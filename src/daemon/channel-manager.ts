@@ -1,0 +1,110 @@
+/**
+ * Channel manager: registers and manages the lifecycle of channel adapters.
+ * Integrates the message hook pipeline for incoming/outgoing transforms.
+ */
+
+import type { ChannelAdapter, IncomingMessage, OutgoingMessage } from "./types.ts";
+import { MessageHookPipeline, type MessageHook } from "./message-hooks.ts";
+
+export class ChannelManager {
+  private adapters = new Map<string, ChannelAdapter>();
+  private started = false;
+  readonly hooks = new MessageHookPipeline();
+
+  /** Register a channel adapter. Must be called before start(). */
+  register(adapter: ChannelAdapter): void {
+    if (this.adapters.has(adapter.platform)) {
+      throw new Error(`Adapter for platform "${adapter.platform}" already registered`);
+    }
+    this.adapters.set(adapter.platform, adapter);
+  }
+
+  /** Register a message transform hook. */
+  addHook(hook: MessageHook): void {
+    this.hooks.addHook(hook);
+  }
+
+  /** Start all registered adapters and load hooks from disk. */
+  async start(): Promise<void> {
+    if (this.started) return;
+    this.started = true;
+
+    // Load user-defined hooks from ~/.nomos/hooks/
+    await this.hooks.loadHooksFromDisk();
+
+    const hookList = this.hooks.listHooks();
+    if (hookList.length > 0) {
+      console.log(`[channel-manager] Loaded ${hookList.length} message hook(s)`);
+    }
+
+    const results = await Promise.allSettled(
+      [...this.adapters.values()].map(async (adapter) => {
+        try {
+          await adapter.start();
+          console.log(`[channel-manager] Started: ${adapter.platform}`);
+        } catch (err) {
+          console.error(`[channel-manager] Failed to start ${adapter.platform}:`, err);
+          throw err;
+        }
+      }),
+    );
+
+    const failures = results.filter((r) => r.status === "rejected");
+    if (failures.length > 0) {
+      console.warn(
+        `[channel-manager] ${failures.length}/${this.adapters.size} adapter(s) failed to start`,
+      );
+    }
+  }
+
+  /** Stop all adapters gracefully. */
+  async stop(): Promise<void> {
+    if (!this.started) return;
+    this.started = false;
+
+    await Promise.allSettled(
+      [...this.adapters.values()].map(async (adapter) => {
+        try {
+          await adapter.stop();
+          console.log(`[channel-manager] Stopped: ${adapter.platform}`);
+        } catch (err) {
+          console.error(`[channel-manager] Error stopping ${adapter.platform}:`, err);
+        }
+      }),
+    );
+  }
+
+  /**
+   * Transform an incoming message through the hook pipeline.
+   * Called by the gateway before enqueuing.
+   */
+  async transformIncoming(message: IncomingMessage): Promise<IncomingMessage> {
+    return this.hooks.transformIncoming(message);
+  }
+
+  /**
+   * Send a message back through the appropriate channel adapter.
+   * Runs outgoing hooks before delivery.
+   */
+  async send(message: OutgoingMessage): Promise<void> {
+    // Run outgoing transform hooks
+    const transformed = await this.hooks.transformOutgoing(message);
+
+    const adapter = this.adapters.get(transformed.platform);
+    if (!adapter) {
+      console.warn(`[channel-manager] No adapter for platform "${transformed.platform}"`);
+      return;
+    }
+    await adapter.send(transformed);
+  }
+
+  /** Look up a registered adapter by platform name. */
+  getAdapter(platform: string): ChannelAdapter | undefined {
+    return this.adapters.get(platform);
+  }
+
+  /** List registered platform names. */
+  listPlatforms(): string[] {
+    return [...this.adapters.keys()];
+  }
+}

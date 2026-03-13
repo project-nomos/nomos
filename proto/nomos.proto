@@ -1,0 +1,109 @@
+syntax = "proto3";
+
+package nomos;
+
+service NomosAgent {
+  // Send a chat message and receive a stream of agent events
+  rpc Chat (ChatRequest) returns (stream AgentEvent);
+
+  // Send a command (e.g., /compact)
+  rpc Command (CommandRequest) returns (CommandResponse);
+
+  // Get daemon status
+  rpc GetStatus (Empty) returns (StatusResponse);
+
+  // Session management
+  rpc ListSessions (Empty) returns (SessionList);
+  rpc GetSession (SessionRequest) returns (SessionResponse);
+
+  // Draft management (Slack User Mode approve-before-send)
+  rpc ListDrafts (Empty) returns (DraftList);
+  rpc ApproveDraft (DraftAction) returns (DraftResponse);
+  rpc RejectDraft (DraftAction) returns (DraftResponse);
+
+  // Health check
+  rpc Ping (Empty) returns (PongResponse);
+}
+
+message Empty {}
+
+// ── Chat ──
+
+message ChatRequest {
+  string content = 1;
+  string session_key = 2;
+}
+
+message AgentEvent {
+  // Event type: "stream_event", "tool_use_summary", "result", "system", "error", "pong"
+  string type = 1;
+  // JSON-encoded event data (preserves flexibility of current protocol)
+  string json_payload = 2;
+}
+
+// ── Commands ──
+
+message CommandRequest {
+  string command = 1;
+  string session_key = 2;
+}
+
+message CommandResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+// ── Status ──
+
+message StatusResponse {
+  bool running = 1;
+  int32 connected_clients = 2;
+  repeated string platforms = 3;
+}
+
+// ── Sessions ──
+
+message SessionRequest {
+  string session_key = 1;
+}
+
+message SessionResponse {
+  string id = 1;
+  string session_key = 2;
+  string model = 3;
+  string created_at = 4;
+}
+
+message SessionList {
+  repeated SessionResponse sessions = 1;
+}
+
+// ── Drafts ──
+
+message DraftAction {
+  string draft_id = 1;
+}
+
+message DraftResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message DraftList {
+  repeated DraftItem drafts = 1;
+}
+
+message DraftItem {
+  string id = 1;
+  string content = 2;
+  string platform = 3;
+  string channel_id = 4;
+  string status = 5;
+  string created_at = 6;
+}
+
+// ── Ping ──
+
+message PongResponse {
+  int64 timestamp = 1;
+}
