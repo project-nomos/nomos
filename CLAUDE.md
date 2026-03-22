@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-A TypeScript CLI and multi-channel AI agent built on `@anthropic-ai/claude-agent-sdk`. It wraps Claude Code to get all built-in tools (Bash, Read, Write, Edit, Glob, Grep, WebSearch, etc.), agent loop, compaction, and streaming — then adds persistent sessions, vector memory, a daemon with channel integrations, scheduled tasks, 25 bundled skills, and personalization.
+A TypeScript CLI and multi-channel AI agent built on `@anthropic-ai/claude-agent-sdk`. It wraps Claude Code to get all built-in tools (Bash, Read, Write, Edit, Glob, Grep, WebSearch, etc.), agent loop, compaction, and streaming — then adds persistent sessions, vector memory, a daemon with channel integrations, scheduled tasks, 25 bundled skills, multi-agent team orchestration, smart model routing, custom API endpoint support, and personalization.
 
 ## Build & Development
 
@@ -40,9 +40,10 @@ Tests are colocated with source as `*.test.ts`.
 
 - **Build**: tsdown (Rolldown-based). Single entry `src/index.ts` → `dist/index.js` with `#!/usr/bin/env node` banner.
 - **Linting/formatting**: Oxlint + Oxfmt (not ESLint/Prettier).
-- **TypeScript**: Strict mode, ESM-only (`"type": "module"`), target ESNext, `moduleResolution: "NodeNext"`.
+- **TypeScript**: Strict mode, ESM-only (`"type": "module"`), target ESNext, `moduleResolution: "NodeNext"`, `jsx: "react-jsx"`, `allowImportingTsExtensions: true`.
 - **UI framework**: Ink (React for CLI) — the REPL (`src/ui/repl.tsx`) uses JSX with React 19.
-- **Pre-commit hooks**: Husky + lint-staged runs `oxfmt --write` and `oxlint` on staged `.ts`/`.tsx` files.
+- **Testing**: Vitest with 30s test timeout. Imports (`describe`, `it`, `expect`, `vi`, etc.) must be explicit from `"vitest"` — globals are NOT auto-imported. DB-dependent tests mock the client with `vi.mock("./client.ts", () => ({ getDb: () => mockSql }))`. Tests are colocated as `*.test.ts` next to their source files.
+- **Pre-commit hooks**: Husky runs three checks sequentially: `lint-staged` (oxfmt + oxlint on staged `.ts`/`.tsx`/`.md`/`.json` files), then `typecheck`, then `test`. All three must pass.
 - **Postinstall**: Automatically installs Playwright Chromium and `uvx` (Python package runner via `uv`).
 
 ### Settings UI
@@ -72,7 +73,21 @@ ENCRYPTION_KEY=<64 hex chars>          # AES-256-GCM encryption for integration 
                                         # Generate with: openssl rand -hex 32
 ```
 
-See `.env.example` for the full set of optional variables (model, permissions, channel tokens, embeddings, etc.).
+Optional feature flags:
+
+```bash
+NOMOS_SMART_ROUTING=true               # Enable complexity-based model routing
+NOMOS_MODEL_SIMPLE=claude-haiku-4-5    # Model for simple queries
+NOMOS_MODEL_MODERATE=claude-sonnet-4-6 # Model for moderate queries
+NOMOS_MODEL_COMPLEX=claude-opus-4-6    # Model for complex queries
+NOMOS_TEAM_MODE=true                   # Enable multi-agent team orchestration
+NOMOS_MAX_TEAM_WORKERS=3               # Max parallel workers (default: 3)
+ANTHROPIC_BASE_URL=http://localhost:4000 # Custom Anthropic-compatible API endpoint
+NOMOS_ADAPTIVE_MEMORY=true             # Enable knowledge extraction + user model
+NOMOS_EXTRACTION_MODEL=claude-haiku-4-5 # Model for extraction (default: haiku)
+```
+
+See `.env.example` for the full set of optional variables (model, permissions, channel tokens, embeddings, etc.). The entry point loads `.env.local` first, then `.env` (both via dotenv). All settings are also configurable via the Settings UI at `settings/` (port 3456), which writes to both DB and `.env`.
 
 ## Architecture
 
@@ -98,24 +113,26 @@ See `.env.example` for the full set of optional variables (model, permissions, c
 - **`index.ts`** — Entry point: loads `.env`, delegates to Commander.js program
 - **`cli/`** — Commander.js commands: `chat.ts` (REPL or daemon client), `daemon.ts` (lifecycle), `wizard.ts` (first-run, opens browser to /setup wizard), `send.ts` (proactive messaging), plus config/session/db/memory/mcp-config commands
 - **`sdk/`** — Claude Agent SDK wrapper:
-  - `session.ts` — wraps `query()`, supports V2 session API with feature detection
-  - `tools.ts` — in-process MCP server exposing `memory_search` tool
-  - `slack-mcp.ts`, `discord-mcp.ts`, `telegram-mcp.ts`, `google-workspace-mcp.ts` — in-process channel MCP tools for proactive messaging
+  - `session.ts` — wraps `query()`, supports V2 session API with feature detection. `RunSessionParams` accepts `systemPrompt` (full override), `anthropicBaseUrl` (custom API endpoint), and `systemPromptAppend` (append to preset). The `ANTHROPIC_BASE_URL` env var is propagated to child processes via the `env` option.
+  - `tools.ts` — in-process MCP server exposing `memory_search` and `user_model_recall` tools
+  - `slack-mcp.ts`, `discord-mcp.ts`, `telegram-mcp.ts`, `google-workspace-mcp.ts`, `slack-workspace-mcp.ts` — in-process channel MCP tools for proactive messaging
+  - `browser.ts` — Playwright-based browser automation
 - **`daemon/`** — Long-running daemon subsystem:
   - `gateway.ts` — orchestrator (boots all subsystems, signal handlers)
-  - `agent-runtime.ts` — centralized agent with cached config, `bypassPermissions` mode
+  - `agent-runtime.ts` — centralized agent with cached config, `bypassPermissions` mode. Detects `/team` prefix to delegate to `TeamRuntime`. Passes `anthropicBaseUrl` from config to all `runSession()` calls.
   - `message-queue.ts` — per-session FIFO queue (concurrent across sessions, serialized within)
   - `grpc-server.ts` — gRPC server on port 8766 (primary protocol for CLI, web, mobile clients)
   - `websocket-server.ts` — WebSocket API on port 8765 (legacy, kept for backwards compatibility)
   - `channel-manager.ts` — adapter registry with conditional registration
   - `cron-engine.ts` — DB-backed scheduled tasks (at/every/cron syntax)
   - `streaming-responder.ts` — progressive message updates for Slack/Discord
-  - `memory-indexer.ts` — auto-indexes conversation turns into vector memory
-  - `channels/` — thin adapters (~50-100 LOC): `slack.ts` (Socket Mode), `slack-user.ts` (User Mode), `discord.ts`, `telegram.ts` (grammY), `whatsapp.ts` (Baileys)
+  - `memory-indexer.ts` — auto-indexes conversation turns into vector memory; when adaptive memory is enabled, also runs knowledge extraction and user model updates
+  - `channels/` — thin adapters (~50-100 LOC): `slack.ts` (Socket Mode), `slack-user.ts` (User Mode), `discord.ts`, `telegram.ts` (grammY), `whatsapp.ts` (Baileys), `imessage.ts` (macOS-only, reads from Messages.app SQLite DB)
   - `draft-manager.ts` — draft orchestration for Slack User Mode (approve-before-send)
-- **`db/`** — PostgreSQL persistence: `client.ts` (connection pool via `postgres`), `schema.sql`, `migrate.ts`, CRUD modules for sessions, transcripts, memory, config, `app-config.ts` (app-level config CRUD mapping DB keys to NomosConfig), `integrations.ts` (unified integration store with encrypted secrets), `encryption.ts` (AES-256-GCM for secrets at rest + auto-key generation at `~/.nomos/encryption.key`), `slack-workspaces.ts`, `drafts.ts`
-- **`memory/`** — `embeddings.ts` (Vertex AI gemini-embedding-001, 768 dims), `chunker.ts` (overlap chunking), `search.ts` (hybrid RRF: vector cosine + FTS)
-- **`config/`** — `env.ts` (env var loader with `loadEnvConfig()` sync + `loadEnvConfigAsync()` DB-merged), `profile.ts` (user profile + agent identity + system prompt builder), `soul.ts` (SOUL.md personality), `tools-md.ts` (TOOLS.md), `agents.ts` (multi-agent configs from agents.json)
+  - `team-runtime.ts` — multi-agent team orchestration. `TeamRuntime` class decomposes tasks via a coordinator agent, spawns parallel workers via independent `runSession()` calls, collects results with `Promise.allSettled()`, and synthesizes a final response. Workers share MCP servers and permissions but get scoped system prompts. Configurable `maxWorkers` and `workerMaxTurns`. `stripTeamPrefix()` detects `/team` trigger.
+- **`db/`** — PostgreSQL persistence: `client.ts` (connection pool via `postgres`), `schema.sql`, `migrate.ts`, CRUD modules for sessions, transcripts, memory, config, `app-config.ts` (app-level config CRUD mapping DB keys to NomosConfig — includes `app.teamMode`, `app.maxTeamWorkers`, `app.anthropicBaseUrl`, `app.smartRouting`, `app.adaptiveMemory`, `app.extractionModel`, and model tier keys), `user-model.ts` (user model CRUD — accumulated preferences/facts from conversations), `integrations.ts` (unified integration store with encrypted secrets), `encryption.ts` (AES-256-GCM for secrets at rest + auto-key generation at `~/.nomos/encryption.key`), `slack-workspaces.ts`, `drafts.ts`
+- **`memory/`** — `embeddings.ts` (Vertex AI gemini-embedding-001, 768 dims), `chunker.ts` (overlap chunking), `search.ts` (hybrid RRF: vector cosine + FTS with optional category filtering), `extractor.ts` (knowledge extraction from conversations via lightweight LLM call), `user-model.ts` (aggregation logic that processes extracted knowledge into user model entries)
+- **`config/`** — `env.ts` (`NomosConfig` interface + `loadEnvConfig()` sync + `loadEnvConfigAsync()` DB-merged. Key fields: `model`, `smartRouting` + `modelTiers`, `teamMode` + `maxTeamWorkers`, `anthropicBaseUrl`, `adaptiveMemory` + `extractionModel`), `profile.ts` (user profile + agent identity + system prompt builder — accepts `userModel` param for adaptive prompt injection), `soul.ts` (SOUL.md personality), `tools-md.ts` (TOOLS.md), `agents.ts` (multi-agent configs from agents.json)
 - **`ui/`** — `repl.tsx` (Ink-based REPL with gradient spinner, Catppuccin Mocha theme), `slash-commands.ts` (30+ slash commands), `banner.ts` (startup greeting), `grpc-client.ts` (gRPC client for daemon), `gateway-client.ts` (legacy WebSocket client), `theme.ts`, `markdown.ts`
 - **`skills/`** — `loader.ts` (three-tier: bundled → personal → project), `frontmatter.ts` (YAML parser), `installer.ts` (dependency installer)
 - **`security/`** — `tool-approval.ts` (dangerous operation detection), `pairing.ts` (8-char pairing codes), `allowlist.ts`
@@ -123,11 +140,15 @@ See `.env.example` for the full set of optional variables (model, permissions, c
 - **`sessions/`** — `types.ts` (scope modes: sender/peer/channel/channel-peer), `store.ts`, `identity.ts`
 - **`cron/`** — `types.ts` (schedule types), `scheduler.ts`, `store.ts`
 - **`auto-reply/`** — `heartbeat.ts` (periodic autonomous agent checks via HEARTBEAT.md)
-- **`settings/`** (repo root, separate package) — Next.js 15 web UI for setup wizard, dashboard, assistant config, channel management, and advanced settings. Routes under `src/app/api/` expose REST endpoints for config, setup, Google OAuth, Slack workspaces, and integration status. Uses Tailwind CSS 4. Key pages: `/setup` (onboarding wizard), `/dashboard` (overview), `/settings` (assistant identity + API), `/integrations/*` (channels), `/admin/*` (database + memory).
+- **`settings/`** (repo root, separate package) — Next.js 15 web UI for setup wizard, dashboard, assistant config, channel management, and advanced settings. Routes under `src/app/api/` expose REST endpoints for config, setup, Google OAuth, Slack workspaces, and integration status. The `/api/env` route handles reading/writing all config to both DB and `.env` (DB primary, `.env` secondary sync). Uses Tailwind CSS 4. Key pages: `/setup` (onboarding wizard), `/dashboard` (overview), `/settings` (assistant identity, model configuration with smart routing + tier selectors, custom API endpoint, multi-agent team mode, adaptive memory toggle + extraction model, permissions), `/integrations/*` (channels), `/admin/*` (database + memory).
 
 ### Database Schema
 
-Tables: `config` (key-value store), `sessions` (SDK session ID, model, tokens), `transcript_messages` (JSONB), `memory_chunks` (text + vector(768)), `memory_files` (source tracking), `pairing_requests`, `channel_allowlists`, `draft_messages` (Slack User Mode approve-before-send), `slack_user_tokens` (multi-workspace), `integrations` (unified integration config with encrypted secrets). Key indexes: IVFFlat on vector column (cosine), GIN on tsvector for FTS. Schema is in `src/db/schema.sql` — migrations are idempotent (`CREATE TABLE IF NOT EXISTS` + `DO $$ BEGIN ... END $$` blocks).
+Tables: `config` (key-value store), `sessions` (SDK session ID, model, tokens), `transcript_messages` (JSONB), `memory_chunks` (text + vector(768) + metadata JSONB for categorization), `memory_files` (source tracking), `user_model` (accumulated user preferences/facts with confidence scores, unique on `(category, key)`), `pairing_requests`, `channel_allowlists`, `draft_messages` (Slack User Mode approve-before-send), `slack_user_tokens` (multi-workspace), `integrations` (unified integration config with encrypted secrets), `agent_permissions` (persistent "always allow" rules). Key indexes: IVFFlat on vector column (cosine), GIN on tsvector for FTS, GIN on metadata JSONB. Schema is in `src/db/schema.sql` — migrations are idempotent (`CREATE TABLE IF NOT EXISTS` + `DO $$ BEGIN ... END $$` blocks).
+
+### gRPC Protocol
+
+`proto/nomos.proto` defines the `NomosAgent` service with RPCs: `Chat` (bidirectional streaming), `Command`, `GetStatus`, `ListSessions`, `GetSession`, draft management (`ListDrafts`/`ApproveDraft`/`RejectDraft`), and `Ping`. The gRPC server runs on port 8766.
 
 ### Skills
 
@@ -143,12 +164,16 @@ Tables: `config` (key-value store), `sessions` (SDK session ID, model, tokens), 
 - **Config in DB, .env as fallback** — DB is source of truth; `loadEnvConfigAsync()` merges DB > env vars > defaults
 - **Stable session keys** — default key is `cli:default` (not timestamp-based), enabling auto-resume
 - **Per-session message queue** — serializes agent processing within a session, allows concurrency across sessions
-- **Automatic conversation memory** — every daemon turn is chunked, embedded, and indexed (fire-and-forget)
+- **Automatic conversation memory** — every daemon turn is chunked, embedded, and indexed (fire-and-forget). When adaptive memory is enabled, also extracts structured knowledge (facts, preferences, corrections) and accumulates a user model
+- **Adaptive memory** — opt-in (`NOMOS_ADAPTIVE_MEMORY=true`). Uses lightweight LLM call (Haiku) to extract knowledge from conversations. Accumulated user model is injected into system prompt and accessible via `user_model_recall` tool. Confidence-weighted: repeated confirmations increase, contradictions decrease
 - **Embeddings** via Vertex AI `gemini-embedding-001` (768 dimensions); FTS fallback when embeddings unavailable
 - **Provider switching** handled entirely by SDK env vars (`ANTHROPIC_API_KEY` or `CLAUDE_CODE_USE_VERTEX`)
 - **Integration secrets encrypted at rest** — AES-256-GCM via `ENCRYPTION_KEY`; auto-generated at `~/.nomos/encryption.key` on first run
 - **Unified integrations table** — replaces per-integration env vars; `integrations` table stores config (JSONB), secrets (encrypted TEXT), and metadata (JSONB)
 - **Web-based onboarding** — setup wizard at `/setup` replaces terminal wizard; saves all config to DB
+- **Multi-agent teams** — coordinator/worker pattern via `TeamRuntime`. Coordinator decomposes tasks, spawns parallel workers via independent `runSession()` calls, synthesizes results. Triggered by `/team` prefix. Workers get scoped system prompts but share MCP servers.
+- **Custom API endpoints** — `ANTHROPIC_BASE_URL` propagated via `env` option in `query()` to all SDK sessions including team workers. Enables Ollama (via LiteLLM proxy), Bedrock, or any Anthropic-compatible endpoint.
+- **Smart model routing** — `smartRouting` flag + `modelTiers` (simple/moderate/complex) allow cost optimization by routing queries to different models based on complexity. Configured via env vars or Settings UI.
 
 ## Coding Conventions
 
@@ -157,3 +182,6 @@ Tables: `config` (key-value store), `sessions` (SDK session ID, model, tokens), 
 - Keep files under ~500 LOC; extract helpers rather than creating copies
 - Use Ink (React JSX) for any terminal UI components
 - Use `chalk` for colors in non-Ink code; Catppuccin Mocha palette in `src/ui/theme.ts`
+- DB schema changes must be idempotent (`CREATE TABLE IF NOT EXISTS`, `DO $$ BEGIN ... END $$` blocks)
+- Use `postgres` (not `pg`) as the PostgreSQL client — tagged template literals for queries
+- Validation with `zod` (v4)

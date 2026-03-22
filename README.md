@@ -1,47 +1,157 @@
-# Nomos
+<p align="center">
+  <img src="nomos-logo.svg" alt="Nomos" width="200" />
+</p>
 
-A TypeScript CLI and multi-channel AI agent built on top of [Claude Code](https://docs.anthropic.com/en/docs/claude-code) via the `@anthropic-ai/claude-agent-sdk`. It inherits all of Claude Code's built-in capabilities -- Bash, Read, Write, Edit, Glob, Grep, WebSearch, agent loop, compaction, streaming -- and layers on persistent sessions, a vector memory system, a daemon with channel integrations, scheduled tasks, 25 bundled skills, and deep personalization.
+<h1 align="center">Nomos</h1>
 
-## Features
+<p align="center">
+  An AI agent platform built on the Claude Agent SDK — persistent sessions, vector memory, multi-channel integrations, and a management dashboard, all in TypeScript.
+</p>
 
-- **Interactive CLI** with ink-based TUI, streaming markdown rendering, gradient spinner, and Catppuccin Mocha color theme
-- **Daemon mode** -- long-running background process with gRPC + WebSocket APIs, message queue, and multi-channel gateway
-- **Channel integrations** -- Slack, Discord, Telegram, and WhatsApp adapters with per-channel session scoping
-- **Slack User Mode** -- act as the authenticated user: drafts responses to your DMs and @mentions for approval, then sends them as you
-- **Cron / scheduled tasks** -- run prompts on a schedule with configurable session targets and delivery modes
-- **25 bundled skills** -- domain-specific instructions injected into the system prompt (GitHub, weather, Google Workspace, Slack, Discord, PDF, PPTX, XLSX, and more)
-- **Vector memory** -- PostgreSQL + pgvector hybrid search (vector similarity + full-text search with RRF fusion)
-- **Automatic conversation memory** -- every daemon conversation turn is indexed into vector memory, enabling cross-session and cross-channel recall
-- **Session persistence** -- all conversations stored in PostgreSQL with SDK session resume and auto-compaction
-- **Personalization** -- user profile, agent identity, SOUL.md personality, TOOLS.md environment config, per-agent configs
-- **Web-based setup wizard** -- guided 5-step onboarding (database, API provider, personality, channels, ready) with browser-based UI
-- **Settings web UI** -- dashboard, assistant personality, channel management, and advanced config via a local Next.js app
-- **Config in DB** -- API keys and settings stored in PostgreSQL (encrypted at rest), with .env fallback
-- **Security** -- tool execution approval for dangerous operations, configurable approval policies
-- **Pairing system** -- 8-character pairing codes with TTL for channel access control and DM policies
-- **Conversation scoping** -- per-sender, per-peer, per-channel, or per-channel-peer session isolation
-- **MCP server support** -- external MCP servers via config file plus in-process `memory_search` tool
-- **Model switching** -- pick between Opus, Sonnet, and Haiku mid-session; configurable thinking levels
-- **Proactive messaging** -- send outbound messages to any channel outside the reply flow
+---
+
+## What is Nomos?
+
+Nomos wraps Anthropic's [Claude Agent SDK](https://docs.anthropic.com/en/docs/claude-code/sdk) to inherit its full agent loop, built-in tools (Bash, Read, Write, Edit, Glob, Grep, WebSearch, etc.), streaming, and compaction. On top of that foundation, it adds persistent sessions, enterprise-grade vector memory, a daemon with 6 channel integrations, a web management dashboard, 25 bundled skills, multi-agent team orchestration, and smart model routing.
+
+## Key Features
+
+### Enterprise-Grade Vector Memory
+
+Long-term memory powered by **pgvector** and hybrid RRF (Reciprocal Rank Fusion) retrieval. Every conversation turn is automatically chunked, embedded via Vertex AI (`gemini-embedding-001`, 768 dimensions), and indexed. Retrieval combines vector cosine similarity with PostgreSQL full-text search for high-quality recall across your entire conversation history.
+
+### Adaptive Memory & User Model
+
+When enabled (`NOMOS_ADAPTIVE_MEMORY=true`), the agent extracts structured knowledge from every conversation — facts, preferences, and corrections — using a lightweight LLM call (Haiku by default). Extracted knowledge is accumulated into a persistent **user model** that the agent uses to personalize responses across sessions.
+
+- **Knowledge extraction** — facts about you, your projects, tech stack; preferences for coding style, communication, tools; corrections when you fix the agent's assumptions
+- **User model accumulation** — repeated confirmations increase confidence; contradictions decrease it; high-confidence entries (≥0.6) are injected into the system prompt
+- **Categorized memory** — memory chunks are tagged with categories (`fact`, `preference`, `correction`, `conversation`) for targeted recall via `memory_search`
+- **`user_model_recall` tool** — the agent can proactively recall accumulated knowledge at the start of each conversation
+
+### Multi-Client Architecture
+
+Connect to Nomos through multiple interfaces simultaneously:
+
+| Protocol           | Port | Purpose                                                 |
+| ------------------ | ---- | ------------------------------------------------------- |
+| **gRPC**           | 8766 | Primary protocol for CLI, web, and mobile clients       |
+| **WebSocket**      | 8765 | Legacy protocol (maintained for backward compatibility) |
+| **Ink CLI**        | —    | Interactive terminal REPL with streaming markdown       |
+| **Next.js Web UI** | 3456 | Settings dashboard and management interface             |
+
+### Web-Based Management Dashboard
+
+A full Next.js 15 app at `settings/` provides a GUI for onboarding, assistant configuration, channel management, and advanced settings — no YAML editing required. Key pages include a setup wizard (`/setup`), dashboard overview, assistant identity configuration, per-channel integration management, and database/memory admin.
+
+### Zero-Fork Extensibility
+
+Extend Nomos without touching core code:
+
+- **25 bundled skills** loaded from `skills/` with YAML frontmatter
+- **Three-tier skill loading**: bundled → personal (`~/.nomos/skills/`) → project (`./skills/`)
+- **MCP server support** via `.nomos/mcp.json` for external tool integrations
+- **DB-stored configuration** — all settings persist in PostgreSQL, with env var fallback
+
+### 6 Pre-Built Channel Integrations
+
+| Platform     | Mode             | Transport                                                |
+| ------------ | ---------------- | -------------------------------------------------------- |
+| **Slack**    | Bot Mode         | Socket Mode                                              |
+| **Slack**    | User Mode        | Socket Mode + OAuth (multi-workspace, draft-before-send) |
+| **Discord**  | Bot              | Gateway                                                  |
+| **Telegram** | Bot              | grammY                                                   |
+| **WhatsApp** | Bridge           | Baileys                                                  |
+| **iMessage** | Read-only bridge | macOS Messages.app SQLite                                |
+
+Each adapter is a thin layer (~50–100 LOC). All agent logic is centralized in `AgentRuntime`; adapters just route messages in and responses out.
+
+### Smart Model Routing
+
+Automatically route queries to different Claude models based on complexity:
+
+- **Simple** (greetings, short questions) → `claude-haiku-4-5` (fast, cheap)
+- **Moderate** (general tasks) → `claude-sonnet-4-6` (balanced)
+- **Complex** (coding, reasoning, multi-step) → `claude-opus-4-6` (most capable)
+
+Enable with `NOMOS_SMART_ROUTING=true`. Configure per-tier models with `NOMOS_MODEL_SIMPLE`, `NOMOS_MODEL_MODERATE`, `NOMOS_MODEL_COMPLEX`.
+
+### Encrypted Secrets at Rest
+
+Integration secrets (API keys, OAuth tokens) are encrypted with **AES-256-GCM** before storage in PostgreSQL. An encryption key is auto-generated at `~/.nomos/encryption.key` on first run, or you can provide your own via the `ENCRYPTION_KEY` env var. No plaintext credentials in the database.
+
+### Multi-Agent Teams
+
+Decompose complex tasks across **parallel worker agents** for faster, more thorough results. A coordinator agent breaks down the task, spawns scoped workers via independent SDK sessions, collects their outputs with `Promise.allSettled()`, and synthesizes a unified response.
+
+```
+User prompt ──► Coordinator ──┬──► Worker 1 (subtask A) ──┐
+                              ├──► Worker 2 (subtask B) ──┤──► Coordinator ──► Final response
+                              └──► Worker 3 (subtask C) ──┘
+```
+
+- Workers run in **parallel** with independent SDK sessions and scoped prompts
+- Each worker shares MCP servers and permissions with the main agent
+- Failed workers are gracefully handled — other workers' results are preserved
+- Trigger with `/team` prefix: `/team Research React vs Svelte and write a comparison`
+- Configure via `NOMOS_TEAM_MODE=true` and `NOMOS_MAX_TEAM_WORKERS=3`
+- Fully managed via the [Settings UI](#settings-web-ui) — no env editing required
+
+---
+
+## Additional Capabilities
+
+- **Custom API endpoints** — point at Ollama, LiteLLM, or any Anthropic-compatible proxy via `ANTHROPIC_BASE_URL` (see [Custom API Endpoints](#custom-api-endpoints))
+- **Slack User Mode** — act as the authenticated user: drafts responses to your DMs and @mentions for approval, then sends them as you
+- **Cron / scheduled tasks** — run prompts on a schedule with configurable session targets and delivery modes
+- **Automatic conversation memory** — every daemon conversation turn is indexed into vector memory, enabling cross-session and cross-channel recall
+- **Session persistence** — all conversations stored in PostgreSQL with SDK session resume and auto-compaction
+- **Personalization** — user profile, agent identity, SOUL.md personality, TOOLS.md environment config, per-agent configs
+- **Web-based setup wizard** — guided 5-step onboarding (database, API provider, personality, channels, ready) with browser-based UI
+- **Security** — tool execution approval for dangerous operations, configurable approval policies
+- **Pairing system** — 8-character pairing codes with TTL for channel access control and DM policies
+- **Conversation scoping** — per-sender, per-peer, per-channel, or per-channel-peer session isolation
+- **Model switching** — pick between Opus, Sonnet, and Haiku mid-session; configurable thinking levels
+- **Proactive messaging** — send outbound messages to any channel outside the reply flow
 
 ## Quick Start
 
-```bash
-# 1. Install dependencies
-pnpm install
+### Install via Homebrew
 
-# 2. Run Nomos — the setup wizard opens in your browser
-pnpm dev
+```bash
+brew tap project-nomos/nomos https://github.com/project-nomos/nomos
+brew install project-nomos/nomos/nomos
 ```
 
-The setup wizard walks you through connecting a database, choosing an API provider, naming your assistant, and connecting channels. All config is saved to the database (encrypted).
+### Install via npm (GitHub Packages)
+
+```bash
+npm install -g @project-nomos/nomos --registry=https://npm.pkg.github.com
+```
+
+### Install from source
+
+```bash
+git clone https://github.com/project-nomos/nomos.git
+cd nomos
+pnpm install
+pnpm build
+pnpm link --global
+```
+
+Then run:
+
+```bash
+nomos chat
+```
+
+The setup wizard opens in your browser and walks you through connecting a database, choosing an API provider, naming your assistant, and connecting channels. All config is saved to the database (encrypted).
 
 For manual setup, see [Installation and Setup](#installation-and-setup) below.
 
 ## Prerequisites
 
 - **Node.js** >= 22
-- **pnpm** >= 10.23
 - **PostgreSQL** with the [pgvector](https://github.com/pgvector/pgvector) extension
 - **Anthropic API key** or **Google Cloud credentials** (for Vertex AI)
 - **Google Cloud credentials** for embeddings (uses `gemini-embedding-001` via Vertex AI)
@@ -307,6 +417,53 @@ WHATSAPP_ALLOWED_CHATS=15551234567@s.whatsapp.net,120363123456789012@g.us
 
 Uses the Baileys library with QR code authentication (no Meta Business API required). On first start, a QR code is displayed in the terminal for pairing. Auth state is persisted to `~/.nomos/whatsapp-auth/`.
 
+## Multi-Agent Teams
+
+Team mode decomposes complex tasks across parallel worker agents. A coordinator agent breaks down the task, spawns scoped workers via independent SDK sessions, and synthesizes their results into a single response.
+
+### Enabling
+
+```bash
+NOMOS_TEAM_MODE=true
+NOMOS_MAX_TEAM_WORKERS=3    # Maximum parallel workers (default: 3)
+```
+
+### Usage
+
+Prefix your message with `/team` to trigger team orchestration:
+
+```
+/team Research the pros and cons of React vs Svelte and write a comparison document
+```
+
+### How it works
+
+1. **Decomposition** — A coordinator agent analyzes the task and breaks it into independent subtasks (up to `maxWorkers`)
+2. **Parallel execution** — Each subtask runs in its own SDK session with a scoped system prompt
+3. **Synthesis** — The coordinator collects all worker outputs and produces a unified response
+
+Workers share the same MCP servers and permissions as the main agent but operate in isolated sessions. If a worker fails, its error is reported in the synthesis step while other workers' results are preserved.
+
+## Custom API Endpoints
+
+Point Nomos at any Anthropic-compatible API proxy by setting `ANTHROPIC_BASE_URL`. This enables use with local model servers (via LiteLLM or similar proxies), alternative cloud providers, or corporate API gateways.
+
+### Ollama + LiteLLM example
+
+```bash
+# 1. Start Ollama
+ollama serve
+
+# 2. Start LiteLLM as an Anthropic-compatible proxy
+litellm --model ollama/llama3 --port 4000
+
+# 3. Configure Nomos
+ANTHROPIC_BASE_URL=http://localhost:4000
+NOMOS_MODEL=claude-3-haiku   # or whatever model name the proxy expects
+```
+
+The base URL is propagated to all SDK sessions including team mode workers.
+
 ## Cron and Scheduled Tasks
 
 The cron engine runs scheduled prompts through the agent runtime. Jobs are stored in the database and managed through the daemon.
@@ -429,9 +586,25 @@ When the daemon processes a message, the user's input and the agent's response a
 - `nomos memory list` shows conversation memory alongside manually indexed files
 - `nomos memory clear -s conversation` clears only conversation memory
 
+### Adaptive memory
+
+When `NOMOS_ADAPTIVE_MEMORY=true`, an additional post-processing step runs after each conversation is indexed:
+
+1. **Knowledge extraction** — a lightweight LLM call (Haiku by default) extracts facts, preferences, and corrections from the conversation turn
+2. **Categorized storage** — extracted items are stored as separate memory chunks with `metadata.category` tags (`fact`, `preference`, `correction`)
+3. **User model accumulation** — extracted knowledge is aggregated into the `user_model` table with confidence scores. Repeated confirmations increase confidence; contradictions decrease it
+4. **Prompt injection** — high-confidence user model entries (≥0.6) are injected into the system prompt as a "What I Know About You" section
+
+This runs fire-and-forget and only triggers when the user message is >50 characters (skipping greetings and short commands).
+
 ### Agent integration
 
-The agent has access to a `memory_search` MCP tool and can query the vector store automatically during conversations. At the start of each session, the agent proactively searches memory for context about the user and their projects. Automatically indexed conversations appear in search results, enabling the agent to recall past interactions regardless of which channel or session they occurred in.
+The agent has access to two MCP tools for memory:
+
+- **`memory_search`** — hybrid vector + full-text search over `memory_chunks`. Supports an optional `category` filter (`fact`, `preference`, `correction`, `skill`, `conversation`) for targeted recall.
+- **`user_model_recall`** — reads accumulated knowledge about the user from the `user_model` table. Supports optional category filtering (`preference`, `fact`, `style`).
+
+At the start of each session, the agent proactively uses `user_model_recall` to load context about the user. Automatically indexed conversations appear in search results, enabling the agent to recall past interactions regardless of which channel or session they occurred in.
 
 ### CLI commands
 
@@ -551,14 +724,14 @@ Short IDs (first 8 characters of the UUID) are used for convenience. The command
 
 ### Config
 
-| Command                     | Description              |
-| --------------------------- | ------------------------ |
-| `/config set <key> <value>` | Change a setting         |
-| `/tools`                    | List available tools     |
-| `/mcp`                      | List MCP servers         |
-| `/memory search <query>`    | Search the vector memory |
-| `/memory add <file>`        | Add a file to memory     |
-| `/integrations`             | Setup channel integrations |
+| Command                     | Description                  |
+| --------------------------- | ---------------------------- |
+| `/config set <key> <value>` | Change a setting             |
+| `/tools`                    | List available tools         |
+| `/mcp`                      | List MCP servers             |
+| `/memory search <query>`    | Search the vector memory     |
+| `/memory add <file>`        | Add a file to memory         |
+| `/integrations`             | Setup channel integrations   |
 | `/integrations <name>`      | Setup a specific integration |
 
 ### Exit
@@ -586,7 +759,7 @@ Add external MCP servers by creating `.nomos/mcp.json` in your project or home d
 }
 ```
 
-These are passed directly to the Claude Agent SDK alongside the built-in `nomos-memory` MCP server, which exposes the `memory_search` tool.
+These are passed directly to the Claude Agent SDK alongside the built-in `nomos-memory` MCP server, which exposes the `memory_search` and `user_model_recall` tools.
 
 ## gRPC Protocol
 
@@ -695,7 +868,7 @@ src/
   index.ts                    # CLI entry point
   sdk/
     session.ts                # Wraps Claude Agent SDK query()
-    tools.ts                  # In-process MCP server (memory_search)
+    tools.ts                  # In-process MCP server (memory_search, user_model_recall)
     google-workspace-mcp.ts   # Google Workspace MCP via @googleworkspace/cli (gws)
   cli/
     program.ts                # Commander.js setup
@@ -728,6 +901,7 @@ src/
     index.ts                  # Daemon entry point
     types.ts                  # Shared types (messages, events, protocol)
     draft-manager.ts          # Draft orchestration for Slack User Mode
+    team-runtime.ts           # Multi-agent team orchestration
     channels/
       slack.ts                # Slack adapter (@slack/bolt, Socket Mode)
       slack-user.ts           # Slack User Mode adapter (acts as authenticated user)
@@ -744,7 +918,8 @@ src/
     schema.sql                # Database schema
     sessions.ts               # Session CRUD
     transcripts.ts            # Transcript CRUD
-    memory.ts                 # Memory chunk CRUD (vector + FTS)
+    memory.ts                 # Memory chunk CRUD (vector + FTS + category filtering)
+    user-model.ts             # User model CRUD (accumulated preferences/facts)
     config.ts                 # Key-value config store
     app-config.ts             # App-level config CRUD (DB-backed NomosConfig)
     integrations.ts           # Unified integration store with encrypted secrets
@@ -754,6 +929,8 @@ src/
     embeddings.ts             # Vertex AI gemini-embedding-001 (768 dims)
     chunker.ts                # Text chunking with overlap
     search.ts                 # Hybrid search (RRF: vector + full-text)
+    extractor.ts              # Knowledge extraction from conversations via LLM
+    user-model.ts             # User model aggregation logic
   routing/
     router.ts                 # Message routing between channels
     store.ts                  # Route configuration store
@@ -803,15 +980,20 @@ API keys and secrets are stored encrypted (AES-256-GCM) in the `integrations` ta
 
 ### Model and behavior
 
-| Variable                | Description                                                                   | Default             |
-| ----------------------- | ----------------------------------------------------------------------------- | ------------------- |
-| `NOMOS_MODEL`           | Default Claude model                                                          | `claude-sonnet-4-6` |
-| `NOMOS_PERMISSION_MODE` | Tool permission mode (default, acceptEdits, plan, dontAsk, bypassPermissions) | `acceptEdits`       |
-| `NOMOS_BETAS`           | SDK betas to enable (comma-separated)                                         | --                  |
-| `NOMOS_FALLBACK_MODELS` | Fallback model chain (comma-separated)                                        | --                  |
-| `NOMOS_USE_V2_SDK`      | Opt in to V2 SDK session API                                                  | `false`             |
-| `NOMOS_SESSION_SCOPE`   | Session scope mode (channel, sender, peer, channel-peer)                      | `channel`           |
-| `TOOL_APPROVAL_POLICY`  | Dangerous tool policy (always_ask, warn_only, block_critical, disabled)       | `block_critical`    |
+| Variable                 | Description                                                                   | Default             |
+| ------------------------ | ----------------------------------------------------------------------------- | ------------------- |
+| `NOMOS_MODEL`            | Default Claude model                                                          | `claude-sonnet-4-6` |
+| `NOMOS_PERMISSION_MODE`  | Tool permission mode (default, acceptEdits, plan, dontAsk, bypassPermissions) | `acceptEdits`       |
+| `NOMOS_BETAS`            | SDK betas to enable (comma-separated)                                         | --                  |
+| `NOMOS_FALLBACK_MODELS`  | Fallback model chain (comma-separated)                                        | --                  |
+| `NOMOS_USE_V2_SDK`       | Opt in to V2 SDK session API                                                  | `false`             |
+| `NOMOS_SESSION_SCOPE`    | Session scope mode (channel, sender, peer, channel-peer)                      | `channel`           |
+| `TOOL_APPROVAL_POLICY`   | Dangerous tool policy (always_ask, warn_only, block_critical, disabled)       | `block_critical`    |
+| `NOMOS_TEAM_MODE`        | Enable multi-agent team orchestration                                         | `false`             |
+| `NOMOS_MAX_TEAM_WORKERS` | Max parallel workers in team mode                                             | `3`                 |
+| `ANTHROPIC_BASE_URL`     | Custom Anthropic API base URL (Ollama, LiteLLM, etc.)                         | —                   |
+| `NOMOS_ADAPTIVE_MEMORY`  | Enable knowledge extraction and user model learning                           | `false`             |
+| `NOMOS_EXTRACTION_MODEL` | Model for knowledge extraction                                                | `claude-haiku-4-5`  |
 
 ### Embeddings
 
@@ -856,20 +1038,20 @@ A local Next.js app at `settings/` for managing your assistant via the browser (
 
 ### Pages
 
-| Route | Description |
-| --- | --- |
-| `/` | Auto-redirect: `/setup` if onboarding incomplete, `/dashboard` otherwise |
-| `/setup` | 5-step onboarding wizard (database, API, personality, channels, ready) |
-| `/dashboard` | Overview: assistant status, model, active channels, memory stats, quick actions |
-| `/settings` | Assistant identity (name, emoji, purpose), API config, model, advanced settings |
-| `/integrations` | Channel overview cards |
-| `/integrations/slack` | Slack workspace management |
-| `/integrations/discord` | Discord bot configuration |
-| `/integrations/telegram` | Telegram bot configuration |
-| `/integrations/google` | Google Workspace OAuth + service selection |
-| `/integrations/whatsapp` | WhatsApp configuration |
-| `/admin/database` | Database connection and migration status |
-| `/admin/memory` | Memory store stats and management |
+| Route                    | Description                                                                     |
+| ------------------------ | ------------------------------------------------------------------------------- |
+| `/`                      | Auto-redirect: `/setup` if onboarding incomplete, `/dashboard` otherwise        |
+| `/setup`                 | 5-step onboarding wizard (database, API, personality, channels, ready)          |
+| `/dashboard`             | Overview: assistant status, model, active channels, memory stats, quick actions |
+| `/settings`              | Assistant identity (name, emoji, purpose), API config, model, advanced settings |
+| `/integrations`          | Channel overview cards                                                          |
+| `/integrations/slack`    | Slack workspace management                                                      |
+| `/integrations/discord`  | Discord bot configuration                                                       |
+| `/integrations/telegram` | Telegram bot configuration                                                      |
+| `/integrations/google`   | Google Workspace OAuth + service selection                                      |
+| `/integrations/whatsapp` | WhatsApp configuration                                                          |
+| `/admin/database`        | Database connection and migration status                                        |
+| `/admin/memory`          | Memory store stats and management                                               |
 
 ### Running the Settings UI
 

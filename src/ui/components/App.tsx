@@ -20,6 +20,10 @@ import { SystemMessage } from "./SystemMessage.tsx";
 import { StatusBar } from "./StatusBar.tsx";
 import { CommandInput } from "./CommandInput.tsx";
 import { GradientSpinner } from "./GradientSpinner.tsx";
+import { CopyModeIndicator } from "./CopyModeIndicator.tsx";
+import { ScrollableView } from "./ScrollableView.tsx";
+import { stripUnsafeCharacters } from "../text-utils.ts";
+import { useAlternateBuffer } from "../hooks/useAlternateBuffer.ts";
 
 /** A finalized item displayed in the Static section. */
 interface UIItem {
@@ -87,13 +91,25 @@ export function App({
   const [inputValue, setInputValue] = useState("");
   // Live thinking/reasoning text (streamed then finalized)
   const [thinkingText, setThinkingText] = useState("");
+  // Last completed thinking content (kept outside Static so it can be toggled)
+  const [lastThinking, setLastThinking] = useState("");
+  // Whether the last thinking block is expanded
+  const [thinkingExpanded, setThinkingExpanded] = useState(false);
   // Live tool execution indicator
   const [liveToolName, setLiveToolName] = useState<string | null>(null);
+  // Copy mode — pauses all animations and live rendering for text selection
+  const [copyMode, setCopyMode] = useState(false);
+
+  // Alternate screen buffer (opt-in via NOMOS_ALTERNATE_BUFFER=true)
+  useAlternateBuffer(config.alternateBuffer);
   // Use refs for mutable values accessed inside the async for-await loop
   // (React state is stale inside async generators)
   const activeToolRef = useRef<ActiveTool | null>(null);
   const bufferRef = useRef("");
   const thinkingBufferRef = useRef("");
+  // Track whether a tool was used between text blocks, so we can add a paragraph
+  // separator when the next text block starts (prevents "sentence1.sentence2" gluing).
+  const needsTextSeparatorRef = useRef(false);
   const flushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const transcriptRef = useRef(transcript);
   const stateRef = useRef<CommandState>({ model: config.model });
@@ -128,7 +144,7 @@ export function App({
 
   const appendDelta = useCallback(
     (text: string) => {
-      bufferRef.current += text;
+      bufferRef.current += stripUnsafeCharacters(text);
       if (!flushTimerRef.current) {
         flushTimerRef.current = setTimeout(flushBuffer, 50);
       }
@@ -156,6 +172,11 @@ export function App({
               const delta = innerEvent.delta as { type: string; text?: string; thinking?: string };
               if (delta?.type === "text_delta" && delta.text) {
                 if (thinkingBufferRef.current) flushBuffer();
+                // Add paragraph break between text blocks separated by tool use
+                if (needsTextSeparatorRef.current) {
+                  bufferRef.current += "\n\n";
+                  needsTextSeparatorRef.current = false;
+                }
                 setIsThinking(false);
                 appendDelta(delta.text);
               } else if (delta?.type === "thinking_delta" && delta.thinking) {
@@ -194,6 +215,8 @@ export function App({
             activeToolRef.current = null;
           }
           setLiveToolName(null);
+          // Next text block after tool use needs a paragraph separator
+          needsTextSeparatorRef.current = true;
           break;
         }
 
@@ -277,11 +300,14 @@ export function App({
       // Reset turn state
       setStreamingText("");
       setThinkingText("");
+      setLastThinking("");
+      setThinkingExpanded(false);
       setIsThinking(true);
       setIsInputActive(false);
       setLiveToolName(null);
       activeToolRef.current = null;
       thinkingBufferRef.current = "";
+      needsTextSeparatorRef.current = false;
 
       // Daemon mode: send via gRPC or WebSocket and return
       if (daemonClient) {
@@ -295,6 +321,9 @@ export function App({
         }
         return;
       }
+
+      // Capture stderr for debug diagnostics on failure
+      const stderrChunks: string[] = [];
 
       try {
         // Map thinking level to SDK options
@@ -331,10 +360,13 @@ export function App({
         // Also allow Bash — our permissions system (check_permission / grant_permission MCP tools)
         // handles fine-grained command approval conversationally, so the SDK's built-in
         // permission layer should not block commands that the agent has already cleared.
-        const allowedTools = [
-          "Bash",
-          ...Object.keys(mcpServers).map((name) => `mcp__${name}`),
-        ];
+        const allowedTools = ["Bash", ...Object.keys(mcpServers).map((name) => `mcp__${name}`)];
+
+        const stderrCallback = (data: string) => {
+          stderrChunks.push(data);
+          // Keep only last 50 lines to avoid unbounded memory
+          if (stderrChunks.length > 50) stderrChunks.shift();
+        };
 
         let sdkQuery = runSession({
           prompt: input,
@@ -345,6 +377,7 @@ export function App({
           resume: sdkSessionIdRef.current ?? undefined,
           thinking,
           allowedTools,
+          stderr: stderrCallback,
         });
 
         const textParts: string[] = [];
@@ -368,6 +401,7 @@ export function App({
                 permissionMode: config.permissionMode,
                 thinking,
                 allowedTools,
+                stderr: stderrCallback,
               });
               for await (const msg of sdkQuery) {
                 yield msg;
@@ -404,6 +438,11 @@ export function App({
                 if (delta.type === "text_delta" && delta.text) {
                   // Finalize thinking block if transitioning from thinking to text
                   if (thinkingBufferRef.current) flushBuffer();
+                  // Add paragraph break between text blocks separated by tool use
+                  if (needsTextSeparatorRef.current) {
+                    bufferRef.current += "\n\n";
+                    needsTextSeparatorRef.current = false;
+                  }
                   setIsThinking(false);
                   appendDelta(delta.text);
                 } else if (delta.type === "thinking_delta" && delta.thinking) {
@@ -451,6 +490,8 @@ export function App({
                 pushItem("tool", msg.summary);
               }
               setLiveToolName(null);
+              // Next text block after tool use needs a paragraph separator
+              needsTextSeparatorRef.current = true;
               break;
             }
 
@@ -538,7 +579,7 @@ export function App({
 
         // Persist assistant response
         if (textParts.length > 0) {
-          const responseText = textParts.join("\n");
+          const responseText = textParts.join("\n\n");
           await appendTranscriptMessage({
             sessionId: session.id,
             role: "assistant",
@@ -552,6 +593,13 @@ export function App({
         activeToolRef.current = null;
         const message = error instanceof Error ? error.message : String(error);
         pushItem("system", `Error: ${message}`);
+        // Surface stderr output for debugging SDK failures
+        if (stderrChunks.length > 0) {
+          const stderrOutput = stderrChunks.join("").trim();
+          if (stderrOutput) {
+            pushItem("system", `stderr:\n${stderrOutput}`);
+          }
+        }
       }
 
       setIsInputActive(true);
@@ -559,18 +607,29 @@ export function App({
     [mcpServers, session.id, pushItem, appendDelta, flushBuffer],
   );
 
-  // When streaming finishes and input becomes active, finalize messages
+  // When streaming finishes and input becomes active, finalize messages.
+  // Long responses are split into chunks for better scroll performance.
   useEffect(() => {
     if (isInputActive) {
+      // Finalize thinking — keep as live state (not Static) so it can be toggled
       if (thinkingText) {
-        pushItem("thinking", thinkingText);
+        setLastThinking(thinkingText);
+        setThinkingExpanded(false);
         setThinkingText("");
       }
       if (streamingText && streamingText.trim().length >= 3) {
-        pushItem("assistant", streamingText);
+        const MAX_LINES_PER_CHUNK = 150;
+        const lines = streamingText.split("\n");
+        if (lines.length > MAX_LINES_PER_CHUNK) {
+          for (let i = 0; i < lines.length; i += MAX_LINES_PER_CHUNK) {
+            const chunk = lines.slice(i, i + MAX_LINES_PER_CHUNK).join("\n");
+            pushItem("assistant", chunk);
+          }
+        } else {
+          pushItem("assistant", streamingText);
+        }
         setStreamingText("");
       } else if (streamingText) {
-        // Silent reply - skip pushing assistant item
         setStreamingText("");
       }
     }
@@ -687,92 +746,124 @@ export function App({
   useInput((_input, key) => {
     if (key.ctrl && _input === "c") {
       exit();
+      return;
+    }
+    // Toggle copy mode with Ctrl+S
+    if (key.ctrl && _input === "s") {
+      setCopyMode((prev) => !prev);
+      return;
+    }
+    // Toggle thinking expansion with Tab (only when input is empty)
+    if (key.tab && !inputValue && lastThinking && isInputActive) {
+      setThinkingExpanded((prev) => !prev);
+      return;
+    }
+    // Exit copy mode on Escape
+    if (key.escape && copyMode) {
+      setCopyMode(false);
+      return;
     }
   });
 
   const promptChar = identity.emoji ? `${identity.emoji} ` : "";
 
+  const renderItem = (item: UIItem): React.ReactElement | null => {
+    switch (item.kind) {
+      case "user":
+        return <UserMessage key={item.id} content={item.content} />;
+      case "assistant":
+        return <NomosMessage key={item.id} content={item.content} />;
+      case "thinking":
+        return <ThinkingBlock key={item.id} content={item.content} />;
+      case "tool":
+        return item.toolMeta ? (
+          <ToolBlock key={item.id} {...item.toolMeta} />
+        ) : (
+          <SystemMessage key={item.id} content={item.content} />
+        );
+      case "tool-progress":
+        return <SystemMessage key={item.id} content={item.content} />;
+      case "cost":
+        return <CostLine key={item.id} content={item.content} />;
+      case "system":
+        return <SystemMessage key={item.id} content={item.content} />;
+      default:
+        return null;
+    }
+  };
+
   return (
     <Box flexDirection="column">
       {/* Completed items — rendered once, scroll up */}
-      <Static items={items}>
-        {(item) => {
-          switch (item.kind) {
-            case "user":
-              return <UserMessage key={item.id} content={item.content} />;
-            case "assistant":
-              return <NomosMessage key={item.id} content={item.content} />;
-            case "thinking":
-              return <ThinkingBlock key={item.id} content={item.content} />;
-            case "tool":
-              return item.toolMeta ? (
-                <ToolBlock key={item.id} {...item.toolMeta} />
-              ) : (
-                <SystemMessage key={item.id} content={item.content} />
-              );
-            case "tool-progress":
-              return <SystemMessage key={item.id} content={item.content} />;
-            case "cost":
-              return <CostLine key={item.id} content={item.content} />;
-            case "system":
-              return <SystemMessage key={item.id} content={item.content} />;
-            default:
-              return null;
-          }
-        }}
-      </Static>
-
-      {/* Thinking indicator with gradient spinner */}
-      {isThinking && !streamingText && !thinkingText && (
-        <Box marginTop={1}>
-          <GradientSpinner label="Thinking..." />
-        </Box>
+      {config.alternateBuffer ? (
+        <ScrollableView height={(process.stdout.rows || 24) - 4}>
+          {items.map((item) => renderItem(item))}
+        </ScrollableView>
+      ) : (
+        <Static items={items}>{(item) => renderItem(item)}</Static>
       )}
 
-      {/* Live thinking/reasoning — single-line preview to avoid Ink redraw issues */}
-      {thinkingText && !isInputActive && (
-        <Box marginTop={0}>
-          <GradientSpinner
-            label={`Reasoning... ${thinkingText.replace(/\n/g, " ").trim().slice(-60)}`}
-          />
-        </Box>
-      )}
+      {/* Copy mode indicator */}
+      {copyMode && <CopyModeIndicator />}
 
-      {/* Live tool execution indicator */}
-      {liveToolName && !isInputActive && <ToolBlock name={liveToolName} status="executing" />}
+      {/* Live UI — hidden in copy mode to allow text selection */}
+      {!copyMode && (
+        <>
+          {/* Last completed thinking — toggleable with Ctrl+T */}
+          {lastThinking && isInputActive && (
+            <ThinkingBlock content={lastThinking} expanded={thinkingExpanded} />
+          )}
 
-      {/* Streaming text */}
-      {streamingText && <NomosMessage content={streamingText} />}
+          {/* Streaming text — shown first, content flows naturally */}
+          {streamingText && <NomosMessage content={streamingText} />}
 
-      {/* Input area */}
-      {isInputActive && (
-        <Box marginTop={1}>
-          <CommandInput
-            value={inputValue}
-            onChange={setInputValue}
-            onSubmit={handleSubmit}
-            focus={isInputActive}
-            prompt={`${promptChar}${theme.symbol.user} `}
-          />
-        </Box>
-      )}
+          {/* Live thinking/reasoning — shown below text during streaming */}
+          {thinkingText && !isInputActive && <ThinkingBlock content={thinkingText} live />}
 
-      {/* Connection status (daemon mode) */}
-      {connectionState && connectionState !== "connected" && (
-        <Box>
-          <Text color="yellow" dimColor>
-            {connectionState === "connecting"
-              ? "Connecting to daemon..."
-              : connectionState === "reconnecting"
-                ? "Reconnecting to daemon..."
-                : "Disconnected from daemon"}
-          </Text>
-        </Box>
-      )}
+          {/* Live tool execution indicator — inline spinner below content */}
+          {liveToolName && !isInputActive && <ToolBlock name={liveToolName} status="executing" />}
 
-      {/* Status bar */}
-      {isInputActive && (
-        <StatusBar model={stateRef.current.model} messageCount={transcriptRef.current.length} />
+          {/* Thinking spinner — shown when waiting for first token */}
+          {isThinking && !streamingText && !thinkingText && !liveToolName && (
+            <Box marginTop={1}>
+              <Text color={theme.text.accent}>
+                <GradientSpinner />
+              </Text>
+              <Text dimColor>{"  Thinking..."}</Text>
+            </Box>
+          )}
+
+          {/* Input area */}
+          {isInputActive && (
+            <Box marginTop={1}>
+              <CommandInput
+                value={inputValue}
+                onChange={setInputValue}
+                onSubmit={handleSubmit}
+                focus={isInputActive && !copyMode}
+                prompt={`${promptChar}${theme.symbol.user} `}
+              />
+            </Box>
+          )}
+
+          {/* Connection status (daemon mode) */}
+          {connectionState && connectionState !== "connected" && (
+            <Box>
+              <Text color="yellow" dimColor>
+                {connectionState === "connecting"
+                  ? "Connecting to daemon..."
+                  : connectionState === "reconnecting"
+                    ? "Reconnecting to daemon..."
+                    : "Disconnected from daemon"}
+              </Text>
+            </Box>
+          )}
+
+          {/* Status bar */}
+          {isInputActive && (
+            <StatusBar model={stateRef.current.model} messageCount={transcriptRef.current.length} />
+          )}
+        </>
       )}
     </Box>
   );

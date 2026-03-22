@@ -19,6 +19,11 @@ const CONFIG_KEY_MAP: Record<string, keyof NomosConfig> = {
   "app.defaultDmPolicy": "defaultDmPolicy",
   "app.sessionScope": "sessionScope",
   "app.toolApprovalPolicy": "toolApprovalPolicy",
+  "app.teamMode": "teamMode",
+  "app.maxTeamWorkers": "maxTeamWorkers",
+  "app.anthropicBaseUrl": "anthropicBaseUrl",
+  "app.adaptiveMemory": "adaptiveMemory",
+  "app.extractionModel": "extractionModel",
 };
 
 /** Reverse map: NomosConfig field → config table key */

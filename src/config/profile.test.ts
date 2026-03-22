@@ -11,8 +11,8 @@ describe("buildSystemPromptAppend", () => {
     });
 
     expect(result).toContain("## Memory");
-    expect(result).toContain("memory_search tool");
-    expect(result).toContain("proactively search memory");
+    expect(result).toContain("memory_search");
+    expect(result).toContain("user_model_recall");
   });
 
   it("includes agent identity when name is not default", () => {

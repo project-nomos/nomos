@@ -23,6 +23,7 @@ Press `Ctrl+C` to stop the server.
 ### Root (`/`)
 
 Server-side redirect based on setup status:
+
 - If setup is incomplete (no API key or agent name) -> redirects to `/setup`
 - If setup is complete -> redirects to `/dashboard`
 
@@ -41,6 +42,7 @@ The wizard stores all config in the database (encrypted for secrets). The CLI wi
 ### Dashboard (`/dashboard`)
 
 Overview with:
+
 - **Status cards** -- assistant name/emoji, model, number of active channels, memory chunk count
 - **Quick actions** -- "Connect a Channel", "Customize Personality", "View Memory"
 
@@ -49,26 +51,34 @@ Overview with:
 - **Identity** section -- name, emoji, purpose textarea (stored in DB `config` table)
 - **Anthropic API** -- API key input (stored encrypted in `integrations` table)
 - **Google Cloud / Vertex AI** -- toggle, project ID, region selector
-- **Model** -- dropdown selector (Opus, Sonnet, Haiku)
+- **Model Configuration**:
+  - Default model dropdown (Opus, Sonnet, Haiku)
+  - Smart model routing toggle -- when enabled, shows per-tier model selectors:
+    - Simple queries (greetings, lookups) -- defaults to Haiku
+    - Moderate queries (general tasks) -- defaults to Sonnet
+    - Complex queries (coding, reasoning) -- defaults to Sonnet
+  - Custom API base URL -- point to Ollama + LiteLLM, Bedrock, or any Anthropic-compatible proxy
+- **Multi-Agent Teams** -- team mode toggle + max parallel workers input. When enabled, `/team` prefix triggers task decomposition across parallel worker agents.
+- **Adaptive Memory** -- toggle to enable knowledge extraction and user model learning. When enabled, shows extraction model selector (defaults to Haiku for cost efficiency). The agent will extract facts, preferences, and corrections from conversations and build a persistent user model.
 - **Advanced Settings** (collapsed by default) -- permission mode, daemon port
 
 ### Channel Pages (`/integrations/*`)
 
-| Route | Description |
-| --- | --- |
-| `/integrations` | Overview cards showing status of all integrations |
-| `/integrations/slack` | Slack workspace management (connect, test, disconnect) |
-| `/integrations/discord` | Discord bot token, allowed channels/guilds |
-| `/integrations/telegram` | Telegram bot token, allowed chats |
-| `/integrations/google` | Google Workspace OAuth, service selection, multi-account |
-| `/integrations/whatsapp` | WhatsApp toggle, allowed chats |
+| Route                    | Description                                              |
+| ------------------------ | -------------------------------------------------------- |
+| `/integrations`          | Overview cards showing status of all integrations        |
+| `/integrations/slack`    | Slack workspace management (connect, test, disconnect)   |
+| `/integrations/discord`  | Discord bot token, allowed channels/guilds               |
+| `/integrations/telegram` | Telegram bot token, allowed chats                        |
+| `/integrations/google`   | Google Workspace OAuth, service selection, multi-account |
+| `/integrations/whatsapp` | WhatsApp toggle, allowed chats                           |
 
 ### Advanced (`/admin/*`)
 
-| Route | Description |
-| --- | --- |
+| Route             | Description                                  |
+| ----------------- | -------------------------------------------- |
 | `/admin/database` | Database connection status, migration runner |
-| `/admin/memory` | Memory store stats, indexed sources |
+| `/admin/memory`   | Memory store stats, indexed sources          |
 
 ## Architecture
 
@@ -156,12 +166,16 @@ Browser                     Next.js API Routes              PostgreSQL
 
 ### Config Storage
 
-| What | Where | Encryption |
-| --- | --- | --- |
-| API keys, tokens | `integrations` table | AES-256-GCM |
-| Agent name, emoji, purpose | `config` table | No (not sensitive) |
-| Model, permission mode, ports | `config` table / `.env` | No |
-| Slack workspaces | `slack_user_tokens` table | No (tokens in `integrations`) |
+| What                              | Where                     | Encryption                    |
+| --------------------------------- | ------------------------- | ----------------------------- |
+| API keys, tokens                  | `integrations` table      | AES-256-GCM                   |
+| Agent name, emoji, purpose        | `config` table            | No (not sensitive)            |
+| Model, permission mode, ports     | `config` table / `.env`   | No                            |
+| Smart routing, model tiers        | `config` table / `.env`   | No                            |
+| Team mode, max workers            | `config` table / `.env`   | No                            |
+| Custom API base URL               | `config` table / `.env`   | No                            |
+| Adaptive memory, extraction model | `config` table / `.env`   | No                            |
+| Slack workspaces                  | `slack_user_tokens` table | No (tokens in `integrations`) |
 
 ### Security Notes
 

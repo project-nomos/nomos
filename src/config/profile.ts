@@ -1,4 +1,5 @@
 import { getConfigValue } from "../db/config.ts";
+import type { UserModelEntry } from "../db/user-model.ts";
 
 export interface UserProfile {
   name?: string;
@@ -73,6 +74,7 @@ export function buildSystemPromptAppend(params: {
   agentPrompt?: string;
   integrations?: string;
   permissions?: string;
+  userModel?: UserModelEntry[];
 }): string {
   const sections: string[] = [];
 
@@ -134,14 +136,29 @@ export function buildSystemPromptAppend(params: {
     sections.push("## Agent Instructions\n" + params.agentPrompt);
   }
 
+  // User model (learned preferences and facts)
+  if (params.userModel && params.userModel.length > 0) {
+    const highConfidence = params.userModel.filter((e) => e.confidence >= 0.6);
+    if (highConfidence.length > 0) {
+      const modelLines = highConfidence
+        .map((e) => `- ${e.key}: ${JSON.stringify(e.value)}`)
+        .join("\n");
+      sections.push(
+        `## What I Know About You\n${modelLines}\n\nUse this context to personalize responses. These are learned from our past conversations.`,
+      );
+    }
+  }
+
   // Memory instructions
   sections.push(
     `## Memory
-You have access to a memory_search tool that queries a PostgreSQL-backed vector store.
-- At the start of each conversation, proactively search memory for context about the user and their current projects.
-- When the user shares important facts, preferences, or project details, note them for future reference.
-- Reference relevant information from previous conversations when it helps provide better responses.
-- Use memory search when the user asks about previously discussed topics, code, or knowledge.`,
+You have access to memory tools:
+- \`memory_search\` — search long-term memory (conversations, facts, preferences). Use the \`category\` filter for targeted recall.
+- \`user_model_recall\` — recall accumulated knowledge about the user (preferences, facts, patterns learned over time).
+
+At the start of each conversation, proactively use \`user_model_recall\` to load context about the user.
+When the user shares preferences or corrects you, these are automatically learned for future conversations.
+Reference relevant information from previous conversations when it helps provide better responses.`,
   );
 
   // Permissions

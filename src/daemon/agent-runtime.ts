@@ -6,12 +6,20 @@
  * Manages SDK session IDs backed by the DB sessions table.
  */
 
-import { randomUUID } from "node:crypto";
-import { runSession, type McpServerConfig, type SDKMessage } from "../sdk/session.ts";
+import { runSession, type McpServerConfig } from "../sdk/session.ts";
 import { createMemoryMcpServer } from "../sdk/tools.ts";
+import { TeamRuntime, stripTeamPrefix } from "./team-runtime.ts";
 import { isSlackConfigured, createSlackMcpServer } from "../sdk/slack-mcp.ts";
-import { isDiscordConfigured, createDiscordMcpServer, loadDiscordTokenFromDb } from "../sdk/discord-mcp.ts";
-import { isTelegramConfigured, createTelegramMcpServer, loadTelegramTokenFromDb } from "../sdk/telegram-mcp.ts";
+import {
+  isDiscordConfigured,
+  createDiscordMcpServer,
+  loadDiscordTokenFromDb,
+} from "../sdk/discord-mcp.ts";
+import {
+  isTelegramConfigured,
+  createTelegramMcpServer,
+  loadTelegramTokenFromDb,
+} from "../sdk/telegram-mcp.ts";
 import {
   isGoogleWorkspaceConfiguredAsync,
   createGoogleWorkspaceMcpConfigsAsync,
@@ -45,6 +53,9 @@ export class AgentRuntime {
 
   // SDK session ID cache: sessionKey → SDK session ID
   private sdkSessionIds = new Map<string, string>();
+
+  // Multi-agent team runtime (when teamMode is enabled)
+  private teamRuntime?: TeamRuntime;
 
   private initialized = false;
 
@@ -132,6 +143,17 @@ export class AgentRuntime {
       // Permissions table may not exist yet on first run — skip
     }
 
+    // Load user model for adaptive behavior
+    let userModel: import("../db/user-model.ts").UserModelEntry[] | undefined;
+    if (this.config.adaptiveMemory) {
+      try {
+        const { getUserModel } = await import("../db/user-model.ts");
+        userModel = await getUserModel();
+      } catch {
+        // Table may not exist yet — skip
+      }
+    }
+
     // Build system prompt (after MCP servers so integrations summary is accurate)
     this.systemPromptAppend = buildSystemPromptAppend({
       profile: this.profile,
@@ -143,11 +165,33 @@ export class AgentRuntime {
       agentPrompt: activeAgent.systemPrompt || undefined,
       integrations: this.buildIntegrationsSummary(),
       permissions: permissionsSummary,
+      userModel,
     });
+
+    // Initialize team runtime if team mode is enabled
+    if (this.config.teamMode) {
+      this.teamRuntime = new TeamRuntime({
+        maxWorkers: this.config.maxTeamWorkers,
+        coordinatorModel: this.config.model,
+      });
+    }
 
     this.initialized = true;
     console.log("[agent-runtime] Initialized");
     console.log(`[agent-runtime]   Model: ${this.config.model}`);
+    if (this.config.teamMode) {
+      console.log(
+        `[agent-runtime]   Team mode: enabled (max ${this.config.maxTeamWorkers} workers)`,
+      );
+    }
+    if (this.config.adaptiveMemory) {
+      console.log(
+        `[agent-runtime]   Adaptive memory: enabled${userModel?.length ? ` (${userModel.length} model entries)` : ""}`,
+      );
+    }
+    if (this.config.anthropicBaseUrl) {
+      console.log(`[agent-runtime]   API base URL: ${this.config.anthropicBaseUrl}`);
+    }
     console.log(`[agent-runtime]   Identity: ${this.identity.emoji ?? ""} ${this.identity.name}`);
     console.log(`[agent-runtime]   MCP servers: ${Object.keys(this.mcpServers).join(", ")}`);
   }
@@ -184,9 +228,7 @@ export class AgentRuntime {
       parts.push("- **Telegram**: Send and receive messages via Telegram bot");
     }
     if (this.mcpServers["google-workspace"]) {
-      parts.push(
-        "- **Google Workspace**: All services via gws CLI MCP",
-      );
+      parts.push("- **Google Workspace**: All services via gws CLI MCP");
     }
 
     // Check for WhatsApp
@@ -251,6 +293,47 @@ export class AgentRuntime {
       console.debug(
         `[agent-runtime] Smart routing: "${classification.tier}" (confidence: ${classification.confidence.toFixed(2)}) → ${model}`,
       );
+    }
+
+    // Check for team mode trigger (/team prefix)
+    const teamTask = this.teamRuntime ? stripTeamPrefix(message.content) : null;
+    if (teamTask && this.teamRuntime) {
+      emit({
+        type: "system",
+        subtype: "status",
+        message: "Running multi-agent team...",
+      });
+
+      try {
+        const result = await this.teamRuntime.runTeam(
+          {
+            prompt: teamTask,
+            systemPromptAppend: this.systemPromptAppend,
+            mcpServers: this.mcpServers,
+            permissionMode: "bypassPermissions",
+            allowedTools: Object.keys(this.mcpServers).map((name) => `mcp__${name}`),
+          },
+          (event) => {
+            emit({
+              type: "system",
+              subtype: "status",
+              message: event.message,
+            });
+          },
+        );
+
+        return {
+          inReplyTo: message.id,
+          platform: message.platform,
+          channelId: message.channelId,
+          threadId: message.threadId,
+          content: result || "_(no response)_",
+        };
+      } catch (err) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        emit({ type: "error", message: errMsg });
+        throw err;
+      }
     }
 
     emit({
@@ -336,6 +419,7 @@ export class AgentRuntime {
       allowedTools,
       resume: resumeId,
       maxTurns: 50,
+      anthropicBaseUrl: this.config.anthropicBaseUrl,
     });
 
     let fullText = "";

@@ -14,7 +14,7 @@ import { fetchRenderedPage, validateUrl } from "./browser.ts";
 export function createMemoryMcpServer(): McpSdkServerConfigWithInstance {
   const memorySearchTool = tool(
     "memory_search",
-    "Search the long-term memory store using hybrid vector + text search. Returns relevant code snippets, documentation, and previously stored knowledge.",
+    "Search the long-term memory store using hybrid vector + text search. Returns relevant code snippets, documentation, and previously stored knowledge. Use the category filter for targeted recall.",
     {
       query: z.string().describe("The search query"),
       limit: z
@@ -24,6 +24,10 @@ export function createMemoryMcpServer(): McpSdkServerConfigWithInstance {
         .max(20)
         .optional()
         .describe("Maximum number of results (default: 5)"),
+      category: z
+        .enum(["fact", "preference", "correction", "skill", "conversation"])
+        .optional()
+        .describe("Filter by memory category"),
     },
     async (args) => {
       try {
@@ -34,17 +38,17 @@ export function createMemoryMcpServer(): McpSdkServerConfigWithInstance {
 
         if (!isEmbeddingAvailable()) {
           // Fall back to text-only search when embeddings are unavailable
-          results = await textOnlySearch(args.query, args.limit ?? 5);
+          results = await textOnlySearch(args.query, args.limit ?? 5, args.category);
         } else {
           try {
             const embedding = await generateEmbedding(args.query);
-            results = await hybridSearch(args.query, embedding, args.limit ?? 5);
+            results = await hybridSearch(args.query, embedding, args.limit ?? 5, args.category);
           } catch (embeddingError) {
             // Fall back to text-only search if embedding generation fails
             console.warn(
               "\x1b[2mEmbedding generation failed, falling back to text-only search\x1b[0m",
             );
-            results = await textOnlySearch(args.query, args.limit ?? 5);
+            results = await textOnlySearch(args.query, args.limit ?? 5, args.category);
           }
         }
 
@@ -57,7 +61,9 @@ export function createMemoryMcpServer(): McpSdkServerConfigWithInstance {
         const formatted = results
           .map((r, i) => {
             const source = r.path ?? r.source;
-            return `[${i + 1}] ${source} (score: ${r.score.toFixed(4)})\n${r.text}`;
+            const cat = (r.metadata as Record<string, unknown>)?.category;
+            const catLabel = cat ? ` [${cat}]` : "";
+            return `[${i + 1}] ${source}${catLabel} (score: ${r.score.toFixed(4)})\n${r.text}`;
           })
           .join("\n\n---\n\n");
 
@@ -71,6 +77,63 @@ export function createMemoryMcpServer(): McpSdkServerConfigWithInstance {
             {
               type: "text",
               text: `Memory search failed: ${message}`,
+            },
+          ],
+          isError: true,
+        };
+      }
+    },
+    {
+      annotations: {
+        readOnly: true,
+      },
+    },
+  );
+
+  const userModelRecallTool = tool(
+    "user_model_recall",
+    "Recall what you've learned about the user from past conversations. Returns accumulated preferences, facts, and patterns.",
+    {
+      category: z.enum(["preference", "fact", "style"]).optional().describe("Filter by category"),
+    },
+    async (args) => {
+      try {
+        const { getUserModel } = await import("../db/user-model.ts");
+        const entries = await getUserModel(args.category);
+
+        if (entries.length === 0) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: "No user model entries found. The user model is built over time from conversations.",
+              },
+            ],
+          };
+        }
+
+        const formatted = entries
+          .map((e) => {
+            const valueStr = typeof e.value === "string" ? e.value : JSON.stringify(e.value);
+            return `[${e.category}] ${e.key}: ${valueStr} (confidence: ${e.confidence.toFixed(2)})`;
+          })
+          .join("\n");
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: `User Model (${entries.length} entries):\n${formatted}`,
+            },
+          ],
+        };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return {
+          content: [
+            {
+              type: "text",
+              text: `User model recall failed: ${message}`,
             },
           ],
           isError: true,
@@ -203,9 +266,7 @@ export function createMemoryMcpServer(): McpSdkServerConfigWithInstance {
       action: z
         .enum(["read", "write", "execute", "install"])
         .describe("Action to check: read, write, execute, or install"),
-      target: z
-        .string()
-        .describe("The specific path, command, or package name to check"),
+      target: z.string().describe("The specific path, command, or package name to check"),
     },
     async (args) => {
       try {
@@ -244,9 +305,7 @@ export function createMemoryMcpServer(): McpSdkServerConfigWithInstance {
       action: z
         .enum(["read", "write", "execute", "install"])
         .describe("Action to grant: read, write, execute, or install"),
-      pattern: z
-        .string()
-        .describe("Exact value or glob pattern (trailing *) to allow"),
+      pattern: z.string().describe("Exact value or glob pattern (trailing *) to allow"),
       granted_by: z
         .string()
         .optional()
@@ -289,9 +348,7 @@ export function createMemoryMcpServer(): McpSdkServerConfigWithInstance {
       action: z
         .enum(["read", "write", "execute", "install"])
         .describe("Action to revoke: read, write, execute, or install"),
-      pattern: z
-        .string()
-        .describe("The exact pattern that was granted"),
+      pattern: z.string().describe("The exact pattern that was granted"),
     },
     async (args) => {
       try {
@@ -327,6 +384,7 @@ export function createMemoryMcpServer(): McpSdkServerConfigWithInstance {
     version: "0.1.0",
     tools: [
       memorySearchTool,
+      userModelRecallTool,
       bootstrapCompleteTool,
       browserFetchTool,
       checkPermissionTool,

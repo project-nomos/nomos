@@ -47,6 +47,18 @@ export interface NomosConfig {
   sessionScope: ScopeMode;
   /** Tool approval policy for dangerous operations (default: "block_critical") */
   toolApprovalPolicy: ApprovalPolicy;
+  /** Enable multi-agent team mode (default: false) */
+  teamMode: boolean;
+  /** Maximum parallel workers for team mode (default: 3) */
+  maxTeamWorkers: number;
+  /** Custom Anthropic API base URL (for Ollama, LiteLLM, etc.) */
+  anthropicBaseUrl?: string;
+  /** Enable knowledge extraction and user model learning (default: false) */
+  adaptiveMemory: boolean;
+  /** Model for knowledge extraction (default: haiku) */
+  extractionModel?: string;
+  /** Enable alternate screen buffer for full-screen TUI experience (default: false) */
+  alternateBuffer: boolean;
 }
 
 export function loadEnvConfig(): NomosConfig {
@@ -93,6 +105,14 @@ export function loadEnvConfig(): NomosConfig {
       (isProduction ? "pairing" : "open"),
     sessionScope: (process.env.NOMOS_SESSION_SCOPE as ScopeMode) ?? "channel",
     toolApprovalPolicy: (process.env.TOOL_APPROVAL_POLICY as ApprovalPolicy) ?? "block_critical",
+    teamMode: process.env.NOMOS_TEAM_MODE === "true",
+    maxTeamWorkers: process.env.NOMOS_MAX_TEAM_WORKERS
+      ? parseInt(process.env.NOMOS_MAX_TEAM_WORKERS, 10)
+      : 3,
+    anthropicBaseUrl: process.env.ANTHROPIC_BASE_URL,
+    adaptiveMemory: process.env.NOMOS_ADAPTIVE_MEMORY === "true",
+    extractionModel: process.env.NOMOS_EXTRACTION_MODEL,
+    alternateBuffer: process.env.NOMOS_ALTERNATE_BUFFER === "true",
   };
 }
 
@@ -141,8 +161,7 @@ export async function loadEnvConfigAsync(): Promise<NomosConfig> {
       // Preserve databaseUrl from DB secrets if available
       databaseUrl: database?.secrets.url ?? envConfig.databaseUrl,
       // Preserve googleCloudProject from DB if available
-      googleCloudProject:
-        (vertexAi?.config.project_id as string) ?? envConfig.googleCloudProject,
+      googleCloudProject: (vertexAi?.config.project_id as string) ?? envConfig.googleCloudProject,
     };
   } catch {
     // DB not available (e.g. first run, no migrations yet) — fall back to env-only

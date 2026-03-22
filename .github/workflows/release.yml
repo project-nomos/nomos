@@ -6,6 +6,7 @@ on:
 
 permissions:
   contents: write
+  packages: write
 
 env:
   NODE_VERSION: '22'
@@ -13,7 +14,7 @@ env:
 
 jobs:
   release:
-    name: Publish to npm & GitHub Release
+    name: Publish & Release
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -29,7 +30,8 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'pnpm'
-          registry-url: 'https://registry.npmjs.org'
+          registry-url: 'https://npm.pkg.github.com'
+          scope: '@project-nomos'
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -45,12 +47,25 @@ jobs:
       - name: Build
         run: pnpm build
 
-      - name: Publish to npm
+      - name: Publish to GitHub Packages
         run: pnpm publish --no-git-checks --access public
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
+
+      - name: Update Homebrew formula SHA
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          TARBALL_URL="https://github.com/${{ github.repository }}/archive/refs/tags/${GITHUB_REF_NAME}.tar.gz"
+          SHA256=$(curl -sL "$TARBALL_URL" | sha256sum | cut -d' ' -f1)
+          sed -i "s|url \".*\"|url \"${TARBALL_URL}\"|" Formula/nomos.rb
+          sed -i "s|sha256 \".*\"|sha256 \"${SHA256}\"|" Formula/nomos.rb
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Formula/nomos.rb
+          git commit -m "formula: update to v${VERSION}" || true
+          git push origin HEAD:main || true

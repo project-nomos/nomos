@@ -63,14 +63,16 @@ export async function isGoogleWorkspaceConfiguredAsync(): Promise<boolean> {
  * Returns a single MCP config — gws handles multi-account internally.
  * Services are controlled by the GWS_SERVICES env var (default: "all").
  */
+const DEFAULT_GWS_SERVICES = "gmail,drive,calendar,sheets,docs,slides";
+
 export function createGoogleWorkspaceMcpConfigs(): Record<string, McpServerConfig> {
-  const services = process.env.GWS_SERVICES ?? "all";
+  const services = process.env.GWS_SERVICES ?? DEFAULT_GWS_SERVICES;
 
   return {
     "google-workspace": {
       type: "stdio",
       command: "npx",
-      args: ["gws", "mcp", "-s", services],
+      args: ["gws", "mcp", "-s", services, "--tool-mode", "compact"],
     } as McpServerConfig,
   };
 }
@@ -79,8 +81,10 @@ export function createGoogleWorkspaceMcpConfigs(): Record<string, McpServerConfi
  * Create GWS MCP configs with DB-backed service config.
  * Reads GWS_SERVICES from DB integration config, falls back to env.
  */
-export async function createGoogleWorkspaceMcpConfigsAsync(): Promise<Record<string, McpServerConfig>> {
-  let services = process.env.GWS_SERVICES ?? "all";
+export async function createGoogleWorkspaceMcpConfigsAsync(): Promise<
+  Record<string, McpServerConfig>
+> {
+  let services = process.env.GWS_SERVICES ?? DEFAULT_GWS_SERVICES;
   try {
     const { getIntegration } = await import("../db/integrations.ts");
     const integration = await getIntegration("google");
@@ -95,7 +99,7 @@ export async function createGoogleWorkspaceMcpConfigsAsync(): Promise<Record<str
     "google-workspace": {
       type: "stdio",
       command: "npx",
-      args: ["gws", "mcp", "-s", services],
+      args: ["gws", "mcp", "-s", services, "--tool-mode", "compact"],
     } as McpServerConfig,
   };
 }
@@ -106,7 +110,10 @@ export async function createGoogleWorkspaceMcpConfigsAsync(): Promise<Record<str
 export async function isGwsAvailable(): Promise<{ available: boolean; version?: string }> {
   try {
     const { stdout } = await execFileAsync("npx", ["gws", "--version"], { timeout: 10000 });
-    const version = stdout.trim().replace(/^gws\s+/, "").split("\n")[0];
+    const version = stdout
+      .trim()
+      .replace(/^gws\s+/, "")
+      .split("\n")[0];
     return { available: true, version };
   } catch {
     return { available: false };

@@ -1,0 +1,35 @@
+{
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "WebFetch(domain:docs.anthropic.com)",
+      "WebFetch(domain:code.claude.com)",
+      "WebFetch(domain:docs.slack.dev)",
+      "WebFetch(domain:api.slack.com)",
+      "WebFetch(domain:discord.com)",
+      "WebFetch(domain:docs.github.com)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:www.npmjs.com)",
+      "WebFetch(domain:docs.cloud.google.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Bash(pnpm *)",
+      "Bash(pnpm)",
+      "Bash(npx *)",
+      "Bash(npm *)",
+      "Bash(node *)",
+      "Bash(git *)",
+      "Bash(gh *)",
+      "Bash(docker *)",
+      "Bash(docker compose *)",
+      "Bash(psql *)",
+      "Bash(python3 *)",
+      "Bash(ls *)",
+      "Bash(echo *)",
+      "Bash(command *)",
+      "Bash(curl *)",
+      "Bash(* --version)",
+      "Bash(* --help)"
+    ],
+    "deny": []
+  }
+}
