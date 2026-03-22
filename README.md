@@ -101,7 +101,8 @@ User prompt ──► Coordinator ──┬──► Worker 1 (subtask A) ──
 
 ## Additional Capabilities
 
-- **Custom API endpoints** — point at Ollama, LiteLLM, or any Anthropic-compatible proxy via `ANTHROPIC_BASE_URL` (see [Custom API Endpoints](#custom-api-endpoints))
+- **Digital marketing suite** — Google Ads + Analytics via MCP servers, with team mode workflows for campaign analysis, audience insights, and optimization. Includes an autonomous daily briefing loop. See [Google Ads](docs/integrations/google-ads.md) and [Google Analytics](docs/integrations/google-analytics.md) setup guides.
+- **Custom API endpoints** — point at Ollama, LiteLLM, OpenRouter, or any Anthropic-compatible proxy (see [API Providers](#api-providers))
 - **Slack User Mode** — act as the authenticated user: drafts responses to your DMs and @mentions for approval, then sends them as you
 - **Cron / scheduled tasks** — run prompts on a schedule with configurable session targets and delivery modes
 - **Automatic conversation memory** — every daemon conversation turn is indexed into vector memory, enabling cross-session and cross-channel recall
@@ -128,6 +129,28 @@ brew install project-nomos/nomos/nomos
 ```bash
 npm install -g @project-nomos/nomos --registry=https://npm.pkg.github.com
 ```
+
+### Run with Docker
+
+```bash
+docker run -d --name nomos \
+  -e DATABASE_URL=postgresql://nomos:nomos@host.docker.internal:5432/nomos \
+  -e ANTHROPIC_API_KEY=sk-ant-... \
+  -p 8766:8766 -p 8765:8765 \
+  ghcr.io/project-nomos/nomos:latest
+```
+
+Or use Docker Compose to run both the database and agent:
+
+```bash
+git clone https://github.com/project-nomos/nomos.git
+cd nomos
+cp .env.example .env
+# Edit .env with your ANTHROPIC_API_KEY (or OPENROUTER_API_KEY)
+docker compose up -d
+```
+
+The agent is accessible via gRPC on port 8766 and WebSocket on port 8765.
 
 ### Install from source
 
@@ -417,6 +440,18 @@ WHATSAPP_ALLOWED_CHATS=15551234567@s.whatsapp.net,120363123456789012@g.us
 
 Uses the Baileys library with QR code authentication (no Meta Business API required). On first start, a QR code is displayed in the terminal for pairing. Auth state is persisted to `~/.nomos/whatsapp-auth/`.
 
+### Data Integrations (via MCP)
+
+These integrations connect external data sources via MCP servers configured in `.nomos/mcp.json`:
+
+| Integration          | MCP Server                                                               | Guide                                          |
+| -------------------- | ------------------------------------------------------------------------ | ---------------------------------------------- |
+| **Google Ads**       | [google-ads-mcp](https://github.com/googleads/google-ads-mcp)            | [Setup](docs/integrations/google-ads.md)       |
+| **Google Analytics** | [analytics-mcp](https://github.com/googleanalytics/google-analytics-mcp) | [Setup](docs/integrations/google-analytics.md) |
+| **Google Workspace** | [@googleworkspace/cli](https://github.com/googleworkspace/cli)           | [Setup](docs/integrations/google-workspace.md) |
+
+The `digital-marketing` bundled skill provides team mode workflows for cross-platform campaign analysis, combining Google Ads spend data with Google Analytics traffic and conversion data. An autonomous daily marketing briefing loop is included at `autonomous/digital-marketing/`.
+
 ## Multi-Agent Teams
 
 Team mode decomposes complex tasks across parallel worker agents. A coordinator agent breaks down the task, spawns scoped workers via independent SDK sessions, and synthesizes their results into a single response.
@@ -527,35 +562,42 @@ Skills are loaded from three locations, in order:
 
 ### Bundled skills
 
-The following 25 skills are included:
+The following skills are included:
 
-| Skill                   | Description                         |
-| ----------------------- | ----------------------------------- |
-| `algorithmic-art`       | Generative art and creative coding  |
-| `apple-notes`           | Apple Notes integration             |
-| `apple-reminders`       | Apple Reminders integration         |
-| `brand-guidelines`      | Brand and style guide creation      |
-| `canvas-design`         | Canvas-based design generation      |
-| `discord`               | Discord bot and integration help    |
-| `doc-coauthoring`       | Collaborative document writing      |
-| `docx`                  | Word document generation            |
-| `frontend-design`       | Frontend UI/UX design guidance      |
-| `github`                | GitHub workflow and PR management   |
-| `google-workspace`      | Google Workspace integration (gws)  |
-| `internal-comms`        | Internal communications drafting    |
-| `mcp-builder`           | MCP server development              |
-| `pdf`                   | PDF document generation             |
-| `pptx`                  | PowerPoint presentation generation  |
-| `skill-creator`         | Create new skills from prompts      |
-| `slack`                 | Slack app and integration help      |
-| `slack-gif-creator`     | Slack GIF creation                  |
-| `telegram`              | Telegram bot and integration help   |
-| `theme-factory`         | Theme and color scheme generation   |
-| `weather`               | Weather information and forecasts   |
-| `web-artifacts-builder` | Web artifact (HTML/CSS/JS) creation |
-| `webapp-testing`        | Web application testing guidance    |
-| `whatsapp`              | WhatsApp integration help           |
-| `xlsx`                  | Excel spreadsheet generation        |
+| Skill                   | Description                                                    |
+| ----------------------- | -------------------------------------------------------------- |
+| `algorithmic-art`       | Generative art and creative coding                             |
+| `apple-notes`           | Apple Notes integration                                        |
+| `apple-reminders`       | Apple Reminders integration                                    |
+| `brand-guidelines`      | Brand and style guide creation                                 |
+| `canvas-design`         | Canvas-based design generation                                 |
+| `digital-marketing`     | Google Ads + Analytics campaigns, team mode analysis workflows |
+| `discord`               | Discord bot and integration help                               |
+| `doc-coauthoring`       | Collaborative document writing                                 |
+| `docx`                  | Word document generation                                       |
+| `frontend-design`       | Frontend UI/UX design guidance                                 |
+| `github`                | GitHub workflow and PR management                              |
+| `gws-gmail`             | Gmail API (messages, drafts, labels)                           |
+| `gws-drive`             | Google Drive (files, folders, permissions)                     |
+| `gws-calendar`          | Google Calendar (events, scheduling)                           |
+| `gws-sheets`            | Google Sheets (read, write, append)                            |
+| `gws-docs`              | Google Docs (create, read, edit)                               |
+| `gws-slides`            | Google Slides (presentations)                                  |
+| `gws-shared`            | Google Workspace shared auth and conventions                   |
+| `internal-comms`        | Internal communications drafting                               |
+| `mcp-builder`           | MCP server development                                         |
+| `pdf`                   | PDF document generation                                        |
+| `pptx`                  | PowerPoint presentation generation                             |
+| `skill-creator`         | Create new skills from prompts                                 |
+| `slack`                 | Slack app and integration help                                 |
+| `slack-gif-creator`     | Slack GIF creation                                             |
+| `telegram`              | Telegram bot and integration help                              |
+| `theme-factory`         | Theme and color scheme generation                              |
+| `weather`               | Weather information and forecasts                              |
+| `web-artifacts-builder` | Web artifact (HTML/CSS/JS) creation                            |
+| `webapp-testing`        | Web application testing guidance                               |
+| `whatsapp`              | WhatsApp integration help                                      |
+| `xlsx`                  | Excel spreadsheet generation                                   |
 
 ### Creating a custom skill
 

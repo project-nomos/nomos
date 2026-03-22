@@ -18,5 +18,25 @@ services:
       start_period: 10s
     restart: unless-stopped
 
+  nomos:
+    build: .
+    container_name: nomos-agent
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://nomos:nomos@postgres:5432/nomos
+      # Set your API provider and key:
+      # ANTHROPIC_API_KEY: sk-ant-...
+      # NOMOS_API_PROVIDER: openrouter
+      # OPENROUTER_API_KEY: sk-or-...
+    env_file:
+      - path: .env
+        required: false
+    ports:
+      - "8766:8766"  # gRPC
+      - "8765:8765"  # WebSocket
+    restart: unless-stopped
+
 volumes:
   pgdata:
