@@ -104,6 +104,7 @@ describe("validateConfig", () => {
       defaultDmPolicy: "open",
       sessionScope: "channel",
       toolApprovalPolicy: "block_critical",
+      apiProvider: "anthropic",
       smartRouting: false,
       modelTiers: {
         simple: "claude-haiku-4-5",
@@ -134,6 +135,7 @@ describe("validateConfig", () => {
       defaultDmPolicy: "open",
       sessionScope: "channel",
       toolApprovalPolicy: "block_critical",
+      apiProvider: "anthropic",
       smartRouting: false,
       modelTiers: {
         simple: "claude-haiku-4-5",

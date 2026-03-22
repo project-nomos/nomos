@@ -21,6 +21,7 @@ const CONFIG_KEY_MAP: Record<string, keyof NomosConfig> = {
   "app.toolApprovalPolicy": "toolApprovalPolicy",
   "app.teamMode": "teamMode",
   "app.maxTeamWorkers": "maxTeamWorkers",
+  "app.apiProvider": "apiProvider",
   "app.anthropicBaseUrl": "anthropicBaseUrl",
   "app.adaptiveMemory": "adaptiveMemory",
   "app.extractionModel": "extractionModel",

@@ -43,10 +43,17 @@ export default function AssistantSettingsPage() {
   const [agentPurpose, setAgentPurpose] = useState("");
   const [initialAgentPurpose, setInitialAgentPurpose] = useState("");
 
+  // API provider
+  const [apiProvider, setApiProvider] = useState("anthropic");
+  const [initialApiProvider, setInitialApiProvider] = useState("anthropic");
+
   // Env-based settings
   const [apiKey, setApiKey] = useState("");
   const [hasApiKey, setHasApiKey] = useState(false);
   const [apiKeyDirty, setApiKeyDirty] = useState(false);
+  const [openrouterApiKey, setOpenrouterApiKey] = useState("");
+  const [hasOpenrouterApiKey, setHasOpenrouterApiKey] = useState(false);
+  const [openrouterApiKeyDirty, setOpenrouterApiKeyDirty] = useState(false);
   const [model, setModel] = useState("claude-sonnet-4-6");
   const [initialModel, setInitialModel] = useState("claude-sonnet-4-6");
   const [permissionMode, setPermissionMode] = useState("default");
@@ -55,8 +62,6 @@ export default function AssistantSettingsPage() {
   const [initialDaemonPort, setInitialDaemonPort] = useState("8765");
 
   // Vertex AI / GCP
-  const [useVertex, setUseVertex] = useState(false);
-  const [initialUseVertex, setInitialUseVertex] = useState(false);
   const [gcpProject, setGcpProject] = useState("");
   const [initialGcpProject, setInitialGcpProject] = useState("");
   const [gcpRegion, setGcpRegion] = useState("us-east5");
@@ -99,10 +104,11 @@ export default function AssistantSettingsPage() {
 
   const isEnvDirty =
     apiKeyDirty ||
+    openrouterApiKeyDirty ||
+    apiProvider !== initialApiProvider ||
     model !== initialModel ||
     permissionMode !== initialPermissionMode ||
     daemonPort !== initialDaemonPort ||
-    useVertex !== initialUseVertex ||
     gcpProject !== initialGcpProject ||
     gcpRegion !== initialGcpRegion ||
     smartRouting !== initialSmartRouting ||
@@ -124,9 +130,17 @@ export default function AssistantSettingsPage() {
       const envData = await envRes.json();
       const configData = await configRes.json();
 
+      const ap = envData.NOMOS_API_PROVIDER ?? "anthropic";
+      setApiProvider(ap);
+      setInitialApiProvider(ap);
+
       setHasApiKey(!!envData.ANTHROPIC_API_KEY);
       setApiKey("");
       setApiKeyDirty(false);
+
+      setHasOpenrouterApiKey(!!envData.OPENROUTER_API_KEY);
+      setOpenrouterApiKey("");
+      setOpenrouterApiKeyDirty(false);
 
       const m = envData.NOMOS_MODEL ?? "claude-sonnet-4-6";
       setModel(m);
@@ -139,11 +153,6 @@ export default function AssistantSettingsPage() {
       const dp = envData.DAEMON_PORT ?? "8765";
       setDaemonPort(dp);
       setInitialDaemonPort(dp);
-
-      const vertex =
-        envData.CLAUDE_CODE_USE_VERTEX === "1" || envData.CLAUDE_CODE_USE_VERTEX === "true";
-      setUseVertex(vertex);
-      setInitialUseVertex(vertex);
 
       const proj = envData.GOOGLE_CLOUD_PROJECT ?? "";
       setGcpProject(proj);
@@ -242,13 +251,17 @@ export default function AssistantSettingsPage() {
       // Save env settings
       if (isEnvDirty) {
         const envUpdates: Record<string, string> = {};
+        if (apiProvider !== initialApiProvider) envUpdates.NOMOS_API_PROVIDER = apiProvider;
         if (apiKeyDirty) envUpdates.ANTHROPIC_API_KEY = apiKey;
+        if (openrouterApiKeyDirty) envUpdates.OPENROUTER_API_KEY = openrouterApiKey;
         if (model !== initialModel) envUpdates.NOMOS_MODEL = model;
         if (permissionMode !== initialPermissionMode)
           envUpdates.NOMOS_PERMISSION_MODE = permissionMode;
         if (daemonPort !== initialDaemonPort) envUpdates.DAEMON_PORT = daemonPort;
-        if (useVertex !== initialUseVertex)
-          envUpdates.CLAUDE_CODE_USE_VERTEX = useVertex ? "1" : "";
+        // Set Vertex flag based on provider selection
+        if (apiProvider !== initialApiProvider) {
+          envUpdates.CLAUDE_CODE_USE_VERTEX = apiProvider === "vertex" ? "1" : "";
+        }
         if (gcpProject !== initialGcpProject) envUpdates.GOOGLE_CLOUD_PROJECT = gcpProject;
         if (gcpRegion !== initialGcpRegion) envUpdates.CLOUD_ML_REGION = gcpRegion;
         if (smartRouting !== initialSmartRouting)
@@ -256,8 +269,14 @@ export default function AssistantSettingsPage() {
         if (modelSimple !== initialModelSimple) envUpdates.NOMOS_MODEL_SIMPLE = modelSimple;
         if (modelModerate !== initialModelModerate) envUpdates.NOMOS_MODEL_MODERATE = modelModerate;
         if (modelComplex !== initialModelComplex) envUpdates.NOMOS_MODEL_COMPLEX = modelComplex;
-        if (anthropicBaseUrl !== initialAnthropicBaseUrl)
+        // Set base URL based on provider
+        if (apiProvider === "openrouter") {
+          envUpdates.ANTHROPIC_BASE_URL = "https://openrouter.ai/api/v1";
+        } else if (apiProvider === "anthropic" || apiProvider === "vertex") {
+          envUpdates.ANTHROPIC_BASE_URL = "";
+        } else if (anthropicBaseUrl !== initialAnthropicBaseUrl) {
           envUpdates.ANTHROPIC_BASE_URL = anthropicBaseUrl;
+        }
         if (teamMode !== initialTeamMode) envUpdates.NOMOS_TEAM_MODE = teamMode ? "true" : "";
         if (maxTeamWorkers !== initialMaxTeamWorkers)
           envUpdates.NOMOS_MAX_TEAM_WORKERS = maxTeamWorkers;
@@ -354,89 +373,203 @@ export default function AssistantSettingsPage() {
         </div>
       </section>
 
-      {/* API Configuration */}
+      {/* API Provider */}
       <section className="mb-8 rounded-xl border border-surface0 bg-mantle p-5">
         <h2 className="text-sm font-semibold text-subtext1 uppercase tracking-wider mb-4">
-          Anthropic API
+          API Provider
         </h2>
-        <TokenInput
-          label="API Key"
-          value={apiKey}
-          onChange={(v) => {
-            setApiKey(v);
-            setApiKeyDirty(true);
-          }}
-          placeholder={hasApiKey ? "Configured - enter new value to replace" : "sk-ant-..."}
-          helperText="Required for Anthropic direct API access. Not needed if using Vertex AI."
-        />
-      </section>
-
-      {/* Google Cloud / Vertex AI */}
-      <section className="mb-8 rounded-xl border border-surface0 bg-mantle p-5">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-sm font-semibold text-subtext1 uppercase tracking-wider">
-            Google Cloud / Vertex AI
-          </h2>
-          <a
-            href="https://console.cloud.google.com"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center gap-1 text-xs text-blue hover:text-blue/80"
-          >
-            GCP Console <ExternalLink size={10} />
-          </a>
+        <div className="space-y-3">
+          {[
+            {
+              value: "anthropic",
+              label: "Anthropic",
+              description: "Direct API access via Anthropic",
+            },
+            {
+              value: "vertex",
+              label: "Google Cloud / Vertex AI",
+              description: "Route requests through Google Cloud Vertex AI",
+            },
+            {
+              value: "openrouter",
+              label: "OpenRouter",
+              description: "Access Anthropic models via OpenRouter",
+            },
+            {
+              value: "ollama",
+              label: "Ollama",
+              description: "Local models via Ollama + LiteLLM proxy",
+            },
+            {
+              value: "custom",
+              label: "Custom Endpoint",
+              description: "Any Anthropic-compatible API proxy",
+            },
+          ].map((p) => (
+            <label
+              key={p.value}
+              className={`flex items-center gap-3 rounded-lg border p-3 cursor-pointer transition-colors ${
+                apiProvider === p.value
+                  ? "border-mauve/50 bg-mauve/5"
+                  : "border-surface0 bg-base hover:border-surface1"
+              }`}
+            >
+              <input
+                type="radio"
+                name="apiProvider"
+                value={p.value}
+                checked={apiProvider === p.value}
+                onChange={(e) => setApiProvider(e.target.value)}
+                className="accent-mauve"
+              />
+              <div>
+                <span className="text-sm font-medium text-text">{p.label}</span>
+                <p className="text-xs text-overlay0">{p.description}</p>
+              </div>
+            </label>
+          ))}
         </div>
-        <div className="space-y-4">
-          <label className="flex items-center gap-3 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={useVertex}
-              onChange={(e) => setUseVertex(e.target.checked)}
-              className="accent-mauve w-4 h-4 rounded"
+
+        {/* Anthropic-specific config */}
+        {apiProvider === "anthropic" && (
+          <div className="mt-4 pt-4 border-t border-surface0">
+            <TokenInput
+              label="API Key"
+              value={apiKey}
+              onChange={(v) => {
+                setApiKey(v);
+                setApiKeyDirty(true);
+              }}
+              placeholder={hasApiKey ? "Configured - enter new value to replace" : "sk-ant-..."}
+              helperText="Your Anthropic API key"
             />
-            <div>
-              <span className="text-sm font-medium text-text">Use Vertex AI</span>
+          </div>
+        )}
+
+        {/* Vertex AI config */}
+        {apiProvider === "vertex" && (
+          <div className="mt-4 pt-4 border-t border-surface0 space-y-4">
+            <div className="flex items-center justify-end">
+              <a
+                href="https://console.cloud.google.com"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 text-xs text-blue hover:text-blue/80"
+              >
+                GCP Console <ExternalLink size={10} />
+              </a>
+            </div>
+            <div className="space-y-1.5">
+              <label className="block text-sm font-medium text-subtext1">GCP Project ID</label>
+              <input
+                type="text"
+                value={gcpProject}
+                onChange={(e) => setGcpProject(e.target.value)}
+                placeholder="my-project-12345"
+                className="w-full rounded-lg border border-surface1 bg-surface0 px-3 py-2 text-sm text-text placeholder:text-overlay0 focus:outline-none focus:border-mauve focus:ring-1 focus:ring-mauve/30 font-mono"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label className="block text-sm font-medium text-subtext1">Region</label>
+              <select
+                value={gcpRegion}
+                onChange={(e) => setGcpRegion(e.target.value)}
+                className="w-full rounded-lg border border-surface1 bg-surface0 px-3 py-2 text-sm text-text focus:outline-none focus:border-mauve focus:ring-1 focus:ring-mauve/30"
+              >
+                {VERTEX_REGIONS.map((r) => (
+                  <option key={r} value={r}>
+                    {r}
+                  </option>
+                ))}
+              </select>
               <p className="text-xs text-overlay0">
-                Route requests through Google Cloud Vertex AI instead of the Anthropic API
+                Requires{" "}
+                <code className="text-xs bg-surface0 px-1 rounded">
+                  gcloud auth application-default login
+                </code>
               </p>
             </div>
-          </label>
-          {useVertex && (
-            <>
-              <div className="space-y-1.5">
-                <label className="block text-sm font-medium text-subtext1">GCP Project ID</label>
-                <input
-                  type="text"
-                  value={gcpProject}
-                  onChange={(e) => setGcpProject(e.target.value)}
-                  placeholder="my-project-12345"
-                  className="w-full rounded-lg border border-surface1 bg-surface0 px-3 py-2 text-sm text-text placeholder:text-overlay0 focus:outline-none focus:border-mauve focus:ring-1 focus:ring-mauve/30 font-mono"
-                />
-              </div>
-              <div className="space-y-1.5">
-                <label className="block text-sm font-medium text-subtext1">Region</label>
-                <select
-                  value={gcpRegion}
-                  onChange={(e) => setGcpRegion(e.target.value)}
-                  className="w-full rounded-lg border border-surface1 bg-surface0 px-3 py-2 text-sm text-text focus:outline-none focus:border-mauve focus:ring-1 focus:ring-mauve/30"
-                >
-                  {VERTEX_REGIONS.map((r) => (
-                    <option key={r} value={r}>
-                      {r}
-                    </option>
-                  ))}
-                </select>
-                <p className="text-xs text-overlay0">
-                  Requires{" "}
-                  <code className="text-xs bg-surface0 px-1 rounded">
-                    gcloud auth application-default login
-                  </code>{" "}
-                  for authentication
-                </p>
-              </div>
-            </>
-          )}
-        </div>
+          </div>
+        )}
+
+        {/* OpenRouter config */}
+        {apiProvider === "openrouter" && (
+          <div className="mt-4 pt-4 border-t border-surface0 space-y-4">
+            <div className="flex items-center justify-end">
+              <a
+                href="https://openrouter.ai/keys"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 text-xs text-blue hover:text-blue/80"
+              >
+                Get API Key <ExternalLink size={10} />
+              </a>
+            </div>
+            <TokenInput
+              label="OpenRouter API Key"
+              value={openrouterApiKey}
+              onChange={(v) => {
+                setOpenrouterApiKey(v);
+                setOpenrouterApiKeyDirty(true);
+              }}
+              placeholder={
+                hasOpenrouterApiKey ? "Configured - enter new value to replace" : "sk-or-..."
+              }
+              helperText="Your OpenRouter API key. Anthropic models are accessed via OpenRouter's Anthropic-compatible endpoint."
+            />
+          </div>
+        )}
+
+        {/* Ollama config */}
+        {apiProvider === "ollama" && (
+          <div className="mt-4 pt-4 border-t border-surface0 space-y-4">
+            <div className="space-y-1.5">
+              <label className="block text-sm font-medium text-subtext1">LiteLLM Proxy URL</label>
+              <input
+                type="text"
+                value={anthropicBaseUrl}
+                onChange={(e) => setAnthropicBaseUrl(e.target.value)}
+                placeholder="http://localhost:4000"
+                className="w-full rounded-lg border border-surface1 bg-surface0 px-3 py-2 text-sm text-text placeholder:text-overlay0 focus:outline-none focus:border-mauve focus:ring-1 focus:ring-mauve/30 font-mono"
+              />
+              <p className="text-xs text-overlay0">
+                Ollama requires a LiteLLM proxy for Anthropic API compatibility. Start with:{" "}
+                <code className="text-xs bg-surface0 px-1 rounded">
+                  litellm --model ollama/llama3 --port 4000
+                </code>
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* Custom endpoint config */}
+        {apiProvider === "custom" && (
+          <div className="mt-4 pt-4 border-t border-surface0 space-y-4">
+            <TokenInput
+              label="API Key"
+              value={apiKey}
+              onChange={(v) => {
+                setApiKey(v);
+                setApiKeyDirty(true);
+              }}
+              placeholder={hasApiKey ? "Configured - enter new value to replace" : "API key..."}
+              helperText="API key for your custom endpoint (sent as the Anthropic API key)"
+            />
+            <div className="space-y-1.5">
+              <label className="block text-sm font-medium text-subtext1">Base URL</label>
+              <input
+                type="text"
+                value={anthropicBaseUrl}
+                onChange={(e) => setAnthropicBaseUrl(e.target.value)}
+                placeholder="https://your-proxy.example.com"
+                className="w-full rounded-lg border border-surface1 bg-surface0 px-3 py-2 text-sm text-text placeholder:text-overlay0 focus:outline-none focus:border-mauve focus:ring-1 focus:ring-mauve/30 font-mono"
+              />
+              <p className="text-xs text-overlay0">
+                Any Anthropic-compatible API endpoint (AWS Bedrock, Azure, corporate gateway, etc.)
+              </p>
+            </div>
+          </div>
+        )}
       </section>
 
       {/* Model Configuration */}
@@ -531,24 +664,6 @@ export default function AssistantSettingsPage() {
               </div>
             </div>
           )}
-
-          {/* Custom API Endpoint */}
-          <div className="pt-2 border-t border-surface0">
-            <div className="space-y-1.5">
-              <label className="block text-sm font-medium text-subtext1">Custom API Base URL</label>
-              <input
-                type="text"
-                value={anthropicBaseUrl}
-                onChange={(e) => setAnthropicBaseUrl(e.target.value)}
-                placeholder="https://api.anthropic.com"
-                className="w-full rounded-lg border border-surface1 bg-surface0 px-3 py-2 text-sm text-text placeholder:text-overlay0 focus:outline-none focus:border-mauve focus:ring-1 focus:ring-mauve/30 font-mono"
-              />
-              <p className="text-xs text-overlay0">
-                Point to Ollama + LiteLLM, AWS Bedrock, or any Anthropic-compatible API proxy. Leave
-                empty for default.
-              </p>
-            </div>
-          </div>
         </div>
       </section>
 

@@ -38,6 +38,8 @@ const ALLOWED_KEYS = [
   "ANTHROPIC_BASE_URL",
   "NOMOS_ADAPTIVE_MEMORY",
   "NOMOS_EXTRACTION_MODEL",
+  "NOMOS_API_PROVIDER",
+  "OPENROUTER_API_KEY",
 ];
 
 /** Keys that contain secrets and should be masked in GET responses. */
@@ -51,6 +53,7 @@ const SECRET_KEYS = new Set([
   "ENCRYPTION_KEY",
   "DISCORD_BOT_TOKEN",
   "TELEGRAM_BOT_TOKEN",
+  "OPENROUTER_API_KEY",
 ]);
 
 /** Keys that are writable via PUT. */
@@ -86,6 +89,8 @@ const WRITABLE_KEYS = new Set([
   "ANTHROPIC_BASE_URL",
   "NOMOS_ADAPTIVE_MEMORY",
   "NOMOS_EXTRACTION_MODEL",
+  "NOMOS_API_PROVIDER",
+  "OPENROUTER_API_KEY",
 ]);
 
 /**
@@ -156,7 +161,14 @@ const ENV_TO_DB: Record<string, DbMapping> = {
   NOMOS_MODEL_COMPLEX: { table: "config", dbKey: "app.modelComplex" },
   NOMOS_TEAM_MODE: { table: "config", dbKey: "app.teamMode" },
   NOMOS_MAX_TEAM_WORKERS: { table: "config", dbKey: "app.maxTeamWorkers" },
+  NOMOS_API_PROVIDER: { table: "config", dbKey: "app.apiProvider" },
   ANTHROPIC_BASE_URL: { table: "config", dbKey: "app.anthropicBaseUrl" },
+  OPENROUTER_API_KEY: {
+    table: "integrations",
+    dbKey: "openrouter",
+    field: "api_key",
+    isSecret: true,
+  },
   NOMOS_ADAPTIVE_MEMORY: { table: "config", dbKey: "app.adaptiveMemory" },
   NOMOS_EXTRACTION_MODEL: { table: "config", dbKey: "app.extractionModel" },
 };

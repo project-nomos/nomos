@@ -444,23 +444,44 @@ Prefix your message with `/team` to trigger team orchestration:
 
 Workers share the same MCP servers and permissions as the main agent but operate in isolated sessions. If a worker fails, its error is reported in the synthesis step while other workers' results are preserved.
 
-## Custom API Endpoints
+## API Providers
 
-Point Nomos at any Anthropic-compatible API proxy by setting `ANTHROPIC_BASE_URL`. This enables use with local model servers (via LiteLLM or similar proxies), alternative cloud providers, or corporate API gateways.
+Nomos supports multiple API providers. Select one in the Settings UI or via `NOMOS_API_PROVIDER`:
 
-### Ollama + LiteLLM example
+| Provider                | Description                       | Guide                                            |
+| ----------------------- | --------------------------------- | ------------------------------------------------ |
+| **Anthropic** (default) | Direct Anthropic API              | Set `ANTHROPIC_API_KEY`                          |
+| **Vertex AI**           | Google Cloud Vertex AI            | Set `CLAUDE_CODE_USE_VERTEX=1` + GCP credentials |
+| **OpenRouter**          | Anthropic models via OpenRouter   | [Setup guide](docs/integrations/openrouter.md)   |
+| **Ollama**              | Local models via LiteLLM proxy    | [Setup guide](docs/integrations/ollama.md)       |
+| **Custom**              | Any Anthropic-compatible endpoint | Set `ANTHROPIC_BASE_URL`                         |
+
+### OpenRouter
+
+Access Claude models through [OpenRouter](https://openrouter.ai) with usage tracking and unified billing:
 
 ```bash
-# 1. Start Ollama
-ollama serve
+NOMOS_API_PROVIDER=openrouter
+OPENROUTER_API_KEY=sk-or-v1-...
+```
 
-# 2. Start LiteLLM as an Anthropic-compatible proxy
+Or configure via the Settings UI: **Assistant** → **API Provider** → **OpenRouter**. See the [full guide](docs/integrations/openrouter.md).
+
+### Ollama
+
+Run local models with [Ollama](https://ollama.com) + [LiteLLM](https://github.com/BerriAI/litellm) proxy:
+
+```bash
+# Start Ollama and LiteLLM
+ollama serve
 litellm --model ollama/llama3 --port 4000
 
-# 3. Configure Nomos
+# Configure Nomos
+NOMOS_API_PROVIDER=ollama
 ANTHROPIC_BASE_URL=http://localhost:4000
-NOMOS_MODEL=claude-3-haiku   # or whatever model name the proxy expects
 ```
+
+See the [full guide](docs/integrations/ollama.md) for multi-model setup and troubleshooting.
 
 The base URL is propagated to all SDK sessions including team mode workers.
 
