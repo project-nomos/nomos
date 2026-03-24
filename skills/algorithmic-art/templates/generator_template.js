@@ -1,3 +1,4 @@
+/* oxlint-disable no-unused-vars -- template file with reference functions */
 /**
  * ═══════════════════════════════════════════════════════════════════════════
  *                  P5.JS GENERATIVE ART - BEST PRACTICES

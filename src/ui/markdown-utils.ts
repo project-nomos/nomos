@@ -57,6 +57,7 @@ export function formatInline(text: string): string {
  * Used for table column alignment.
  */
 export function padToWidth(text: string, width: number): string {
+  // oxlint-disable-next-line no-control-regex -- intentional ANSI escape stripping
   const stripped = text.replace(/\x1b\[[0-9;]*m/g, "");
   const len = stripped.length;
   if (len >= width) return text;
@@ -67,5 +68,6 @@ export function padToWidth(text: string, width: number): string {
  * Get the visible (non-ANSI) length of a string.
  */
 export function visibleLength(text: string): number {
+  // oxlint-disable-next-line no-control-regex -- intentional ANSI escape stripping
   return text.replace(/\x1b\[[0-9;]*m/g, "").length;
 }
