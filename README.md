@@ -12,7 +12,7 @@
 
 ## What is Nomos?
 
-Nomos wraps Anthropic's [Claude Agent SDK](https://docs.anthropic.com/en/docs/claude-code/sdk) to inherit its full agent loop, built-in tools (Bash, Read, Write, Edit, Glob, Grep, WebSearch, etc.), streaming, and compaction. On top of that foundation, it adds persistent sessions, enterprise-grade vector memory, a daemon with 6 channel integrations, a web management dashboard, 25 bundled skills, multi-agent team orchestration, and smart model routing.
+Nomos wraps Anthropic's [Claude Agent SDK](https://docs.anthropic.com/en/docs/claude-code/sdk) to inherit its full agent loop, built-in tools (Bash, Read, Write, Edit, Glob, Grep, WebSearch, etc.), streaming, and compaction. On top of that foundation, it adds persistent sessions, enterprise-grade vector memory, a daemon with 6 channel integrations, a web management dashboard, 27 bundled skills, multi-agent team orchestration, smart model routing, and AI-powered image and video generation.
 
 ## Key Features
 
@@ -48,7 +48,7 @@ A full Next.js 15 app at `settings/` provides a GUI for onboarding, assistant co
 
 Extend Nomos without touching core code:
 
-- **25 bundled skills** loaded from `skills/` with YAML frontmatter
+- **27 bundled skills** loaded from `skills/` with YAML frontmatter
 - **Three-tier skill loading**: bundled → personal (`~/.nomos/skills/`) → project (`./skills/`)
 - **MCP server support** via `.nomos/mcp.json` for external tool integrations
 - **DB-stored configuration** — all settings persist in PostgreSQL, with env var fallback
@@ -96,6 +96,27 @@ User prompt ──► Coordinator ──┬──► Worker 1 (subtask A) ──
 - Trigger with `/team` prefix: `/team Research React vs Svelte and write a comparison`
 - Configure via `NOMOS_TEAM_MODE=true` and `NOMOS_MAX_TEAM_WORKERS=3`
 - Fully managed via the [Settings UI](#settings-web-ui) — no env editing required
+
+### Image & Video Generation
+
+Generate images and videos from text prompts using Google's Gemini and Veo models. Both features are opt-in — enable them in the Settings UI or via environment variables.
+
+- **Image generation** — `generate_image` tool powered by `gemini-3-pro-image-preview`. Creates photorealistic images, illustrations, concept art, logos, and more from detailed text prompts. Images are saved as PNG/JPEG/WebP.
+- **Video generation** — `generate_video` tool powered by `veo-3.0-generate-preview`. Creates short video clips with cinematic quality. Supports camera movement, style, and duration control. Videos are saved as MP4/WebM.
+- **Shared API key** — both features use the same `GEMINI_API_KEY` from [Google AI Studio](https://aistudio.google.com/apikey)
+- **Bundled skills** — `image-generation` and `video-generation` skills provide prompt-writing guidance and best practices
+
+```bash
+# Enable image generation
+NOMOS_IMAGE_GENERATION=true
+GEMINI_API_KEY=your-gemini-api-key
+
+# Enable video generation
+NOMOS_VIDEO_GENERATION=true
+# Uses the same GEMINI_API_KEY
+```
+
+Or configure via the Settings UI: **Assistant** → **Image Generation** / **Video Generation**.
 
 ---
 
@@ -577,6 +598,7 @@ The following skills are included:
 | `docx`                  | Word document generation                                       |
 | `frontend-design`       | Frontend UI/UX design guidance                                 |
 | `github`                | GitHub workflow and PR management                              |
+| `image-generation`      | Image generation with Gemini (prompts, styles, capabilities)   |
 | `gws-gmail`             | Gmail API (messages, drafts, labels)                           |
 | `gws-drive`             | Google Drive (files, folders, permissions)                     |
 | `gws-calendar`          | Google Calendar (events, scheduling)                           |
@@ -593,6 +615,7 @@ The following skills are included:
 | `slack-gif-creator`     | Slack GIF creation                                             |
 | `telegram`              | Telegram bot and integration help                              |
 | `theme-factory`         | Theme and color scheme generation                              |
+| `video-generation`      | Video generation with Veo (camera, styles, prompt guidance)    |
 | `weather`               | Weather information and forecasts                              |
 | `web-artifacts-builder` | Web artifact (HTML/CSS/JS) creation                            |
 | `webapp-testing`        | Web application testing guidance                               |
@@ -662,10 +685,12 @@ This runs fire-and-forget and only triggers when the user message is >50 charact
 
 ### Agent integration
 
-The agent has access to two MCP tools for memory:
+The agent has access to MCP tools for memory and media generation:
 
 - **`memory_search`** — hybrid vector + full-text search over `memory_chunks`. Supports an optional `category` filter (`fact`, `preference`, `correction`, `skill`, `conversation`) for targeted recall.
 - **`user_model_recall`** — reads accumulated knowledge about the user from the `user_model` table. Supports optional category filtering (`preference`, `fact`, `style`).
+- **`generate_image`** — generates images from text prompts via Gemini (`gemini-3-pro-image-preview`). Requires `NOMOS_IMAGE_GENERATION=true` and `GEMINI_API_KEY`.
+- **`generate_video`** — generates videos from text prompts via Veo (`veo-3.0-generate-preview`). Long-running operation (1-3 min). Requires `NOMOS_VIDEO_GENERATION=true` and `GEMINI_API_KEY`.
 
 At the start of each session, the agent proactively uses `user_model_recall` to load context about the user. Automatically indexed conversations appear in search results, enabling the agent to recall past interactions regardless of which channel or session they occurred in.
 
@@ -822,7 +847,7 @@ Add external MCP servers by creating `.nomos/mcp.json` in your project or home d
 }
 ```
 
-These are passed directly to the Claude Agent SDK alongside the built-in `nomos-memory` MCP server, which exposes the `memory_search` and `user_model_recall` tools.
+These are passed directly to the Claude Agent SDK alongside the built-in `nomos-memory` MCP server, which exposes the `memory_search`, `user_model_recall`, `generate_image`, and `generate_video` tools.
 
 ## gRPC Protocol
 
@@ -931,7 +956,9 @@ src/
   index.ts                    # CLI entry point
   sdk/
     session.ts                # Wraps Claude Agent SDK query()
-    tools.ts                  # In-process MCP server (memory_search, user_model_recall)
+    tools.ts                  # In-process MCP server (memory_search, user_model_recall, generate_image, generate_video)
+    image-gen.ts              # Gemini image generation (gemini-3-pro-image-preview)
+    video-gen.ts              # Veo video generation (veo-3.0-generate-preview)
     google-workspace-mcp.ts   # Google Workspace MCP via @googleworkspace/cli (gws)
   cli/
     program.ts                # Commander.js setup
@@ -1016,7 +1043,7 @@ src/
     banner.ts                 # Startup banner with random taglines
 proto/
   nomos.proto                 # gRPC service definition (protobuf)
-skills/                       # Bundled skills (25 SKILL.md files)
+skills/                       # Bundled skills (27 SKILL.md files)
 docs/integrations/            # Detailed channel setup guides
 ```
 
@@ -1043,20 +1070,25 @@ API keys and secrets are stored encrypted (AES-256-GCM) in the `integrations` ta
 
 ### Model and behavior
 
-| Variable                 | Description                                                                   | Default             |
-| ------------------------ | ----------------------------------------------------------------------------- | ------------------- |
-| `NOMOS_MODEL`            | Default Claude model                                                          | `claude-sonnet-4-6` |
-| `NOMOS_PERMISSION_MODE`  | Tool permission mode (default, acceptEdits, plan, dontAsk, bypassPermissions) | `acceptEdits`       |
-| `NOMOS_BETAS`            | SDK betas to enable (comma-separated)                                         | --                  |
-| `NOMOS_FALLBACK_MODELS`  | Fallback model chain (comma-separated)                                        | --                  |
-| `NOMOS_USE_V2_SDK`       | Opt in to V2 SDK session API                                                  | `false`             |
-| `NOMOS_SESSION_SCOPE`    | Session scope mode (channel, sender, peer, channel-peer)                      | `channel`           |
-| `TOOL_APPROVAL_POLICY`   | Dangerous tool policy (always_ask, warn_only, block_critical, disabled)       | `block_critical`    |
-| `NOMOS_TEAM_MODE`        | Enable multi-agent team orchestration                                         | `false`             |
-| `NOMOS_MAX_TEAM_WORKERS` | Max parallel workers in team mode                                             | `3`                 |
-| `ANTHROPIC_BASE_URL`     | Custom Anthropic API base URL (Ollama, LiteLLM, etc.)                         | —                   |
-| `NOMOS_ADAPTIVE_MEMORY`  | Enable knowledge extraction and user model learning                           | `false`             |
-| `NOMOS_EXTRACTION_MODEL` | Model for knowledge extraction                                                | `claude-haiku-4-5`  |
+| Variable                       | Description                                                                   | Default                      |
+| ------------------------------ | ----------------------------------------------------------------------------- | ---------------------------- |
+| `NOMOS_MODEL`                  | Default Claude model                                                          | `claude-sonnet-4-6`          |
+| `NOMOS_PERMISSION_MODE`        | Tool permission mode (default, acceptEdits, plan, dontAsk, bypassPermissions) | `acceptEdits`                |
+| `NOMOS_BETAS`                  | SDK betas to enable (comma-separated)                                         | --                           |
+| `NOMOS_FALLBACK_MODELS`        | Fallback model chain (comma-separated)                                        | --                           |
+| `NOMOS_USE_V2_SDK`             | Opt in to V2 SDK session API                                                  | `false`                      |
+| `NOMOS_SESSION_SCOPE`          | Session scope mode (channel, sender, peer, channel-peer)                      | `channel`                    |
+| `TOOL_APPROVAL_POLICY`         | Dangerous tool policy (always_ask, warn_only, block_critical, disabled)       | `block_critical`             |
+| `NOMOS_TEAM_MODE`              | Enable multi-agent team orchestration                                         | `false`                      |
+| `NOMOS_MAX_TEAM_WORKERS`       | Max parallel workers in team mode                                             | `3`                          |
+| `ANTHROPIC_BASE_URL`           | Custom Anthropic API base URL (Ollama, LiteLLM, etc.)                         | —                            |
+| `NOMOS_ADAPTIVE_MEMORY`        | Enable knowledge extraction and user model learning                           | `false`                      |
+| `NOMOS_EXTRACTION_MODEL`       | Model for knowledge extraction                                                | `claude-haiku-4-5`           |
+| `NOMOS_IMAGE_GENERATION`       | Enable image generation via Gemini                                            | `false`                      |
+| `NOMOS_IMAGE_GENERATION_MODEL` | Gemini model for image generation                                             | `gemini-3-pro-image-preview` |
+| `GEMINI_API_KEY`               | Gemini API key (shared by image and video generation)                         | —                            |
+| `NOMOS_VIDEO_GENERATION`       | Enable video generation via Veo                                               | `false`                      |
+| `NOMOS_VIDEO_GENERATION_MODEL` | Veo model for video generation                                                | `veo-3.0-generate-preview`   |
 
 ### Embeddings
 

@@ -93,6 +93,25 @@ export default function AssistantSettingsPage() {
   const [extractionModel, setExtractionModel] = useState("claude-haiku-4-5");
   const [initialExtractionModel, setInitialExtractionModel] = useState("claude-haiku-4-5");
 
+  // Image generation
+  const [imageGeneration, setImageGeneration] = useState(false);
+  const [initialImageGeneration, setInitialImageGeneration] = useState(false);
+  const [geminiApiKey, setGeminiApiKey] = useState("");
+  const [hasGeminiApiKey, setHasGeminiApiKey] = useState(false);
+  const [geminiApiKeyDirty, setGeminiApiKeyDirty] = useState(false);
+  const [imageGenerationModel, setImageGenerationModel] = useState("gemini-3-pro-image-preview");
+  const [initialImageGenerationModel, setInitialImageGenerationModel] = useState(
+    "gemini-3-pro-image-preview",
+  );
+
+  // Video generation
+  const [videoGeneration, setVideoGeneration] = useState(false);
+  const [initialVideoGeneration, setInitialVideoGeneration] = useState(false);
+  const [videoGenerationModel, setVideoGenerationModel] = useState("veo-3.0-generate-preview");
+  const [initialVideoGenerationModel, setInitialVideoGenerationModel] = useState(
+    "veo-3.0-generate-preview",
+  );
+
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
@@ -119,7 +138,12 @@ export default function AssistantSettingsPage() {
     teamMode !== initialTeamMode ||
     maxTeamWorkers !== initialMaxTeamWorkers ||
     adaptiveMemory !== initialAdaptiveMemory ||
-    extractionModel !== initialExtractionModel;
+    extractionModel !== initialExtractionModel ||
+    geminiApiKeyDirty ||
+    imageGeneration !== initialImageGeneration ||
+    imageGenerationModel !== initialImageGenerationModel ||
+    videoGeneration !== initialVideoGeneration ||
+    videoGenerationModel !== initialVideoGenerationModel;
 
   const isDirty = isIdentityDirty || isEnvDirty;
   useUnsavedChanges(isDirty);
@@ -201,6 +225,28 @@ export default function AssistantSettingsPage() {
       const em = envData.NOMOS_EXTRACTION_MODEL ?? "claude-haiku-4-5";
       setExtractionModel(em);
       setInitialExtractionModel(em);
+
+      // Image generation
+      const ig = envData.NOMOS_IMAGE_GENERATION === "true";
+      setImageGeneration(ig);
+      setInitialImageGeneration(ig);
+
+      setHasGeminiApiKey(!!envData.GEMINI_API_KEY);
+      setGeminiApiKey("");
+      setGeminiApiKeyDirty(false);
+
+      const igm = envData.NOMOS_IMAGE_GENERATION_MODEL ?? "gemini-3-pro-image-preview";
+      setImageGenerationModel(igm);
+      setInitialImageGenerationModel(igm);
+
+      // Video generation
+      const vg = envData.NOMOS_VIDEO_GENERATION === "true";
+      setVideoGeneration(vg);
+      setInitialVideoGeneration(vg);
+
+      const vgm = envData.NOMOS_VIDEO_GENERATION_MODEL ?? "veo-3.0-generate-preview";
+      setVideoGenerationModel(vgm);
+      setInitialVideoGenerationModel(vgm);
 
       // Identity from config
       const name = (configData["agent.name"] as string) ?? "";
@@ -284,6 +330,15 @@ export default function AssistantSettingsPage() {
           envUpdates.NOMOS_ADAPTIVE_MEMORY = adaptiveMemory ? "true" : "";
         if (extractionModel !== initialExtractionModel)
           envUpdates.NOMOS_EXTRACTION_MODEL = extractionModel;
+        if (imageGeneration !== initialImageGeneration)
+          envUpdates.NOMOS_IMAGE_GENERATION = imageGeneration ? "true" : "";
+        if (geminiApiKeyDirty) envUpdates.GEMINI_API_KEY = geminiApiKey;
+        if (imageGenerationModel !== initialImageGenerationModel)
+          envUpdates.NOMOS_IMAGE_GENERATION_MODEL = imageGenerationModel;
+        if (videoGeneration !== initialVideoGeneration)
+          envUpdates.NOMOS_VIDEO_GENERATION = videoGeneration ? "true" : "";
+        if (videoGenerationModel !== initialVideoGenerationModel)
+          envUpdates.NOMOS_VIDEO_GENERATION_MODEL = videoGenerationModel;
 
         promises.push(
           fetch("/api/env", {
@@ -749,6 +804,111 @@ export default function AssistantSettingsPage() {
               <p className="text-xs text-overlay0">
                 Model used for knowledge extraction. Haiku recommended for cost efficiency.
               </p>
+            </div>
+          )}
+        </div>
+      </section>
+
+      {/* Image Generation */}
+      <section className="mb-8 rounded-xl border border-surface0 bg-mantle p-5">
+        <h2 className="text-sm font-semibold text-subtext1 uppercase tracking-wider mb-4">
+          Image Generation
+        </h2>
+        <div className="space-y-4">
+          <label className="flex items-center gap-3 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={imageGeneration}
+              onChange={(e) => setImageGeneration(e.target.checked)}
+              className="accent-mauve w-4 h-4 rounded"
+            />
+            <div>
+              <span className="text-sm font-medium text-text">Enable Image Generation</span>
+              <p className="text-xs text-overlay0">
+                Generate images from text prompts using Google's Gemini model via the{" "}
+                <code className="text-xs bg-surface0 px-1 rounded">generate_image</code> tool.
+              </p>
+            </div>
+          </label>
+
+          {imageGeneration && (
+            <div className="space-y-4 pl-7 border-l-2 border-surface1 ml-2">
+              <TokenInput
+                label="Gemini API Key"
+                value={geminiApiKey}
+                onChange={(v) => {
+                  setGeminiApiKey(v);
+                  setGeminiApiKeyDirty(true);
+                }}
+                placeholder={
+                  hasGeminiApiKey
+                    ? "Configured - enter new value to replace"
+                    : "Your Gemini API key"
+                }
+                helperText="Get a free API key from https://aistudio.google.com/apikey"
+              />
+              <div className="space-y-1.5">
+                <label className="block text-sm font-medium text-subtext1">Model</label>
+                <input
+                  type="text"
+                  value={imageGenerationModel}
+                  onChange={(e) => setImageGenerationModel(e.target.value)}
+                  placeholder="gemini-3-pro-image-preview"
+                  className="w-full rounded-lg border border-surface1 bg-surface0 px-3 py-2 text-sm text-text placeholder:text-overlay0 focus:outline-none focus:border-mauve focus:ring-1 focus:ring-mauve/30 font-mono"
+                />
+                <p className="text-xs text-overlay0">
+                  Gemini model with image generation capabilities
+                </p>
+              </div>
+            </div>
+          )}
+        </div>
+      </section>
+
+      {/* Video Generation */}
+      <section className="mb-8 rounded-xl border border-surface0 bg-mantle p-5">
+        <h2 className="text-sm font-semibold text-subtext1 uppercase tracking-wider mb-4">
+          Video Generation
+        </h2>
+        <div className="space-y-4">
+          <label className="flex items-center gap-3 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={videoGeneration}
+              onChange={(e) => setVideoGeneration(e.target.checked)}
+              className="accent-mauve w-4 h-4 rounded"
+            />
+            <div>
+              <span className="text-sm font-medium text-text">Enable Video Generation</span>
+              <p className="text-xs text-overlay0">
+                Generate videos from text prompts using Google's Veo model via the{" "}
+                <code className="text-xs bg-surface0 px-1 rounded">generate_video</code> tool.
+                Requires a Gemini API key (same as image generation).
+              </p>
+            </div>
+          </label>
+
+          {videoGeneration && (
+            <div className="space-y-4 pl-7 border-l-2 border-surface1 ml-2">
+              {!hasGeminiApiKey && !imageGeneration && (
+                <p className="text-xs text-peach">
+                  A Gemini API key is required. Configure it in the Image Generation section above
+                  or set GEMINI_API_KEY in your environment.
+                </p>
+              )}
+              <div className="space-y-1.5">
+                <label className="block text-sm font-medium text-subtext1">Model</label>
+                <input
+                  type="text"
+                  value={videoGenerationModel}
+                  onChange={(e) => setVideoGenerationModel(e.target.value)}
+                  placeholder="veo-3.0-generate-preview"
+                  className="w-full rounded-lg border border-surface1 bg-surface0 px-3 py-2 text-sm text-text placeholder:text-overlay0 focus:outline-none focus:border-mauve focus:ring-1 focus:ring-mauve/30 font-mono"
+                />
+                <p className="text-xs text-overlay0">
+                  Veo model for video generation. Videos may take 1-3 minutes to generate.
+                </p>
+              </div>
             </div>
           )}
         </div>

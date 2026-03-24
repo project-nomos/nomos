@@ -25,6 +25,10 @@ const CONFIG_KEY_MAP: Record<string, keyof NomosConfig> = {
   "app.anthropicBaseUrl": "anthropicBaseUrl",
   "app.adaptiveMemory": "adaptiveMemory",
   "app.extractionModel": "extractionModel",
+  "app.imageGeneration": "imageGeneration",
+  "app.imageGenerationModel": "imageGenerationModel",
+  "app.videoGeneration": "videoGeneration",
+  "app.videoGenerationModel": "videoGenerationModel",
 };
 
 /** Reverse map: NomosConfig field → config table key */

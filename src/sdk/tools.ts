@@ -338,6 +338,125 @@ export function createMemoryMcpServer(): McpSdkServerConfigWithInstance {
     },
   );
 
+  const generateImageTool = tool(
+    "generate_image",
+    "Generate an image from a text prompt using Google's Gemini model. Returns the file path to the generated image. Requires image generation to be enabled and a Gemini API key configured.",
+    {
+      prompt: z
+        .string()
+        .describe(
+          "Detailed description of the image to generate. Be specific about style, composition, colors, and subject matter.",
+        ),
+      output_path: z
+        .string()
+        .optional()
+        .describe(
+          "Optional file path to save the image. If not provided, saves to a temp directory.",
+        ),
+    },
+    async (args) => {
+      try {
+        if (process.env.NOMOS_IMAGE_GENERATION !== "true") {
+          return {
+            content: [
+              {
+                type: "text",
+                text: "Image generation is not enabled. Enable it in Settings or set NOMOS_IMAGE_GENERATION=true and GEMINI_API_KEY in your environment.",
+              },
+            ],
+            isError: true,
+          };
+        }
+
+        const { generateImage } = await import("./image-gen.ts");
+        const result = await generateImage(args.prompt, {
+          outputPath: args.output_path,
+        });
+
+        const parts = [`Image saved to: ${result.imagePath}`];
+        if (result.text) {
+          parts.push(`\nModel notes: ${result.text}`);
+        }
+
+        return {
+          content: [{ type: "text", text: parts.join("") }],
+        };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return {
+          content: [{ type: "text", text: `Image generation failed: ${message}` }],
+          isError: true,
+        };
+      }
+    },
+    {
+      annotations: {
+        readOnly: false,
+      },
+    },
+  );
+
+  const generateVideoTool = tool(
+    "generate_video",
+    "Generate a video from a text prompt using Google's Veo model. This is a long-running operation that may take a few minutes. Returns the file path to the generated video. Requires video generation to be enabled and a Gemini API key configured.",
+    {
+      prompt: z
+        .string()
+        .describe(
+          "Detailed description of the video to generate. Describe the scene, action, camera movement, style, and mood.",
+        ),
+      output_path: z
+        .string()
+        .optional()
+        .describe(
+          "Optional file path to save the video. If not provided, saves to a temp directory.",
+        ),
+      duration_seconds: z
+        .number()
+        .int()
+        .min(1)
+        .max(30)
+        .optional()
+        .describe("Duration of the video in seconds (default determined by model)"),
+    },
+    async (args) => {
+      try {
+        if (process.env.NOMOS_VIDEO_GENERATION !== "true") {
+          return {
+            content: [
+              {
+                type: "text",
+                text: "Video generation is not enabled. Enable it in Settings or set NOMOS_VIDEO_GENERATION=true and GEMINI_API_KEY in your environment.",
+              },
+            ],
+            isError: true,
+          };
+        }
+
+        const { generateVideo } = await import("./video-gen.ts");
+        const result = await generateVideo(args.prompt, {
+          outputPath: args.output_path,
+          durationSeconds: args.duration_seconds,
+        });
+
+        return {
+          content: [{ type: "text", text: `Video saved to: ${result.videoPath}` }],
+        };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return {
+          content: [{ type: "text", text: `Video generation failed: ${message}` }],
+          isError: true,
+        };
+      }
+    },
+    {
+      annotations: {
+        readOnly: false,
+      },
+    },
+  );
+
   const revokePermissionTool = tool(
     "revoke_permission",
     "Remove a previously granted permanent permission.",
@@ -387,6 +506,8 @@ export function createMemoryMcpServer(): McpSdkServerConfigWithInstance {
       userModelRecallTool,
       bootstrapCompleteTool,
       browserFetchTool,
+      generateImageTool,
+      generateVideoTool,
       checkPermissionTool,
       grantPermissionTool,
       revokePermissionTool,

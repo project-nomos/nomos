@@ -115,6 +115,8 @@ describe("validateConfig", () => {
       maxTeamWorkers: 3,
       adaptiveMemory: false,
       alternateBuffer: false,
+      imageGeneration: false,
+      videoGeneration: false,
     };
 
     const errors = validateConfig(config);
@@ -146,6 +148,8 @@ describe("validateConfig", () => {
       maxTeamWorkers: 3,
       adaptiveMemory: false,
       alternateBuffer: false,
+      imageGeneration: false,
+      videoGeneration: false,
     };
 
     const errors = validateConfig(config);

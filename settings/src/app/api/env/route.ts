@@ -171,6 +171,16 @@ const ENV_TO_DB: Record<string, DbMapping> = {
   },
   NOMOS_ADAPTIVE_MEMORY: { table: "config", dbKey: "app.adaptiveMemory" },
   NOMOS_EXTRACTION_MODEL: { table: "config", dbKey: "app.extractionModel" },
+  NOMOS_IMAGE_GENERATION: { table: "config", dbKey: "app.imageGeneration" },
+  NOMOS_IMAGE_GENERATION_MODEL: { table: "config", dbKey: "app.imageGenerationModel" },
+  GEMINI_API_KEY: {
+    table: "integrations",
+    dbKey: "gemini",
+    field: "api_key",
+    isSecret: true,
+  },
+  NOMOS_VIDEO_GENERATION: { table: "config", dbKey: "app.videoGeneration" },
+  NOMOS_VIDEO_GENERATION_MODEL: { table: "config", dbKey: "app.videoGenerationModel" },
 };
 
 /** Simple decrypt: if the value looks encrypted (three dot-separated hex segments), try to decrypt. */

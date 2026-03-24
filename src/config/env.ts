@@ -66,6 +66,16 @@ export interface NomosConfig {
   extractionModel?: string;
   /** Enable alternate screen buffer for full-screen TUI experience (default: false) */
   alternateBuffer: boolean;
+  /** Enable image generation via Gemini (default: false) */
+  imageGeneration: boolean;
+  /** Gemini API key for image generation */
+  geminiApiKey?: string;
+  /** Gemini model for image generation (default: gemini-3-pro-image-preview) */
+  imageGenerationModel?: string;
+  /** Enable video generation via Veo (default: false) */
+  videoGeneration: boolean;
+  /** Veo model for video generation (default: veo-3.0-generate-preview) */
+  videoGenerationModel?: string;
 }
 
 export function loadEnvConfig(): NomosConfig {
@@ -122,6 +132,11 @@ export function loadEnvConfig(): NomosConfig {
     adaptiveMemory: process.env.NOMOS_ADAPTIVE_MEMORY === "true",
     extractionModel: process.env.NOMOS_EXTRACTION_MODEL,
     alternateBuffer: process.env.NOMOS_ALTERNATE_BUFFER === "true",
+    imageGeneration: process.env.NOMOS_IMAGE_GENERATION === "true",
+    geminiApiKey: process.env.GEMINI_API_KEY,
+    imageGenerationModel: process.env.NOMOS_IMAGE_GENERATION_MODEL,
+    videoGeneration: process.env.NOMOS_VIDEO_GENERATION === "true",
+    videoGenerationModel: process.env.NOMOS_VIDEO_GENERATION_MODEL,
   };
 }
 
@@ -149,6 +164,7 @@ export async function loadEnvConfigAsync(): Promise<NomosConfig> {
     const vertexAi = await getAppSecrets("vertex-ai");
     const openrouter = await getAppSecrets("openrouter");
     const database = await getAppSecrets("database");
+    const gemini = await getAppSecrets("gemini");
 
     // Apply DB secrets to env vars so downstream code (SDK, etc.) picks them up
     if (anthropic?.secrets.api_key && !process.env.ANTHROPIC_API_KEY) {
@@ -174,6 +190,8 @@ export async function loadEnvConfigAsync(): Promise<NomosConfig> {
       googleCloudProject: (vertexAi?.config.project_id as string) ?? envConfig.googleCloudProject,
       // Preserve openrouterApiKey from DB if available
       openrouterApiKey: openrouter?.secrets.api_key ?? envConfig.openrouterApiKey,
+      // Preserve geminiApiKey from DB if available
+      geminiApiKey: gemini?.secrets.api_key ?? envConfig.geminiApiKey,
     };
 
     // Apply provider-specific env vars based on active provider
