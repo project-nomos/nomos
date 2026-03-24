@@ -139,7 +139,10 @@ export async function POST() {
     if (!url) {
       cleanup();
       return NextResponse.json(
-        { error: "Failed to get OAuth URL from gws. Check that gws CLI is installed and credentials are valid." },
+        {
+          error:
+            "Failed to get OAuth URL from gws. Check that gws CLI is installed and credentials are valid.",
+        },
         { status: 500 },
       );
     }
@@ -148,9 +151,6 @@ export async function POST() {
   } catch (err) {
     cleanup();
     const message = err instanceof Error ? err.message : String(err);
-    return NextResponse.json(
-      { error: `Failed to start gws auth: ${message}` },
-      { status: 500 },
-    );
+    return NextResponse.json({ error: `Failed to start gws auth: ${message}` }, { status: 500 });
   }
 }

@@ -34,8 +34,8 @@ services:
       - path: .env
         required: false
     ports:
-      - "8766:8766"  # gRPC
-      - "8765:8765"  # WebSocket
+      - "8766:8766" # gRPC
+      - "8765:8765" # WebSocket
     restart: unless-stopped
 
 volumes:

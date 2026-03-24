@@ -78,36 +78,35 @@ export default function DashboardPage() {
   }
 
   if (!data) {
-    return (
-      <div className="text-center text-overlay0 py-16">
-        Failed to load dashboard data.
-      </div>
-    );
+    return <div className="text-center text-overlay0 py-16">Failed to load dashboard data.</div>;
   }
 
   return (
     <div className="max-w-4xl">
       <h1 className="text-2xl font-bold text-text mb-1">Dashboard</h1>
-      <p className="text-sm text-overlay0 mb-8">
-        Overview of your assistant
-      </p>
+      <p className="text-sm text-overlay0 mb-8">Overview of your assistant</p>
 
       {/* Status Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-10">
         <div className="rounded-xl border border-surface0 bg-mantle p-5">
           <div className="flex items-center gap-2 mb-3">
             <User size={16} className="text-mauve" />
-            <span className="text-xs font-semibold text-overlay0 uppercase tracking-wider">Assistant</span>
+            <span className="text-xs font-semibold text-overlay0 uppercase tracking-wider">
+              Assistant
+            </span>
           </div>
           <p className="text-lg font-bold text-text truncate">
-            {data.identity.emoji ? `${data.identity.emoji} ` : ""}{data.identity.name}
+            {data.identity.emoji ? `${data.identity.emoji} ` : ""}
+            {data.identity.name}
           </p>
         </div>
 
         <div className="rounded-xl border border-surface0 bg-mantle p-5">
           <div className="flex items-center gap-2 mb-3">
             <Brain size={16} className="text-mauve" />
-            <span className="text-xs font-semibold text-overlay0 uppercase tracking-wider">Model</span>
+            <span className="text-xs font-semibold text-overlay0 uppercase tracking-wider">
+              Model
+            </span>
           </div>
           <p className="text-lg font-bold text-text truncate">{data.model}</p>
         </div>
@@ -115,7 +114,9 @@ export default function DashboardPage() {
         <div className="rounded-xl border border-surface0 bg-mantle p-5">
           <div className="flex items-center gap-2 mb-3">
             <Radio size={16} className="text-mauve" />
-            <span className="text-xs font-semibold text-overlay0 uppercase tracking-wider">Channels</span>
+            <span className="text-xs font-semibold text-overlay0 uppercase tracking-wider">
+              Channels
+            </span>
           </div>
           <p className="text-lg font-bold text-text">{data.activeChannels} active</p>
         </div>
@@ -123,14 +124,18 @@ export default function DashboardPage() {
         <div className="rounded-xl border border-surface0 bg-mantle p-5">
           <div className="flex items-center gap-2 mb-3">
             <Brain size={16} className="text-mauve" />
-            <span className="text-xs font-semibold text-overlay0 uppercase tracking-wider">Memory</span>
+            <span className="text-xs font-semibold text-overlay0 uppercase tracking-wider">
+              Memory
+            </span>
           </div>
           <p className="text-lg font-bold text-text">{data.memoryChunks.toLocaleString()} chunks</p>
         </div>
       </div>
 
       {/* Quick Actions */}
-      <h2 className="text-sm font-semibold text-subtext1 uppercase tracking-wider mb-4">Quick Actions</h2>
+      <h2 className="text-sm font-semibold text-subtext1 uppercase tracking-wider mb-4">
+        Quick Actions
+      </h2>
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <Link
           href="/integrations"
@@ -141,7 +146,10 @@ export default function DashboardPage() {
               <h3 className="text-sm font-medium text-text mb-1">Connect a Channel</h3>
               <p className="text-xs text-overlay0">Add Slack, Discord, Telegram, or more</p>
             </div>
-            <ArrowRight size={16} className="text-overlay0 group-hover:text-mauve transition-colors" />
+            <ArrowRight
+              size={16}
+              className="text-overlay0 group-hover:text-mauve transition-colors"
+            />
           </div>
         </Link>
 
@@ -154,7 +162,10 @@ export default function DashboardPage() {
               <h3 className="text-sm font-medium text-text mb-1">Customize Personality</h3>
               <p className="text-xs text-overlay0">Set name, emoji, and purpose</p>
             </div>
-            <ArrowRight size={16} className="text-overlay0 group-hover:text-mauve transition-colors" />
+            <ArrowRight
+              size={16}
+              className="text-overlay0 group-hover:text-mauve transition-colors"
+            />
           </div>
         </Link>
 
@@ -167,7 +178,10 @@ export default function DashboardPage() {
               <h3 className="text-sm font-medium text-text mb-1">View Memory</h3>
               <p className="text-xs text-overlay0">Browse stored knowledge and context</p>
             </div>
-            <ArrowRight size={16} className="text-overlay0 group-hover:text-mauve transition-colors" />
+            <ArrowRight
+              size={16}
+              className="text-overlay0 group-hover:text-mauve transition-colors"
+            />
           </div>
         </Link>
       </div>

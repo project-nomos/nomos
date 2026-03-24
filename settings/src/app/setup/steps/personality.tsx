@@ -156,15 +156,9 @@ export function PersonalityStep({ onComplete }: PersonalityStepProps) {
       {/* Preview */}
       {agentName && (
         <div className="rounded-lg border border-surface0 bg-crust p-3 text-center">
-          <span className="text-lg">
-            {agentEmoji && `${agentEmoji} `}
-          </span>
+          <span className="text-lg">{agentEmoji && `${agentEmoji} `}</span>
           <span className="text-sm font-medium text-text">{agentName}</span>
-          {userName && (
-            <p className="text-xs text-overlay0 mt-1">
-              Assistant for {userName}
-            </p>
-          )}
+          {userName && <p className="text-xs text-overlay0 mt-1">Assistant for {userName}</p>}
         </div>
       )}
 

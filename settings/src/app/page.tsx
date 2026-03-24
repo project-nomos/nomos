@@ -29,9 +29,7 @@ async function isSetupComplete(): Promise<boolean> {
     }
 
     // Also check env vars as fallback
-    const hasEnvKey =
-      !!process.env.ANTHROPIC_API_KEY ||
-      process.env.CLAUDE_CODE_USE_VERTEX === "1";
+    const hasEnvKey = !!process.env.ANTHROPIC_API_KEY || process.env.CLAUDE_CODE_USE_VERTEX === "1";
 
     const hasApiKey = hasAnthropicKey || hasVertexConfig || hasEnvKey;
 

@@ -61,7 +61,9 @@ function StatCard({ label, value }: { label: string; value: string | number }) {
   return (
     <div className="rounded-lg border border-surface0/50 bg-base p-4">
       <p className="text-xs text-overlay0 mb-1">{label}</p>
-      <p className="text-xl font-semibold text-text tabular-nums">{typeof value === "number" ? value.toLocaleString() : value}</p>
+      <p className="text-xl font-semibold text-text tabular-nums">
+        {typeof value === "number" ? value.toLocaleString() : value}
+      </p>
     </div>
   );
 }
@@ -230,7 +232,10 @@ export default function VectorMemoryPage() {
         <section className="rounded-xl border border-surface0 bg-mantle p-5">
           <p className="text-sm text-red mb-4">{error}</p>
           <button
-            onClick={() => { setLoading(true); loadData(); }}
+            onClick={() => {
+              setLoading(true);
+              loadData();
+            }}
             className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border border-surface1 text-sm text-subtext0 hover:bg-surface0 transition-colors"
           >
             <RefreshCw size={14} />
@@ -251,7 +256,12 @@ export default function VectorMemoryPage() {
       <div className="flex items-center justify-between mb-1">
         <h1 className="text-2xl font-bold text-text">Vector Memory</h1>
         <button
-          onClick={() => { setLoading(true); setSearchResults(null); setSearchQuery(""); loadData(); }}
+          onClick={() => {
+            setLoading(true);
+            setSearchResults(null);
+            setSearchQuery("");
+            loadData();
+          }}
           className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border border-surface1 text-sm text-subtext0 hover:bg-surface0 transition-colors"
         >
           <RefreshCw size={14} />
@@ -262,7 +272,9 @@ export default function VectorMemoryPage() {
 
       {/* Stats Cards */}
       <section className="mb-8 rounded-xl border border-surface0 bg-mantle p-5">
-        <h2 className="text-sm font-semibold text-subtext1 uppercase tracking-wider mb-4">Overview</h2>
+        <h2 className="text-sm font-semibold text-subtext1 uppercase tracking-wider mb-4">
+          Overview
+        </h2>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           <StatCard label="Total Chunks" value={data.stats.total} />
           <StatCard label="With Embeddings" value={data.stats.withEmbedding} />
@@ -274,11 +286,16 @@ export default function VectorMemoryPage() {
       {/* Source Breakdown */}
       {data.sources.length > 0 && (
         <section className="mb-8 rounded-xl border border-surface0 bg-mantle p-5">
-          <h2 className="text-sm font-semibold text-subtext1 uppercase tracking-wider mb-4">Sources</h2>
+          <h2 className="text-sm font-semibold text-subtext1 uppercase tracking-wider mb-4">
+            Sources
+          </h2>
           <div className="space-y-2">
             {data.sources.map((s) => (
               <div key={s.source} className="flex items-center gap-3">
-                <span className="text-sm font-mono text-text w-36 truncate shrink-0" title={s.source}>
+                <span
+                  className="text-sm font-mono text-text w-36 truncate shrink-0"
+                  title={s.source}
+                >
                   {s.source}
                 </span>
                 <div className="flex-1 h-5 bg-surface0/50 rounded overflow-hidden">
@@ -287,7 +304,9 @@ export default function VectorMemoryPage() {
                     style={{ width: `${(s.count / maxSourceCount) * 100}%` }}
                   />
                 </div>
-                <span className="text-xs text-overlay0 tabular-nums w-12 text-right">{s.count}</span>
+                <span className="text-xs text-overlay0 tabular-nums w-12 text-right">
+                  {s.count}
+                </span>
               </div>
             ))}
           </div>
@@ -296,7 +315,9 @@ export default function VectorMemoryPage() {
 
       {/* Search */}
       <section className="mb-8 rounded-xl border border-surface0 bg-mantle p-5">
-        <h2 className="text-sm font-semibold text-subtext1 uppercase tracking-wider mb-4">Search</h2>
+        <h2 className="text-sm font-semibold text-subtext1 uppercase tracking-wider mb-4">
+          Search
+        </h2>
         <div className="flex gap-2">
           <div className="relative flex-1">
             <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-overlay0" />
@@ -324,7 +345,8 @@ export default function VectorMemoryPage() {
         </div>
         {searchResults !== null && (
           <p className="text-xs text-overlay0 mt-2">
-            {searchResults.length} result{searchResults.length !== 1 ? "s" : ""} for &ldquo;{searchQuery}&rdquo;
+            {searchResults.length} result{searchResults.length !== 1 ? "s" : ""} for &ldquo;
+            {searchQuery}&rdquo;
           </p>
         )}
       </section>

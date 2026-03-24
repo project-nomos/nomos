@@ -69,11 +69,7 @@ export default function SetupWizardPage() {
       {/* Header */}
       <div className="text-center mb-8">
         <h1 className="text-2xl font-bold text-text mb-1">Set up Nomos</h1>
-        <p className="text-sm text-overlay0">
-          {step < 5
-            ? `Step ${step} of 4`
-            : "Setup complete"}
-        </p>
+        <p className="text-sm text-overlay0">{step < 5 ? `Step ${step} of 4` : "Setup complete"}</p>
       </div>
 
       {/* Progress Bar */}
@@ -81,10 +77,7 @@ export default function SetupWizardPage() {
         <div className="mb-8">
           <div className="flex items-center justify-between mb-2">
             {STEPS.slice(0, 4).map((s) => (
-              <div
-                key={s.number}
-                className="flex flex-col items-center gap-1"
-              >
+              <div key={s.number} className="flex flex-col items-center gap-1">
                 <div
                   className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold transition-colors ${
                     s.number < step
@@ -96,11 +89,7 @@ export default function SetupWizardPage() {
                 >
                   {s.number < step ? "\u2713" : s.number}
                 </div>
-                <span
-                  className={`text-xs ${
-                    s.number <= step ? "text-subtext0" : "text-overlay0"
-                  }`}
-                >
+                <span className={`text-xs ${s.number <= step ? "text-subtext0" : "text-overlay0"}`}>
                   {s.label}
                 </span>
               </div>

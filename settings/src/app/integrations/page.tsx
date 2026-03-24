@@ -34,9 +34,7 @@ export default function IntegrationsPage() {
   return (
     <div>
       <h1 className="text-2xl font-bold text-text mb-1">Integrations</h1>
-      <p className="text-sm text-overlay0 mb-8">
-        Connect and manage your services
-      </p>
+      <p className="text-sm text-overlay0 mb-8">Connect and manage your services</p>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-2 gap-4 max-w-4xl">
         <IntegrationCard
@@ -80,11 +78,7 @@ export default function IntegrationsPage() {
               ? `${google.accountCount} account${google.accountCount !== 1 ? "s" : ""}`
               : undefined
           }
-          details={
-            google?.configured
-              ? [`Services: ${google.services}`]
-              : undefined
-          }
+          details={google?.configured ? [`Services: ${google.services}`] : undefined}
         />
 
         <IntegrationCard

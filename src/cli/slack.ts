@@ -80,11 +80,8 @@ async function startSlackListener(): Promise<void> {
 
   // Load agent config for SDK calls
   const { loadEnvConfig } = await import("../config/env.ts");
-  const {
-    loadAgentIdentity,
-    loadUserProfile,
-    buildSystemPromptAppend,
-  } = await import("../config/profile.ts");
+  const { loadAgentIdentity, loadUserProfile, buildSystemPromptAppend } =
+    await import("../config/profile.ts");
   const { loadSoulFile } = await import("../config/soul.ts");
   const { loadSkills, formatSkillsForPrompt } = await import("../skills/loader.ts");
   const { createMemoryMcpServer } = await import("../sdk/tools.ts");
@@ -202,7 +199,9 @@ async function startSlackListener(): Promise<void> {
       const resumeId = channelSessions.get(sessionKey);
 
       console.log(
-        chalk.dim(`\n[${ws.team_name}] ${senderName} in ${channelName}: ${cleanText.slice(0, 80)}${cleanText.length > 80 ? "..." : ""}`),
+        chalk.dim(
+          `\n[${ws.team_name}] ${senderName} in ${channelName}: ${cleanText.slice(0, 80)}${cleanText.length > 80 ? "..." : ""}`,
+        ),
       );
 
       try {
@@ -297,11 +296,15 @@ async function startSlackListener(): Promise<void> {
 
     await app.start();
     console.log(
-      chalk.green(`  Workspace: ${ws.team_name} (${ws.team_id}) — listening as ${auth.user} (${userId})`),
+      chalk.green(
+        `  Workspace: ${ws.team_name} (${ws.team_id}) — listening as ${auth.user} (${userId})`,
+      ),
     );
   }
 
-  console.log(chalk.hex("#CBA6F7").bold("\nListening for Slack messages as you. Press Ctrl+C to stop.\n"));
+  console.log(
+    chalk.hex("#CBA6F7").bold("\nListening for Slack messages as you. Press Ctrl+C to stop.\n"),
+  );
   console.log(chalk.dim("Responds to DMs and @mentions. Messages are sent as your account.\n"));
 
   // Keep process alive

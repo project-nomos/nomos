@@ -95,10 +95,12 @@ export class GrpcClient {
         this.client = new NomosAgentClient(address, grpc.credentials.createInsecure());
 
         // Verify connection with a Ping
-        (this.client.ping as (
-          req: Record<string, never>,
-          callback: (err: grpc.ServiceError | null, resp: unknown) => void,
-        ) => void)({}, (err: grpc.ServiceError | null) => {
+        (
+          this.client.ping as (
+            req: Record<string, never>,
+            callback: (err: grpc.ServiceError | null, resp: unknown) => void,
+          ) => void
+        )({}, (err: grpc.ServiceError | null) => {
           if (err) {
             this.client = null;
             this.setState("disconnected");
@@ -137,9 +139,10 @@ export class GrpcClient {
       throw new Error("Not connected to daemon");
     }
 
-    const chatFn = this.client.chat as (
-      req: { content: string; sessionKey: string },
-    ) => grpc.ClientReadableStream<{ type: string; jsonPayload: string }>;
+    const chatFn = this.client.chat as (req: {
+      content: string;
+      sessionKey: string;
+    }) => grpc.ClientReadableStream<{ type: string; jsonPayload: string }>;
 
     const stream = chatFn.call(this.client, { content, sessionKey });
 
@@ -186,7 +189,10 @@ export class GrpcClient {
 
     const commandFn = this.client.command as (
       req: { command: string; sessionKey: string },
-      callback: (err: grpc.ServiceError | null, resp: { success: boolean; message: string }) => void,
+      callback: (
+        err: grpc.ServiceError | null,
+        resp: { success: boolean; message: string },
+      ) => void,
     ) => void;
 
     commandFn.call(this.client, { command, sessionKey }, (err, resp) => {

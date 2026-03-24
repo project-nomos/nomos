@@ -3,7 +3,18 @@
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, Settings, LayoutGrid, MessageSquare, MessageCircle, Send, Mail, Phone, Database, Brain } from "lucide-react";
+import {
+  LayoutDashboard,
+  Settings,
+  LayoutGrid,
+  MessageSquare,
+  MessageCircle,
+  Send,
+  Mail,
+  Phone,
+  Database,
+  Brain,
+} from "lucide-react";
 import { DaemonStatus } from "@/components/daemon-status";
 
 const navItems = [
@@ -28,10 +39,17 @@ const advancedItems = [
 export function Sidebar() {
   const pathname = usePathname();
 
-  const renderLink = (item: { href: string; label: string; icon: React.ComponentType<{ size: number }> }) => {
+  const renderLink = (item: {
+    href: string;
+    label: string;
+    icon: React.ComponentType<{ size: number }>;
+  }) => {
     const isActive =
       pathname === item.href ||
-      (item.href !== "/integrations" && item.href !== "/settings" && item.href !== "/dashboard" && pathname.startsWith(item.href));
+      (item.href !== "/integrations" &&
+        item.href !== "/settings" &&
+        item.href !== "/dashboard" &&
+        pathname.startsWith(item.href));
     return (
       <Link
         key={item.href}
@@ -58,9 +76,7 @@ export function Sidebar() {
         </div>
       </div>
 
-      <nav className="flex flex-col gap-0.5">
-        {navItems.map(renderLink)}
-      </nav>
+      <nav className="flex flex-col gap-0.5">{navItems.map(renderLink)}</nav>
 
       <div className="mt-4 mb-2 px-3">
         <span className="text-xs font-semibold text-overlay0 uppercase tracking-wider">
@@ -68,9 +84,7 @@ export function Sidebar() {
         </span>
       </div>
 
-      <nav className="flex flex-col gap-0.5">
-        {channelItems.map(renderLink)}
-      </nav>
+      <nav className="flex flex-col gap-0.5">{channelItems.map(renderLink)}</nav>
 
       <div className="mt-4 mb-2 px-3">
         <span className="text-xs font-semibold text-overlay0 uppercase tracking-wider">
@@ -78,9 +92,7 @@ export function Sidebar() {
         </span>
       </div>
 
-      <nav className="flex flex-col gap-0.5">
-        {advancedItems.map(renderLink)}
-      </nav>
+      <nav className="flex flex-col gap-0.5">{advancedItems.map(renderLink)}</nav>
 
       <div className="mt-auto pt-4 border-t border-surface0">
         <DaemonStatus />

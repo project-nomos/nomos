@@ -8,20 +8,20 @@
     "start": "next start --port 3456"
   },
   "dependencies": {
-    "next": "^16.1.6",
-    "react": "^19.2.4",
-    "react-dom": "^19.2.4",
-    "postgres": "^3.4.7",
     "@slack/web-api": "^7.14.1",
-    "lucide-react": "^0.577.0"
+    "lucide-react": "^0.577.0",
+    "next": "^16.1.6",
+    "postgres": "^3.4.7",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.2.1",
-    "tailwindcss": "^4.2.1",
     "@types/node": "^25.3.5",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
-    "typescript": "^5.9.3",
-    "postcss": "^8.5.8"
+    "postcss": "^8.5.8",
+    "tailwindcss": "^4.2.1",
+    "typescript": "^5.9.3"
   }
 }

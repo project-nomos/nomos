@@ -157,45 +157,48 @@ export class Gateway {
   private async registerChannelAdapters(): Promise<void> {
     const enqueue = (rawMsg: IncomingMessage) => {
       // Run incoming transform hooks (fire-and-forget the async, enqueue immediately)
-      this.channelManager.transformIncoming(rawMsg).then((msg) => {
-      const sessionKey = `${msg.platform}:${msg.channelId}`;
-      const adapter = this.channelManager.getAdapter(msg.platform);
+      this.channelManager
+        .transformIncoming(rawMsg)
+        .then((msg) => {
+          const sessionKey = `${msg.platform}:${msg.channelId}`;
+          const adapter = this.channelManager.getAdapter(msg.platform);
 
-      // Create streaming responder if adapter supports progressive updates
-      let responder: StreamingResponder | null = null;
-      if (adapter?.postMessage && adapter?.updateMessage) {
-        responder = new StreamingResponder(
-          (text) => adapter.postMessage!(msg.channelId, text, msg.threadId),
-          (ts, text) => adapter.updateMessage!(msg.channelId, ts, text),
-          adapter.deleteMessage ? (ts) => adapter.deleteMessage!(msg.channelId, ts) : undefined,
-        );
-      }
-
-      this.messageQueue
-        .enqueue(sessionKey, msg, responder?.handleEvent ?? (() => {}))
-        .then(async (result) => {
-          if (responder) {
-            const handled = await responder.finalize(result.content);
-            if (!handled) {
-              await this.channelManager.send(result);
-            }
-          } else {
-            await this.channelManager.send(result);
+          // Create streaming responder if adapter supports progressive updates
+          let responder: StreamingResponder | null = null;
+          if (adapter?.postMessage && adapter?.updateMessage) {
+            responder = new StreamingResponder(
+              (text) => adapter.postMessage!(msg.channelId, text, msg.threadId),
+              (ts, text) => adapter.updateMessage!(msg.channelId, ts, text),
+              adapter.deleteMessage ? (ts) => adapter.deleteMessage!(msg.channelId, ts) : undefined,
+            );
           }
 
-          // Fire-and-forget: index conversation turn into vector memory
-          indexConversationTurn(msg, result).catch((err) =>
-            console.error("[gateway] Memory indexing failed:", err),
-          );
+          this.messageQueue
+            .enqueue(sessionKey, msg, responder?.handleEvent ?? (() => {}))
+            .then(async (result) => {
+              if (responder) {
+                const handled = await responder.finalize(result.content);
+                if (!handled) {
+                  await this.channelManager.send(result);
+                }
+              } else {
+                await this.channelManager.send(result);
+              }
+
+              // Fire-and-forget: index conversation turn into vector memory
+              indexConversationTurn(msg, result).catch((err) =>
+                console.error("[gateway] Memory indexing failed:", err),
+              );
+            })
+            .catch(async (err) => {
+              // Update placeholder with error if possible
+              await responder?.finalize("Sorry, an error occurred.");
+              console.error(`[gateway] Failed to process message from ${msg.platform}:`, err);
+            });
         })
-        .catch(async (err) => {
-          // Update placeholder with error if possible
-          await responder?.finalize("Sorry, an error occurred.");
-          console.error(`[gateway] Failed to process message from ${msg.platform}:`, err);
+        .catch((err) => {
+          console.error(`[gateway] Incoming hook transform failed:`, err);
         });
-      }).catch((err) => {
-        console.error(`[gateway] Incoming hook transform failed:`, err);
-      });
     };
 
     // Only register adapters whose tokens are present

@@ -16,17 +16,12 @@ function getSettingsDir(): string {
   let dir = path.dirname(fileURLToPath(import.meta.url));
   for (let i = 0; i < 5; i++) {
     const candidate = path.join(dir, "settings");
-    if (
-      fs.existsSync(candidate) &&
-      fs.existsSync(path.join(candidate, "package.json"))
-    ) {
+    if (fs.existsSync(candidate) && fs.existsSync(path.join(candidate, "package.json"))) {
       return candidate;
     }
     dir = path.dirname(dir);
   }
-  throw new Error(
-    "Could not find settings/ directory. Ensure it exists in the project root.",
-  );
+  throw new Error("Could not find settings/ directory. Ensure it exists in the project root.");
 }
 
 export function registerSettingsCommand(program: Command): void {
@@ -53,9 +48,7 @@ export function registerSettingsCommand(program: Command): void {
         });
 
         if (result.status !== 0) {
-          console.error(
-            chalk.red("Failed to install dependencies. Run manually:"),
-          );
+          console.error(chalk.red("Failed to install dependencies. Run manually:"));
           console.error(chalk.dim(`  cd ${settingsDir} && pnpm install`));
           process.exit(1);
         }
@@ -79,9 +72,7 @@ export function registerSettingsCommand(program: Command): void {
       }
 
       const url = `http://localhost:${port}`;
-      console.log(
-        chalk.hex("#CBA6F7").bold("\nStarting Nomos Settings UI...\n"),
-      );
+      console.log(chalk.hex("#CBA6F7").bold("\nStarting Nomos Settings UI...\n"));
       console.log(chalk.dim(`  ${url}\n`));
 
       // Start Next.js in production or dev mode
@@ -95,17 +86,20 @@ export function registerSettingsCommand(program: Command): void {
       });
 
       // Open browser after a short delay
-      setTimeout(() => {
-        const cmd =
-          process.platform === "darwin"
-            ? "open"
-            : process.platform === "win32"
-              ? "start"
-              : "xdg-open";
-        exec(`${cmd} "${url}"`, () => {
-          // Silently ignore errors — user can open manually
-        });
-      }, devMode ? 2000 : 500);
+      setTimeout(
+        () => {
+          const cmd =
+            process.platform === "darwin"
+              ? "open"
+              : process.platform === "win32"
+                ? "start"
+                : "xdg-open";
+          exec(`${cmd} "${url}"`, () => {
+            // Silently ignore errors — user can open manually
+          });
+        },
+        devMode ? 2000 : 500,
+      );
 
       // Handle shutdown
       const cleanup = () => {

@@ -2,10 +2,10 @@ name: Release
 
 on:
   push:
-    tags: ['v*']
+    tags: ["v*"]
 
 env:
-  NODE_VERSION: '22'
+  NODE_VERSION: "22"
 
 jobs:
   release:
@@ -31,9 +31,9 @@ jobs:
         uses: actions/setup-node@v6.1.0
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: 'pnpm'
-          registry-url: 'https://npm.pkg.github.com'
-          scope: '@project-nomos'
+          cache: "pnpm"
+          registry-url: "https://npm.pkg.github.com"
+          scope: "@project-nomos"
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile

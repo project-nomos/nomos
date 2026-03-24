@@ -23,10 +23,7 @@ export default function TelegramSettingsPage() {
 
   const loadData = useCallback(async () => {
     try {
-      const [statusRes, envRes] = await Promise.all([
-        fetch("/api/status"),
-        fetch("/api/env"),
-      ]);
+      const [statusRes, envRes] = await Promise.all([fetch("/api/status"), fetch("/api/env")]);
       const statusData = await statusRes.json();
       const envData = await envRes.json();
 
@@ -95,9 +92,7 @@ export default function TelegramSettingsPage() {
         <h1 className="text-2xl font-bold text-text">Telegram</h1>
         <DirtyIndicator isDirty={isDirty} />
       </div>
-      <p className="text-sm text-overlay0 mb-8">
-        Configure Telegram bot integration
-      </p>
+      <p className="text-sm text-overlay0 mb-8">Configure Telegram bot integration</p>
 
       {/* Connection Status */}
       <section className="mb-8 rounded-xl border border-surface0 bg-mantle p-5">
@@ -121,8 +116,13 @@ export default function TelegramSettingsPage() {
         <TokenInput
           label="Telegram Bot Token"
           value={botToken}
-          onChange={(v) => { setBotToken(v); setBotTokenDirty(true); }}
-          placeholder={hasBotToken ? "Configured - enter new value to replace" : "123456:ABC-DEF..."}
+          onChange={(v) => {
+            setBotToken(v);
+            setBotTokenDirty(true);
+          }}
+          placeholder={
+            hasBotToken ? "Configured - enter new value to replace" : "123456:ABC-DEF..."
+          }
           helperText="Get a token from @BotFather on Telegram"
         />
       </section>
@@ -133,9 +133,7 @@ export default function TelegramSettingsPage() {
           Access Control
         </h2>
         <div className="space-y-1.5">
-          <label className="block text-sm font-medium text-subtext1">
-            Allowed Chats
-          </label>
+          <label className="block text-sm font-medium text-subtext1">Allowed Chats</label>
           <input
             type="text"
             value={allowedChats}
@@ -143,7 +141,9 @@ export default function TelegramSettingsPage() {
             placeholder="chat-id-1, chat-id-2"
             className="w-full rounded-lg border border-surface1 bg-surface0 px-3 py-2 text-sm text-text placeholder:text-overlay0 focus:outline-none focus:border-mauve focus:ring-1 focus:ring-mauve/30 font-mono"
           />
-          <p className="text-xs text-overlay0">Comma-separated chat IDs. Leave empty to allow all.</p>
+          <p className="text-xs text-overlay0">
+            Comma-separated chat IDs. Leave empty to allow all.
+          </p>
         </div>
       </section>
 

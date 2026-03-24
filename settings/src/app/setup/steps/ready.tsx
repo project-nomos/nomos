@@ -1,7 +1,15 @@
 "use client";
 
 import Link from "next/link";
-import { CheckCircle, Settings, ArrowRight, Database, Key, User, MessageSquare } from "lucide-react";
+import {
+  CheckCircle,
+  Settings,
+  ArrowRight,
+  Database,
+  Key,
+  User,
+  MessageSquare,
+} from "lucide-react";
 
 interface ReadyStepProps {
   checks: {
@@ -29,9 +37,7 @@ export function ReadyStep({ checks }: ReadyStepProps) {
 
       <div>
         <h2 className="text-xl font-bold text-text mb-2">You{"'"}re all set</h2>
-        <p className="text-sm text-overlay0">
-          Your assistant is configured and ready to use.
-        </p>
+        <p className="text-sm text-overlay0">Your assistant is configured and ready to use.</p>
       </div>
 
       {/* Summary */}
@@ -44,18 +50,12 @@ export function ReadyStep({ checks }: ReadyStepProps) {
               <div key={item.key} className="flex items-center gap-3">
                 <div
                   className={`w-6 h-6 rounded-full flex items-center justify-center ${
-                    done
-                      ? "bg-green/10 text-green"
-                      : "bg-surface0 text-overlay0"
+                    done ? "bg-green/10 text-green" : "bg-surface0 text-overlay0"
                   }`}
                 >
                   {done ? <CheckCircle size={14} /> : <Icon size={14} />}
                 </div>
-                <span
-                  className={`text-sm ${
-                    done ? "text-text" : "text-overlay0"
-                  }`}
-                >
+                <span className={`text-sm ${done ? "text-text" : "text-overlay0"}`}>
                   {item.label}
                 </span>
               </div>
@@ -77,7 +77,8 @@ export function ReadyStep({ checks }: ReadyStepProps) {
             <div>
               <p className="text-sm text-text">Start chatting</p>
               <p className="text-xs text-overlay0">
-                Run <code className="bg-surface0 px-1 rounded text-xs">nomos chat</code> to start a conversation
+                Run <code className="bg-surface0 px-1 rounded text-xs">nomos chat</code> to start a
+                conversation
               </p>
             </div>
           </div>

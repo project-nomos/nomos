@@ -9,10 +9,7 @@ export async function POST(request: Request) {
   const { teamId } = (await request.json()) as { teamId: string };
 
   if (!teamId) {
-    return NextResponse.json(
-      { ok: false, message: "teamId is required" },
-      { status: 400 }
-    );
+    return NextResponse.json({ ok: false, message: "teamId is required" }, { status: 400 });
   }
 
   try {

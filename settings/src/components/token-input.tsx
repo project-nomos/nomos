@@ -11,13 +11,7 @@ interface TokenInputProps {
   helperText?: string;
 }
 
-export function TokenInput({
-  label,
-  value,
-  onChange,
-  placeholder,
-  helperText,
-}: TokenInputProps) {
+export function TokenInput({ label, value, onChange, placeholder, helperText }: TokenInputProps) {
   const [visible, setVisible] = useState(false);
   const [copied, setCopied] = useState(false);
 

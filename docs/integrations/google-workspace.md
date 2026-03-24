@@ -123,25 +123,25 @@ The MCP server handles account selection automatically based on the default acco
 
 The gws CLI supports all Google Workspace APIs via the Discovery Service. Common services:
 
-| Service      | Description                                   |
-| ------------ | --------------------------------------------- |
-| `gmail`      | Email — send, read, search, manage labels     |
-| `calendar`   | Events, calendars, scheduling                 |
-| `drive`      | Files, folders, shared drives, sharing         |
-| `docs`       | Google Docs reading and editing               |
-| `sheets`     | Spreadsheet reading and writing               |
-| `slides`     | Presentation creation and editing             |
-| `forms`      | Form creation and response collection         |
-| `tasks`      | Task lists and task management                |
-| `people`     | Contacts and contact groups                   |
-| `chat`       | Google Chat messages (Workspace accounts only) |
-| `keep`       | Google Keep notes                             |
-| `meet`       | Google Meet                                   |
-| `admin`      | Admin SDK — users, groups, devices            |
-| `classroom`  | Google Classroom                              |
-| `youtube`    | YouTube API                                   |
-| `blogger`    | Blogger posts                                 |
-| `sites`      | Google Sites                                  |
+| Service     | Description                                    |
+| ----------- | ---------------------------------------------- |
+| `gmail`     | Email — send, read, search, manage labels      |
+| `calendar`  | Events, calendars, scheduling                  |
+| `drive`     | Files, folders, shared drives, sharing         |
+| `docs`      | Google Docs reading and editing                |
+| `sheets`    | Spreadsheet reading and writing                |
+| `slides`    | Presentation creation and editing              |
+| `forms`     | Form creation and response collection          |
+| `tasks`     | Task lists and task management                 |
+| `people`    | Contacts and contact groups                    |
+| `chat`      | Google Chat messages (Workspace accounts only) |
+| `keep`      | Google Keep notes                              |
+| `meet`      | Google Meet                                    |
+| `admin`     | Admin SDK — users, groups, devices             |
+| `classroom` | Google Classroom                               |
+| `youtube`   | YouTube API                                    |
+| `blogger`   | Blogger posts                                  |
+| `sites`     | Google Sites                                   |
 
 To limit which services are exposed:
 

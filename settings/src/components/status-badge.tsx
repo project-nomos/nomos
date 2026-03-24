@@ -22,11 +22,7 @@ export function StatusBadge({ status, label }: StatusBadgeProps) {
     >
       <span
         className={`w-1.5 h-1.5 rounded-full ${
-          status === "connected"
-            ? "bg-green"
-            : status === "error"
-              ? "bg-red"
-              : "bg-overlay0"
+          status === "connected" ? "bg-green" : status === "error" ? "bg-red" : "bg-overlay0"
         }`}
       />
       {label ?? defaultLabels[status]}

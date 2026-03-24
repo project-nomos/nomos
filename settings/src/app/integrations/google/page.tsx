@@ -10,8 +10,18 @@ import { useToast } from "@/contexts/toast-context";
 import { useUnsavedChanges } from "@/hooks/use-unsaved-changes";
 
 const ALL_SERVICES = [
-  "drive", "gmail", "calendar", "docs", "sheets", "slides",
-  "tasks", "people", "chat", "forms", "keep", "meet",
+  "drive",
+  "gmail",
+  "calendar",
+  "docs",
+  "sheets",
+  "slides",
+  "tasks",
+  "people",
+  "chat",
+  "forms",
+  "keep",
+  "meet",
 ];
 
 interface GwsAccount {
@@ -45,15 +55,16 @@ export default function GoogleSettingsPage() {
   const [authorizing, setAuthorizing] = useState(false);
   const [removeTarget, setRemoveTarget] = useState<string | null>(null);
 
-  const isDirty =
-    clientIdDirty ||
-    clientSecretDirty ||
-    services !== initialServices;
+  const isDirty = clientIdDirty || clientSecretDirty || services !== initialServices;
   useUnsavedChanges(isDirty);
 
-  const selectedServices = services === "all"
-    ? ALL_SERVICES
-    : services.split(",").map((s) => s.trim()).filter(Boolean);
+  const selectedServices =
+    services === "all"
+      ? ALL_SERVICES
+      : services
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean);
 
   const isAllServices = services === "all";
 
@@ -239,9 +250,7 @@ export default function GoogleSettingsPage() {
         <h1 className="text-2xl font-bold text-text">Google Workspace</h1>
         <DirtyIndicator isDirty={isDirty} />
       </div>
-      <p className="text-sm text-overlay0 mb-8">
-        Google Workspace integration via gws CLI
-      </p>
+      <p className="text-sm text-overlay0 mb-8">Google Workspace integration via gws CLI</p>
 
       {/* Connection Status */}
       <section className="mb-8 rounded-xl border border-surface0 bg-mantle p-5">
@@ -266,18 +275,18 @@ export default function GoogleSettingsPage() {
           <div className="flex items-center justify-between">
             <span className="text-sm text-text">Authorized Accounts</span>
             <span className="text-xs text-overlay0">
-              {accounts.length > 0
-                ? `${accounts.length} authorized`
-                : "None authorized"}
+              {accounts.length > 0 ? `${accounts.length} authorized` : "None authorized"}
             </span>
           </div>
           <div className="flex items-center gap-2 pt-1">
             <span className="text-xs text-overlay0">Services:</span>
-            <span className={`text-xs px-2 py-0.5 rounded-md ${
-              gwsInstalled && accounts.length > 0
-                ? "bg-green/10 text-green"
-                : "bg-surface0 text-overlay0"
-            }`}>
+            <span
+              className={`text-xs px-2 py-0.5 rounded-md ${
+                gwsInstalled && accounts.length > 0
+                  ? "bg-green/10 text-green"
+                  : "bg-surface0 text-overlay0"
+              }`}
+            >
               {isAllServices ? "All services" : `${selectedServices.length} selected`}
             </span>
           </div>
@@ -300,9 +309,7 @@ export default function GoogleSettingsPage() {
                   <KeyRound size={14} className="text-green shrink-0" />
                   <div className="min-w-0">
                     <span className="text-sm text-text block truncate">{account.email}</span>
-                    {account.default && (
-                      <span className="text-xs text-overlay0">default</span>
-                    )}
+                    {account.default && <span className="text-xs text-overlay0">default</span>}
                   </div>
                 </div>
                 <button
@@ -316,7 +323,8 @@ export default function GoogleSettingsPage() {
           </div>
         ) : (
           <p className="text-sm text-overlay0 mb-4">
-            No Google accounts authorized yet. Configure OAuth credentials below, then click Authorize.
+            No Google accounts authorized yet. Configure OAuth credentials below, then click
+            Authorize.
           </p>
         )}
         <div className="flex items-center gap-3">
@@ -325,17 +333,11 @@ export default function GoogleSettingsPage() {
             disabled={!isConfigured || authorizing}
             className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-surface0 border border-surface1 text-sm text-subtext0 hover:text-text hover:border-surface2 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
           >
-            {authorizing ? (
-              <RefreshCw size={14} className="animate-spin" />
-            ) : (
-              <Plus size={14} />
-            )}
+            {authorizing ? <RefreshCw size={14} className="animate-spin" /> : <Plus size={14} />}
             Authorize New Account
           </button>
           {!isConfigured && (
-            <span className="text-xs text-overlay0">
-              Configure OAuth credentials first
-            </span>
+            <span className="text-xs text-overlay0">Configure OAuth credentials first</span>
           )}
         </div>
         <p className="text-xs text-overlay0 mt-3">
@@ -362,14 +364,24 @@ export default function GoogleSettingsPage() {
           <TokenInput
             label="Client ID"
             value={clientId}
-            onChange={(v) => { setClientId(v); setClientIdDirty(true); }}
-            placeholder={hasClientId ? "Configured - enter new value to replace" : "...apps.googleusercontent.com"}
+            onChange={(v) => {
+              setClientId(v);
+              setClientIdDirty(true);
+            }}
+            placeholder={
+              hasClientId
+                ? "Configured - enter new value to replace"
+                : "...apps.googleusercontent.com"
+            }
             helperText="OAuth 2.0 Desktop Client ID"
           />
           <TokenInput
             label="Client Secret"
             value={clientSecret}
-            onChange={(v) => { setClientSecret(v); setClientSecretDirty(true); }}
+            onChange={(v) => {
+              setClientSecret(v);
+              setClientSecretDirty(true);
+            }}
             placeholder={hasClientSecret ? "Configured - enter new value to replace" : "GOCSPX-..."}
             helperText="OAuth 2.0 Client Secret"
           />
@@ -395,9 +407,7 @@ export default function GoogleSettingsPage() {
             type="button"
             onClick={toggleAllServices}
             className={`w-4 h-4 rounded border flex items-center justify-center transition-colors ${
-              isAllServices
-                ? "bg-mauve border-mauve text-crust"
-                : "border-surface1 bg-surface0"
+              isAllServices ? "bg-mauve border-mauve text-crust" : "border-surface1 bg-surface0"
             }`}
           >
             {isAllServices && <Check size={12} />}
@@ -421,11 +431,11 @@ export default function GoogleSettingsPage() {
                     : "border-surface0 bg-base text-overlay0 hover:border-surface1"
                 }`}
               >
-                <div className={`w-3 h-3 rounded-sm border flex items-center justify-center ${
-                  isSelected
-                    ? "bg-mauve border-mauve text-crust"
-                    : "border-surface1"
-                }`}>
+                <div
+                  className={`w-3 h-3 rounded-sm border flex items-center justify-center ${
+                    isSelected ? "bg-mauve border-mauve text-crust" : "border-surface1"
+                  }`}
+                >
                   {isSelected && <Check size={8} />}
                 </div>
                 {service}
@@ -452,9 +462,7 @@ export default function GoogleSettingsPage() {
           Test Connection
         </button>
         {testResult && (
-          <span
-            className={`text-xs ${testResult.ok ? "text-green" : "text-red"}`}
-          >
+          <span className={`text-xs ${testResult.ok ? "text-green" : "text-red"}`}>
             {testResult.message}
           </span>
         )}

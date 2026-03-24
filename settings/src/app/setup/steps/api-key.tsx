@@ -1,7 +1,16 @@
 "use client";
 
 import { useState } from "react";
-import { Key, CheckCircle, AlertCircle, Loader2, ExternalLink, Eye, EyeOff, Cloud } from "lucide-react";
+import {
+  Key,
+  CheckCircle,
+  AlertCircle,
+  Loader2,
+  ExternalLink,
+  Eye,
+  EyeOff,
+  Cloud,
+} from "lucide-react";
 
 interface ApiKeyStepProps {
   onComplete: () => void;
@@ -13,7 +22,13 @@ const MODELS = [
   { value: "claude-haiku-4-5", label: "Claude Haiku 4.5", description: "Fastest, most efficient" },
 ];
 
-const VERTEX_REGIONS = ["us-east5", "us-central1", "europe-west1", "europe-west4", "asia-southeast1"];
+const VERTEX_REGIONS = [
+  "us-east5",
+  "us-central1",
+  "europe-west1",
+  "europe-west4",
+  "asia-southeast1",
+];
 
 export function ApiKeyStep({ onComplete }: ApiKeyStepProps) {
   const [provider, setProvider] = useState<"anthropic" | "vertex">("anthropic");
@@ -81,8 +96,7 @@ export function ApiKeyStep({ onComplete }: ApiKeyStepProps) {
     }
   };
 
-  const canSubmit =
-    provider === "anthropic" ? apiKey.length > 0 : gcpProject.length > 0;
+  const canSubmit = provider === "anthropic" ? apiKey.length > 0 : gcpProject.length > 0;
 
   return (
     <div className="space-y-6">
@@ -100,7 +114,11 @@ export function ApiKeyStep({ onComplete }: ApiKeyStepProps) {
       <div className="flex gap-2">
         <button
           type="button"
-          onClick={() => { setProvider("anthropic"); setError(null); setSuccess(false); }}
+          onClick={() => {
+            setProvider("anthropic");
+            setError(null);
+            setSuccess(false);
+          }}
           className={`flex-1 flex items-center gap-2 px-4 py-3 rounded-lg border text-sm font-medium transition-colors ${
             provider === "anthropic"
               ? "border-mauve/50 bg-mauve/5 text-text"
@@ -112,7 +130,11 @@ export function ApiKeyStep({ onComplete }: ApiKeyStepProps) {
         </button>
         <button
           type="button"
-          onClick={() => { setProvider("vertex"); setError(null); setSuccess(false); }}
+          onClick={() => {
+            setProvider("vertex");
+            setError(null);
+            setSuccess(false);
+          }}
           className={`flex-1 flex items-center gap-2 px-4 py-3 rounded-lg border text-sm font-medium transition-colors ${
             provider === "vertex"
               ? "border-mauve/50 bg-mauve/5 text-text"
@@ -128,9 +150,7 @@ export function ApiKeyStep({ onComplete }: ApiKeyStepProps) {
       {provider === "anthropic" ? (
         <div className="space-y-2">
           <div className="flex items-center justify-between">
-            <label className="block text-sm font-medium text-subtext1">
-              API Key
-            </label>
+            <label className="block text-sm font-medium text-subtext1">API Key</label>
             <a
               href="https://console.anthropic.com/settings/keys"
               target="_blank"
@@ -164,9 +184,7 @@ export function ApiKeyStep({ onComplete }: ApiKeyStepProps) {
       ) : (
         <div className="space-y-4">
           <div className="space-y-2">
-            <label className="block text-sm font-medium text-subtext1">
-              GCP Project ID
-            </label>
+            <label className="block text-sm font-medium text-subtext1">GCP Project ID</label>
             <input
               type="text"
               value={gcpProject}
@@ -180,22 +198,26 @@ export function ApiKeyStep({ onComplete }: ApiKeyStepProps) {
             />
           </div>
           <div className="space-y-2">
-            <label className="block text-sm font-medium text-subtext1">
-              Region
-            </label>
+            <label className="block text-sm font-medium text-subtext1">Region</label>
             <select
               value={gcpRegion}
               onChange={(e) => setGcpRegion(e.target.value)}
               className="w-full rounded-lg border border-surface1 bg-surface0 px-3 py-2.5 text-sm text-text focus:outline-none focus:border-mauve focus:ring-1 focus:ring-mauve/30"
             >
               {VERTEX_REGIONS.map((r) => (
-                <option key={r} value={r}>{r}</option>
+                <option key={r} value={r}>
+                  {r}
+                </option>
               ))}
             </select>
           </div>
           <div className="rounded-lg bg-yellow/10 border border-yellow/20 p-3">
             <p className="text-xs text-yellow">
-              Requires <code className="bg-surface0 px-1 rounded text-xs">gcloud auth application-default login</code> for authentication.
+              Requires{" "}
+              <code className="bg-surface0 px-1 rounded text-xs">
+                gcloud auth application-default login
+              </code>{" "}
+              for authentication.
             </p>
           </div>
         </div>

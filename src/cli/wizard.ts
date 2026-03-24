@@ -72,9 +72,7 @@ export async function runSetupWizard(): Promise<void> {
 
       return;
     } catch {
-      console.log(
-        chalk.dim("Could not launch web wizard. Falling back to terminal setup.\n"),
-      );
+      console.log(chalk.dim("Could not launch web wizard. Falling back to terminal setup.\n"));
     }
   }
 
@@ -160,9 +158,7 @@ async function runTerminalWizard(): Promise<void> {
   console.log();
   console.log(chalk.dim(`Wrote ${envPath}`));
   console.log(chalk.dim("You can edit this file anytime to change settings."));
-  console.log(
-    chalk.dim("\nFor the full setup wizard, run: cd settings && pnpm dev\n"),
-  );
+  console.log(chalk.dim("\nFor the full setup wizard, run: cd settings && pnpm dev\n"));
 
   rl.close();
 }
