@@ -1,21 +1,26 @@
 import React from "react";
 import { Box, Text } from "ink";
 import { theme } from "../theme.ts";
-import { renderMarkdown } from "../markdown.ts";
+import { MarkdownDisplay } from "./MarkdownDisplay.tsx";
 
 interface NomosMessageProps {
   content: string;
 }
 
-export function NomosMessage({ content }: NomosMessageProps): React.ReactElement {
+function NomosMessageInner({ content }: NomosMessageProps): React.ReactElement {
+  // Reserve 3 columns for the "●  " prefix
+  const width = Math.min((process.stdout.columns || 80) - 3, 120);
+
   return (
     <Box flexDirection="row" marginTop={1}>
-      <Box width={2} flexShrink={0}>
-        <Text color={theme.text.accent}>{theme.symbol.nomos + " "}</Text>
+      <Box width={3} flexShrink={0}>
+        <Text color={theme.text.accent}>{"●  "}</Text>
       </Box>
       <Box flexGrow={1} flexDirection="column">
-        <Text>{renderMarkdown(content)}</Text>
+        <MarkdownDisplay text={content} width={width} />
       </Box>
     </Box>
   );
 }
+
+export const NomosMessage = React.memo(NomosMessageInner);

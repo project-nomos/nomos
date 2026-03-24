@@ -51,6 +51,8 @@ describe("loadEnvConfig", () => {
     expect(config.betas).toBeUndefined();
     expect(config.fallbackModels).toBeUndefined();
     expect(config.heartbeatIntervalMs).toBe(1800000);
+    expect(config.adaptiveMemory).toBe(false);
+    expect(config.extractionModel).toBeUndefined();
   });
 
   it("parses NOMOS_BETAS comma-separated string into array", () => {
@@ -102,8 +104,19 @@ describe("validateConfig", () => {
       defaultDmPolicy: "open",
       sessionScope: "channel",
       toolApprovalPolicy: "block_critical",
+      apiProvider: "anthropic",
       smartRouting: false,
-      modelTiers: { simple: "claude-haiku-4-5", moderate: "claude-sonnet-4-6", complex: "claude-sonnet-4-6" },
+      modelTiers: {
+        simple: "claude-haiku-4-5",
+        moderate: "claude-sonnet-4-6",
+        complex: "claude-sonnet-4-6",
+      },
+      teamMode: false,
+      maxTeamWorkers: 3,
+      adaptiveMemory: false,
+      alternateBuffer: false,
+      imageGeneration: false,
+      videoGeneration: false,
     };
 
     const errors = validateConfig(config);
@@ -124,8 +137,19 @@ describe("validateConfig", () => {
       defaultDmPolicy: "open",
       sessionScope: "channel",
       toolApprovalPolicy: "block_critical",
+      apiProvider: "anthropic",
       smartRouting: false,
-      modelTiers: { simple: "claude-haiku-4-5", moderate: "claude-sonnet-4-6", complex: "claude-sonnet-4-6" },
+      modelTiers: {
+        simple: "claude-haiku-4-5",
+        moderate: "claude-sonnet-4-6",
+        complex: "claude-sonnet-4-6",
+      },
+      teamMode: false,
+      maxTeamWorkers: 3,
+      adaptiveMemory: false,
+      alternateBuffer: false,
+      imageGeneration: false,
+      videoGeneration: false,
     };
 
     const errors = validateConfig(config);

@@ -1,7 +1,19 @@
 "use client";
 
 import { useState } from "react";
-import { MessageSquare, MessageCircle, Send, Mail, Phone, ChevronDown, ChevronRight, Eye, EyeOff, Loader2, CheckCircle } from "lucide-react";
+import {
+  MessageSquare,
+  MessageCircle,
+  Send,
+  Mail,
+  Phone,
+  ChevronDown,
+  ChevronRight,
+  Eye,
+  EyeOff,
+  Loader2,
+  CheckCircle,
+} from "lucide-react";
 
 interface ChannelsStepProps {
   onComplete: () => void;
@@ -37,8 +49,17 @@ const CHANNELS: ChannelConfig[] = [
     icon: MessageCircle,
     color: "text-lavender",
     fields: [
-      { key: "DISCORD_BOT_TOKEN", label: "Bot Token", placeholder: "Discord bot token", secret: true },
-      { key: "DISCORD_ALLOWED_GUILDS", label: "Allowed Guilds", placeholder: "Guild IDs (comma-separated)" },
+      {
+        key: "DISCORD_BOT_TOKEN",
+        label: "Bot Token",
+        placeholder: "Discord bot token",
+        secret: true,
+      },
+      {
+        key: "DISCORD_ALLOWED_GUILDS",
+        label: "Allowed Guilds",
+        placeholder: "Guild IDs (comma-separated)",
+      },
     ],
   },
   {
@@ -47,8 +68,17 @@ const CHANNELS: ChannelConfig[] = [
     icon: Send,
     color: "text-teal",
     fields: [
-      { key: "TELEGRAM_BOT_TOKEN", label: "Bot Token", placeholder: "123456:ABC-...", secret: true },
-      { key: "TELEGRAM_ALLOWED_CHATS", label: "Allowed Chats", placeholder: "Chat IDs (comma-separated)" },
+      {
+        key: "TELEGRAM_BOT_TOKEN",
+        label: "Bot Token",
+        placeholder: "123456:ABC-...",
+        secret: true,
+      },
+      {
+        key: "TELEGRAM_ALLOWED_CHATS",
+        label: "Allowed Chats",
+        placeholder: "Chat IDs (comma-separated)",
+      },
     ],
   },
   {
@@ -57,8 +87,17 @@ const CHANNELS: ChannelConfig[] = [
     icon: Mail,
     color: "text-peach",
     fields: [
-      { key: "GOOGLE_OAUTH_CLIENT_ID", label: "OAuth Client ID", placeholder: "...apps.googleusercontent.com" },
-      { key: "GOOGLE_OAUTH_CLIENT_SECRET", label: "OAuth Client Secret", placeholder: "GOCSPX-...", secret: true },
+      {
+        key: "GOOGLE_OAUTH_CLIENT_ID",
+        label: "OAuth Client ID",
+        placeholder: "...apps.googleusercontent.com",
+      },
+      {
+        key: "GOOGLE_OAUTH_CLIENT_SECRET",
+        label: "OAuth Client Secret",
+        placeholder: "GOCSPX-...",
+        secret: true,
+      },
     ],
   },
   {
@@ -66,9 +105,7 @@ const CHANNELS: ChannelConfig[] = [
     label: "WhatsApp",
     icon: Phone,
     color: "text-green",
-    fields: [
-      { key: "WHATSAPP_ENABLED", label: "Enable WhatsApp", placeholder: "true" },
-    ],
+    fields: [{ key: "WHATSAPP_ENABLED", label: "Enable WhatsApp", placeholder: "true" }],
   },
 ];
 
@@ -93,13 +130,13 @@ function ChannelCard({
         onClick={() => setExpanded(!expanded)}
         className="w-full flex items-center gap-3 p-4 hover:bg-surface0/50 transition-colors"
       >
-        <div className={`w-8 h-8 rounded-lg bg-surface0 flex items-center justify-center ${channel.color} shrink-0`}>
+        <div
+          className={`w-8 h-8 rounded-lg bg-surface0 flex items-center justify-center ${channel.color} shrink-0`}
+        >
           <Icon size={16} />
         </div>
         <span className="text-sm font-medium text-text flex-1 text-left">{channel.label}</span>
-        {hasValues && (
-          <span className="w-2 h-2 rounded-full bg-green shrink-0" />
-        )}
+        {hasValues && <span className="w-2 h-2 rounded-full bg-green shrink-0" />}
         {expanded ? (
           <ChevronDown size={14} className="text-overlay0" />
         ) : (
@@ -207,12 +244,7 @@ export function ChannelsStep({ onComplete }: ChannelsStepProps) {
 
       <div className="space-y-2">
         {CHANNELS.map((channel) => (
-          <ChannelCard
-            key={channel.id}
-            channel={channel}
-            values={values}
-            onChange={handleChange}
-          />
+          <ChannelCard key={channel.id} channel={channel} values={values} onChange={handleChange} />
         ))}
       </div>
 

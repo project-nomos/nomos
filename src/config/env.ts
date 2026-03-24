@@ -14,9 +14,14 @@ export interface ModelTiers {
   complex: string;
 }
 
+/** API provider type */
+export type ApiProvider = "anthropic" | "vertex" | "openrouter" | "ollama" | "custom";
+
 export interface NomosConfig {
   /** PostgreSQL connection URL */
   databaseUrl?: string;
+  /** Active API provider */
+  apiProvider: ApiProvider;
   /** Default model to use (passed to SDK) */
   model: string;
   /** Whether to enable smart model routing based on query complexity. */
@@ -47,6 +52,30 @@ export interface NomosConfig {
   sessionScope: ScopeMode;
   /** Tool approval policy for dangerous operations (default: "block_critical") */
   toolApprovalPolicy: ApprovalPolicy;
+  /** Enable multi-agent team mode (default: false) */
+  teamMode: boolean;
+  /** Maximum parallel workers for team mode (default: 3) */
+  maxTeamWorkers: number;
+  /** Custom Anthropic API base URL (for OpenRouter, Ollama, LiteLLM, etc.) */
+  anthropicBaseUrl?: string;
+  /** OpenRouter API key (stored separately so provider switching preserves keys) */
+  openrouterApiKey?: string;
+  /** Enable knowledge extraction and user model learning (default: false) */
+  adaptiveMemory: boolean;
+  /** Model for knowledge extraction (default: haiku) */
+  extractionModel?: string;
+  /** Enable alternate screen buffer for full-screen TUI experience (default: false) */
+  alternateBuffer: boolean;
+  /** Enable image generation via Gemini (default: false) */
+  imageGeneration: boolean;
+  /** Gemini API key for image generation */
+  geminiApiKey?: string;
+  /** Gemini model for image generation (default: gemini-3-pro-image-preview) */
+  imageGenerationModel?: string;
+  /** Enable video generation via Veo (default: false) */
+  videoGeneration: boolean;
+  /** Veo model for video generation (default: veo-3.0-generate-preview) */
+  videoGenerationModel?: string;
 }
 
 export function loadEnvConfig(): NomosConfig {
@@ -57,6 +86,7 @@ export function loadEnvConfig(): NomosConfig {
 
   return {
     databaseUrl: process.env.DATABASE_URL,
+    apiProvider: (process.env.NOMOS_API_PROVIDER as ApiProvider) ?? "anthropic",
     model: defaultModel,
     smartRouting: process.env.NOMOS_SMART_ROUTING === "true",
     modelTiers: {
@@ -93,6 +123,20 @@ export function loadEnvConfig(): NomosConfig {
       (isProduction ? "pairing" : "open"),
     sessionScope: (process.env.NOMOS_SESSION_SCOPE as ScopeMode) ?? "channel",
     toolApprovalPolicy: (process.env.TOOL_APPROVAL_POLICY as ApprovalPolicy) ?? "block_critical",
+    teamMode: process.env.NOMOS_TEAM_MODE === "true",
+    maxTeamWorkers: process.env.NOMOS_MAX_TEAM_WORKERS
+      ? parseInt(process.env.NOMOS_MAX_TEAM_WORKERS, 10)
+      : 3,
+    anthropicBaseUrl: process.env.ANTHROPIC_BASE_URL,
+    openrouterApiKey: process.env.OPENROUTER_API_KEY,
+    adaptiveMemory: process.env.NOMOS_ADAPTIVE_MEMORY === "true",
+    extractionModel: process.env.NOMOS_EXTRACTION_MODEL,
+    alternateBuffer: process.env.NOMOS_ALTERNATE_BUFFER === "true",
+    imageGeneration: process.env.NOMOS_IMAGE_GENERATION === "true",
+    geminiApiKey: process.env.GEMINI_API_KEY,
+    imageGenerationModel: process.env.NOMOS_IMAGE_GENERATION_MODEL,
+    videoGeneration: process.env.NOMOS_VIDEO_GENERATION === "true",
+    videoGenerationModel: process.env.NOMOS_VIDEO_GENERATION_MODEL,
   };
 }
 
@@ -118,7 +162,9 @@ export async function loadEnvConfigAsync(): Promise<NomosConfig> {
     // Load secrets from integrations table
     const anthropic = await getAppSecrets("anthropic");
     const vertexAi = await getAppSecrets("vertex-ai");
+    const openrouter = await getAppSecrets("openrouter");
     const database = await getAppSecrets("database");
+    const gemini = await getAppSecrets("gemini");
 
     // Apply DB secrets to env vars so downstream code (SDK, etc.) picks them up
     if (anthropic?.secrets.api_key && !process.env.ANTHROPIC_API_KEY) {
@@ -135,15 +181,33 @@ export async function loadEnvConfigAsync(): Promise<NomosConfig> {
     }
 
     // Merge: DB values override env defaults
-    return {
+    const merged: NomosConfig = {
       ...envConfig,
       ...dbConfig,
       // Preserve databaseUrl from DB secrets if available
       databaseUrl: database?.secrets.url ?? envConfig.databaseUrl,
       // Preserve googleCloudProject from DB if available
-      googleCloudProject:
-        (vertexAi?.config.project_id as string) ?? envConfig.googleCloudProject,
+      googleCloudProject: (vertexAi?.config.project_id as string) ?? envConfig.googleCloudProject,
+      // Preserve openrouterApiKey from DB if available
+      openrouterApiKey: openrouter?.secrets.api_key ?? envConfig.openrouterApiKey,
+      // Preserve geminiApiKey from DB if available
+      geminiApiKey: gemini?.secrets.api_key ?? envConfig.geminiApiKey,
     };
+
+    // Apply provider-specific env vars based on active provider
+    const provider = merged.apiProvider;
+    if (provider === "openrouter") {
+      const orKey = openrouter?.secrets.api_key ?? envConfig.openrouterApiKey;
+      if (orKey) {
+        process.env.ANTHROPIC_API_KEY = orKey;
+        process.env.ANTHROPIC_BASE_URL = "https://openrouter.ai/api/v1";
+        merged.anthropicBaseUrl = "https://openrouter.ai/api/v1";
+      }
+    } else if (provider === "vertex") {
+      process.env.CLAUDE_CODE_USE_VERTEX = "1";
+    }
+
+    return merged;
   } catch {
     // DB not available (e.g. first run, no migrations yet) — fall back to env-only
     return envConfig;

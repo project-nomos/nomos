@@ -1,5 +1,5 @@
 import { getDb } from "../db/client.ts";
-import type { PairingRequest, DmPolicy } from "./types.ts";
+import type { PairingRequest } from "./types.ts";
 import { AllowlistStore } from "./allowlist.ts";
 
 /**

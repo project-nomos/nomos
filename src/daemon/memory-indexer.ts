@@ -13,6 +13,7 @@ import { chunkText } from "../memory/chunker.ts";
 import { precompress } from "../memory/compressor.ts";
 import { generateEmbeddings, isEmbeddingAvailable } from "../memory/embeddings.ts";
 import { storeMemoryChunk } from "../db/memory.ts";
+import { loadEnvConfig } from "../config/env.ts";
 import type { IncomingMessage, OutgoingMessage } from "./types.ts";
 
 /**
@@ -76,4 +77,35 @@ export async function indexConversationTurn(
   }
 
   console.debug(`[memory-indexer] Indexed ${chunks.length} chunk(s) from ${sessionKey}`);
+
+  // Adaptive memory: extract structured knowledge (fire-and-forget)
+  const config = loadEnvConfig();
+  if (config.adaptiveMemory) {
+    extractAndStoreKnowledgeFromTurn(incoming, outgoing, sessionKey).catch((err) => {
+      console.debug("[memory-indexer] Knowledge extraction failed:", err);
+    });
+  }
+}
+
+/**
+ * Extract structured knowledge from a conversation turn and update the user model.
+ * Called fire-and-forget after normal indexing when adaptive memory is enabled.
+ */
+async function extractAndStoreKnowledgeFromTurn(
+  incoming: IncomingMessage,
+  outgoing: OutgoingMessage,
+  sessionKey: string,
+): Promise<void> {
+  const { extractAndStoreKnowledge } = await import("../memory/extractor.ts");
+  const { updateUserModel } = await import("../memory/user-model.ts");
+
+  const { knowledge, chunkIds } = await extractAndStoreKnowledge(
+    incoming.content,
+    outgoing.content,
+    sessionKey,
+  );
+
+  if (chunkIds.length > 0) {
+    await updateUserModel(knowledge, chunkIds);
+  }
 }

@@ -2,14 +2,14 @@
 
 ## 1. Overview
 
-A TypeScript CLI and multi-channel AI agent built on the `@anthropic-ai/claude-agent-sdk`. It wraps Claude Code as its agent runtime, inheriting the full tool suite (Bash, Read, Write, Edit, Glob, Grep, WebSearch, sub-agents, context compaction) and adds persistent sessions, vector memory with automatic conversation indexing, a daemon gateway with channel integrations, scheduled tasks, and a skills system.
+A TypeScript CLI and multi-channel AI agent built on the `@anthropic-ai/claude-agent-sdk`. It wraps Claude Code as its agent runtime, inheriting the full tool suite (Bash, Read, Write, Edit, Glob, Grep, WebSearch, sub-agents, context compaction) and adds persistent sessions, vector memory with automatic conversation indexing and adaptive knowledge extraction, a daemon gateway with channel integrations, multi-agent team orchestration, smart model routing, custom API endpoint support, scheduled tasks, and a skills system.
 
 ### Design Principles
 
 - **Claude Code IS the runtime** -- don't reimplement the agent loop, tool execution, context management, or sub-agents
 - **MCP for extensibility** -- in-process and external MCP servers extend the agent's capabilities
 - **PostgreSQL as the single persistence layer** -- sessions, transcripts, memory, config, cron jobs, and access control all live in one database
-- **Anthropic-only provider** -- Anthropic direct API or Google Vertex AI; no multi-provider abstraction
+- **Anthropic-compatible providers** -- Anthropic direct API, Google Vertex AI, or any Anthropic-compatible proxy (Ollama + LiteLLM, etc.) via `ANTHROPIC_BASE_URL`
 
 ## 2. Architecture
 
@@ -72,8 +72,10 @@ A TypeScript CLI and multi-channel AI agent built on the `@anthropic-ai/claude-a
 |  - config              (key-value settings)                     |
 |  - sessions            (session metadata + SDK session IDs)     |
 |  - transcript_messages (conversation messages, JSONB)           |
-|  - memory_chunks       (text chunks + 768-dim embeddings)       |
+|  - memory_chunks       (text chunks + 768-dim embeddings +      |
+|                         metadata JSONB for categorization)      |
 |  - memory_files        (source file tracking for indexer)       |
+|  - user_model          (accumulated user preferences/facts)     |
 |  - cron_jobs           (scheduled task definitions)             |
 |  - pairing_requests    (channel pairing codes with TTL)         |
 |  - channel_allowlists  (per-platform user allowlists)           |
@@ -102,7 +104,7 @@ src/
 │   └── program.ts            Commander.js program builder
 ├── sdk/                      Claude Agent SDK wrapper
 │   ├── session.ts            SDK query() wrapper, V2 session API
-│   ├── tools.ts              In-process MCP: memory_search tool
+│   ├── tools.ts              In-process MCP: memory_search, user_model_recall
 │   ├── slack-mcp.ts          In-process Slack MCP tools
 │   ├── discord-mcp.ts        In-process Discord MCP tools
 │   ├── telegram-mcp.ts       In-process Telegram MCP tools
@@ -111,6 +113,7 @@ src/
 ├── daemon/                   Long-running daemon subsystem
 │   ├── gateway.ts            Orchestrator (boots subsystems, signal handlers)
 │   ├── agent-runtime.ts      Centralized agent with cached config
+│   ├── team-runtime.ts       Multi-agent team orchestration (coordinator/worker pattern)
 │   ├── message-queue.ts      Per-session FIFO (concurrent across sessions)
 │   ├── websocket-server.ts   WebSocket API on port 8765
 │   ├── channel-manager.ts    Adapter registry with lifecycle management
@@ -134,14 +137,17 @@ src/
 │   ├── migrate.ts            Migration runner (inline schema fallback)
 │   ├── sessions.ts           Session CRUD
 │   ├── transcripts.ts        Transcript CRUD
-│   ├── memory.ts             Memory chunk CRUD
+│   ├── memory.ts             Memory chunk CRUD (with category filtering)
+│   ├── user-model.ts         User model CRUD (accumulated preferences/facts)
 │   ├── config.ts             Config key-value CRUD
 │   ├── drafts.ts             Draft message CRUD
 │   └── slack-workspaces.ts   Slack workspace token CRUD
 ├── memory/                   Vector memory system
 │   ├── embeddings.ts         Vertex AI gemini-embedding-001 (768 dims)
 │   ├── chunker.ts            Overlap chunking
-│   └── search.ts             Hybrid RRF: vector cosine + full-text search
+│   ├── search.ts             Hybrid RRF: vector cosine + full-text search
+│   ├── extractor.ts          Knowledge extraction from conversations via LLM
+│   └── user-model.ts         User model aggregation logic
 ├── config/                   Configuration
 │   ├── env.ts                Env var loader
 │   ├── profile.ts            User profile + agent identity + system prompt
@@ -189,12 +195,13 @@ src/
 
 ### 4.1 Provider Layer
 
-Two authentication modes, both using the Anthropic SDK:
+Three provider modes, all using the Anthropic SDK:
 
 - **Anthropic Direct**: `ANTHROPIC_API_KEY` env var
 - **Vertex AI**: Google Cloud ADC (`CLAUDE_CODE_USE_VERTEX=1`, `GOOGLE_CLOUD_PROJECT`, `CLOUD_ML_REGION`)
+- **Custom Endpoint**: `ANTHROPIC_BASE_URL` points to any Anthropic-compatible API proxy (Ollama + LiteLLM, AWS Bedrock, corporate gateway, etc.)
 
-Provider switching is handled entirely by the SDK based on which environment variables are set. No custom failover logic -- the SDK manages retries and errors.
+Provider switching is handled entirely by the SDK based on which environment variables are set. `ANTHROPIC_BASE_URL` is propagated to all child processes via the `env` option in `query()`, including team mode workers. No custom failover logic -- the SDK manages retries and errors.
 
 ### 4.2 Persistence Layer (PostgreSQL + pgvector)
 
@@ -202,23 +209,25 @@ All state lives in PostgreSQL. Schema defined in `src/db/schema.sql` with inline
 
 #### Tables
 
-| Table                 | Purpose                                          | Key Columns                                                     |
-| --------------------- | ------------------------------------------------ | --------------------------------------------------------------- |
-| `config`              | Key-value settings store                         | `key` (PK), `value` (JSONB)                                     |
-| `sessions`            | Session metadata and SDK session IDs             | `session_key` (unique), `agent_id`, `model`, `metadata` (JSONB) |
-| `transcript_messages` | Conversation messages                            | `session_id` (FK), `role`, `content` (JSONB)                    |
-| `memory_chunks`       | Text chunks with vector embeddings               | `source`, `text`, `embedding` (vector(768)), `hash`             |
-| `memory_files`        | Source file tracking for incremental re-indexing | `path` (PK), `source`, `hash`, `mtime`                          |
-| `cron_jobs`           | Scheduled task definitions                       | `schedule`, `schedule_type`, `prompt`, `enabled`                |
-| `pairing_requests`    | Channel pairing codes with TTL                   | `code` (unique), `status`, `expires_at`                         |
-| `channel_allowlists`  | Per-platform user allowlists                     | `platform` + `user_id` (unique)                                 |
-| `draft_messages`      | Slack User Mode approve-before-send drafts       | `platform`, `channel_id`, `content`, `status`                   |
-| `slack_user_tokens`   | Multi-workspace Slack OAuth tokens               | `team_id` (unique), `access_token`, `team_name`                 |
+| Table                 | Purpose                                          | Key Columns                                                              |
+| --------------------- | ------------------------------------------------ | ------------------------------------------------------------------------ |
+| `config`              | Key-value settings store                         | `key` (PK), `value` (JSONB)                                              |
+| `sessions`            | Session metadata and SDK session IDs             | `session_key` (unique), `agent_id`, `model`, `metadata` (JSONB)          |
+| `transcript_messages` | Conversation messages                            | `session_id` (FK), `role`, `content` (JSONB)                             |
+| `memory_chunks`       | Text chunks with vector embeddings + metadata    | `source`, `text`, `embedding` (vector(768)), `hash`, `metadata` (JSONB)  |
+| `memory_files`        | Source file tracking for incremental re-indexing | `path` (PK), `source`, `hash`, `mtime`                                   |
+| `user_model`          | Accumulated user preferences and facts           | `category` + `key` (unique), `value` (JSONB), `confidence`, `source_ids` |
+| `cron_jobs`           | Scheduled task definitions                       | `schedule`, `schedule_type`, `prompt`, `enabled`                         |
+| `pairing_requests`    | Channel pairing codes with TTL                   | `code` (unique), `status`, `expires_at`                                  |
+| `channel_allowlists`  | Per-platform user allowlists                     | `platform` + `user_id` (unique)                                          |
+| `draft_messages`      | Slack User Mode approve-before-send drafts       | `platform`, `channel_id`, `content`, `status`                            |
+| `slack_user_tokens`   | Multi-workspace Slack OAuth tokens               | `team_id` (unique), `access_token`, `team_name`                          |
 
 #### Indexes
 
 - **IVFFlat** on `memory_chunks.embedding` (cosine similarity, created manually after data load)
 - **GIN** on `memory_chunks.text` (full-text search via `tsvector`)
+- **GIN** on `memory_chunks.metadata` (JSONB category filtering)
 - Standard B-tree indexes on foreign keys, status columns, and lookup fields
 
 #### Session Keys
@@ -229,9 +238,10 @@ Session keys follow the pattern `<platform>:<channel_id>` (e.g., `cli:default`, 
 
 #### In-Process MCP: `nomos-memory`
 
-Created via `createSdkMcpServer()` from the Agent SDK (`src/sdk/tools.ts`). Exposes two tools:
+Created via `createSdkMcpServer()` from the Agent SDK (`src/sdk/tools.ts`). Exposes tools:
 
-- **`memory_search`** -- Hybrid vector + full-text search over `memory_chunks`. Generates an embedding for the query via Vertex AI, runs both pgvector cosine similarity and PostgreSQL `ts_rank`, then merges results using Reciprocal Rank Fusion (RRF). Falls back to text-only search when embeddings are unavailable.
+- **`memory_search`** -- Hybrid vector + full-text search over `memory_chunks`. Generates an embedding for the query via Vertex AI, runs both pgvector cosine similarity and PostgreSQL `ts_rank`, then merges results using Reciprocal Rank Fusion (RRF). Falls back to text-only search when embeddings are unavailable. Supports optional `category` filter (`fact`, `preference`, `correction`, `skill`, `conversation`) for targeted recall.
+- **`user_model_recall`** -- Reads accumulated knowledge about the user from the `user_model` table. Returns preferences, facts, and patterns learned from past conversations with confidence scores. Supports optional category filtering.
 - **`bootstrap_complete`** -- Saves agent purpose, user profile, and identity during the first-run introduction conversation.
 
 #### In-Process Channel MCP Servers
@@ -263,9 +273,13 @@ The Agent SDK provides natively (no reimplementation needed):
 
 What we add via MCP and the daemon:
 
-- Persistent memory across sessions and channels (`memory_search`)
+- Persistent memory across sessions and channels (`memory_search`, `user_model_recall`)
 - Automatic conversation indexing into vector memory
+- Adaptive memory: structured knowledge extraction and user model accumulation
 - Multi-channel message routing (Slack, Discord, Telegram, WhatsApp, iMessage)
+- Multi-agent team orchestration (`TeamRuntime` -- coordinator/worker pattern with parallel `query()` calls)
+- Smart model routing (complexity-based tier selection: simple → Haiku, moderate → Sonnet, complex → Opus)
+- Custom API endpoint passthrough (`ANTHROPIC_BASE_URL`)
 - Scheduled task execution (cron)
 - Streaming progressive updates to channel platforms
 - Approve-before-send draft workflow (Slack User Mode)
@@ -300,6 +314,15 @@ Daemon Process (Gateway)
 |     Config, identity, profile, skills, MCP servers loaded once at startup.
 |     Processes messages through Claude Agent SDK (runSession).
 |     Caches SDK session IDs per conversation for multi-turn resume.
+|     Detects /team prefix and delegates to TeamRuntime.
+|     Passes ANTHROPIC_BASE_URL to all runSession() calls.
+|
++-- TeamRuntime (when NOMOS_TEAM_MODE=true)
+|     Coordinator/worker pattern for parallel task execution.
+|     1. Coordinator decomposes task into subtasks via initial query().
+|     2. Workers execute subtasks in parallel (independent SDK sessions).
+|     3. Coordinator synthesizes worker outputs into final response.
+|     Configurable maxWorkers (default: 3) and workerMaxTurns (default: 20).
 |
 +-- MessageQueue
 |     Per-session FIFO queues (in-memory Maps).
@@ -315,6 +338,8 @@ Daemon Process (Gateway)
 |     After each agent turn, formats the exchange (user + assistant),
 |     chunks it, generates embeddings, and stores in memory_chunks
 |     with source "conversation". Runs fire-and-forget.
+|     When NOMOS_ADAPTIVE_MEMORY=true, also runs knowledge extraction
+|     (facts, preferences, corrections) and updates the user model.
 |
 +-- DraftManager
 |     Orchestrates draft creation, approval, and sending for Slack User Mode.
@@ -413,8 +438,40 @@ The `MemoryIndexer` (`src/daemon/memory-indexer.ts`) runs after each completed a
 2. Chunks the text using the standard chunker
 3. Generates embeddings via `gemini-embedding-001` (falls back to text-only if unavailable)
 4. Stores chunks in `memory_chunks` with `source = "conversation"` and `path` set to the session key
+5. **(Adaptive memory)** When `NOMOS_ADAPTIVE_MEMORY=true`, runs knowledge extraction and user model accumulation (see below)
 
 This runs fire-and-forget so it never delays message delivery. The result is that all conversations -- across all channels -- become searchable via `memory_search`, enabling cross-session and cross-channel recall.
+
+### Adaptive Memory & User Model
+
+When `NOMOS_ADAPTIVE_MEMORY=true`, the `MemoryIndexer` runs a post-processing pipeline after normal indexing:
+
+```
+conversation → indexConversationTurn() → extractKnowledge() → updateUserModel()
+                    ↓                           ↓                      ↓
+              memory_chunks              memory_chunks           user_model
+              (conversation)         (fact/preference/correction)  (accumulated)
+```
+
+**Knowledge Extraction** (`src/memory/extractor.ts`):
+
+- Takes the user message + agent response from each turn
+- Sends a short extraction prompt to the SDK (using Haiku for cost efficiency)
+- Extracts three categories: facts, preferences, and corrections
+- Each extracted item is stored as a separate `memory_chunk` with a `metadata.category` tag
+- Only runs when user message is >50 characters (skips greetings, short commands)
+
+**User Model Accumulation** (`src/memory/user-model.ts`):
+
+- Processes extracted knowledge into accumulated `user_model` entries
+- Confidence scoring: new entries start at extraction confidence, repeated confirmations increase it (capped at 0.95), contradictions decrease it
+- Corrections mark the original memory chunk as superseded via `metadata.superseded_by`
+
+**Prompt Injection** (at startup):
+
+- `AgentRuntime` loads the user model from the `user_model` table
+- High-confidence entries (≥0.6) are injected into the system prompt as a "What I Know About You" section
+- The agent also has a `user_model_recall` tool for on-demand access
 
 ### Message Flow
 
@@ -473,23 +530,32 @@ The `tool-approval.ts` module detects dangerous operations (destructive shell co
 
 ### Environment Variables
 
-| Variable                 | Required    | Purpose                                       |
-| ------------------------ | ----------- | --------------------------------------------- |
-| `DATABASE_URL`           | Yes         | PostgreSQL connection string                  |
-| `ANTHROPIC_API_KEY`      | One of      | Anthropic direct API key                      |
-| `CLAUDE_CODE_USE_VERTEX` | One of      | Enable Vertex AI provider                     |
-| `GOOGLE_CLOUD_PROJECT`   | With Vertex | GCP project ID                                |
-| `CLOUD_ML_REGION`        | With Vertex | GCP region (e.g., `us-east5`)                 |
-| `NOMOS_MODEL`            | No          | Model override (default: `claude-sonnet-4-6`) |
-| `SLACK_BOT_TOKEN`        | No          | Slack bot mode                                |
-| `SLACK_APP_TOKEN`        | No          | Slack Socket Mode (bot + user mode)           |
-| `SLACK_CLIENT_ID`        | No          | Slack OAuth (multi-workspace user mode)       |
-| `SLACK_CLIENT_SECRET`    | No          | Slack OAuth (multi-workspace user mode)       |
-| `SLACK_USER_TOKEN`       | No          | Legacy single-workspace user mode             |
-| `DISCORD_BOT_TOKEN`      | No          | Discord integration                           |
-| `TELEGRAM_BOT_TOKEN`     | No          | Telegram integration                          |
-| `WHATSAPP_ENABLED`       | No          | WhatsApp integration                          |
-| `IMESSAGE_ENABLED`       | No          | iMessage integration (macOS only)             |
+| Variable                 | Required    | Purpose                                        |
+| ------------------------ | ----------- | ---------------------------------------------- |
+| `DATABASE_URL`           | Yes         | PostgreSQL connection string                   |
+| `ANTHROPIC_API_KEY`      | One of      | Anthropic direct API key                       |
+| `CLAUDE_CODE_USE_VERTEX` | One of      | Enable Vertex AI provider                      |
+| `GOOGLE_CLOUD_PROJECT`   | With Vertex | GCP project ID                                 |
+| `CLOUD_ML_REGION`        | With Vertex | GCP region (e.g., `us-east5`)                  |
+| `NOMOS_MODEL`            | No          | Model override (default: `claude-sonnet-4-6`)  |
+| `NOMOS_SMART_ROUTING`    | No          | Enable complexity-based model routing          |
+| `NOMOS_MODEL_SIMPLE`     | No          | Model for simple queries (default: Haiku)      |
+| `NOMOS_MODEL_MODERATE`   | No          | Model for moderate queries (default: Sonnet)   |
+| `NOMOS_MODEL_COMPLEX`    | No          | Model for complex queries (default: Sonnet)    |
+| `NOMOS_TEAM_MODE`        | No          | Enable multi-agent team orchestration          |
+| `NOMOS_MAX_TEAM_WORKERS` | No          | Max parallel workers in team mode (default: 3) |
+| `ANTHROPIC_BASE_URL`     | No          | Custom Anthropic-compatible API endpoint       |
+| `NOMOS_ADAPTIVE_MEMORY`  | No          | Enable knowledge extraction + user model       |
+| `NOMOS_EXTRACTION_MODEL` | No          | Model for extraction (default: Haiku)          |
+| `SLACK_BOT_TOKEN`        | No          | Slack bot mode                                 |
+| `SLACK_APP_TOKEN`        | No          | Slack Socket Mode (bot + user mode)            |
+| `SLACK_CLIENT_ID`        | No          | Slack OAuth (multi-workspace user mode)        |
+| `SLACK_CLIENT_SECRET`    | No          | Slack OAuth (multi-workspace user mode)        |
+| `SLACK_USER_TOKEN`       | No          | Legacy single-workspace user mode              |
+| `DISCORD_BOT_TOKEN`      | No          | Discord integration                            |
+| `TELEGRAM_BOT_TOKEN`     | No          | Telegram integration                           |
+| `WHATSAPP_ENABLED`       | No          | WhatsApp integration                           |
+| `IMESSAGE_ENABLED`       | No          | iMessage integration (macOS only)              |
 
 See `.env.example` for the full set of optional variables.
 

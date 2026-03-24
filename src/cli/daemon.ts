@@ -17,7 +17,6 @@ import path from "node:path";
 import {
   isDaemonRunning,
   isProcessRunning,
-  readPidFile,
   removePidFile,
   getLogFilePath,
   getPidFilePath,

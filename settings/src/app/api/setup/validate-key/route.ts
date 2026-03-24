@@ -14,10 +14,7 @@ export async function POST(request: Request) {
 
   if (body.provider === "anthropic") {
     if (!body.apiKey) {
-      return NextResponse.json(
-        { valid: false, error: "API key is required" },
-        { status: 400 },
-      );
+      return NextResponse.json({ valid: false, error: "API key is required" }, { status: 400 });
     }
 
     try {
@@ -58,12 +55,10 @@ export async function POST(request: Request) {
 
       const data = await res.json().catch(() => null);
       const errorMsg =
-        (data as Record<string, unknown>)?.error?.toString() ??
-        `API returned status ${res.status}`;
+        (data as Record<string, unknown>)?.error?.toString() ?? `API returned status ${res.status}`;
       return NextResponse.json({ valid: false, error: errorMsg });
     } catch (err) {
-      const message =
-        err instanceof Error ? err.message : "Failed to validate key";
+      const message = err instanceof Error ? err.message : "Failed to validate key";
       return NextResponse.json({ valid: false, error: message });
     }
   }
@@ -83,8 +78,5 @@ export async function POST(request: Request) {
     });
   }
 
-  return NextResponse.json(
-    { valid: false, error: "Unknown provider" },
-    { status: 400 },
-  );
+  return NextResponse.json({ valid: false, error: "Unknown provider" }, { status: 400 });
 }

@@ -50,7 +50,8 @@ export class GrpcServer {
 
       const protoDescriptor = grpc.loadPackageDefinition(packageDefinition);
       const nomosPackage = protoDescriptor.nomos as Record<string, unknown>;
-      const NomosAgentService = (nomosPackage.NomosAgent as { service: grpc.ServiceDefinition }).service;
+      const NomosAgentService = (nomosPackage.NomosAgent as { service: grpc.ServiceDefinition })
+        .service;
 
       this.server = new grpc.Server();
       this.server.addService(NomosAgentService, {
@@ -132,7 +133,9 @@ export class GrpcServer {
   }
 
   /** Handle Chat RPC: server-streaming of agent events. */
-  private handleChat(call: grpc.ServerWritableStream<{ content: string; sessionKey: string }, unknown>): void {
+  private handleChat(
+    call: grpc.ServerWritableStream<{ content: string; sessionKey: string }, unknown>,
+  ): void {
     const streamId = randomUUID();
     const request = call.request;
     const content = request?.content ?? "";
@@ -142,11 +145,13 @@ export class GrpcServer {
     this.activeStreams.set(streamId, { id: streamId, call });
 
     // Send init event
-    call.write(this.serializeEvent({
-      type: "system",
-      subtype: "init",
-      message: "Connected to daemon via gRPC",
-    }));
+    call.write(
+      this.serializeEvent({
+        type: "system",
+        subtype: "init",
+        message: "Connected to daemon via gRPC",
+      }),
+    );
 
     // Create incoming message
     const incoming: IncomingMessage = {
@@ -203,7 +208,11 @@ export class GrpcServer {
   /** Handle GetStatus RPC. */
   private handleGetStatus(
     _call: grpc.ServerUnaryCall<unknown, unknown>,
-    callback: grpc.sendUnaryData<{ running: boolean; connectedClients: number; platforms: string[] }>,
+    callback: grpc.sendUnaryData<{
+      running: boolean;
+      connectedClients: number;
+      platforms: string[];
+    }>,
   ): void {
     callback(null, {
       running: true,

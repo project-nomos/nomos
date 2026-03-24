@@ -14,7 +14,7 @@ import { fetchRenderedPage, validateUrl } from "./browser.ts";
 export function createMemoryMcpServer(): McpSdkServerConfigWithInstance {
   const memorySearchTool = tool(
     "memory_search",
-    "Search the long-term memory store using hybrid vector + text search. Returns relevant code snippets, documentation, and previously stored knowledge.",
+    "Search the long-term memory store using hybrid vector + text search. Returns relevant code snippets, documentation, and previously stored knowledge. Use the category filter for targeted recall.",
     {
       query: z.string().describe("The search query"),
       limit: z
@@ -24,6 +24,10 @@ export function createMemoryMcpServer(): McpSdkServerConfigWithInstance {
         .max(20)
         .optional()
         .describe("Maximum number of results (default: 5)"),
+      category: z
+        .enum(["fact", "preference", "correction", "skill", "conversation"])
+        .optional()
+        .describe("Filter by memory category"),
     },
     async (args) => {
       try {
@@ -34,17 +38,17 @@ export function createMemoryMcpServer(): McpSdkServerConfigWithInstance {
 
         if (!isEmbeddingAvailable()) {
           // Fall back to text-only search when embeddings are unavailable
-          results = await textOnlySearch(args.query, args.limit ?? 5);
+          results = await textOnlySearch(args.query, args.limit ?? 5, args.category);
         } else {
           try {
             const embedding = await generateEmbedding(args.query);
-            results = await hybridSearch(args.query, embedding, args.limit ?? 5);
-          } catch (embeddingError) {
+            results = await hybridSearch(args.query, embedding, args.limit ?? 5, args.category);
+          } catch {
             // Fall back to text-only search if embedding generation fails
             console.warn(
               "\x1b[2mEmbedding generation failed, falling back to text-only search\x1b[0m",
             );
-            results = await textOnlySearch(args.query, args.limit ?? 5);
+            results = await textOnlySearch(args.query, args.limit ?? 5, args.category);
           }
         }
 
@@ -57,7 +61,9 @@ export function createMemoryMcpServer(): McpSdkServerConfigWithInstance {
         const formatted = results
           .map((r, i) => {
             const source = r.path ?? r.source;
-            return `[${i + 1}] ${source} (score: ${r.score.toFixed(4)})\n${r.text}`;
+            const cat = (r.metadata as Record<string, unknown>)?.category;
+            const catLabel = cat ? ` [${cat}]` : "";
+            return `[${i + 1}] ${source}${catLabel} (score: ${r.score.toFixed(4)})\n${r.text}`;
           })
           .join("\n\n---\n\n");
 
@@ -71,6 +77,63 @@ export function createMemoryMcpServer(): McpSdkServerConfigWithInstance {
             {
               type: "text",
               text: `Memory search failed: ${message}`,
+            },
+          ],
+          isError: true,
+        };
+      }
+    },
+    {
+      annotations: {
+        readOnly: true,
+      },
+    },
+  );
+
+  const userModelRecallTool = tool(
+    "user_model_recall",
+    "Recall what you've learned about the user from past conversations. Returns accumulated preferences, facts, and patterns.",
+    {
+      category: z.enum(["preference", "fact", "style"]).optional().describe("Filter by category"),
+    },
+    async (args) => {
+      try {
+        const { getUserModel } = await import("../db/user-model.ts");
+        const entries = await getUserModel(args.category);
+
+        if (entries.length === 0) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: "No user model entries found. The user model is built over time from conversations.",
+              },
+            ],
+          };
+        }
+
+        const formatted = entries
+          .map((e) => {
+            const valueStr = typeof e.value === "string" ? e.value : JSON.stringify(e.value);
+            return `[${e.category}] ${e.key}: ${valueStr} (confidence: ${e.confidence.toFixed(2)})`;
+          })
+          .join("\n");
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: `User Model (${entries.length} entries):\n${formatted}`,
+            },
+          ],
+        };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return {
+          content: [
+            {
+              type: "text",
+              text: `User model recall failed: ${message}`,
             },
           ],
           isError: true,
@@ -203,9 +266,7 @@ export function createMemoryMcpServer(): McpSdkServerConfigWithInstance {
       action: z
         .enum(["read", "write", "execute", "install"])
         .describe("Action to check: read, write, execute, or install"),
-      target: z
-        .string()
-        .describe("The specific path, command, or package name to check"),
+      target: z.string().describe("The specific path, command, or package name to check"),
     },
     async (args) => {
       try {
@@ -244,9 +305,7 @@ export function createMemoryMcpServer(): McpSdkServerConfigWithInstance {
       action: z
         .enum(["read", "write", "execute", "install"])
         .describe("Action to grant: read, write, execute, or install"),
-      pattern: z
-        .string()
-        .describe("Exact value or glob pattern (trailing *) to allow"),
+      pattern: z.string().describe("Exact value or glob pattern (trailing *) to allow"),
       granted_by: z
         .string()
         .optional()
@@ -279,6 +338,125 @@ export function createMemoryMcpServer(): McpSdkServerConfigWithInstance {
     },
   );
 
+  const generateImageTool = tool(
+    "generate_image",
+    "Generate an image from a text prompt using Google's Gemini model. Returns the file path to the generated image. Requires image generation to be enabled and a Gemini API key configured.",
+    {
+      prompt: z
+        .string()
+        .describe(
+          "Detailed description of the image to generate. Be specific about style, composition, colors, and subject matter.",
+        ),
+      output_path: z
+        .string()
+        .optional()
+        .describe(
+          "Optional file path to save the image. If not provided, saves to a temp directory.",
+        ),
+    },
+    async (args) => {
+      try {
+        if (process.env.NOMOS_IMAGE_GENERATION !== "true") {
+          return {
+            content: [
+              {
+                type: "text",
+                text: "Image generation is not enabled. Enable it in Settings or set NOMOS_IMAGE_GENERATION=true and GEMINI_API_KEY in your environment.",
+              },
+            ],
+            isError: true,
+          };
+        }
+
+        const { generateImage } = await import("./image-gen.ts");
+        const result = await generateImage(args.prompt, {
+          outputPath: args.output_path,
+        });
+
+        const parts = [`Image saved to: ${result.imagePath}`];
+        if (result.text) {
+          parts.push(`\nModel notes: ${result.text}`);
+        }
+
+        return {
+          content: [{ type: "text", text: parts.join("") }],
+        };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return {
+          content: [{ type: "text", text: `Image generation failed: ${message}` }],
+          isError: true,
+        };
+      }
+    },
+    {
+      annotations: {
+        readOnly: false,
+      },
+    },
+  );
+
+  const generateVideoTool = tool(
+    "generate_video",
+    "Generate a video from a text prompt using Google's Veo model. This is a long-running operation that may take a few minutes. Returns the file path to the generated video. Requires video generation to be enabled and a Gemini API key configured.",
+    {
+      prompt: z
+        .string()
+        .describe(
+          "Detailed description of the video to generate. Describe the scene, action, camera movement, style, and mood.",
+        ),
+      output_path: z
+        .string()
+        .optional()
+        .describe(
+          "Optional file path to save the video. If not provided, saves to a temp directory.",
+        ),
+      duration_seconds: z
+        .number()
+        .int()
+        .min(1)
+        .max(30)
+        .optional()
+        .describe("Duration of the video in seconds (default determined by model)"),
+    },
+    async (args) => {
+      try {
+        if (process.env.NOMOS_VIDEO_GENERATION !== "true") {
+          return {
+            content: [
+              {
+                type: "text",
+                text: "Video generation is not enabled. Enable it in Settings or set NOMOS_VIDEO_GENERATION=true and GEMINI_API_KEY in your environment.",
+              },
+            ],
+            isError: true,
+          };
+        }
+
+        const { generateVideo } = await import("./video-gen.ts");
+        const result = await generateVideo(args.prompt, {
+          outputPath: args.output_path,
+          durationSeconds: args.duration_seconds,
+        });
+
+        return {
+          content: [{ type: "text", text: `Video saved to: ${result.videoPath}` }],
+        };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return {
+          content: [{ type: "text", text: `Video generation failed: ${message}` }],
+          isError: true,
+        };
+      }
+    },
+    {
+      annotations: {
+        readOnly: false,
+      },
+    },
+  );
+
   const revokePermissionTool = tool(
     "revoke_permission",
     "Remove a previously granted permanent permission.",
@@ -289,9 +467,7 @@ export function createMemoryMcpServer(): McpSdkServerConfigWithInstance {
       action: z
         .enum(["read", "write", "execute", "install"])
         .describe("Action to revoke: read, write, execute, or install"),
-      pattern: z
-        .string()
-        .describe("The exact pattern that was granted"),
+      pattern: z.string().describe("The exact pattern that was granted"),
     },
     async (args) => {
       try {
@@ -327,8 +503,11 @@ export function createMemoryMcpServer(): McpSdkServerConfigWithInstance {
     version: "0.1.0",
     tools: [
       memorySearchTool,
+      userModelRecallTool,
       bootstrapCompleteTool,
       browserFetchTool,
+      generateImageTool,
+      generateVideoTool,
       checkPermissionTool,
       grantPermissionTool,
       revokePermissionTool,

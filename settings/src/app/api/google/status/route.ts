@@ -14,7 +14,10 @@ export async function GET() {
   try {
     const { stdout } = await execFileAsync("npx", ["gws", "--version"], { timeout: 10000 });
     gwsInstalled = true;
-    gwsVersion = stdout.trim().replace(/^gws\s+/, "").split("\n")[0];
+    gwsVersion = stdout
+      .trim()
+      .replace(/^gws\s+/, "")
+      .split("\n")[0];
   } catch {
     // gws not available
   }
@@ -37,7 +40,8 @@ export async function GET() {
   const services = env.GWS_SERVICES ?? "all";
 
   return NextResponse.json({
-    configured: accounts.length > 0 || !!(env.GOOGLE_OAUTH_CLIENT_ID && env.GOOGLE_OAUTH_CLIENT_SECRET),
+    configured:
+      accounts.length > 0 || !!(env.GOOGLE_OAUTH_CLIENT_ID && env.GOOGLE_OAUTH_CLIENT_SECRET),
     gwsInstalled,
     gwsVersion,
     accounts,

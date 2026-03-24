@@ -22,6 +22,7 @@ export const SLASH_COMMANDS = [
   { name: "cost", desc: "Session token usage" },
   { name: "history", desc: "Conversation summary" },
   { name: "undo", desc: "Remove last exchange" },
+  { name: "copy", desc: "Copy last response to clipboard" },
   { name: "profile", desc: "View/edit user profile" },
   { name: "identity", desc: "View/edit agent identity" },
   { name: "skills", desc: "List loaded skills" },
@@ -117,6 +118,8 @@ export async function dispatchSlashCommand(
       return { output: cmdHistory(ctx) };
     case "undo":
       return { output: await cmdUndo(ctx) };
+    case "copy":
+      return { output: await cmdCopy(ctx) };
     case "mcp":
       return { output: await cmdMcp(ctx) };
     case "profile":
@@ -169,6 +172,7 @@ function cmdHelp(): string {
     "  /history           Show conversation summary",
     "  /undo              Remove last exchange",
     "  /undo-files        Revert file changes (placeholder)",
+    "  /copy              Copy last response to clipboard",
     "",
     chalk.bold("Model"),
     "  /model             Show current model and available options",
@@ -675,6 +679,50 @@ async function cmdUndo(ctx: CommandContext): Promise<string> {
   return chalk.dim(`Removed last ${removeCount} message(s). ${ctx.transcript.length} remaining.`);
 }
 
+async function cmdCopy(ctx: CommandContext): Promise<string> {
+  // Find the last assistant message
+  const lastAssistant = [...ctx.transcript].reverse().find((m) => m.role === "assistant");
+  if (!lastAssistant) {
+    return chalk.dim("No assistant response to copy.");
+  }
+
+  try {
+    const { execFile } = await import("node:child_process");
+    const { promisify } = await import("node:util");
+    const execFileAsync = promisify(execFile);
+
+    // Use platform-specific clipboard command
+    const platform = process.platform;
+    let cmd: string;
+    let args: string[];
+
+    if (platform === "darwin") {
+      cmd = "pbcopy";
+      args = [];
+    } else if (platform === "linux") {
+      // Try xclip first, fall back to xsel
+      cmd = "xclip";
+      args = ["-selection", "clipboard"];
+    } else if (platform === "win32") {
+      cmd = "clip";
+      args = [];
+    } else {
+      return chalk.yellow("Clipboard not supported on this platform.");
+    }
+
+    const child = execFileAsync(cmd, args, { timeout: 5000 });
+    child.child.stdin?.write(lastAssistant.content);
+    child.child.stdin?.end();
+    await child;
+
+    const preview = lastAssistant.content.slice(0, 60).replace(/\n/g, " ");
+    const truncated = lastAssistant.content.length > 60 ? "..." : "";
+    return chalk.dim(`Copied to clipboard: "${preview}${truncated}"`);
+  } catch {
+    return chalk.red("Failed to copy to clipboard. Ensure pbcopy/xclip/clip is available.");
+  }
+}
+
 async function cmdMcp(ctx: CommandContext): Promise<string> {
   const mcpNames = Object.keys(ctx.mcpServers);
   const lines: string[] = [];
@@ -968,10 +1016,12 @@ async function cmdPermissions(args: string[]): Promise<string> {
     const pattern = patternParts.join(" ");
 
     if (!resourceType || !action || !pattern) {
-      return chalk.yellow("Usage: /permissions grant <type> <action> <pattern>\n" +
-        "  Types: path, command, package\n" +
-        "  Actions: read, write, execute, install\n" +
-        '  Example: /permissions grant path read /Users/me/Documents/*');
+      return chalk.yellow(
+        "Usage: /permissions grant <type> <action> <pattern>\n" +
+          "  Types: path, command, package\n" +
+          "  Actions: read, write, execute, install\n" +
+          "  Example: /permissions grant path read /Users/me/Documents/*",
+      );
     }
 
     try {
@@ -1068,7 +1118,9 @@ async function cmdIntegrations(ctx: CommandContext, args: string[]): Promise<str
           chalk.dim("Setup options:"),
           chalk.dim("  1. Run: gws auth setup (requires gcloud CLI)"),
           chalk.dim("  2. Use the Settings UI at /integrations/google"),
-          chalk.dim("  3. Manually create a GCP OAuth client and place client_secret.json in ~/.config/gws/"),
+          chalk.dim(
+            "  3. Manually create a GCP OAuth client and place client_secret.json in ~/.config/gws/",
+          ),
           "",
           chalk.dim("After setting up credentials, run: gws auth login"),
         ].join("\n");

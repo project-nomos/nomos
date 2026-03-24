@@ -101,13 +101,13 @@ export class WhatsAppAdapter implements ChannelAdapter {
             const text = msg.message?.conversation || msg.message?.extendedTextMessage?.text || "";
             const mentions = msg.message?.extendedTextMessage?.contextInfo?.mentionedJid || [];
             const isMentioned = mentions.some((m) => m === botNumber);
-            if (!isMentioned && !/^[\/!@]/.test(text.trim())) continue;
+            if (!isMentioned && !/^[/!@]/.test(text.trim())) continue;
           }
 
           const text = msg.message?.conversation || msg.message?.extendedTextMessage?.text || "";
           const content = text
             .replace(new RegExp(`@${botNumber.split("@")[0]}`, "g"), "")
-            .replace(/^[\/!@]\s*/, "")
+            .replace(/^[/!@]\s*/, "")
             .trim();
           if (!content) continue;
 

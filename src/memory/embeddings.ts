@@ -53,7 +53,7 @@ export async function generateEmbeddings(texts: string[]): Promise<number[][]> {
 
   const endpoint = `https://${location}-aiplatform.googleapis.com/v1/projects/${projectId}/locations/${location}/publishers/google/models/${model}:predict`;
 
-  const results: number[][] = new Array(texts.length);
+  const results: number[][] = Array.from<number[]>({ length: texts.length });
 
   // Process in batches
   for (let i = 0; i < texts.length; i += MAX_BATCH_SIZE) {

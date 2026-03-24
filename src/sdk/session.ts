@@ -16,6 +16,10 @@ export interface RunSessionParams {
   model?: string;
   /** Text appended to Claude Code's default system prompt */
   systemPromptAppend?: string;
+  /** Full system prompt override (takes precedence over systemPromptAppend) */
+  systemPrompt?: string;
+  /** Custom Anthropic API base URL (for Ollama, LiteLLM, etc.) */
+  anthropicBaseUrl?: string;
   /** MCP servers (external + in-process) */
   mcpServers?: Record<string, McpServerConfig>;
   /** Permission mode for the session */
@@ -40,6 +44,10 @@ export interface RunSessionParams {
   fallbackModels?: string[];
   /** Tool names that are auto-allowed without prompting for permission */
   allowedTools?: string[];
+  /** Enable SDK debug mode (verbose logging) */
+  debug?: boolean;
+  /** Callback for stderr output from the Claude Code process */
+  stderr?: (data: string) => void;
 }
 
 /**
@@ -47,18 +55,39 @@ export interface RunSessionParams {
  * Returns the async generator of SDK messages.
  */
 export function runSession(params: RunSessionParams): Query {
+  // Build system prompt config
+  let systemPrompt: Options["systemPrompt"];
+  if (params.systemPrompt) {
+    systemPrompt = {
+      type: "preset",
+      preset: "claude_code",
+      append: params.systemPrompt,
+    };
+  } else if (params.systemPromptAppend) {
+    systemPrompt = {
+      type: "preset",
+      preset: "claude_code",
+      append: params.systemPromptAppend,
+    };
+  } else {
+    systemPrompt = { type: "preset", preset: "claude_code" };
+  }
+
+  // Build env, including custom base URL if provided
+  const env: Record<string, string | undefined> = {
+    ...process.env,
+    CLAUDE_AGENT_SDK_CLIENT_APP: "nomos/0.1.0",
+  };
+  if (params.anthropicBaseUrl) {
+    env.ANTHROPIC_BASE_URL = params.anthropicBaseUrl;
+  }
+
   return query({
     prompt: params.prompt,
     options: {
       model: params.model,
       permissionMode: params.permissionMode ?? "acceptEdits",
-      systemPrompt: params.systemPromptAppend
-        ? {
-            type: "preset",
-            preset: "claude_code",
-            append: params.systemPromptAppend,
-          }
-        : { type: "preset", preset: "claude_code" },
+      systemPrompt,
       mcpServers: params.mcpServers,
       allowedTools: params.allowedTools,
       thinking: params.thinking ?? { type: "adaptive" },
@@ -70,10 +99,9 @@ export function runSession(params: RunSessionParams): Query {
       includePartialMessages: true,
       sandbox: params.sandbox,
       betas: params.betas,
-      env: {
-        ...process.env,
-        CLAUDE_AGENT_SDK_CLIENT_APP: "nomos/0.1.0",
-      },
+      debug: params.debug,
+      stderr: params.stderr,
+      env,
     },
   });
 }

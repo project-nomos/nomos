@@ -98,12 +98,17 @@ export default function DatabasePage() {
         <p className="text-sm text-overlay0 mb-8">PostgreSQL overview and statistics</p>
         <section className="rounded-xl border border-surface0 bg-mantle p-5">
           <div className="flex items-center gap-3 mb-2">
-            <h2 className="text-sm font-semibold text-subtext1 uppercase tracking-wider">Connection</h2>
+            <h2 className="text-sm font-semibold text-subtext1 uppercase tracking-wider">
+              Connection
+            </h2>
             <StatusBadge status="error" />
           </div>
           <p className="text-sm text-red">{error}</p>
           <button
-            onClick={() => { setLoading(true); loadData(); }}
+            onClick={() => {
+              setLoading(true);
+              loadData();
+            }}
             className="mt-4 inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border border-surface1 text-sm text-subtext0 hover:bg-surface0 transition-colors"
           >
             <RefreshCw size={14} />
@@ -123,7 +128,10 @@ export default function DatabasePage() {
       <div className="flex items-center justify-between mb-1">
         <h1 className="text-2xl font-bold text-text">Database</h1>
         <button
-          onClick={() => { setLoading(true); loadData(); }}
+          onClick={() => {
+            setLoading(true);
+            loadData();
+          }}
           className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border border-surface1 text-sm text-subtext0 hover:bg-surface0 transition-colors"
         >
           <RefreshCw size={14} />
@@ -135,7 +143,9 @@ export default function DatabasePage() {
       {/* Connection Info */}
       <section className="mb-8 rounded-xl border border-surface0 bg-mantle p-5">
         <div className="flex items-center gap-3 mb-4">
-          <h2 className="text-sm font-semibold text-subtext1 uppercase tracking-wider">Connection</h2>
+          <h2 className="text-sm font-semibold text-subtext1 uppercase tracking-wider">
+            Connection
+          </h2>
           <StatusBadge status="connected" />
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -160,7 +170,9 @@ export default function DatabasePage() {
       <section className="mb-8 rounded-xl border border-surface0 bg-mantle p-5">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-sm font-semibold text-subtext1 uppercase tracking-wider">Tables</h2>
-          <span className="text-xs text-overlay0">{data.tables.length} tables &middot; {totalRows.toLocaleString()} rows</span>
+          <span className="text-xs text-overlay0">
+            {data.tables.length} tables &middot; {totalRows.toLocaleString()} rows
+          </span>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
@@ -173,9 +185,14 @@ export default function DatabasePage() {
             </thead>
             <tbody>
               {data.tables.map((t) => (
-                <tr key={t.name} className="border-b border-surface0/50 hover:bg-surface0/30 transition-colors">
+                <tr
+                  key={t.name}
+                  className="border-b border-surface0/50 hover:bg-surface0/30 transition-colors"
+                >
                   <td className="py-2 pr-4 font-mono text-text">{t.name}</td>
-                  <td className="py-2 px-4 text-right text-subtext0 tabular-nums">{t.rowCount.toLocaleString()}</td>
+                  <td className="py-2 px-4 text-right text-subtext0 tabular-nums">
+                    {t.rowCount.toLocaleString()}
+                  </td>
                   <td className="py-2 pl-4 text-right text-subtext0">{t.size}</td>
                 </tr>
               ))}
@@ -186,7 +203,9 @@ export default function DatabasePage() {
 
       {/* Recent Sessions */}
       <section className="mb-8 rounded-xl border border-surface0 bg-mantle p-5">
-        <h2 className="text-sm font-semibold text-subtext1 uppercase tracking-wider mb-4">Recent Sessions</h2>
+        <h2 className="text-sm font-semibold text-subtext1 uppercase tracking-wider mb-4">
+          Recent Sessions
+        </h2>
         {data.sessions.length === 0 ? (
           <p className="text-sm text-overlay0">No sessions found</p>
         ) : (
@@ -216,12 +235,10 @@ export default function DatabasePage() {
                 </span>
                 <div className="text-right text-xs text-overlay0 whitespace-nowrap w-28">
                   <div>
-                    <span className="text-subtext0">in:</span>{" "}
-                    {formatTokens(s.tokenUsage?.input)}
+                    <span className="text-subtext0">in:</span> {formatTokens(s.tokenUsage?.input)}
                   </div>
                   <div>
-                    <span className="text-subtext0">out:</span>{" "}
-                    {formatTokens(s.tokenUsage?.output)}
+                    <span className="text-subtext0">out:</span> {formatTokens(s.tokenUsage?.output)}
                   </div>
                 </div>
                 <span className="text-xs text-overlay0 whitespace-nowrap w-16 text-right">

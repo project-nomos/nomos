@@ -29,6 +29,17 @@ const ALLOWED_KEYS = [
   "CLAUDE_CODE_USE_VERTEX",
   "GOOGLE_CLOUD_PROJECT",
   "CLOUD_ML_REGION",
+  "NOMOS_SMART_ROUTING",
+  "NOMOS_MODEL_SIMPLE",
+  "NOMOS_MODEL_MODERATE",
+  "NOMOS_MODEL_COMPLEX",
+  "NOMOS_TEAM_MODE",
+  "NOMOS_MAX_TEAM_WORKERS",
+  "ANTHROPIC_BASE_URL",
+  "NOMOS_ADAPTIVE_MEMORY",
+  "NOMOS_EXTRACTION_MODEL",
+  "NOMOS_API_PROVIDER",
+  "OPENROUTER_API_KEY",
 ];
 
 /** Keys that contain secrets and should be masked in GET responses. */
@@ -42,6 +53,7 @@ const SECRET_KEYS = new Set([
   "ENCRYPTION_KEY",
   "DISCORD_BOT_TOKEN",
   "TELEGRAM_BOT_TOKEN",
+  "OPENROUTER_API_KEY",
 ]);
 
 /** Keys that are writable via PUT. */
@@ -68,6 +80,17 @@ const WRITABLE_KEYS = new Set([
   "CLAUDE_CODE_USE_VERTEX",
   "GOOGLE_CLOUD_PROJECT",
   "CLOUD_ML_REGION",
+  "NOMOS_SMART_ROUTING",
+  "NOMOS_MODEL_SIMPLE",
+  "NOMOS_MODEL_MODERATE",
+  "NOMOS_MODEL_COMPLEX",
+  "NOMOS_TEAM_MODE",
+  "NOMOS_MAX_TEAM_WORKERS",
+  "ANTHROPIC_BASE_URL",
+  "NOMOS_ADAPTIVE_MEMORY",
+  "NOMOS_EXTRACTION_MODEL",
+  "NOMOS_API_PROVIDER",
+  "OPENROUTER_API_KEY",
 ]);
 
 /**
@@ -89,14 +112,24 @@ const ENV_TO_DB: Record<string, DbMapping> = {
   NOMOS_MODEL: { table: "config", dbKey: "app.model" },
   NOMOS_PERMISSION_MODE: { table: "config", dbKey: "app.permissionMode" },
   DAEMON_PORT: { table: "config", dbKey: "app.daemonPort" },
-  ANTHROPIC_API_KEY: { table: "integrations", dbKey: "anthropic", field: "api_key", isSecret: true },
+  ANTHROPIC_API_KEY: {
+    table: "integrations",
+    dbKey: "anthropic",
+    field: "api_key",
+    isSecret: true,
+  },
   GOOGLE_CLOUD_PROJECT: { table: "integrations", dbKey: "vertex-ai", field: "project_id" },
   CLOUD_ML_REGION: { table: "integrations", dbKey: "vertex-ai", field: "region" },
   DATABASE_URL: { table: "integrations", dbKey: "database", field: "url", isSecret: true },
   SLACK_APP_TOKEN: { table: "integrations", dbKey: "slack", field: "app_token", isSecret: true },
   SLACK_BOT_TOKEN: { table: "integrations", dbKey: "slack", field: "bot_token", isSecret: true },
   SLACK_CLIENT_ID: { table: "integrations", dbKey: "slack", field: "client_id" },
-  SLACK_CLIENT_SECRET: { table: "integrations", dbKey: "slack", field: "client_secret", isSecret: true },
+  SLACK_CLIENT_SECRET: {
+    table: "integrations",
+    dbKey: "slack",
+    field: "client_secret",
+    isSecret: true,
+  },
   GOOGLE_OAUTH_CLIENT_ID: { table: "integrations", dbKey: "google", field: "client_id" },
   GOOGLE_OAUTH_CLIENT_SECRET: {
     table: "integrations",
@@ -105,7 +138,12 @@ const ENV_TO_DB: Record<string, DbMapping> = {
     isSecret: true,
   },
   GWS_SERVICES: { table: "integrations", dbKey: "google", field: "services" },
-  DISCORD_BOT_TOKEN: { table: "integrations", dbKey: "discord", field: "bot_token", isSecret: true },
+  DISCORD_BOT_TOKEN: {
+    table: "integrations",
+    dbKey: "discord",
+    field: "bot_token",
+    isSecret: true,
+  },
   DISCORD_ALLOWED_CHANNELS: { table: "integrations", dbKey: "discord", field: "allowed_channels" },
   DISCORD_ALLOWED_GUILDS: { table: "integrations", dbKey: "discord", field: "allowed_guilds" },
   TELEGRAM_BOT_TOKEN: {
@@ -117,6 +155,32 @@ const ENV_TO_DB: Record<string, DbMapping> = {
   TELEGRAM_ALLOWED_CHATS: { table: "integrations", dbKey: "telegram", field: "allowed_chats" },
   WHATSAPP_ENABLED: { table: "integrations", dbKey: "whatsapp", field: "enabled" },
   WHATSAPP_ALLOWED_CHATS: { table: "integrations", dbKey: "whatsapp", field: "allowed_chats" },
+  NOMOS_SMART_ROUTING: { table: "config", dbKey: "app.smartRouting" },
+  NOMOS_MODEL_SIMPLE: { table: "config", dbKey: "app.modelSimple" },
+  NOMOS_MODEL_MODERATE: { table: "config", dbKey: "app.modelModerate" },
+  NOMOS_MODEL_COMPLEX: { table: "config", dbKey: "app.modelComplex" },
+  NOMOS_TEAM_MODE: { table: "config", dbKey: "app.teamMode" },
+  NOMOS_MAX_TEAM_WORKERS: { table: "config", dbKey: "app.maxTeamWorkers" },
+  NOMOS_API_PROVIDER: { table: "config", dbKey: "app.apiProvider" },
+  ANTHROPIC_BASE_URL: { table: "config", dbKey: "app.anthropicBaseUrl" },
+  OPENROUTER_API_KEY: {
+    table: "integrations",
+    dbKey: "openrouter",
+    field: "api_key",
+    isSecret: true,
+  },
+  NOMOS_ADAPTIVE_MEMORY: { table: "config", dbKey: "app.adaptiveMemory" },
+  NOMOS_EXTRACTION_MODEL: { table: "config", dbKey: "app.extractionModel" },
+  NOMOS_IMAGE_GENERATION: { table: "config", dbKey: "app.imageGeneration" },
+  NOMOS_IMAGE_GENERATION_MODEL: { table: "config", dbKey: "app.imageGenerationModel" },
+  GEMINI_API_KEY: {
+    table: "integrations",
+    dbKey: "gemini",
+    field: "api_key",
+    isSecret: true,
+  },
+  NOMOS_VIDEO_GENERATION: { table: "config", dbKey: "app.videoGeneration" },
+  NOMOS_VIDEO_GENERATION_MODEL: { table: "config", dbKey: "app.videoGenerationModel" },
 };
 
 /** Simple decrypt: if the value looks encrypted (three dot-separated hex segments), try to decrypt. */
@@ -156,9 +220,7 @@ async function readDbValue(
       `;
       if (row?.value != null) return String(row.value);
     } else {
-      const [row] = await sql<
-        [{ config: Record<string, unknown>; secrets: string }?]
-      >`
+      const [row] = await sql<[{ config: Record<string, unknown>; secrets: string }?]>`
         SELECT config, secrets FROM integrations WHERE name = ${mapping.dbKey}
       `;
       if (!row) return undefined;

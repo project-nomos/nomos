@@ -19,7 +19,7 @@ import { loadSoulFile } from "../config/soul.ts";
 import { loadSkills, formatSkillsForPrompt } from "../skills/loader.ts";
 
 // Discord imports
-import { Client as DiscordClient, GatewayIntentBits, REST, Routes } from "discord.js";
+import { REST, Routes } from "discord.js";
 
 // Slack imports
 import { WebClient } from "@slack/web-api";

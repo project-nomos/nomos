@@ -6,7 +6,7 @@ interface UserMessageProps {
   content: string;
 }
 
-export function UserMessage({ content }: UserMessageProps): React.ReactElement {
+function UserMessageInner({ content }: UserMessageProps): React.ReactElement {
   return (
     <Box marginTop={1}>
       <Text color={theme.text.user} bold>
@@ -16,3 +16,5 @@ export function UserMessage({ content }: UserMessageProps): React.ReactElement {
     </Box>
   );
 }
+
+export const UserMessage = React.memo(UserMessageInner);

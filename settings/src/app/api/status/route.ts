@@ -11,8 +11,7 @@ export async function GET() {
   const env = readEnv();
 
   // Slack status
-  let slackWorkspaces: { teamId: string; teamName: string; userId: string }[] =
-    [];
+  let slackWorkspaces: { teamId: string; teamName: string; userId: string }[] = [];
   try {
     const sql = getDb();
     // Read from integrations table (slack-ws:* naming)
@@ -57,11 +56,7 @@ export async function GET() {
 
   const status: IntegrationStatus = {
     slack: {
-      configured: !!(
-        env.SLACK_APP_TOKEN ||
-        env.SLACK_BOT_TOKEN ||
-        slackWorkspaces.length > 0
-      ),
+      configured: !!(env.SLACK_APP_TOKEN || env.SLACK_BOT_TOKEN || slackWorkspaces.length > 0),
       appToken: !!env.SLACK_APP_TOKEN,
       botToken: !!env.SLACK_BOT_TOKEN,
       workspaces: slackWorkspaces,

@@ -49,14 +49,8 @@ export async function startDaemonIfNeeded(): Promise<void> {
   }
 
   if (ready) {
-    console.log(
-      chalk.dim(`Daemon running (PID ${child.pid}, gRPC :${grpcPort})`),
-    );
+    console.log(chalk.dim(`Daemon running (PID ${child.pid}, gRPC :${grpcPort})`));
   } else {
-    console.log(
-      chalk.yellow(
-        `Daemon may not have started in time. Check logs: ${logFile}`,
-      ),
-    );
+    console.log(chalk.yellow(`Daemon may not have started in time. Check logs: ${logFile}`));
   }
 }

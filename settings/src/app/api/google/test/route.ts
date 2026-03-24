@@ -11,7 +11,9 @@ export async function POST() {
     const version = stdout.trim();
 
     // Check if auth is configured
-    const { stdout: authOut } = await execFileAsync("npx", ["gws", "auth", "list"], { timeout: 10000 });
+    const { stdout: authOut } = await execFileAsync("npx", ["gws", "auth", "list"], {
+      timeout: 10000,
+    });
     const authData = JSON.parse(authOut);
     const accountCount = authData.count ?? 0;
 

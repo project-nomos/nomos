@@ -81,11 +81,7 @@ export function DatabaseStep({ onComplete }: DatabaseStepProps) {
             onClick={handleCopy}
             className="absolute top-2 right-2 p-1.5 rounded-md bg-surface0 hover:bg-surface1 text-overlay0 hover:text-text transition-colors"
           >
-            {copied ? (
-              <Check size={12} className="text-green" />
-            ) : (
-              <Copy size={12} />
-            )}
+            {copied ? <Check size={12} className="text-green" /> : <Copy size={12} />}
           </button>
         </div>
         <p className="text-xs text-overlay0 mt-2">
@@ -95,9 +91,7 @@ export function DatabaseStep({ onComplete }: DatabaseStepProps) {
 
       {/* Connection URL */}
       <div className="space-y-2">
-        <label className="block text-sm font-medium text-subtext1">
-          Connection URL
-        </label>
+        <label className="block text-sm font-medium text-subtext1">Connection URL</label>
         <input
           type="text"
           value={url}
@@ -122,9 +116,7 @@ export function DatabaseStep({ onComplete }: DatabaseStepProps) {
       {success && (
         <div className="flex items-center gap-2 rounded-lg bg-green/10 border border-green/20 p-3">
           <CheckCircle size={16} className="text-green" />
-          <p className="text-sm text-green">
-            Connected and migrations applied
-          </p>
+          <p className="text-sm text-green">Connected and migrations applied</p>
         </div>
       )}
 

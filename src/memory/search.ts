@@ -106,9 +106,10 @@ function extractKeywords(query: string): string {
 export async function textOnlySearch(
   query: string,
   limit: number = 10,
+  category?: string,
 ): Promise<MemorySearchResult[]> {
   const keywords = extractKeywords(query);
-  const results = await searchMemoryByText(keywords, limit * 2);
+  const results = await searchMemoryByText(keywords, limit * 2, category);
 
   // Normalize scores to 0-1 range based on rank, then apply temporal decay
   const scored = results.map((result, rank) => ({
@@ -130,11 +131,12 @@ export async function hybridSearch(
   query: string,
   embedding: number[],
   limit: number = 10,
+  category?: string,
 ): Promise<MemorySearchResult[]> {
   // Run both searches in parallel
   const [vectorResults, textResults] = await Promise.all([
-    searchMemoryByVector(embedding, limit * 2),
-    searchMemoryByText(query, limit * 2),
+    searchMemoryByVector(embedding, limit * 2, category),
+    searchMemoryByText(query, limit * 2, category),
   ]);
 
   // Build RRF scores

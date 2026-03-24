@@ -15,7 +15,11 @@ const MODELS = [
 
 const PERMISSION_MODES = [
   { value: "default", label: "Default", description: "Ask before running tools" },
-  { value: "acceptEdits", label: "Accept Edits", description: "Auto-approve file edits, ask for others" },
+  {
+    value: "acceptEdits",
+    label: "Accept Edits",
+    description: "Auto-approve file edits, ask for others",
+  },
   { value: "plan", label: "Plan", description: "Plan mode - propose changes before applying" },
   { value: "bypassPermissions", label: "Bypass", description: "Auto-approve all tool calls" },
 ];
@@ -39,10 +43,17 @@ export default function AssistantSettingsPage() {
   const [agentPurpose, setAgentPurpose] = useState("");
   const [initialAgentPurpose, setInitialAgentPurpose] = useState("");
 
+  // API provider
+  const [apiProvider, setApiProvider] = useState("anthropic");
+  const [initialApiProvider, setInitialApiProvider] = useState("anthropic");
+
   // Env-based settings
   const [apiKey, setApiKey] = useState("");
   const [hasApiKey, setHasApiKey] = useState(false);
   const [apiKeyDirty, setApiKeyDirty] = useState(false);
+  const [openrouterApiKey, setOpenrouterApiKey] = useState("");
+  const [hasOpenrouterApiKey, setHasOpenrouterApiKey] = useState(false);
+  const [openrouterApiKeyDirty, setOpenrouterApiKeyDirty] = useState(false);
   const [model, setModel] = useState("claude-sonnet-4-6");
   const [initialModel, setInitialModel] = useState("claude-sonnet-4-6");
   const [permissionMode, setPermissionMode] = useState("default");
@@ -51,12 +62,55 @@ export default function AssistantSettingsPage() {
   const [initialDaemonPort, setInitialDaemonPort] = useState("8765");
 
   // Vertex AI / GCP
-  const [useVertex, setUseVertex] = useState(false);
-  const [initialUseVertex, setInitialUseVertex] = useState(false);
   const [gcpProject, setGcpProject] = useState("");
   const [initialGcpProject, setInitialGcpProject] = useState("");
   const [gcpRegion, setGcpRegion] = useState("us-east5");
   const [initialGcpRegion, setInitialGcpRegion] = useState("us-east5");
+
+  // Smart model routing
+  const [smartRouting, setSmartRouting] = useState(false);
+  const [initialSmartRouting, setInitialSmartRouting] = useState(false);
+  const [modelSimple, setModelSimple] = useState("claude-haiku-4-5");
+  const [initialModelSimple, setInitialModelSimple] = useState("claude-haiku-4-5");
+  const [modelModerate, setModelModerate] = useState("claude-sonnet-4-6");
+  const [initialModelModerate, setInitialModelModerate] = useState("claude-sonnet-4-6");
+  const [modelComplex, setModelComplex] = useState("claude-sonnet-4-6");
+  const [initialModelComplex, setInitialModelComplex] = useState("claude-sonnet-4-6");
+
+  // Custom API endpoint
+  const [anthropicBaseUrl, setAnthropicBaseUrl] = useState("");
+  const [initialAnthropicBaseUrl, setInitialAnthropicBaseUrl] = useState("");
+
+  // Multi-agent teams
+  const [teamMode, setTeamMode] = useState(false);
+  const [initialTeamMode, setInitialTeamMode] = useState(false);
+  const [maxTeamWorkers, setMaxTeamWorkers] = useState("3");
+  const [initialMaxTeamWorkers, setInitialMaxTeamWorkers] = useState("3");
+
+  // Adaptive memory
+  const [adaptiveMemory, setAdaptiveMemory] = useState(false);
+  const [initialAdaptiveMemory, setInitialAdaptiveMemory] = useState(false);
+  const [extractionModel, setExtractionModel] = useState("claude-haiku-4-5");
+  const [initialExtractionModel, setInitialExtractionModel] = useState("claude-haiku-4-5");
+
+  // Image generation
+  const [imageGeneration, setImageGeneration] = useState(false);
+  const [initialImageGeneration, setInitialImageGeneration] = useState(false);
+  const [geminiApiKey, setGeminiApiKey] = useState("");
+  const [hasGeminiApiKey, setHasGeminiApiKey] = useState(false);
+  const [geminiApiKeyDirty, setGeminiApiKeyDirty] = useState(false);
+  const [imageGenerationModel, setImageGenerationModel] = useState("gemini-3-pro-image-preview");
+  const [initialImageGenerationModel, setInitialImageGenerationModel] = useState(
+    "gemini-3-pro-image-preview",
+  );
+
+  // Video generation
+  const [videoGeneration, setVideoGeneration] = useState(false);
+  const [initialVideoGeneration, setInitialVideoGeneration] = useState(false);
+  const [videoGenerationModel, setVideoGenerationModel] = useState("veo-3.0-generate-preview");
+  const [initialVideoGenerationModel, setInitialVideoGenerationModel] = useState(
+    "veo-3.0-generate-preview",
+  );
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -69,28 +123,48 @@ export default function AssistantSettingsPage() {
 
   const isEnvDirty =
     apiKeyDirty ||
+    openrouterApiKeyDirty ||
+    apiProvider !== initialApiProvider ||
     model !== initialModel ||
     permissionMode !== initialPermissionMode ||
     daemonPort !== initialDaemonPort ||
-    useVertex !== initialUseVertex ||
     gcpProject !== initialGcpProject ||
-    gcpRegion !== initialGcpRegion;
+    gcpRegion !== initialGcpRegion ||
+    smartRouting !== initialSmartRouting ||
+    modelSimple !== initialModelSimple ||
+    modelModerate !== initialModelModerate ||
+    modelComplex !== initialModelComplex ||
+    anthropicBaseUrl !== initialAnthropicBaseUrl ||
+    teamMode !== initialTeamMode ||
+    maxTeamWorkers !== initialMaxTeamWorkers ||
+    adaptiveMemory !== initialAdaptiveMemory ||
+    extractionModel !== initialExtractionModel ||
+    geminiApiKeyDirty ||
+    imageGeneration !== initialImageGeneration ||
+    imageGenerationModel !== initialImageGenerationModel ||
+    videoGeneration !== initialVideoGeneration ||
+    videoGenerationModel !== initialVideoGenerationModel;
 
   const isDirty = isIdentityDirty || isEnvDirty;
   useUnsavedChanges(isDirty);
 
   const loadData = useCallback(async () => {
     try {
-      const [envRes, configRes] = await Promise.all([
-        fetch("/api/env"),
-        fetch("/api/config"),
-      ]);
+      const [envRes, configRes] = await Promise.all([fetch("/api/env"), fetch("/api/config")]);
       const envData = await envRes.json();
       const configData = await configRes.json();
+
+      const ap = envData.NOMOS_API_PROVIDER ?? "anthropic";
+      setApiProvider(ap);
+      setInitialApiProvider(ap);
 
       setHasApiKey(!!envData.ANTHROPIC_API_KEY);
       setApiKey("");
       setApiKeyDirty(false);
+
+      setHasOpenrouterApiKey(!!envData.OPENROUTER_API_KEY);
+      setOpenrouterApiKey("");
+      setOpenrouterApiKeyDirty(false);
 
       const m = envData.NOMOS_MODEL ?? "claude-sonnet-4-6";
       setModel(m);
@@ -104,10 +178,6 @@ export default function AssistantSettingsPage() {
       setDaemonPort(dp);
       setInitialDaemonPort(dp);
 
-      const vertex = envData.CLAUDE_CODE_USE_VERTEX === "1" || envData.CLAUDE_CODE_USE_VERTEX === "true";
-      setUseVertex(vertex);
-      setInitialUseVertex(vertex);
-
       const proj = envData.GOOGLE_CLOUD_PROJECT ?? "";
       setGcpProject(proj);
       setInitialGcpProject(proj);
@@ -115,6 +185,68 @@ export default function AssistantSettingsPage() {
       const region = envData.CLOUD_ML_REGION ?? "us-east5";
       setGcpRegion(region);
       setInitialGcpRegion(region);
+
+      // Smart model routing
+      const sr = envData.NOMOS_SMART_ROUTING === "true";
+      setSmartRouting(sr);
+      setInitialSmartRouting(sr);
+
+      const ms = envData.NOMOS_MODEL_SIMPLE ?? "claude-haiku-4-5";
+      setModelSimple(ms);
+      setInitialModelSimple(ms);
+
+      const mm = envData.NOMOS_MODEL_MODERATE ?? "claude-sonnet-4-6";
+      setModelModerate(mm);
+      setInitialModelModerate(mm);
+
+      const mc = envData.NOMOS_MODEL_COMPLEX ?? "claude-sonnet-4-6";
+      setModelComplex(mc);
+      setInitialModelComplex(mc);
+
+      // Custom API endpoint
+      const baseUrl = envData.ANTHROPIC_BASE_URL ?? "";
+      setAnthropicBaseUrl(baseUrl);
+      setInitialAnthropicBaseUrl(baseUrl);
+
+      // Multi-agent teams
+      const tm = envData.NOMOS_TEAM_MODE === "true";
+      setTeamMode(tm);
+      setInitialTeamMode(tm);
+
+      const mtw = envData.NOMOS_MAX_TEAM_WORKERS ?? "3";
+      setMaxTeamWorkers(mtw);
+      setInitialMaxTeamWorkers(mtw);
+
+      // Adaptive memory
+      const am = envData.NOMOS_ADAPTIVE_MEMORY === "true";
+      setAdaptiveMemory(am);
+      setInitialAdaptiveMemory(am);
+
+      const em = envData.NOMOS_EXTRACTION_MODEL ?? "claude-haiku-4-5";
+      setExtractionModel(em);
+      setInitialExtractionModel(em);
+
+      // Image generation
+      const ig = envData.NOMOS_IMAGE_GENERATION === "true";
+      setImageGeneration(ig);
+      setInitialImageGeneration(ig);
+
+      setHasGeminiApiKey(!!envData.GEMINI_API_KEY);
+      setGeminiApiKey("");
+      setGeminiApiKeyDirty(false);
+
+      const igm = envData.NOMOS_IMAGE_GENERATION_MODEL ?? "gemini-3-pro-image-preview";
+      setImageGenerationModel(igm);
+      setInitialImageGenerationModel(igm);
+
+      // Video generation
+      const vg = envData.NOMOS_VIDEO_GENERATION === "true";
+      setVideoGeneration(vg);
+      setInitialVideoGeneration(vg);
+
+      const vgm = envData.NOMOS_VIDEO_GENERATION_MODEL ?? "veo-3.0-generate-preview";
+      setVideoGenerationModel(vgm);
+      setInitialVideoGenerationModel(vgm);
 
       // Identity from config
       const name = (configData["agent.name"] as string) ?? "";
@@ -165,13 +297,48 @@ export default function AssistantSettingsPage() {
       // Save env settings
       if (isEnvDirty) {
         const envUpdates: Record<string, string> = {};
+        if (apiProvider !== initialApiProvider) envUpdates.NOMOS_API_PROVIDER = apiProvider;
         if (apiKeyDirty) envUpdates.ANTHROPIC_API_KEY = apiKey;
+        if (openrouterApiKeyDirty) envUpdates.OPENROUTER_API_KEY = openrouterApiKey;
         if (model !== initialModel) envUpdates.NOMOS_MODEL = model;
-        if (permissionMode !== initialPermissionMode) envUpdates.NOMOS_PERMISSION_MODE = permissionMode;
+        if (permissionMode !== initialPermissionMode)
+          envUpdates.NOMOS_PERMISSION_MODE = permissionMode;
         if (daemonPort !== initialDaemonPort) envUpdates.DAEMON_PORT = daemonPort;
-        if (useVertex !== initialUseVertex) envUpdates.CLAUDE_CODE_USE_VERTEX = useVertex ? "1" : "";
+        // Set Vertex flag based on provider selection
+        if (apiProvider !== initialApiProvider) {
+          envUpdates.CLAUDE_CODE_USE_VERTEX = apiProvider === "vertex" ? "1" : "";
+        }
         if (gcpProject !== initialGcpProject) envUpdates.GOOGLE_CLOUD_PROJECT = gcpProject;
         if (gcpRegion !== initialGcpRegion) envUpdates.CLOUD_ML_REGION = gcpRegion;
+        if (smartRouting !== initialSmartRouting)
+          envUpdates.NOMOS_SMART_ROUTING = smartRouting ? "true" : "";
+        if (modelSimple !== initialModelSimple) envUpdates.NOMOS_MODEL_SIMPLE = modelSimple;
+        if (modelModerate !== initialModelModerate) envUpdates.NOMOS_MODEL_MODERATE = modelModerate;
+        if (modelComplex !== initialModelComplex) envUpdates.NOMOS_MODEL_COMPLEX = modelComplex;
+        // Set base URL based on provider
+        if (apiProvider === "openrouter") {
+          envUpdates.ANTHROPIC_BASE_URL = "https://openrouter.ai/api/v1";
+        } else if (apiProvider === "anthropic" || apiProvider === "vertex") {
+          envUpdates.ANTHROPIC_BASE_URL = "";
+        } else if (anthropicBaseUrl !== initialAnthropicBaseUrl) {
+          envUpdates.ANTHROPIC_BASE_URL = anthropicBaseUrl;
+        }
+        if (teamMode !== initialTeamMode) envUpdates.NOMOS_TEAM_MODE = teamMode ? "true" : "";
+        if (maxTeamWorkers !== initialMaxTeamWorkers)
+          envUpdates.NOMOS_MAX_TEAM_WORKERS = maxTeamWorkers;
+        if (adaptiveMemory !== initialAdaptiveMemory)
+          envUpdates.NOMOS_ADAPTIVE_MEMORY = adaptiveMemory ? "true" : "";
+        if (extractionModel !== initialExtractionModel)
+          envUpdates.NOMOS_EXTRACTION_MODEL = extractionModel;
+        if (imageGeneration !== initialImageGeneration)
+          envUpdates.NOMOS_IMAGE_GENERATION = imageGeneration ? "true" : "";
+        if (geminiApiKeyDirty) envUpdates.GEMINI_API_KEY = geminiApiKey;
+        if (imageGenerationModel !== initialImageGenerationModel)
+          envUpdates.NOMOS_IMAGE_GENERATION_MODEL = imageGenerationModel;
+        if (videoGeneration !== initialVideoGeneration)
+          envUpdates.NOMOS_VIDEO_GENERATION = videoGeneration ? "true" : "";
+        if (videoGenerationModel !== initialVideoGenerationModel)
+          envUpdates.NOMOS_VIDEO_GENERATION_MODEL = videoGenerationModel;
 
         promises.push(
           fetch("/api/env", {
@@ -214,9 +381,7 @@ export default function AssistantSettingsPage() {
         <h1 className="text-2xl font-bold text-text">Assistant</h1>
         <DirtyIndicator isDirty={isDirty} />
       </div>
-      <p className="text-sm text-overlay0 mb-8">
-        Personality, model selection, and configuration
-      </p>
+      <p className="text-sm text-overlay0 mb-8">Personality, model selection, and configuration</p>
 
       {/* Identity / Personality */}
       <section className="mb-8 rounded-xl border border-surface0 bg-mantle p-5">
@@ -263,104 +428,489 @@ export default function AssistantSettingsPage() {
         </div>
       </section>
 
-      {/* API Configuration */}
+      {/* API Provider */}
       <section className="mb-8 rounded-xl border border-surface0 bg-mantle p-5">
         <h2 className="text-sm font-semibold text-subtext1 uppercase tracking-wider mb-4">
-          Anthropic API
+          API Provider
         </h2>
-        <TokenInput
-          label="API Key"
-          value={apiKey}
-          onChange={(v) => { setApiKey(v); setApiKeyDirty(true); }}
-          placeholder={hasApiKey ? "Configured - enter new value to replace" : "sk-ant-..."}
-          helperText="Required for Anthropic direct API access. Not needed if using Vertex AI."
-        />
+        <div className="space-y-3">
+          {[
+            {
+              value: "anthropic",
+              label: "Anthropic",
+              description: "Direct API access via Anthropic",
+            },
+            {
+              value: "vertex",
+              label: "Google Cloud / Vertex AI",
+              description: "Route requests through Google Cloud Vertex AI",
+            },
+            {
+              value: "openrouter",
+              label: "OpenRouter",
+              description: "Access Anthropic models via OpenRouter",
+            },
+            {
+              value: "ollama",
+              label: "Ollama",
+              description: "Local models via Ollama + LiteLLM proxy",
+            },
+            {
+              value: "custom",
+              label: "Custom Endpoint",
+              description: "Any Anthropic-compatible API proxy",
+            },
+          ].map((p) => (
+            <label
+              key={p.value}
+              className={`flex items-center gap-3 rounded-lg border p-3 cursor-pointer transition-colors ${
+                apiProvider === p.value
+                  ? "border-mauve/50 bg-mauve/5"
+                  : "border-surface0 bg-base hover:border-surface1"
+              }`}
+            >
+              <input
+                type="radio"
+                name="apiProvider"
+                value={p.value}
+                checked={apiProvider === p.value}
+                onChange={(e) => setApiProvider(e.target.value)}
+                className="accent-mauve"
+              />
+              <div>
+                <span className="text-sm font-medium text-text">{p.label}</span>
+                <p className="text-xs text-overlay0">{p.description}</p>
+              </div>
+            </label>
+          ))}
+        </div>
+
+        {/* Anthropic-specific config */}
+        {apiProvider === "anthropic" && (
+          <div className="mt-4 pt-4 border-t border-surface0">
+            <TokenInput
+              label="API Key"
+              value={apiKey}
+              onChange={(v) => {
+                setApiKey(v);
+                setApiKeyDirty(true);
+              }}
+              placeholder={hasApiKey ? "Configured - enter new value to replace" : "sk-ant-..."}
+              helperText="Your Anthropic API key"
+            />
+          </div>
+        )}
+
+        {/* Vertex AI config */}
+        {apiProvider === "vertex" && (
+          <div className="mt-4 pt-4 border-t border-surface0 space-y-4">
+            <div className="flex items-center justify-end">
+              <a
+                href="https://console.cloud.google.com"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 text-xs text-blue hover:text-blue/80"
+              >
+                GCP Console <ExternalLink size={10} />
+              </a>
+            </div>
+            <div className="space-y-1.5">
+              <label className="block text-sm font-medium text-subtext1">GCP Project ID</label>
+              <input
+                type="text"
+                value={gcpProject}
+                onChange={(e) => setGcpProject(e.target.value)}
+                placeholder="my-project-12345"
+                className="w-full rounded-lg border border-surface1 bg-surface0 px-3 py-2 text-sm text-text placeholder:text-overlay0 focus:outline-none focus:border-mauve focus:ring-1 focus:ring-mauve/30 font-mono"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label className="block text-sm font-medium text-subtext1">Region</label>
+              <select
+                value={gcpRegion}
+                onChange={(e) => setGcpRegion(e.target.value)}
+                className="w-full rounded-lg border border-surface1 bg-surface0 px-3 py-2 text-sm text-text focus:outline-none focus:border-mauve focus:ring-1 focus:ring-mauve/30"
+              >
+                {VERTEX_REGIONS.map((r) => (
+                  <option key={r} value={r}>
+                    {r}
+                  </option>
+                ))}
+              </select>
+              <p className="text-xs text-overlay0">
+                Requires{" "}
+                <code className="text-xs bg-surface0 px-1 rounded">
+                  gcloud auth application-default login
+                </code>
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* OpenRouter config */}
+        {apiProvider === "openrouter" && (
+          <div className="mt-4 pt-4 border-t border-surface0 space-y-4">
+            <div className="flex items-center justify-end">
+              <a
+                href="https://openrouter.ai/keys"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 text-xs text-blue hover:text-blue/80"
+              >
+                Get API Key <ExternalLink size={10} />
+              </a>
+            </div>
+            <TokenInput
+              label="OpenRouter API Key"
+              value={openrouterApiKey}
+              onChange={(v) => {
+                setOpenrouterApiKey(v);
+                setOpenrouterApiKeyDirty(true);
+              }}
+              placeholder={
+                hasOpenrouterApiKey ? "Configured - enter new value to replace" : "sk-or-..."
+              }
+              helperText="Your OpenRouter API key. Anthropic models are accessed via OpenRouter's Anthropic-compatible endpoint."
+            />
+          </div>
+        )}
+
+        {/* Ollama config */}
+        {apiProvider === "ollama" && (
+          <div className="mt-4 pt-4 border-t border-surface0 space-y-4">
+            <div className="space-y-1.5">
+              <label className="block text-sm font-medium text-subtext1">LiteLLM Proxy URL</label>
+              <input
+                type="text"
+                value={anthropicBaseUrl}
+                onChange={(e) => setAnthropicBaseUrl(e.target.value)}
+                placeholder="http://localhost:4000"
+                className="w-full rounded-lg border border-surface1 bg-surface0 px-3 py-2 text-sm text-text placeholder:text-overlay0 focus:outline-none focus:border-mauve focus:ring-1 focus:ring-mauve/30 font-mono"
+              />
+              <p className="text-xs text-overlay0">
+                Ollama requires a LiteLLM proxy for Anthropic API compatibility. Start with:{" "}
+                <code className="text-xs bg-surface0 px-1 rounded">
+                  litellm --model ollama/llama3 --port 4000
+                </code>
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* Custom endpoint config */}
+        {apiProvider === "custom" && (
+          <div className="mt-4 pt-4 border-t border-surface0 space-y-4">
+            <TokenInput
+              label="API Key"
+              value={apiKey}
+              onChange={(v) => {
+                setApiKey(v);
+                setApiKeyDirty(true);
+              }}
+              placeholder={hasApiKey ? "Configured - enter new value to replace" : "API key..."}
+              helperText="API key for your custom endpoint (sent as the Anthropic API key)"
+            />
+            <div className="space-y-1.5">
+              <label className="block text-sm font-medium text-subtext1">Base URL</label>
+              <input
+                type="text"
+                value={anthropicBaseUrl}
+                onChange={(e) => setAnthropicBaseUrl(e.target.value)}
+                placeholder="https://your-proxy.example.com"
+                className="w-full rounded-lg border border-surface1 bg-surface0 px-3 py-2 text-sm text-text placeholder:text-overlay0 focus:outline-none focus:border-mauve focus:ring-1 focus:ring-mauve/30 font-mono"
+              />
+              <p className="text-xs text-overlay0">
+                Any Anthropic-compatible API endpoint (AWS Bedrock, Azure, corporate gateway, etc.)
+              </p>
+            </div>
+          </div>
+        )}
       </section>
 
-      {/* Google Cloud / Vertex AI */}
+      {/* Model Configuration */}
       <section className="mb-8 rounded-xl border border-surface0 bg-mantle p-5">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-sm font-semibold text-subtext1 uppercase tracking-wider">
-            Google Cloud / Vertex AI
-          </h2>
-          <a
-            href="https://console.cloud.google.com"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center gap-1 text-xs text-blue hover:text-blue/80"
-          >
-            GCP Console <ExternalLink size={10} />
-          </a>
-        </div>
+        <h2 className="text-sm font-semibold text-subtext1 uppercase tracking-wider mb-4">
+          Model Configuration
+        </h2>
         <div className="space-y-4">
-          <label className="flex items-center gap-3 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={useVertex}
-              onChange={(e) => setUseVertex(e.target.checked)}
-              className="accent-mauve w-4 h-4 rounded"
-            />
-            <div>
-              <span className="text-sm font-medium text-text">Use Vertex AI</span>
-              <p className="text-xs text-overlay0">Route requests through Google Cloud Vertex AI instead of the Anthropic API</p>
-            </div>
-          </label>
-          {useVertex && (
-            <>
-              <div className="space-y-1.5">
-                <label className="block text-sm font-medium text-subtext1">
-                  GCP Project ID
-                </label>
-                <input
-                  type="text"
-                  value={gcpProject}
-                  onChange={(e) => setGcpProject(e.target.value)}
-                  placeholder="my-project-12345"
-                  className="w-full rounded-lg border border-surface1 bg-surface0 px-3 py-2 text-sm text-text placeholder:text-overlay0 focus:outline-none focus:border-mauve focus:ring-1 focus:ring-mauve/30 font-mono"
-                />
-              </div>
-              <div className="space-y-1.5">
-                <label className="block text-sm font-medium text-subtext1">
-                  Region
-                </label>
-                <select
-                  value={gcpRegion}
-                  onChange={(e) => setGcpRegion(e.target.value)}
-                  className="w-full rounded-lg border border-surface1 bg-surface0 px-3 py-2 text-sm text-text focus:outline-none focus:border-mauve focus:ring-1 focus:ring-mauve/30"
-                >
-                  {VERTEX_REGIONS.map((r) => (
-                    <option key={r} value={r}>{r}</option>
-                  ))}
-                </select>
+          <div className="space-y-1.5">
+            <label className="block text-sm font-medium text-subtext1">Default Model</label>
+            <select
+              value={model}
+              onChange={(e) => setModel(e.target.value)}
+              className="w-full rounded-lg border border-surface1 bg-surface0 px-3 py-2 text-sm text-text focus:outline-none focus:border-mauve focus:ring-1 focus:ring-mauve/30"
+            >
+              {MODELS.map((m) => (
+                <option key={m.value} value={m.value}>
+                  {m.label}
+                </option>
+              ))}
+            </select>
+            <p className="text-xs text-overlay0">
+              Used for all queries unless smart routing is enabled
+            </p>
+          </div>
+
+          {/* Smart Model Routing */}
+          <div className="pt-2 border-t border-surface0">
+            <label className="flex items-center gap-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={smartRouting}
+                onChange={(e) => setSmartRouting(e.target.checked)}
+                className="accent-mauve w-4 h-4 rounded"
+              />
+              <div>
+                <span className="text-sm font-medium text-text">Smart Model Routing</span>
                 <p className="text-xs text-overlay0">
-                  Requires <code className="text-xs bg-surface0 px-1 rounded">gcloud auth application-default login</code> for authentication
+                  Automatically route queries to different models based on complexity for cost
+                  optimization
                 </p>
               </div>
-            </>
+            </label>
+          </div>
+
+          {smartRouting && (
+            <div className="space-y-3 pl-7 border-l-2 border-surface1 ml-2">
+              <div className="space-y-1.5">
+                <label className="block text-sm font-medium text-subtext1">Simple Queries</label>
+                <select
+                  value={modelSimple}
+                  onChange={(e) => setModelSimple(e.target.value)}
+                  className="w-full rounded-lg border border-surface1 bg-surface0 px-3 py-2 text-sm text-text focus:outline-none focus:border-mauve focus:ring-1 focus:ring-mauve/30"
+                >
+                  {MODELS.map((m) => (
+                    <option key={m.value} value={m.value}>
+                      {m.label}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-xs text-overlay0">Greetings, short questions, simple lookups</p>
+              </div>
+              <div className="space-y-1.5">
+                <label className="block text-sm font-medium text-subtext1">Moderate Queries</label>
+                <select
+                  value={modelModerate}
+                  onChange={(e) => setModelModerate(e.target.value)}
+                  className="w-full rounded-lg border border-surface1 bg-surface0 px-3 py-2 text-sm text-text focus:outline-none focus:border-mauve focus:ring-1 focus:ring-mauve/30"
+                >
+                  {MODELS.map((m) => (
+                    <option key={m.value} value={m.value}>
+                      {m.label}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-xs text-overlay0">General tasks, summaries, standard work</p>
+              </div>
+              <div className="space-y-1.5">
+                <label className="block text-sm font-medium text-subtext1">Complex Queries</label>
+                <select
+                  value={modelComplex}
+                  onChange={(e) => setModelComplex(e.target.value)}
+                  className="w-full rounded-lg border border-surface1 bg-surface0 px-3 py-2 text-sm text-text focus:outline-none focus:border-mauve focus:ring-1 focus:ring-mauve/30"
+                >
+                  {MODELS.map((m) => (
+                    <option key={m.value} value={m.value}>
+                      {m.label}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-xs text-overlay0">Coding, reasoning, multi-step analysis</p>
+              </div>
+            </div>
           )}
         </div>
       </section>
 
-      {/* Model Selection */}
+      {/* Multi-Agent Teams */}
       <section className="mb-8 rounded-xl border border-surface0 bg-mantle p-5">
         <h2 className="text-sm font-semibold text-subtext1 uppercase tracking-wider mb-4">
-          Model
+          Multi-Agent Teams
         </h2>
-        <div className="space-y-1.5">
-          <label className="block text-sm font-medium text-subtext1">
-            Default Model
+        <div className="space-y-4">
+          <label className="flex items-center gap-3 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={teamMode}
+              onChange={(e) => setTeamMode(e.target.checked)}
+              className="accent-mauve w-4 h-4 rounded"
+            />
+            <div>
+              <span className="text-sm font-medium text-text">Enable Team Mode</span>
+              <p className="text-xs text-overlay0">
+                Decompose complex tasks across parallel worker agents. Trigger with{" "}
+                <code className="text-xs bg-surface0 px-1 rounded">/team</code> prefix.
+              </p>
+            </div>
           </label>
-          <select
-            value={model}
-            onChange={(e) => setModel(e.target.value)}
-            className="w-full rounded-lg border border-surface1 bg-surface0 px-3 py-2 text-sm text-text focus:outline-none focus:border-mauve focus:ring-1 focus:ring-mauve/30"
-          >
-            {MODELS.map((m) => (
-              <option key={m.value} value={m.value}>
-                {m.label}
-              </option>
-            ))}
-          </select>
+
+          {teamMode && (
+            <div className="space-y-1.5 pl-7 border-l-2 border-surface1 ml-2">
+              <label className="block text-sm font-medium text-subtext1">
+                Max Parallel Workers
+              </label>
+              <input
+                type="number"
+                min="1"
+                max="10"
+                value={maxTeamWorkers}
+                onChange={(e) => setMaxTeamWorkers(e.target.value)}
+                className="w-full max-w-xs rounded-lg border border-surface1 bg-surface0 px-3 py-2 text-sm text-text placeholder:text-overlay0 focus:outline-none focus:border-mauve focus:ring-1 focus:ring-mauve/30 font-mono"
+              />
+              <p className="text-xs text-overlay0">
+                Number of worker agents that can run simultaneously (default: 3)
+              </p>
+            </div>
+          )}
+        </div>
+      </section>
+
+      {/* Adaptive Memory */}
+      <section className="mb-8 rounded-xl border border-surface0 bg-mantle p-5">
+        <h2 className="text-sm font-semibold text-subtext1 uppercase tracking-wider mb-4">
+          Adaptive Memory
+        </h2>
+        <div className="space-y-4">
+          <label className="flex items-center gap-3 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={adaptiveMemory}
+              onChange={(e) => setAdaptiveMemory(e.target.checked)}
+              className="accent-mauve w-4 h-4 rounded"
+            />
+            <div>
+              <span className="text-sm font-medium text-text">Enable Adaptive Memory</span>
+              <p className="text-xs text-overlay0">
+                Extract facts, preferences, and corrections from conversations to build a user model
+                over time.
+              </p>
+            </div>
+          </label>
+
+          {adaptiveMemory && (
+            <div className="space-y-1.5 pl-7 border-l-2 border-surface1 ml-2">
+              <label className="block text-sm font-medium text-subtext1">Extraction Model</label>
+              <select
+                value={extractionModel}
+                onChange={(e) => setExtractionModel(e.target.value)}
+                className="w-full rounded-lg border border-surface1 bg-surface0 px-3 py-2 text-sm text-text focus:outline-none focus:border-mauve focus:ring-1 focus:ring-mauve/30"
+              >
+                {MODELS.map((m) => (
+                  <option key={m.value} value={m.value}>
+                    {m.label}
+                  </option>
+                ))}
+              </select>
+              <p className="text-xs text-overlay0">
+                Model used for knowledge extraction. Haiku recommended for cost efficiency.
+              </p>
+            </div>
+          )}
+        </div>
+      </section>
+
+      {/* Image Generation */}
+      <section className="mb-8 rounded-xl border border-surface0 bg-mantle p-5">
+        <h2 className="text-sm font-semibold text-subtext1 uppercase tracking-wider mb-4">
+          Image Generation
+        </h2>
+        <div className="space-y-4">
+          <label className="flex items-center gap-3 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={imageGeneration}
+              onChange={(e) => setImageGeneration(e.target.checked)}
+              className="accent-mauve w-4 h-4 rounded"
+            />
+            <div>
+              <span className="text-sm font-medium text-text">Enable Image Generation</span>
+              <p className="text-xs text-overlay0">
+                Generate images from text prompts using Google's Gemini model via the{" "}
+                <code className="text-xs bg-surface0 px-1 rounded">generate_image</code> tool.
+              </p>
+            </div>
+          </label>
+
+          {imageGeneration && (
+            <div className="space-y-4 pl-7 border-l-2 border-surface1 ml-2">
+              <TokenInput
+                label="Gemini API Key"
+                value={geminiApiKey}
+                onChange={(v) => {
+                  setGeminiApiKey(v);
+                  setGeminiApiKeyDirty(true);
+                }}
+                placeholder={
+                  hasGeminiApiKey
+                    ? "Configured - enter new value to replace"
+                    : "Your Gemini API key"
+                }
+                helperText="Get a free API key from https://aistudio.google.com/apikey"
+              />
+              <div className="space-y-1.5">
+                <label className="block text-sm font-medium text-subtext1">Model</label>
+                <input
+                  type="text"
+                  value={imageGenerationModel}
+                  onChange={(e) => setImageGenerationModel(e.target.value)}
+                  placeholder="gemini-3-pro-image-preview"
+                  className="w-full rounded-lg border border-surface1 bg-surface0 px-3 py-2 text-sm text-text placeholder:text-overlay0 focus:outline-none focus:border-mauve focus:ring-1 focus:ring-mauve/30 font-mono"
+                />
+                <p className="text-xs text-overlay0">
+                  Gemini model with image generation capabilities
+                </p>
+              </div>
+            </div>
+          )}
+        </div>
+      </section>
+
+      {/* Video Generation */}
+      <section className="mb-8 rounded-xl border border-surface0 bg-mantle p-5">
+        <h2 className="text-sm font-semibold text-subtext1 uppercase tracking-wider mb-4">
+          Video Generation
+        </h2>
+        <div className="space-y-4">
+          <label className="flex items-center gap-3 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={videoGeneration}
+              onChange={(e) => setVideoGeneration(e.target.checked)}
+              className="accent-mauve w-4 h-4 rounded"
+            />
+            <div>
+              <span className="text-sm font-medium text-text">Enable Video Generation</span>
+              <p className="text-xs text-overlay0">
+                Generate videos from text prompts using Google's Veo model via the{" "}
+                <code className="text-xs bg-surface0 px-1 rounded">generate_video</code> tool.
+                Requires a Gemini API key (same as image generation).
+              </p>
+            </div>
+          </label>
+
+          {videoGeneration && (
+            <div className="space-y-4 pl-7 border-l-2 border-surface1 ml-2">
+              {!hasGeminiApiKey && !imageGeneration && (
+                <p className="text-xs text-peach">
+                  A Gemini API key is required. Configure it in the Image Generation section above
+                  or set GEMINI_API_KEY in your environment.
+                </p>
+              )}
+              <div className="space-y-1.5">
+                <label className="block text-sm font-medium text-subtext1">Model</label>
+                <input
+                  type="text"
+                  value={videoGenerationModel}
+                  onChange={(e) => setVideoGenerationModel(e.target.value)}
+                  placeholder="veo-3.0-generate-preview"
+                  className="w-full rounded-lg border border-surface1 bg-surface0 px-3 py-2 text-sm text-text placeholder:text-overlay0 focus:outline-none focus:border-mauve focus:ring-1 focus:ring-mauve/30 font-mono"
+                />
+                <p className="text-xs text-overlay0">
+                  Veo model for video generation. Videos may take 1-3 minutes to generate.
+                </p>
+              </div>
+            </div>
+          )}
         </div>
       </section>
 
@@ -401,9 +951,7 @@ export default function AssistantSettingsPage() {
                       className="accent-mauve"
                     />
                     <div>
-                      <span className="text-sm font-medium text-text">
-                        {pm.label}
-                      </span>
+                      <span className="text-sm font-medium text-text">{pm.label}</span>
                       <p className="text-xs text-overlay0">{pm.description}</p>
                     </div>
                   </label>
@@ -417,9 +965,7 @@ export default function AssistantSettingsPage() {
                 Daemon
               </h2>
               <div className="space-y-1.5">
-                <label className="block text-sm font-medium text-subtext1">
-                  WebSocket Port
-                </label>
+                <label className="block text-sm font-medium text-subtext1">WebSocket Port</label>
                 <input
                   type="number"
                   value={daemonPort}
@@ -427,7 +973,9 @@ export default function AssistantSettingsPage() {
                   placeholder="8765"
                   className="w-full max-w-xs rounded-lg border border-surface1 bg-surface0 px-3 py-2 text-sm text-text placeholder:text-overlay0 focus:outline-none focus:border-mauve focus:ring-1 focus:ring-mauve/30 font-mono"
                 />
-                <p className="text-xs text-overlay0">Port for daemon WebSocket server (default: 8765)</p>
+                <p className="text-xs text-overlay0">
+                  Port for daemon WebSocket server (default: 8765)
+                </p>
               </div>
             </section>
           </div>

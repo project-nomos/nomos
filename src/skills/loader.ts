@@ -5,7 +5,6 @@ import { parseFrontmatter } from "./frontmatter.ts";
 import type { Skill } from "./types.ts";
 
 const MAX_SKILL_FILE_BYTES = 256_000;
-const MAX_SKILLS_PROMPT_CHARS = 30_000;
 
 /**
  * Load all skills from multiple source directories.

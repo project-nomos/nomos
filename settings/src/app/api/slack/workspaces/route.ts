@@ -51,7 +51,7 @@ export async function POST(request: Request) {
   if (!token || !token.startsWith("xoxp-")) {
     return NextResponse.json(
       { error: "Token must be a Slack user token starting with xoxp-" },
-      { status: 400 }
+      { status: 400 },
     );
   }
 
@@ -63,10 +63,7 @@ export async function POST(request: Request) {
     authResult = await client.auth.test();
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    return NextResponse.json(
-      { error: `auth.test failed: ${message}` },
-      { status: 400 }
-    );
+    return NextResponse.json({ error: `auth.test failed: ${message}` }, { status: 400 });
   }
 
   const teamId = authResult.team_id;
@@ -76,7 +73,7 @@ export async function POST(request: Request) {
   if (!teamId || !userId) {
     return NextResponse.json(
       { error: "Could not resolve team or user from token" },
-      { status: 400 }
+      { status: 400 },
     );
   }
 
@@ -109,10 +106,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: true, workspace });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    return NextResponse.json(
-      { error: `Database error: ${message}` },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: `Database error: ${message}` }, { status: 500 });
   }
 }
 
@@ -124,10 +118,7 @@ export async function DELETE(request: Request) {
   const teamId = searchParams.get("teamId");
 
   if (!teamId) {
-    return NextResponse.json(
-      { error: "teamId query parameter is required" },
-      { status: 400 }
-    );
+    return NextResponse.json({ error: "teamId query parameter is required" }, { status: 400 });
   }
 
   try {
@@ -155,9 +146,6 @@ export async function DELETE(request: Request) {
     return NextResponse.json({ ok: true });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    return NextResponse.json(
-      { error: `Database error: ${message}` },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: `Database error: ${message}` }, { status: 500 });
   }
 }

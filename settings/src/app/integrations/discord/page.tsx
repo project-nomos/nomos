@@ -28,10 +28,7 @@ export default function DiscordSettingsPage() {
 
   const loadData = useCallback(async () => {
     try {
-      const [statusRes, envRes] = await Promise.all([
-        fetch("/api/status"),
-        fetch("/api/env"),
-      ]);
+      const [statusRes, envRes] = await Promise.all([fetch("/api/status"), fetch("/api/env")]);
       const statusData = await statusRes.json();
       const envData = await envRes.json();
 
@@ -106,9 +103,7 @@ export default function DiscordSettingsPage() {
         <h1 className="text-2xl font-bold text-text">Discord</h1>
         <DirtyIndicator isDirty={isDirty} />
       </div>
-      <p className="text-sm text-overlay0 mb-8">
-        Configure Discord bot integration
-      </p>
+      <p className="text-sm text-overlay0 mb-8">Configure Discord bot integration</p>
 
       {/* Connection Status */}
       <section className="mb-8 rounded-xl border border-surface0 bg-mantle p-5">
@@ -132,8 +127,15 @@ export default function DiscordSettingsPage() {
         <TokenInput
           label="Discord Bot Token"
           value={botToken}
-          onChange={(v) => { setBotToken(v); setBotTokenDirty(true); }}
-          placeholder={hasBotToken ? "Configured - enter new value to replace" : "Bot token from Discord Developer Portal"}
+          onChange={(v) => {
+            setBotToken(v);
+            setBotTokenDirty(true);
+          }}
+          placeholder={
+            hasBotToken
+              ? "Configured - enter new value to replace"
+              : "Bot token from Discord Developer Portal"
+          }
           helperText="Create a bot at discord.com/developers/applications"
         />
       </section>
@@ -145,9 +147,7 @@ export default function DiscordSettingsPage() {
         </h2>
         <div className="space-y-4">
           <div className="space-y-1.5">
-            <label className="block text-sm font-medium text-subtext1">
-              Allowed Channels
-            </label>
+            <label className="block text-sm font-medium text-subtext1">Allowed Channels</label>
             <input
               type="text"
               value={allowedChannels}
@@ -155,7 +155,9 @@ export default function DiscordSettingsPage() {
               placeholder="channel-id-1, channel-id-2"
               className="w-full rounded-lg border border-surface1 bg-surface0 px-3 py-2 text-sm text-text placeholder:text-overlay0 focus:outline-none focus:border-mauve focus:ring-1 focus:ring-mauve/30 font-mono"
             />
-            <p className="text-xs text-overlay0">Comma-separated channel IDs. Leave empty to allow all.</p>
+            <p className="text-xs text-overlay0">
+              Comma-separated channel IDs. Leave empty to allow all.
+            </p>
           </div>
           <div className="space-y-1.5">
             <label className="block text-sm font-medium text-subtext1">
@@ -168,7 +170,9 @@ export default function DiscordSettingsPage() {
               placeholder="guild-id-1, guild-id-2"
               className="w-full rounded-lg border border-surface1 bg-surface0 px-3 py-2 text-sm text-text placeholder:text-overlay0 focus:outline-none focus:border-mauve focus:ring-1 focus:ring-mauve/30 font-mono"
             />
-            <p className="text-xs text-overlay0">Comma-separated guild IDs. Leave empty to allow all.</p>
+            <p className="text-xs text-overlay0">
+              Comma-separated guild IDs. Leave empty to allow all.
+            </p>
           </div>
         </div>
       </section>

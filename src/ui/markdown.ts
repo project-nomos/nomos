@@ -31,7 +31,8 @@ marked.use(
     // Options
     reflowText: false,
     showSectionPrefix: false,
-    width: Math.min(process.stdout.columns || 80, 120),
+    // Account for the 2-char prefix (▸ ) in NomosMessage layout
+    width: Math.min((process.stdout.columns || 80) - 2, 118),
     tab: 2,
     emoji: false,
     unescape: true,

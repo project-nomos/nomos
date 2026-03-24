@@ -56,7 +56,7 @@ const DIMENSIONS: Dimension[] = [
   },
   {
     name: "code",
-    weight: 0.20,
+    weight: 0.2,
     keywords: [
       "function",
       "class",

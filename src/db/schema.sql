@@ -173,6 +173,29 @@ CREATE TABLE IF NOT EXISTS agent_permissions (
 CREATE INDEX IF NOT EXISTS idx_permissions_lookup
   ON agent_permissions(resource_type, action);
 
+-- Migration: add metadata JSONB column to memory_chunks for categorization (idempotent)
+DO $$ BEGIN
+  ALTER TABLE memory_chunks ADD COLUMN IF NOT EXISTS metadata JSONB NOT NULL DEFAULT '{}';
+EXCEPTION WHEN OTHERS THEN NULL;
+END $$;
+
+CREATE INDEX IF NOT EXISTS idx_memory_metadata ON memory_chunks USING gin(metadata);
+
+-- User model: accumulated preferences and facts learned from conversations
+CREATE TABLE IF NOT EXISTS user_model (
+  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  category    TEXT NOT NULL,
+  key         TEXT NOT NULL,
+  value       JSONB NOT NULL,
+  source_ids  TEXT[] NOT NULL DEFAULT '{}',
+  confidence  FLOAT NOT NULL DEFAULT 0.5,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (category, key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_model_category ON user_model(category);
+
 -- Migration: copy slack_user_tokens → integrations (idempotent)
 DO $$ BEGIN
   IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'slack_user_tokens') THEN

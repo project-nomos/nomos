@@ -25,9 +25,9 @@ export default function SlackSettingsPage() {
   const [connecting, setConnecting] = useState(false);
   const [disconnecting, setDisconnecting] = useState(false);
   const [disconnectTarget, setDisconnectTarget] = useState<string | null>(null);
-  const [testResults, setTestResults] = useState<
-    Record<string, { ok: boolean; message: string }>
-  >({});
+  const [testResults, setTestResults] = useState<Record<string, { ok: boolean; message: string }>>(
+    {},
+  );
 
   const isDirty = appTokenDirty || botTokenDirty;
   useUnsavedChanges(isDirty);
@@ -176,9 +176,7 @@ export default function SlackSettingsPage() {
         <h1 className="text-2xl font-bold text-text">Slack</h1>
         <DirtyIndicator isDirty={isDirty} />
       </div>
-      <p className="text-sm text-overlay0 mb-8">
-        Manage Slack workspace connections and tokens
-      </p>
+      <p className="text-sm text-overlay0 mb-8">Manage Slack workspace connections and tokens</p>
 
       {/* Connection Status */}
       <section className="mb-8 rounded-xl border border-surface0 bg-mantle p-5">
@@ -218,9 +216,7 @@ export default function SlackSettingsPage() {
                 className="flex items-center justify-between rounded-lg border border-surface0 bg-base p-3"
               >
                 <div>
-                  <p className="text-sm font-medium text-text">
-                    {ws.team_name}
-                  </p>
+                  <p className="text-sm font-medium text-text">{ws.team_name}</p>
                   <p className="text-xs text-overlay0">
                     {ws.team_id} · User: {ws.user_id} · Connected:{" "}
                     {new Date(ws.created_at).toLocaleDateString()}
@@ -228,9 +224,7 @@ export default function SlackSettingsPage() {
                   {testResults[ws.team_id] && (
                     <p
                       className={`text-xs mt-1 ${
-                        testResults[ws.team_id].ok
-                          ? "text-green"
-                          : "text-red"
+                        testResults[ws.team_id].ok ? "text-green" : "text-red"
                       }`}
                     >
                       {testResults[ws.team_id].message}
@@ -277,11 +271,7 @@ export default function SlackSettingsPage() {
             disabled={!newToken.trim() || connecting}
             className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-mauve text-crust text-sm font-medium hover:bg-mauve/90 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
           >
-            {connecting ? (
-              <RefreshCw size={14} className="animate-spin" />
-            ) : (
-              <Plus size={14} />
-            )}
+            {connecting ? <RefreshCw size={14} className="animate-spin" /> : <Plus size={14} />}
             Connect
           </button>
         </div>
@@ -296,14 +286,20 @@ export default function SlackSettingsPage() {
           <TokenInput
             label="App Token"
             value={appToken}
-            onChange={(v) => { setAppToken(v); setAppTokenDirty(true); }}
+            onChange={(v) => {
+              setAppToken(v);
+              setAppTokenDirty(true);
+            }}
             placeholder={hasAppToken ? "Configured - enter new value to replace" : "xapp-..."}
             helperText="Required for Socket Mode. Generate at api.slack.com/apps → App-Level Tokens"
           />
           <TokenInput
             label="Bot Token"
             value={botToken}
-            onChange={(v) => { setBotToken(v); setBotTokenDirty(true); }}
+            onChange={(v) => {
+              setBotToken(v);
+              setBotTokenDirty(true);
+            }}
             placeholder={hasBotToken ? "Configured - enter new value to replace" : "xoxb-..."}
             helperText="Optional. Used for bot mode"
           />

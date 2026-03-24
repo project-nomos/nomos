@@ -4,10 +4,10 @@ Slack User Mode lets Nomos act **as you** in Slack. Instead of replying as a bot
 
 There are two ways to run user mode:
 
-| Mode | Command | Approval | Best for |
-| --- | --- | --- | --- |
+| Mode             | Command              | Approval                                | Best for                     |
+| ---------------- | -------------------- | --------------------------------------- | ---------------------------- |
 | **CLI listener** | `nomos slack listen` | Sends directly (you're at the terminal) | Interactive use, quick setup |
-| **Daemon** | `nomos daemon start` | Draft → approve → send | Background / unattended |
+| **Daemon**       | `nomos daemon start` | Draft → approve → send                  | Background / unattended      |
 
 Both use Socket Mode and your `xoxp-` user token.
 

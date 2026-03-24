@@ -6,9 +6,9 @@ interface SystemMessageProps {
   content: string;
 }
 
-export function SystemMessage({ content }: SystemMessageProps): React.ReactElement {
+function SystemMessageInner({ content }: SystemMessageProps): React.ReactElement {
   return (
-    <Box>
+    <Box paddingLeft={3}>
       <Text dimColor>
         {theme.symbol.system + " "}
         {content}
@@ -16,3 +16,5 @@ export function SystemMessage({ content }: SystemMessageProps): React.ReactEleme
     </Box>
   );
 }
+
+export const SystemMessage = React.memo(SystemMessageInner);

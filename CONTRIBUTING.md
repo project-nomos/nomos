@@ -85,6 +85,7 @@ Tests are colocated with source as `*.test.ts`.
 ### Pre-commit Hooks
 
 Husky + lint-staged runs on `git commit`:
+
 - `oxfmt --write` on staged `.ts`/`.tsx` files
 - `oxlint` on staged `.ts`/`.tsx` files
 
@@ -92,10 +93,10 @@ Husky + lint-staged runs on `git commit`:
 
 ### Two Applications
 
-| Directory | What | Stack |
-| --- | --- | --- |
-| `/` (root) | CLI + daemon | TypeScript, Commander.js, Ink (React for CLI), Claude Agent SDK, gRPC |
-| `settings/` | Settings web UI | Next.js 15, React 19, Tailwind CSS 4, lucide-react |
+| Directory   | What            | Stack                                                                 |
+| ----------- | --------------- | --------------------------------------------------------------------- |
+| `/` (root)  | CLI + daemon    | TypeScript, Commander.js, Ink (React for CLI), Claude Agent SDK, gRPC |
+| `settings/` | Settings web UI | Next.js 15, React 19, Tailwind CSS 4, lucide-react                    |
 
 Each has its own `package.json`, `tsconfig.json`, and build pipeline. The root `pnpm typecheck` covers only the main app.
 
@@ -191,6 +192,7 @@ Configuration loads with this precedence: **Database > env vars > defaults**.
 ```
 
 Key files:
+
 - `src/config/env.ts` -- `loadEnvConfig()` (sync, env-only) and `loadEnvConfigAsync()` (DB + env merge)
 - `src/db/app-config.ts` -- CRUD for DB-backed config (maps `app.model` -> `NomosConfig.model`, etc.)
 - `src/db/integrations.ts` -- Encrypted integration secrets
@@ -222,6 +224,7 @@ Gateway (orchestrator)
 Defined in `proto/nomos.proto`. Uses `@grpc/grpc-js` + `@grpc/proto-loader` (dynamic loading, no codegen step).
 
 Key RPCs:
+
 - `Chat` -- server-side streaming: send `ChatRequest`, receive stream of `AgentEvent`
 - `Command` -- unary: execute slash commands
 - `GetStatus` -- unary: health check
@@ -285,6 +288,7 @@ Instructions for the agent...
 ```
 
 Loaded from three tiers (highest priority first):
+
 1. `./skills/` -- project-local
 2. `~/.nomos/skills/` -- personal
 3. `skills/` -- bundled
@@ -292,16 +296,19 @@ Loaded from three tiers (highest priority first):
 ## Coding Conventions
 
 ### TypeScript
+
 - Strict mode, ESM-only (`"type": "module"`)
 - `.ts` extension imports: `import { foo } from "./bar.ts"`
 - Avoid `any`; use `unknown` with type guards
 - Keep files under ~500 lines
 
 ### Formatting & Linting
+
 - **Oxfmt** (not Prettier) -- `pnpm format`
 - **Oxlint** (not ESLint) -- `pnpm lint:fix`
 
 ### UI
+
 - **Ink** (React) for terminal components
 - **Next.js 15** + **React 19** for settings web UI
 - **Catppuccin Mocha** palette everywhere
@@ -309,12 +316,14 @@ Loaded from three tiers (highest priority first):
 - **chalk** for colors in non-Ink code
 
 ### Naming
+
 - Files: `kebab-case.ts`
 - Classes: `PascalCase`
 - Functions/variables: `camelCase`
 - Config keys in DB: `dot.separated` (e.g., `agent.name`, `app.model`)
 
 ### Database
+
 - Schema in `src/db/schema.sql` -- idempotent (`CREATE TABLE IF NOT EXISTS`)
 - Run `pnpm dev -- db migrate`
 - Use `postgres` driver directly (no ORM)
