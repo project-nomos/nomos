@@ -43,7 +43,7 @@ export function createMemoryMcpServer(): McpSdkServerConfigWithInstance {
           try {
             const embedding = await generateEmbedding(args.query);
             results = await hybridSearch(args.query, embedding, args.limit ?? 5, args.category);
-          } catch (embeddingError) {
+          } catch {
             // Fall back to text-only search if embedding generation fails
             console.warn(
               "\x1b[2mEmbedding generation failed, falling back to text-only search\x1b[0m",

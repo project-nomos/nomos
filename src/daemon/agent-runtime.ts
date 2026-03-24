@@ -267,7 +267,7 @@ export class AgentRuntime {
     const sessionKey = `${message.platform}:${message.channelId}`;
 
     // Ensure DB session exists
-    const dbSession = await createDbSession({
+    await createDbSession({
       sessionKey,
       model: this.config.model,
     });

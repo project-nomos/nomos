@@ -41,9 +41,6 @@ export async function loadDiscordTokenFromDb(): Promise<void> {
   }
 }
 
-// Shorthand for Discord API routes
-const API = "https://discord.com/api/v10";
-
 /** Format a Discord message for display. */
 function formatMessage(msg: Record<string, unknown>): string {
   const author = msg.author as Record<string, unknown> | undefined;

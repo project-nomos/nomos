@@ -1,7 +1,7 @@
 import type postgres from "postgres";
 import { CronStore } from "./store.ts";
 import { CronScheduler, type CronCallback } from "./scheduler.ts";
-import type { CronJob, CronJobUpdate, CronJobFilter } from "./types.ts";
+import type { CronJob } from "./types.ts";
 
 export * from "./types.ts";
 export * from "./store.ts";
