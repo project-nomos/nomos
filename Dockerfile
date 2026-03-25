@@ -10,7 +10,7 @@ RUN pnpm install --frozen-lockfile --ignore-scripts
 
 # Copy source and build
 COPY . .
-RUN pnpm build
+RUN bash scripts/fetch-anthropic-skills.sh && pnpm build
 
 # ── Production image ─────────────────────────────────────────────
 FROM node:22-slim AS production

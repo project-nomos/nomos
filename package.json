@@ -36,7 +36,7 @@
     "registry": "https://npm.pkg.github.com"
   },
   "scripts": {
-    "postinstall": "playwright install chromium && (which uvx >/dev/null 2>&1 || (echo 'Installing uv (Python package runner)...' && curl -LsSf https://astral.sh/uv/install.sh | sh))",
+    "postinstall": "bash scripts/fetch-anthropic-skills.sh && playwright install chromium && (which uvx >/dev/null 2>&1 || (echo 'Installing uv (Python package runner)...' && curl -LsSf https://astral.sh/uv/install.sh | sh))",
     "build": "tsdown",
     "dev": "tsx src/index.ts",
     "start": "node dist/index.js",

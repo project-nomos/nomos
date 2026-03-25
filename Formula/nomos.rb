@@ -19,7 +19,8 @@ class Nomos < Formula
     # Install production dependencies only, skip postinstall (playwright/uvx)
     system "pnpm", "install", "--prod", "--ignore-scripts"
 
-    # Install build tooling and build
+    # Fetch Anthropic skills, install build tooling, and build
+    system "bash", "scripts/fetch-anthropic-skills.sh"
     system "pnpm", "install", "--ignore-scripts"
     system "pnpm", "build"
 

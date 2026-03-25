@@ -42,3 +42,21 @@ settings/node_modules/
 todo.md
 
 MyNomos.ai-bkp
+
+# Anthropic skills (fetched at install time from github.com/anthropics/skills)
+skills/algorithmic-art/
+skills/brand-guidelines/
+skills/canvas-design/
+skills/docx/
+skills/frontend-design/
+skills/internal-comms/
+skills/mcp-builder/
+skills/pdf/
+skills/pptx/
+skills/skill-creator/
+skills/slack-gif-creator/
+skills/theme-factory/
+skills/web-artifacts-builder/
+skills/webapp-testing/
+skills/xlsx/
+skills/.anthropic-skills-fetched
