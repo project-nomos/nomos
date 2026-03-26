@@ -19,9 +19,17 @@
 <p align="center">
   <a href="https://github.com/project-nomos/nomos/releases"><img src="https://img.shields.io/github/v/release/project-nomos/nomos" alt="Release" /></a>
   <a href="https://github.com/project-nomos/nomos/actions/workflows/ci.yml"><img src="https://github.com/project-nomos/nomos/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
+  <a href="https://github.com/project-nomos/nomos/actions/workflows/docker.yml"><img src="https://github.com/project-nomos/nomos/actions/workflows/docker.yml/badge.svg" alt="Docker" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License" /></a>
   <img src="https://img.shields.io/badge/node-%3E%3D22-brightgreen.svg" alt="Node >= 22" />
   <img src="https://img.shields.io/badge/TypeScript-strict-blue.svg" alt="TypeScript Strict" />
+  <img src="https://img.shields.io/badge/Claude_Agent_SDK-powered-6B4FBB?logo=anthropic" alt="Claude Agent SDK" />
+  <img src="https://img.shields.io/badge/AI-agent_teams-ff6f00" alt="Agent Teams" />
+  <img src="https://img.shields.io/badge/RAG-vector_memory-00b4d8" alt="Vector Memory" />
+  <img src="https://img.shields.io/badge/skills-35+-10b981" alt="35+ Skills" />
+  <img src="https://img.shields.io/badge/MCP-compatible-10b981?logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxNiIgaGVpZ2h0PSIxNiIgZmlsbD0id2hpdGUiIHZpZXdCb3g9IjAgMCAxNiAxNiI+PGNpcmNsZSBjeD0iOCIgY3k9IjgiIHI9IjMiLz48L3N2Zz4=" alt="MCP Compatible" />
+  <img src="https://img.shields.io/badge/pnpm-10.23+-yellow.svg" alt="pnpm" />
+  <a href="https://github.com/project-nomos/nomos/pkgs/container/nomos"><img src="https://img.shields.io/badge/GHCR-container-blue?logo=docker" alt="Docker Image" /></a>
   <a href="https://github.com/project-nomos/nomos/stargazers"><img src="https://img.shields.io/github/stars/project-nomos/nomos?style=flat" alt="Stars" /></a>
 </p>
 
