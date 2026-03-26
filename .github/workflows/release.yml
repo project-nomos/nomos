@@ -16,17 +16,8 @@ jobs:
     name: Publish & Release
     runs-on: ubuntu-latest
     steps:
-      - name: Generate token
-        id: app-token
-        uses: actions/create-github-app-token@v3
-        with:
-          app-id: ${{ vars.BOT_APP_ID }}
-          private-key: ${{ secrets.BOT_PRIVATE_KEY }}
-
       - name: Checkout
         uses: actions/checkout@v6.0.1
-        with:
-          token: ${{ steps.app-token.outputs.token }}
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4.2.0
@@ -56,27 +47,18 @@ jobs:
       - name: Publish to GitHub Packages
         run: pnpm publish --no-git-checks --access public || echo "Package version may already exist, skipping"
         env:
-          NODE_AUTH_TOKEN: ${{ steps.app-token.outputs.token }}
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
-        env:
-          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
 
   docker:
     name: Push Docker Image
     runs-on: ubuntu-latest
     needs: release
     steps:
-      - name: Generate token
-        id: app-token
-        uses: actions/create-github-app-token@v3
-        with:
-          app-id: ${{ vars.BOT_APP_ID }}
-          private-key: ${{ secrets.BOT_PRIVATE_KEY }}
-
       - name: Checkout
         uses: actions/checkout@v6.0.1
 
@@ -87,8 +69,8 @@ jobs:
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
-          username: x-access-token
-          password: ${{ steps.app-token.outputs.token }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Extract metadata
         id: meta
@@ -116,17 +98,10 @@ jobs:
     runs-on: ubuntu-latest
     needs: release
     steps:
-      - name: Generate token
-        id: app-token
-        uses: actions/create-github-app-token@v3
-        with:
-          app-id: ${{ vars.BOT_APP_ID }}
-          private-key: ${{ secrets.BOT_PRIVATE_KEY }}
-
       - name: Checkout
         uses: actions/checkout@v6.0.1
         with:
-          token: ${{ steps.app-token.outputs.token }}
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Update Homebrew formula SHA
         run: |
