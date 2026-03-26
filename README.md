@@ -115,18 +115,19 @@ nomos chat
 
 ## What You Get
 
-|                        | Feature                                                                            | What it does                                                                                |
-| ---------------------- | ---------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| :brain:                | [**Memory That Persists**](#memory-that-persists-across-sessions-and-channels)     | Every conversation auto-indexed into pgvector. Recall anything from any session or channel. |
-| :speech_balloon:       | [**6 Channel Integrations**](#deploy-to-6-platforms-in-minutes)                    | Slack, Discord, Telegram, WhatsApp, iMessage — thin adapters, one agent runtime.            |
-| :busts_in_silhouette:  | [**Multi-Agent Teams**](#multi-agent-teams--parallelize-complex-work)              | Coordinator + parallel workers. Hand off complex tasks, get synthesized results.            |
-| :zap:                  | [**Smart Model Routing**](#smart-model-routing--cut-costs-without-cutting-quality) | Auto-route queries to Haiku/Sonnet/Opus by complexity. Save money on simple tasks.          |
-| :globe_with_meridians: | [**Multiple API Providers**](#multiple-api-providers)                              | 5 providers supported: direct API, Vertex AI, OpenRouter, Ollama, or custom.                |
-| :art:                  | [**Image & Video Gen**](#image--video-generation--built-in-not-bolted-on)          | Gemini image + Veo video generation, conversational — just ask.                             |
-| :desktop_computer:     | [**Web Dashboard**](#web-based-management-dashboard)                               | Next.js 16 settings UI with setup wizard. No YAML editing.                                  |
-| :jigsaw:               | [**27 Bundled Skills**](#extend-without-forking)                                   | Three-tier loading: bundled, personal, project. Create your own in minutes.                 |
-| :lock:                 | [**Secrets Encrypted at Rest**](#secrets-encrypted-at-rest)                        | AES-256-GCM for all API keys and tokens. Auto-key on first run.                             |
-| :brain:                | [**Adaptive Memory**](#adaptive-memory--user-model)                                | Extracts facts, preferences, corrections. Builds a persistent user model.                   |
+|                           | Feature                                                                            | What it does                                                                                |
+| ------------------------- | ---------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| :brain:                   | [**Memory That Persists**](#memory-that-persists-across-sessions-and-channels)     | Every conversation auto-indexed into pgvector. Recall anything from any session or channel. |
+| :speech_balloon:          | [**6 Channel Integrations**](#deploy-to-6-platforms-in-minutes)                    | Slack, Discord, Telegram, WhatsApp, iMessage — thin adapters, one agent runtime.            |
+| :busts_in_silhouette:     | [**Multi-Agent Teams**](#multi-agent-teams--parallelize-complex-work)              | Coordinator + parallel workers. Hand off complex tasks, get synthesized results.            |
+| :zap:                     | [**Smart Model Routing**](#smart-model-routing--cut-costs-without-cutting-quality) | Route by complexity across any provider — cloud, local, or hybrid. Cut costs automatically. |
+| :globe_with_meridians:    | [**Multiple API Providers**](#multiple-api-providers)                              | 5 providers supported: direct API, Vertex AI, OpenRouter, Ollama, or custom.                |
+| :art:                     | [**Image & Video Gen**](#image--video-generation--built-in-not-bolted-on)          | Gemini image + Veo video generation, conversational — just ask.                             |
+| :desktop_computer:        | [**Web Dashboard**](#web-based-management-dashboard)                               | Next.js 16 settings UI with setup wizard. No YAML editing.                                  |
+| :jigsaw:                  | [**27 Bundled Skills**](#extend-without-forking)                                   | Three-tier loading: bundled, personal, project. Create your own in minutes.                 |
+| :lock:                    | [**Secrets Encrypted at Rest**](#secrets-encrypted-at-rest)                        | AES-256-GCM for all API keys and tokens. Auto-key on first run.                             |
+| :brain:                   | [**Adaptive Memory**](#adaptive-memory--user-model)                                | Extracts facts, preferences, corrections. Builds a persistent user model.                   |
+| :arrows_counterclockwise: | [**Self-Improvement**](#self-improvement--an-agent-that-evolves-itself)            | Nomos can analyze its own code, implement fixes, and open PRs to itself.                    |
 
 ---
 
@@ -143,6 +144,19 @@ When enabled (`NOMOS_ADAPTIVE_MEMORY=true`), the agent extracts structured knowl
 - **Knowledge extraction** — facts about you, your projects, tech stack; preferences for coding style, communication, tools
 - **Confidence-weighted** — repeated confirmations increase confidence; contradictions decrease it
 - **Prompt injection** — high-confidence entries (>=0.6) are auto-injected into the system prompt
+
+### Self-Improvement — An Agent That Evolves Itself
+
+Nomos has a built-in `self-improve` skill that lets it analyze its own codebase, implement changes, and open pull requests to itself — all autonomously. Ask it to fix a bug, add a feature, write tests, or refactor its own code.
+
+How it works:
+
+1. Clones a fresh copy of its own repo (never modifies the running instance)
+2. Analyzes the codebase and implements the requested change
+3. Runs all checks (`pnpm check`, `pnpm test`, `pnpm build`)
+4. Opens a PR for your review
+
+Just say _"improve yourself"_, _"add tests for the chunker"_, or _"fix your session cleanup logic"_ — and review the PR when it's ready.
 
 ### Connect From Anywhere
 
@@ -181,11 +195,13 @@ Each adapter is a thin layer (~50-100 LOC). All agent logic is centralized in `A
 
 ### Smart Model Routing — Cut Costs Without Cutting Quality
 
-Route queries to the right model automatically. Simple questions go to Haiku (fast, cheap), complex reasoning goes to Opus (most capable), everything else hits Sonnet:
+Route queries to the right model automatically based on complexity. Works with **any provider** — Anthropic, OpenRouter, Ollama, or your own endpoint. Use Claude models, open-source local models, or mix and match:
 
-- **Simple** (greetings, short questions) -> `claude-haiku-4-5`
-- **Moderate** (general tasks) -> `claude-sonnet-4-6`
-- **Complex** (coding, reasoning, multi-step) -> `claude-opus-4-6`
+- **Simple** (greetings, short questions) -> fast, cheap model (e.g. `claude-haiku-4-5`, `llama3`, or any local model)
+- **Moderate** (general tasks) -> balanced model (e.g. `claude-sonnet-4-6`, `mistral-large`)
+- **Complex** (coding, reasoning, multi-step) -> most capable model (e.g. `claude-opus-4-6`, `deepseek-r1`)
+
+Run fully local with Ollama, optimize cloud costs across tiers, or combine local models for simple tasks with cloud models for complex ones.
 
 Enable with `NOMOS_SMART_ROUTING=true`.
 
