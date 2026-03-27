@@ -5,6 +5,7 @@ import type { AgentIdentity } from "../../config/profile.ts";
 import { appendTranscriptMessage } from "../../db/transcripts.ts";
 import { updateSessionUsage, updateSessionSdkId } from "../../db/sessions.ts";
 import { runSession, type McpServerConfig, type SDKMessage } from "../../sdk/session.ts";
+import { TeamRuntime, stripTeamPrefix } from "../../daemon/team-runtime.ts";
 import { dispatchSlashCommand, type CommandContext, type CommandState } from "../slash-commands.ts";
 import { shouldBootstrap, getBootstrapPrompt } from "../bootstrap.ts";
 import { loadHeartbeatFile, isHeartbeatEmpty } from "../../auto-reply/heartbeat.ts";
@@ -28,7 +29,15 @@ import { useAlternateBuffer } from "../hooks/useAlternateBuffer.ts";
 /** A finalized item displayed in the Static section. */
 interface UIItem {
   id: string;
-  kind: "user" | "assistant" | "system" | "tool" | "tool-progress" | "thinking" | "cost";
+  kind:
+    | "user"
+    | "assistant"
+    | "system"
+    | "tool"
+    | "tool-progress"
+    | "thinking"
+    | "cost"
+    | "routing";
   content: string;
   toolMeta?: {
     name: string;
@@ -189,7 +198,14 @@ export function App({
             } else if (innerEvent.type === "content_block_start") {
               const block = innerEvent.content_block as { type: string; name?: string };
               if (block?.type === "tool_use" && block.name) {
+                // Finalize accumulated text as a separate message before showing tool
                 if (bufferRef.current || thinkingBufferRef.current) flushBuffer();
+                setStreamingText((prev) => {
+                  if (prev && prev.trim().length >= 3) {
+                    pushItem("assistant", prev);
+                  }
+                  return "";
+                });
                 activeToolRef.current = { name: block.name, startTime: Date.now() };
                 setLiveToolName(block.name);
               } else if (block?.type === "thinking") {
@@ -215,8 +231,6 @@ export function App({
             activeToolRef.current = null;
           }
           setLiveToolName(null);
-          // Next text block after tool use needs a paragraph separator
-          needsTextSeparatorRef.current = true;
           break;
         }
 
@@ -228,8 +242,8 @@ export function App({
           activeToolRef.current = null;
 
           // Update token usage
-          const inp = event.usage.input_tokens;
-          const out = event.usage.output_tokens;
+          const inp = event.usage?.input_tokens ?? 0;
+          const out = event.usage?.output_tokens ?? 0;
           if (inp > 0 || out > 0) {
             const total = inp + out;
             const fmt = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(1)}K` : String(n));
@@ -241,7 +255,9 @@ export function App({
         }
 
         case "system": {
-          if (
+          if (event.subtype === "routing") {
+            pushItem("routing", event.message);
+          } else if (
             event.subtype !== "init" &&
             event.subtype !== "status" &&
             event.subtype !== "command_ack"
@@ -320,6 +336,54 @@ export function App({
           setIsInputActive(true);
         }
         return;
+      }
+
+      // Team mode: handle /team prefix in CLI direct mode
+      const teamTask = config.teamMode ? stripTeamPrefix(input) : null;
+      if (teamTask) {
+        pushItem("system", "Running multi-agent team...");
+        try {
+          const teamRuntime = new TeamRuntime({
+            maxWorkers: config.maxTeamWorkers,
+            coordinatorModel: stateRef.current.model,
+          });
+          const allowedTools = ["Bash", ...Object.keys(mcpServers).map((name) => `mcp__${name}`)];
+          const result = await teamRuntime.runTeam(
+            {
+              prompt: teamTask,
+              systemPromptAppend: systemPromptAppendRef.current,
+              mcpServers,
+              permissionMode: config.permissionMode,
+              allowedTools,
+            },
+            (event) => {
+              pushItem("system", event.message);
+            },
+          );
+
+          if (bufferRef.current || thinkingBufferRef.current) flushBuffer();
+          setIsThinking(false);
+
+          const content = result || "_(no response)_";
+          appendDelta(content);
+          flushBuffer();
+
+          await appendTranscriptMessage({
+            sessionId: session.id,
+            role: "assistant",
+            content,
+          });
+          transcriptRef.current.push({ role: "assistant", content });
+
+          setIsInputActive(true);
+          return;
+        } catch (err) {
+          setIsThinking(false);
+          const message = err instanceof Error ? err.message : String(err);
+          pushItem("system", `Team error: ${message}`);
+          setIsInputActive(true);
+          return;
+        }
       }
 
       // Capture stderr for debug diagnostics on failure
@@ -456,12 +520,14 @@ export function App({
               } else if (event.type === "content_block_start") {
                 const block = event.content_block as { type: string; name?: string };
                 if (block.type === "tool_use" && block.name) {
-                  // Flush any buffered text before tool
+                  // Finalize accumulated text as a separate message before showing tool
                   if (bufferRef.current || thinkingBufferRef.current) flushBuffer();
-                  // Finalize thinking if we had any
-                  if (thinkingText || thinkingBufferRef.current) {
-                    // Will be finalized in the effect
-                  }
+                  setStreamingText((prev) => {
+                    if (prev && prev.trim().length >= 3) {
+                      pushItem("assistant", prev);
+                    }
+                    return "";
+                  });
                   activeToolRef.current = { name: block.name, startTime: Date.now() };
                   setLiveToolName(block.name);
                 } else if (block.type === "thinking") {
@@ -490,8 +556,6 @@ export function App({
                 pushItem("tool", msg.summary);
               }
               setLiveToolName(null);
-              // Next text block after tool use needs a paragraph separator
-              needsTextSeparatorRef.current = true;
               break;
             }
 
@@ -735,6 +799,10 @@ export function App({
           setItems([]);
           sdkSessionIdRef.current = null;
         }
+
+        if (result.passthrough) {
+          await handleUserMessage(result.passthrough);
+        }
         return;
       }
 
@@ -785,6 +853,13 @@ export function App({
         return <SystemMessage key={item.id} content={item.content} />;
       case "cost":
         return <CostLine key={item.id} content={item.content} />;
+      case "routing":
+        return (
+          <Box key={item.id} paddingLeft={3}>
+            <Text color={theme.text.accent}>⇢ </Text>
+            <Text dimColor>{item.content}</Text>
+          </Box>
+        );
       case "system":
         return <SystemMessage key={item.id} content={item.content} />;
       default:

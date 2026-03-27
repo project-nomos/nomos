@@ -149,7 +149,7 @@ const DIMENSIONS: Dimension[] = [
   },
   {
     name: "creative",
-    weight: 0.08,
+    weight: 0.15,
     keywords: [
       "write",
       "story",
@@ -268,10 +268,10 @@ export function classifyQuery(text: string): ClassificationResult {
   scores["length"] = Math.min(tokens / 500, 1);
   totalScore += lengthScore;
 
-  // Code block detection bonus
+  // Code block detection bonus (scaled by count)
   const codeBlocks = (text.match(/```/g) ?? []).length / 2;
   if (codeBlocks > 0) {
-    totalScore += 0.1;
+    totalScore += Math.min(codeBlocks * 0.02, 0.06);
     scores["code_blocks"] = codeBlocks;
   }
 
@@ -279,9 +279,9 @@ export function classifyQuery(text: string): ClassificationResult {
   const confidence = sigmoid(totalScore * 10 - 2);
 
   let tier: ComplexityTier;
-  if (totalScore < 0.08) {
+  if (totalScore < 0.02) {
     tier = "simple";
-  } else if (totalScore < 0.22) {
+  } else if (totalScore < 0.08) {
     tier = "moderate";
   } else {
     tier = "complex";

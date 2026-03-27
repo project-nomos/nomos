@@ -6,7 +6,7 @@
  * Manages SDK session IDs backed by the DB sessions table.
  */
 
-import { runSession, type McpServerConfig } from "../sdk/session.ts";
+import { runSession, type McpServerConfig, type SDKMessage } from "../sdk/session.ts";
 import { createMemoryMcpServer } from "../sdk/tools.ts";
 import { TeamRuntime, stripTeamPrefix } from "./team-runtime.ts";
 import { isSlackConfigured, createSlackMcpServer } from "../sdk/slack-mcp.ts";
@@ -34,8 +34,9 @@ import {
   type UserProfile,
   type AgentIdentity,
 } from "../config/profile.ts";
-import { loadSoulFile } from "../config/soul.ts";
+import { loadSoulFile, loadSoulFromDb, DEFAULT_SOUL } from "../config/soul.ts";
 import { loadToolsFile } from "../config/tools-md.ts";
+import { loadIdentityFile } from "../config/identity.ts";
 import { loadAgentConfigs, getActiveAgent } from "../config/agents.ts";
 import { loadSkills, formatSkillsForPrompt } from "../skills/loader.ts";
 import { loadMcpConfig } from "../cli/mcp-config.ts";
@@ -59,6 +60,11 @@ export class AgentRuntime {
 
   private initialized = false;
 
+  /** Get the configured model name. */
+  getModel(): string {
+    return this.config?.model ?? "claude-sonnet-4-6";
+  }
+
   /** Initialize the runtime: run migrations, load all config. */
   async initialize(): Promise<void> {
     if (this.initialized) return;
@@ -79,12 +85,20 @@ export class AgentRuntime {
     // Load personalization
     [this.profile, this.identity] = await Promise.all([loadUserProfile(), loadAgentIdentity()]);
 
+    // Override identity with IDENTITY.md if present (file > DB)
+    const fileIdentity = loadIdentityFile();
+    if (fileIdentity) {
+      if (fileIdentity.name) this.identity.name = fileIdentity.name;
+      if (fileIdentity.emoji) this.identity.emoji = fileIdentity.emoji;
+      if (fileIdentity.purpose) this.identity.purpose = fileIdentity.purpose;
+    }
+
     // Load skills
     const skills = loadSkills();
     const skillsPrompt = formatSkillsForPrompt(skills);
 
-    // Load personality
-    const soulPrompt = loadSoulFile();
+    // Load personality (file > DB > bundled default)
+    const soulPrompt = loadSoulFile() ?? (await loadSoulFromDb()) ?? DEFAULT_SOUL;
 
     // Load environment config
     const toolsPrompt = loadToolsFile();
@@ -290,14 +304,26 @@ export class AgentRuntime {
     if (this.config.smartRouting) {
       const classification = classifyQuery(message.content);
       model = this.config.modelTiers[classification.tier];
-      console.debug(
+      console.log(
         `[agent-runtime] Smart routing: "${classification.tier}" (confidence: ${classification.confidence.toFixed(2)}) → ${model}`,
       );
+      // Show routing decision in the chat
+      const shortModel = model.replace("claude-", "").replace(/-\d+$/, "");
+      emit({
+        type: "system",
+        subtype: "routing",
+        message: `Routed to ${shortModel} (${classification.tier})`,
+      });
     }
 
     // Check for team mode trigger (/team prefix)
     const teamTask = this.teamRuntime ? stripTeamPrefix(message.content) : null;
+    console.log(
+      `[agent-runtime] Team check: teamRuntime=${!!this.teamRuntime}, teamTask=${!!teamTask}`,
+    );
     if (teamTask && this.teamRuntime) {
+      console.log(`[agent-runtime] Executing team task: ${teamTask.slice(0, 100)}`);
+
       emit({
         type: "system",
         subtype: "status",
@@ -322,12 +348,32 @@ export class AgentRuntime {
           },
         );
 
+        const content = result || "_(no response)_";
+
+        // Emit the team result as stream events so gRPC/WebSocket clients render it
+        emit({
+          type: "stream_event",
+          event: {
+            type: "stream_event",
+            event: {
+              type: "content_block_delta",
+              delta: { type: "text_delta", text: content },
+            },
+          } as unknown as SDKMessage,
+        });
+        emit({
+          type: "result",
+          result: [{ type: "text", text: content }],
+          usage: { input_tokens: 0, output_tokens: 0 },
+          total_cost_usd: 0,
+        });
+
         return {
           inReplyTo: message.id,
           platform: message.platform,
           channelId: message.channelId,
           threadId: message.threadId,
-          content: result || "_(no response)_",
+          content,
         };
       } catch (err) {
         const errMsg = err instanceof Error ? err.message : String(err);

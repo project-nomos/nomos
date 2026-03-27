@@ -51,7 +51,7 @@ describe("loadEnvConfig", () => {
     expect(config.betas).toBeUndefined();
     expect(config.fallbackModels).toBeUndefined();
     expect(config.heartbeatIntervalMs).toBe(1800000);
-    expect(config.adaptiveMemory).toBe(false);
+    expect(config.adaptiveMemory).toBe(true);
     expect(config.extractionModel).toBeUndefined();
   });
 

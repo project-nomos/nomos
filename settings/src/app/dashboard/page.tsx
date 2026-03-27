@@ -45,7 +45,7 @@ export default function DashboardPage() {
           const memRes = await fetch("/api/admin/memory?count=true");
           if (memRes.ok) {
             const memData = await memRes.json();
-            memoryChunks = memData.count ?? 0;
+            memoryChunks = memData.stats?.total ?? memData.count ?? 0;
           }
         } catch {
           // Memory endpoint may not exist yet
@@ -159,8 +159,8 @@ export default function DashboardPage() {
         >
           <div className="flex items-center justify-between">
             <div>
-              <h3 className="text-sm font-medium text-text mb-1">Customize Personality</h3>
-              <p className="text-xs text-overlay0">Set name, emoji, and purpose</p>
+              <h3 className="text-sm font-medium text-text mb-1">Customize Assistant</h3>
+              <p className="text-xs text-overlay0">Identity, personality, and model config</p>
             </div>
             <ArrowRight
               size={16}

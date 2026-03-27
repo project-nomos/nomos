@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { RefreshCw } from "lucide-react";
+import { RefreshCw, ExternalLink } from "lucide-react";
 import { StatusBadge } from "@/components/status-badge";
 import { DirtyIndicator } from "@/components/dirty-indicator";
 import { useToast } from "@/contexts/toast-context";
@@ -92,7 +92,28 @@ export default function WhatsAppSettingsPage() {
         <h1 className="text-2xl font-bold text-text">WhatsApp</h1>
         <DirtyIndicator isDirty={isDirty} />
       </div>
-      <p className="text-sm text-overlay0 mb-8">Configure WhatsApp integration</p>
+      <div className="flex items-center gap-3 mb-8">
+        <p className="text-sm text-overlay0">Configure WhatsApp integration</p>
+        <div className="flex items-center gap-2">
+          <a
+            href="https://developers.facebook.com/apps/"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1 text-xs text-blue hover:text-blue/80"
+          >
+            Meta Developer Portal <ExternalLink size={10} />
+          </a>
+          <span className="text-overlay0">·</span>
+          <a
+            href="https://developers.facebook.com/docs/whatsapp/cloud-api/get-started"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1 text-xs text-blue hover:text-blue/80"
+          >
+            Setup Guide <ExternalLink size={10} />
+          </a>
+        </div>
+      </div>
 
       {/* Connection Status */}
       <section className="mb-8 rounded-xl border border-surface0 bg-mantle p-5">

@@ -22,6 +22,29 @@ import {
   getPidFilePath,
 } from "../daemon/lifecycle.ts";
 
+/**
+ * Build the spawn arguments for the daemon child process.
+ * When running from source (.ts), we need tsx as the loader.
+ * When running from a built bundle (.js/.mjs), plain node works.
+ */
+function buildSpawnArgs(scriptPath: string, extraArgs: string[]): { cmd: string; args: string[] } {
+  const isTsFile = scriptPath.endsWith(".ts") || scriptPath.endsWith(".tsx");
+
+  if (isTsFile) {
+    // We're running from source — need tsx.
+    // Try to find tsx in node_modules/.bin or use npx as fallback.
+    const tsxBin = path.resolve("node_modules", ".bin", "tsx");
+    if (fs.existsSync(tsxBin)) {
+      return { cmd: tsxBin, args: [scriptPath, ...extraArgs] };
+    }
+    // Fallback: use node with --import tsx
+    return { cmd: process.execPath, args: ["--import", "tsx", scriptPath, ...extraArgs] };
+  }
+
+  // Built bundle — plain node works
+  return { cmd: process.execPath, args: [scriptPath, ...extraArgs] };
+}
+
 /** Send SIGTERM and wait for the process to exit (up to timeoutMs). */
 async function stopDaemonProcess(pid: number, timeoutMs: number = 10_000): Promise<boolean> {
   process.kill(pid, "SIGTERM");
@@ -63,11 +86,10 @@ export function registerDaemonCommand(program: Command): void {
       fs.mkdirSync(path.dirname(logFile), { recursive: true });
       const logFd = fs.openSync(logFile, "a");
 
-      // Re-invoke the same CLI binary with "daemon run" so it works
-      // whether running from source (tsx) or the built bundle (dist/index.js).
       const scriptPath = process.argv[1]!;
+      const { cmd, args } = buildSpawnArgs(scriptPath, ["daemon", "run", "-p", options.port]);
 
-      const child = spawn(process.execPath, [scriptPath, "daemon", "run", "-p", options.port], {
+      const child = spawn(cmd, args, {
         detached: true,
         stdio: ["ignore", logFd, logFd],
         env: {
@@ -130,8 +152,9 @@ export function registerDaemonCommand(program: Command): void {
       const logFd = fs.openSync(logFile, "a");
 
       const scriptPath = process.argv[1]!;
+      const { cmd, args } = buildSpawnArgs(scriptPath, ["daemon", "run", "-p", options.port]);
 
-      const child = spawn(process.execPath, [scriptPath, "daemon", "run", "-p", options.port], {
+      const child = spawn(cmd, args, {
         detached: true,
         stdio: ["ignore", logFd, logFd],
         env: {

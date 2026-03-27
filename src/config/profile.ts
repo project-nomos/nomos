@@ -91,18 +91,18 @@ export function buildSystemPromptAppend(params: {
   }
 
   // Agent identity and purpose
-  const identityParts: string[] = [];
+  const identityParts: string[] = [
+    `## Identity\nYou are ${params.identity.name}, not "Claude Code". Always introduce yourself as ${params.identity.name}. Never refer to yourself as Claude Code or claim to be a CLI assistant.`,
+  ];
+  if (params.identity.emoji) {
+    identityParts.push(`Your emoji is ${params.identity.emoji}.`);
+  }
   if (params.identity.purpose) {
     identityParts.push(
       `## Purpose\nYou are: ${params.identity.purpose}\nThis is your core role. Let it shape how you respond, what you prioritize, and how you approach problems.`,
     );
   }
-  if (params.identity.name !== "Nomos") {
-    identityParts.push(`Your name is ${params.identity.name}.`);
-  }
-  if (identityParts.length > 0) {
-    sections.push(identityParts.join("\n"));
-  }
+  sections.push(identityParts.join("\n"));
 
   // User profile
   const profileParts: string[] = [];

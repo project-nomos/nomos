@@ -7,6 +7,7 @@
  */
 
 import { randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import * as grpc from "@grpc/grpc-js";
@@ -14,9 +15,15 @@ import * as protoLoader from "@grpc/proto-loader";
 import type { MessageQueue } from "./message-queue.ts";
 import type { DraftManager } from "./draft-manager.ts";
 import type { AgentEvent, IncomingMessage } from "./types.ts";
+import { indexConversationTurn } from "./memory-indexer.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const PROTO_PATH = resolve(__dirname, "../../proto/nomos.proto");
+// In dev (tsx): __dirname = src/daemon/ → ../../proto works
+// In built (dist/): __dirname = dist/ → ../proto works
+// Try both paths and use whichever exists
+const PROTO_PATH = existsSync(resolve(__dirname, "../../proto/nomos.proto"))
+  ? resolve(__dirname, "../../proto/nomos.proto")
+  : resolve(__dirname, "../proto/nomos.proto");
 
 /** Active server-streaming call for broadcasting events. */
 interface ActiveStream {
@@ -174,7 +181,11 @@ export class GrpcServer {
 
     this.messageQueue
       .enqueue(sessionKey, incoming, emit)
-      .then(() => {
+      .then((result) => {
+        // Fire-and-forget: index conversation turn into vector memory
+        indexConversationTurn(incoming, result).catch((err) =>
+          console.error("[grpc-server] Memory indexing failed:", err),
+        );
         call.end();
         this.activeStreams.delete(streamId);
       })

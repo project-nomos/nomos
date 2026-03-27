@@ -8,7 +8,7 @@ import {
   buildSystemPromptAppend,
   buildRuntimeInfo,
 } from "../config/profile.ts";
-import { loadSoulFile } from "../config/soul.ts";
+import { loadSoulFile, loadSoulFromDb, DEFAULT_SOUL } from "../config/soul.ts";
 import { loadToolsFile } from "../config/tools-md.ts";
 import { loadAgentConfigs, getActiveAgent } from "../config/agents.ts";
 import { closeDb } from "../db/client.ts";
@@ -56,12 +56,21 @@ export async function startRepl(options: ReplOptions): Promise<void> {
   const profile = await loadUserProfile();
   const identity = await loadAgentIdentity();
 
+  // Override identity with IDENTITY.md if present (file > DB)
+  const { loadIdentityFile } = await import("../config/identity.ts");
+  const fileIdentity = loadIdentityFile();
+  if (fileIdentity) {
+    if (fileIdentity.name) identity.name = fileIdentity.name;
+    if (fileIdentity.emoji) identity.emoji = fileIdentity.emoji;
+    if (fileIdentity.purpose) identity.purpose = fileIdentity.purpose;
+  }
+
   // Load skills from filesystem
   const skills = loadSkills();
   const skillsPrompt = formatSkillsForPrompt(skills);
 
   // Load personality from SOUL.md
-  const soulPrompt = loadSoulFile();
+  const soulPrompt = loadSoulFile() ?? (await loadSoulFromDb()) ?? DEFAULT_SOUL;
 
   // Load environment config from TOOLS.md
   const toolsPrompt = loadToolsFile();

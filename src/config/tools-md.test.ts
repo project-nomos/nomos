@@ -105,7 +105,7 @@ describe("buildSystemPromptAppend with toolsPrompt", () => {
     expect(result).toContain(toolsPrompt);
 
     // Tools section should come after personality (if present) but before identity
-    const identityIndex = result.indexOf("Your name is TestBot");
+    const identityIndex = result.indexOf("You are TestBot");
     const toolsIndex = result.indexOf("## Environment Configuration");
     expect(toolsIndex).toBeLessThan(identityIndex);
     expect(toolsIndex).toBeGreaterThanOrEqual(0);
@@ -144,7 +144,7 @@ describe("buildSystemPromptAppend with toolsPrompt", () => {
 
     const personalityIndex = result.indexOf("## Personality");
     const toolsIndex = result.indexOf("## Environment Configuration");
-    const identityIndex = result.indexOf("Your name is TestBot");
+    const identityIndex = result.indexOf("You are TestBot");
 
     expect(personalityIndex).toBeLessThan(toolsIndex);
     expect(toolsIndex).toBeLessThan(identityIndex);
@@ -172,7 +172,7 @@ describe("buildSystemPromptAppend with toolsPrompt", () => {
     expect(result).toContain(soulPrompt);
     expect(result).toContain("## Environment Configuration");
     expect(result).toContain(toolsPrompt);
-    expect(result).toContain("Your name is TestBot");
+    expect(result).toContain("You are TestBot");
     expect(result).toContain("## User Profile");
     expect(result).toContain("Alice");
     expect(result).toContain("## Runtime Environment");

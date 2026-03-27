@@ -74,7 +74,7 @@ export class TeamRuntime {
 
   constructor(config: Partial<TeamConfig> = {}) {
     this.config = {
-      maxWorkers: config.maxWorkers ?? 3,
+      maxWorkers: config.maxWorkers ?? 4,
       workerMaxTurns: config.workerMaxTurns ?? 20,
       coordinatorModel: config.coordinatorModel,
       workerModel: config.workerModel,
@@ -251,6 +251,8 @@ Execute this subtask thoroughly and provide your output.`;
       maxTurns?: number;
     },
   ): Promise<string> {
+    console.log(`[team-runtime] Running agent (model: ${options.model ?? "default"})...`);
+
     const sdkQuery = runSession({
       prompt,
       model: options.model,
@@ -264,6 +266,7 @@ Execute this subtask thoroughly and provide your output.`;
     let fullText = "";
 
     for await (const msg of sdkQuery) {
+      console.log(`[team-runtime] Event: ${msg.type}`);
       if (msg.type === "assistant") {
         for (const block of msg.message.content) {
           if (block.type === "text" && block.text) {
@@ -280,6 +283,7 @@ Execute this subtask thoroughly and provide your output.`;
       }
     }
 
+    console.log(`[team-runtime] Agent finished (${fullText.length} chars)`);
     return fullText;
   }
 }

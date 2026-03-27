@@ -12,15 +12,28 @@ export async function GET() {
         pg_size_pretty(pg_database_size(current_database())) AS db_size
     `;
 
-    const tables = await sql`
+    // Get table names and sizes from pg_stat, then exact row counts via COUNT(*)
+    const tableMeta = await sql`
       SELECT
         relname AS name,
-        n_live_tup AS row_count,
         pg_size_pretty(pg_total_relation_size(quote_ident(relname))) AS size,
         pg_total_relation_size(quote_ident(relname)) AS size_bytes
       FROM pg_stat_user_tables
       ORDER BY relname
     `;
+
+    // Get exact row counts for each table
+    const tables = await Promise.all(
+      tableMeta.map(async (t) => {
+        const [row] = await sql.unsafe(`SELECT count(*)::int AS cnt FROM "${t.name as string}"`);
+        return {
+          name: t.name as string,
+          size: t.size as string,
+          sizeBytes: Number(t.size_bytes),
+          rowCount: Number(row.cnt),
+        };
+      }),
+    );
 
     let sessions: Record<string, unknown>[] = [];
     try {
@@ -40,12 +53,7 @@ export async function GET() {
         pgVersion: dbInfo.pg_version,
         dbSize: dbInfo.db_size,
       },
-      tables: tables.map((t) => ({
-        name: t.name,
-        rowCount: Number(t.row_count),
-        size: t.size,
-        sizeBytes: Number(t.size_bytes),
-      })),
+      tables,
       sessions: sessions.map((s) => ({
         id: s.id,
         sessionKey: s.session_key,

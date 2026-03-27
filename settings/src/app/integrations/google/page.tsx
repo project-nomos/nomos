@@ -52,6 +52,7 @@ export default function GoogleSettingsPage() {
 
   // Authorized accounts state
   const [accounts, setAccounts] = useState<GwsAccount[]>([]);
+  const [hasValidToken, setHasValidToken] = useState(false);
   const [authorizing, setAuthorizing] = useState(false);
   const [removeTarget, setRemoveTarget] = useState<string | null>(null);
 
@@ -96,6 +97,7 @@ export default function GoogleSettingsPage() {
       setGwsInstalled(statusData.gwsInstalled ?? false);
       setGwsVersion(statusData.gwsVersion ?? "");
       setAccounts(statusData.accounts ?? []);
+      setHasValidToken(statusData.hasValidToken ?? false);
       setServices(statusData.services ?? "all");
       setInitialServices(statusData.services ?? "all");
     } catch (err) {
@@ -173,9 +175,21 @@ export default function GoogleSettingsPage() {
       } else {
         addToast("Authorization started", "success");
       }
-      // Poll for new accounts
+      // Poll for auth completion, then refresh the full page
+      const prevCount = accounts.length;
       const pollInterval = setInterval(async () => {
-        await loadAccounts();
+        try {
+          const res = await fetch("/api/google/status");
+          const statusData = await res.json();
+          const newCount = statusData.accounts?.length ?? 0;
+          if (newCount > prevCount || statusData.hasValidToken) {
+            clearInterval(pollInterval);
+            addToast("Google account authorized successfully", "success");
+            await loadData();
+          }
+        } catch {
+          // Ignore polling errors
+        }
       }, 3000);
       // Stop polling after 2 minutes
       setTimeout(() => clearInterval(pollInterval), 120000);
@@ -250,7 +264,28 @@ export default function GoogleSettingsPage() {
         <h1 className="text-2xl font-bold text-text">Google Workspace</h1>
         <DirtyIndicator isDirty={isDirty} />
       </div>
-      <p className="text-sm text-overlay0 mb-8">Google Workspace integration via gws CLI</p>
+      <div className="flex items-center gap-3 mb-8">
+        <p className="text-sm text-overlay0">Google Workspace integration via gws CLI</p>
+        <div className="flex items-center gap-2">
+          <a
+            href="https://console.cloud.google.com/apis/credentials"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1 text-xs text-blue hover:text-blue/80"
+          >
+            GCP Credentials <ExternalLink size={10} />
+          </a>
+          <span className="text-overlay0">·</span>
+          <a
+            href="https://developers.google.com/workspace/guides/get-started"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1 text-xs text-blue hover:text-blue/80"
+          >
+            Setup Guide <ExternalLink size={10} />
+          </a>
+        </div>
+      </div>
 
       {/* Connection Status */}
       <section className="mb-8 rounded-xl border border-surface0 bg-mantle p-5">
@@ -274,15 +309,22 @@ export default function GoogleSettingsPage() {
           </div>
           <div className="flex items-center justify-between">
             <span className="text-sm text-text">Authorized Accounts</span>
-            <span className="text-xs text-overlay0">
-              {accounts.length > 0 ? `${accounts.length} authorized` : "None authorized"}
-            </span>
+            <StatusBadge
+              status={accounts.length > 0 || hasValidToken ? "connected" : "not_configured"}
+              label={
+                accounts.length > 0
+                  ? `${accounts.length} authorized`
+                  : hasValidToken
+                    ? "Authorized (token valid)"
+                    : "None authorized"
+              }
+            />
           </div>
           <div className="flex items-center gap-2 pt-1">
             <span className="text-xs text-overlay0">Services:</span>
             <span
               className={`text-xs px-2 py-0.5 rounded-md ${
-                gwsInstalled && accounts.length > 0
+                gwsInstalled && (accounts.length > 0 || hasValidToken)
                   ? "bg-green/10 text-green"
                   : "bg-surface0 text-overlay0"
               }`}
@@ -320,6 +362,11 @@ export default function GoogleSettingsPage() {
                 </button>
               </div>
             ))}
+          </div>
+        ) : hasValidToken ? (
+          <div className="flex items-center gap-2 rounded-lg border border-green/20 bg-green/5 px-3 py-2 mb-4">
+            <KeyRound size={14} className="text-green shrink-0" />
+            <span className="text-sm text-green">Google account authorized with valid token</span>
           </div>
         ) : (
           <p className="text-sm text-overlay0 mb-4">

@@ -101,6 +101,9 @@ export class Gateway {
     // Initialize agent runtime (loads config, runs migrations)
     await this.runtime.initialize();
 
+    // Verify LLM access before starting services
+    await this.checkLlmAccess();
+
     // Seed autonomous loops (idempotent — safe to call on every start)
     try {
       const { seedAutonomousLoops } = await import("./autonomous.ts");
@@ -151,6 +154,54 @@ export class Gateway {
     await closeBrowser();
 
     console.log("[gateway] Daemon stopped");
+  }
+
+  /** Verify LLM API access works before starting services. */
+  private async checkLlmAccess(): Promise<void> {
+    console.log("[gateway] Checking LLM access...");
+
+    const apiKey = process.env.ANTHROPIC_API_KEY;
+    const baseUrl = process.env.ANTHROPIC_BASE_URL || "https://api.anthropic.com";
+    const useVertex = process.env.CLAUDE_CODE_USE_VERTEX === "1";
+
+    if (useVertex) {
+      console.log("[gateway] Using Vertex AI — skipping API key check");
+      return;
+    }
+
+    if (!apiKey) {
+      console.warn("[gateway] ⚠ No ANTHROPIC_API_KEY set — LLM calls will fail");
+      return;
+    }
+
+    try {
+      const res = await fetch(`${baseUrl}/v1/messages`, {
+        method: "POST",
+        headers: {
+          "x-api-key": apiKey,
+          "anthropic-version": "2023-06-01",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          model: this.runtime.getModel(),
+          max_tokens: 1,
+          messages: [{ role: "user", content: "hi" }],
+        }),
+      });
+
+      if (res.ok) {
+        console.log("[gateway] LLM access verified");
+      } else {
+        const body = await res.text();
+        console.error(`[gateway] LLM access check failed (${res.status}): ${body}`);
+        console.error("[gateway] Verify ANTHROPIC_API_KEY and model configuration in .env");
+        console.warn("[gateway] ⚠ Daemon starting without verified LLM access");
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`[gateway] LLM access check failed: ${message}`);
+      console.warn("[gateway] ⚠ Daemon starting without verified LLM access");
+    }
   }
 
   /** Register available channel adapters based on env vars. */

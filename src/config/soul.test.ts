@@ -107,7 +107,7 @@ describe("buildSystemPromptAppend with soulPrompt", () => {
 
     // Personality should come first (before identity)
     const personalityIndex = result.indexOf("## Personality");
-    const identityIndex = result.indexOf("Your name is TestBot");
+    const identityIndex = result.indexOf("You are TestBot");
     expect(personalityIndex).toBeLessThan(identityIndex);
     expect(personalityIndex).toBeGreaterThanOrEqual(0);
     expect(identityIndex).toBeGreaterThan(0);
@@ -148,7 +148,7 @@ describe("buildSystemPromptAppend with soulPrompt", () => {
 
     expect(result).toContain("## Personality");
     expect(result).toContain(soulPrompt);
-    expect(result).toContain("Your name is TestBot");
+    expect(result).toContain("You are TestBot");
     expect(result).toContain("## User Profile");
     expect(result).toContain("Alice");
     expect(result).toContain("## Runtime Environment");

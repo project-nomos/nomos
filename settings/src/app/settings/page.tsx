@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { RefreshCw, ExternalLink, ChevronDown, ChevronRight } from "lucide-react";
 import { TokenInput } from "@/components/token-input";
+import { EmojiPicker } from "@/components/emoji-picker";
 import { DirtyIndicator } from "@/components/dirty-indicator";
 import { useToast } from "@/contexts/toast-context";
 import { useUnsavedChanges } from "@/hooks/use-unsaved-changes";
@@ -42,6 +43,10 @@ export default function AssistantSettingsPage() {
   const [initialAgentEmoji, setInitialAgentEmoji] = useState("");
   const [agentPurpose, setAgentPurpose] = useState("");
   const [initialAgentPurpose, setInitialAgentPurpose] = useState("");
+
+  // Personality (SOUL)
+  const [agentSoul, setAgentSoul] = useState("");
+  const [initialAgentSoul, setInitialAgentSoul] = useState("");
 
   // API provider
   const [apiProvider, setApiProvider] = useState("anthropic");
@@ -84,12 +89,12 @@ export default function AssistantSettingsPage() {
   // Multi-agent teams
   const [teamMode, setTeamMode] = useState(false);
   const [initialTeamMode, setInitialTeamMode] = useState(false);
-  const [maxTeamWorkers, setMaxTeamWorkers] = useState("3");
-  const [initialMaxTeamWorkers, setInitialMaxTeamWorkers] = useState("3");
+  const [maxTeamWorkers, setMaxTeamWorkers] = useState("4");
+  const [initialMaxTeamWorkers, setInitialMaxTeamWorkers] = useState("4");
 
   // Adaptive memory
-  const [adaptiveMemory, setAdaptiveMemory] = useState(false);
-  const [initialAdaptiveMemory, setInitialAdaptiveMemory] = useState(false);
+  const [adaptiveMemory, setAdaptiveMemory] = useState(true);
+  const [initialAdaptiveMemory, setInitialAdaptiveMemory] = useState(true);
   const [extractionModel, setExtractionModel] = useState("claude-haiku-4-5");
   const [initialExtractionModel, setInitialExtractionModel] = useState("claude-haiku-4-5");
 
@@ -119,7 +124,8 @@ export default function AssistantSettingsPage() {
   const isIdentityDirty =
     agentName !== initialAgentName ||
     agentEmoji !== initialAgentEmoji ||
-    agentPurpose !== initialAgentPurpose;
+    agentPurpose !== initialAgentPurpose ||
+    agentSoul !== initialAgentSoul;
 
   const isEnvDirty =
     apiKeyDirty ||
@@ -154,7 +160,9 @@ export default function AssistantSettingsPage() {
       const envData = await envRes.json();
       const configData = await configRes.json();
 
-      const ap = envData.NOMOS_API_PROVIDER ?? "anthropic";
+      const ap =
+        envData.NOMOS_API_PROVIDER ??
+        (envData.CLAUDE_CODE_USE_VERTEX === "1" ? "vertex" : "anthropic");
       setApiProvider(ap);
       setInitialApiProvider(ap);
 
@@ -213,12 +221,12 @@ export default function AssistantSettingsPage() {
       setTeamMode(tm);
       setInitialTeamMode(tm);
 
-      const mtw = envData.NOMOS_MAX_TEAM_WORKERS ?? "3";
+      const mtw = envData.NOMOS_MAX_TEAM_WORKERS ?? "4";
       setMaxTeamWorkers(mtw);
       setInitialMaxTeamWorkers(mtw);
 
       // Adaptive memory
-      const am = envData.NOMOS_ADAPTIVE_MEMORY === "true";
+      const am = envData.NOMOS_ADAPTIVE_MEMORY !== "false";
       setAdaptiveMemory(am);
       setInitialAdaptiveMemory(am);
 
@@ -260,6 +268,10 @@ export default function AssistantSettingsPage() {
       const purpose = (configData["agent.purpose"] as string) ?? "";
       setAgentPurpose(purpose);
       setInitialAgentPurpose(purpose);
+
+      const soul = (configData["agent.soul"] as string) ?? "";
+      setAgentSoul(soul);
+      setInitialAgentSoul(soul);
     } catch (err) {
       console.error("Failed to load settings:", err);
       addToast("Failed to load settings", "error");
@@ -284,6 +296,7 @@ export default function AssistantSettingsPage() {
         if (agentName !== initialAgentName) configUpdates["agent.name"] = agentName;
         if (agentEmoji !== initialAgentEmoji) configUpdates["agent.emoji"] = agentEmoji;
         if (agentPurpose !== initialAgentPurpose) configUpdates["agent.purpose"] = agentPurpose;
+        if (agentSoul !== initialAgentSoul) configUpdates["agent.soul"] = agentSoul;
 
         promises.push(
           fetch("/api/config", {
@@ -383,10 +396,10 @@ export default function AssistantSettingsPage() {
       </div>
       <p className="text-sm text-overlay0 mb-8">Personality, model selection, and configuration</p>
 
-      {/* Identity / Personality */}
+      {/* Identity & Personality */}
       <section className="mb-8 rounded-xl border border-surface0 bg-mantle p-5">
         <h2 className="text-sm font-semibold text-subtext1 uppercase tracking-wider mb-4">
-          Identity
+          Identity & Personality
         </h2>
         <div className="space-y-4">
           <div className="flex gap-4">
@@ -400,16 +413,9 @@ export default function AssistantSettingsPage() {
                 className="w-full rounded-lg border border-surface1 bg-surface0 px-3 py-2 text-sm text-text placeholder:text-overlay0 focus:outline-none focus:border-mauve focus:ring-1 focus:ring-mauve/30"
               />
             </div>
-            <div className="w-24 space-y-1.5">
-              <label className="block text-sm font-medium text-subtext1">Emoji</label>
-              <input
-                type="text"
-                value={agentEmoji}
-                onChange={(e) => setAgentEmoji(e.target.value)}
-                placeholder="🤖"
-                maxLength={4}
-                className="w-full rounded-lg border border-surface1 bg-surface0 px-3 py-2 text-sm text-text text-center placeholder:text-overlay0 focus:outline-none focus:border-mauve focus:ring-1 focus:ring-mauve/30"
-              />
+            <div className="space-y-1.5">
+              <label className="block text-sm font-medium text-subtext1">Avatar</label>
+              <EmojiPicker value={agentEmoji} onChange={setAgentEmoji} />
             </div>
           </div>
           <div className="space-y-1.5">
@@ -422,7 +428,22 @@ export default function AssistantSettingsPage() {
               className="w-full rounded-lg border border-surface1 bg-surface0 px-3 py-2 text-sm text-text placeholder:text-overlay0 focus:outline-none focus:border-mauve focus:ring-1 focus:ring-mauve/30 resize-none"
             />
             <p className="text-xs text-overlay0">
-              Defines your assistant's core role and how it approaches problems
+              Defines your assistant&apos;s core role and how it approaches problems
+            </p>
+          </div>
+          <div className="space-y-1.5">
+            <label className="block text-sm font-medium text-subtext1">Personality</label>
+            <textarea
+              value={agentSoul}
+              onChange={(e) => setAgentSoul(e.target.value)}
+              placeholder={`Direct and competent. Lead with answers, not disclaimers.\nProactive — anticipate what the user needs next.\nConcise by default, thorough when needed.\nHonest about uncertainty.`}
+              rows={8}
+              className="w-full rounded-lg border border-surface1 bg-surface0 px-3 py-2 text-sm text-text placeholder:text-overlay0 focus:outline-none focus:border-mauve focus:ring-1 focus:ring-mauve/30 resize-y font-mono"
+            />
+            <p className="text-xs text-overlay0">
+              Free-form personality instructions injected into the system prompt. Overridden by{" "}
+              <code className="text-xs bg-surface0 px-1 rounded">~/.nomos/SOUL.md</code> if that
+              file exists.
             </p>
           </div>
         </div>
@@ -758,7 +779,7 @@ export default function AssistantSettingsPage() {
                 className="w-full max-w-xs rounded-lg border border-surface1 bg-surface0 px-3 py-2 text-sm text-text placeholder:text-overlay0 focus:outline-none focus:border-mauve focus:ring-1 focus:ring-mauve/30 font-mono"
               />
               <p className="text-xs text-overlay0">
-                Number of worker agents that can run simultaneously (default: 3)
+                Number of worker agents that can run simultaneously (default: 4)
               </p>
             </div>
           )}
@@ -825,28 +846,49 @@ export default function AssistantSettingsPage() {
             <div>
               <span className="text-sm font-medium text-text">Enable Image Generation</span>
               <p className="text-xs text-overlay0">
-                Generate images from text prompts using Google's Gemini model via the{" "}
+                Generate images from text prompts using Google&apos;s Gemini model via the{" "}
                 <code className="text-xs bg-surface0 px-1 rounded">generate_image</code> tool.
+                {apiProvider === "vertex" ? (
+                  <span className="text-green ml-1">Using Vertex AI.</span>
+                ) : hasGeminiApiKey ? (
+                  <span className="text-green ml-1">Gemini API key configured.</span>
+                ) : (
+                  <span className="text-peach ml-1">Requires Vertex AI or a Gemini API key.</span>
+                )}
               </p>
             </div>
           </label>
 
           {imageGeneration && (
             <div className="space-y-4 pl-7 border-l-2 border-surface1 ml-2">
-              <TokenInput
-                label="Gemini API Key"
-                value={geminiApiKey}
-                onChange={(v) => {
-                  setGeminiApiKey(v);
-                  setGeminiApiKeyDirty(true);
-                }}
-                placeholder={
-                  hasGeminiApiKey
-                    ? "Configured - enter new value to replace"
-                    : "Your Gemini API key"
-                }
-                helperText="Get a free API key from https://aistudio.google.com/apikey"
-              />
+              {apiProvider !== "vertex" && (
+                <TokenInput
+                  label="Gemini API Key"
+                  value={geminiApiKey}
+                  onChange={(v) => {
+                    setGeminiApiKey(v);
+                    setGeminiApiKeyDirty(true);
+                  }}
+                  placeholder={
+                    hasGeminiApiKey
+                      ? "Configured - enter new value to replace"
+                      : "Your Gemini API key"
+                  }
+                  helperText={
+                    <>
+                      Get a free API key from{" "}
+                      <a
+                        href="https://aistudio.google.com/apikey"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-blue hover:text-blue/80 underline"
+                      >
+                        Google AI Studio
+                      </a>
+                    </>
+                  }
+                />
+              )}
               <div className="space-y-1.5">
                 <label className="block text-sm font-medium text-subtext1">Model</label>
                 <input
@@ -881,21 +923,21 @@ export default function AssistantSettingsPage() {
             <div>
               <span className="text-sm font-medium text-text">Enable Video Generation</span>
               <p className="text-xs text-overlay0">
-                Generate videos from text prompts using Google's Veo model via the{" "}
+                Generate videos from text prompts using Google&apos;s Veo model via the{" "}
                 <code className="text-xs bg-surface0 px-1 rounded">generate_video</code> tool.
-                Requires a Gemini API key (same as image generation).
+                {apiProvider === "vertex" ? (
+                  <span className="text-green ml-1">Using Vertex AI.</span>
+                ) : hasGeminiApiKey || imageGeneration ? (
+                  <span className="text-green ml-1">Gemini API key configured.</span>
+                ) : (
+                  <span className="text-peach ml-1">Requires Vertex AI or a Gemini API key.</span>
+                )}
               </p>
             </div>
           </label>
 
           {videoGeneration && (
             <div className="space-y-4 pl-7 border-l-2 border-surface1 ml-2">
-              {!hasGeminiApiKey && !imageGeneration && (
-                <p className="text-xs text-peach">
-                  A Gemini API key is required. Configure it in the Image Generation section above
-                  or set GEMINI_API_KEY in your environment.
-                </p>
-              )}
               <div className="space-y-1.5">
                 <label className="block text-sm font-medium text-subtext1">Model</label>
                 <input

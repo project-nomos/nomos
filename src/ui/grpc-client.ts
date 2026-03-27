@@ -5,6 +5,7 @@
  * send a message, receive a stream of events.
  */
 
+import { existsSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import * as grpc from "@grpc/grpc-js";
@@ -12,7 +13,9 @@ import * as protoLoader from "@grpc/proto-loader";
 import type { AgentEvent } from "../daemon/types.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const PROTO_PATH = resolve(__dirname, "../../proto/nomos.proto");
+const PROTO_PATH = existsSync(resolve(__dirname, "../../proto/nomos.proto"))
+  ? resolve(__dirname, "../../proto/nomos.proto")
+  : resolve(__dirname, "../proto/nomos.proto");
 
 export type ConnectionState = "connecting" | "connected" | "disconnected" | "reconnecting";
 

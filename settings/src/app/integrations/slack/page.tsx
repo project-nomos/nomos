@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { RefreshCw, Trash2, Zap, Plus } from "lucide-react";
+import { RefreshCw, Trash2, Zap, Plus, ExternalLink } from "lucide-react";
 import { TokenInput } from "@/components/token-input";
 import { StatusBadge } from "@/components/status-badge";
 import { ConfirmModal } from "@/components/confirm-modal";
@@ -176,7 +176,28 @@ export default function SlackSettingsPage() {
         <h1 className="text-2xl font-bold text-text">Slack</h1>
         <DirtyIndicator isDirty={isDirty} />
       </div>
-      <p className="text-sm text-overlay0 mb-8">Manage Slack workspace connections and tokens</p>
+      <div className="flex items-center gap-3 mb-8">
+        <p className="text-sm text-overlay0">Manage Slack workspace connections and tokens</p>
+        <div className="flex items-center gap-2">
+          <a
+            href="https://api.slack.com/apps"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1 text-xs text-blue hover:text-blue/80"
+          >
+            Create Slack App <ExternalLink size={10} />
+          </a>
+          <span className="text-overlay0">·</span>
+          <a
+            href="https://api.slack.com/tutorials/tracks/getting-a-token"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1 text-xs text-blue hover:text-blue/80"
+          >
+            Setup Guide <ExternalLink size={10} />
+          </a>
+        </div>
+      </div>
 
       {/* Connection Status */}
       <section className="mb-8 rounded-xl border border-surface0 bg-mantle p-5">

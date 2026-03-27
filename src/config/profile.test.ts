@@ -21,16 +21,18 @@ describe("buildSystemPromptAppend", () => {
       identity: { name: "Jarvis" },
     });
 
-    expect(result).toContain("Your name is Jarvis.");
+    expect(result).toContain("## Identity");
+    expect(result).toContain("You are Jarvis");
   });
 
-  it("does not include identity section for default name", () => {
+  it("includes identity section for default name", () => {
     const result = buildSystemPromptAppend({
       profile: {},
       identity: defaultIdentity,
     });
 
-    expect(result).not.toContain("Your name is");
+    expect(result).toContain("## Identity");
+    expect(result).toContain("You are Nomos");
   });
 
   it("includes user profile fields", () => {
@@ -99,7 +101,7 @@ describe("buildSystemPromptAppend", () => {
       skillsPrompt: "## Skills\n### test\nA skill.",
     });
 
-    expect(result).toContain("Your name is Max.");
+    expect(result).toContain("You are Max");
     expect(result).toContain("Bob");
     expect(result).toContain("UTC");
     expect(result).toContain("## Custom Instructions");

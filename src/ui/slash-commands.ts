@@ -38,6 +38,7 @@ export const SLASH_COMMANDS = [
   { name: "slack", desc: "List connected Slack workspaces" },
   { name: "permissions", desc: "Manage agent permissions" },
   { name: "integrations", desc: "Setup channel integrations" },
+  { name: "team", desc: "Run a task with parallel agent workers" },
   { name: "quit", desc: "Exit nomos" },
 ] as const;
 
@@ -63,6 +64,8 @@ export interface CommandResult {
   quit?: boolean;
   /** Signal to compact the conversation */
   compact?: boolean;
+  /** Signal to pass the original input through to the agent as a user message */
+  passthrough?: string;
 }
 
 /** Available models for /model picker */
@@ -148,6 +151,8 @@ export async function dispatchSlashCommand(
       return { output: await cmdPermissions(args) };
     case "integrations":
       return { output: await cmdIntegrations(ctx, args) };
+    case "team":
+      return cmdTeam(args, input);
     case "undo-files":
       return { output: cmdUndoFiles() };
     default:
@@ -190,6 +195,9 @@ function cmdHelp(): string {
     "  /drafts            List pending draft responses",
     "  /approve <id>      Approve a draft and send as user",
     "  /reject <id>       Reject a draft response",
+    "",
+    chalk.bold("Teams"),
+    "  /team <task>       Run a task with parallel agent workers",
     "",
     chalk.bold("Config"),
     "  /config            List runtime settings",
@@ -1177,6 +1185,25 @@ async function cmdIntegrations(ctx: CommandContext, args: string[]): Promise<str
   lines.push("", chalk.dim("Use /integrations <name> for setup. E.g. /integrations google"));
 
   return lines.join("\n");
+}
+
+function cmdTeam(args: string[], rawInput: string): CommandResult {
+  const task = args.join(" ");
+  if (!task) {
+    return {
+      output: [
+        chalk.bold("Team Mode"),
+        chalk.dim("  Spawn parallel agent workers to decompose and execute complex tasks."),
+        "",
+        chalk.dim("Usage: /team <task description>"),
+        chalk.dim("  Example: /team analyze Q4 metrics, refactor auth module, update docs"),
+        "",
+        chalk.dim("Requires NOMOS_TEAM_MODE=true in your environment."),
+      ].join("\n"),
+    };
+  }
+  // Pass the full /team message through to the agent
+  return { output: "", passthrough: rawInput };
 }
 
 function cmdUndoFiles(): string {

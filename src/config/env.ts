@@ -126,10 +126,10 @@ export function loadEnvConfig(): NomosConfig {
     teamMode: process.env.NOMOS_TEAM_MODE === "true",
     maxTeamWorkers: process.env.NOMOS_MAX_TEAM_WORKERS
       ? parseInt(process.env.NOMOS_MAX_TEAM_WORKERS, 10)
-      : 3,
+      : 4,
     anthropicBaseUrl: process.env.ANTHROPIC_BASE_URL,
     openrouterApiKey: process.env.OPENROUTER_API_KEY,
-    adaptiveMemory: process.env.NOMOS_ADAPTIVE_MEMORY === "true",
+    adaptiveMemory: process.env.NOMOS_ADAPTIVE_MEMORY !== "false",
     extractionModel: process.env.NOMOS_EXTRACTION_MODEL,
     alternateBuffer: process.env.NOMOS_ALTERNATE_BUFFER === "true",
     imageGeneration: process.env.NOMOS_IMAGE_GENERATION === "true",

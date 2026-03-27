@@ -147,7 +147,20 @@ export async function POST() {
       );
     }
 
-    return NextResponse.json({ ok: true, url });
+    // Inject openid+email scopes so we can resolve the account email later
+    let authUrl = url;
+    try {
+      const parsed = new URL(authUrl);
+      const scope = parsed.searchParams.get("scope") ?? "";
+      if (!scope.includes("openid")) {
+        parsed.searchParams.set("scope", `openid email ${scope}`);
+        authUrl = parsed.toString();
+      }
+    } catch {
+      // If URL parsing fails, use the original
+    }
+
+    return NextResponse.json({ ok: true, url: authUrl });
   } catch (err) {
     cleanup();
     const message = err instanceof Error ? err.message : String(err);

@@ -8,7 +8,7 @@ interface TokenInputProps {
   value: string;
   onChange: (value: string) => void;
   placeholder?: string;
-  helperText?: string;
+  helperText?: React.ReactNode;
 }
 
 export function TokenInput({ label, value, onChange, placeholder, helperText }: TokenInputProps) {

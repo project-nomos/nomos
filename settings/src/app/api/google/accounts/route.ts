@@ -11,8 +11,11 @@ export async function GET() {
     const { stdout } = await execFileAsync("npx", ["gws", "auth", "list"], { timeout: 10000 });
     const data = JSON.parse(stdout);
     const defaultAccount = data.default ?? "";
-    for (const email of data.accounts ?? []) {
-      accounts.push({ email, default: email === defaultAccount });
+    for (const entry of data.accounts ?? []) {
+      const email = typeof entry === "string" ? entry : entry.email;
+      if (email) {
+        accounts.push({ email, default: email === defaultAccount });
+      }
     }
   } catch {
     // gws not available or no accounts
