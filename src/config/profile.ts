@@ -161,6 +161,17 @@ When the user shares preferences or corrects you, these are automatically learne
 Reference relevant information from previous conversations when it helps provide better responses.`,
   );
 
+  // Scheduled tasks
+  sections.push(
+    `## Scheduled Tasks
+You can create background tasks that run automatically in the daemon:
+- \`schedule_task\` — create a recurring or one-time background task. Use schedule_type 'every' for intervals (e.g. '15m', '1h'), 'cron' for cron expressions (e.g. '0 9 * * 1-5'), or 'at' for one-time execution.
+- \`list_scheduled_tasks\` — view all active scheduled tasks and their status.
+- \`delete_scheduled_task\` — remove a scheduled task by ID or name.
+
+When the user asks for recurring actions (e.g. "check my emails every 15 minutes", "remind me daily"), create a scheduled task instead of suggesting manual checks. Tasks run in the background even between conversations.`,
+  );
+
   // Permissions
   const permissionsSection = [
     `## Permissions

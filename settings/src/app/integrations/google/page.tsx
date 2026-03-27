@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { RefreshCw, ExternalLink, Plus, Trash2, KeyRound, Check } from "lucide-react";
+import { RefreshCw, ExternalLink, Plus, Trash2, KeyRound, Check, Info } from "lucide-react";
 import { TokenInput } from "@/components/token-input";
 import { StatusBadge } from "@/components/status-badge";
 import { DirtyIndicator } from "@/components/dirty-indicator";
@@ -35,6 +35,7 @@ export default function GoogleSettingsPage() {
   const [clientSecret, setClientSecret] = useState("");
   const [hasClientId, setHasClientId] = useState(false);
   const [hasClientSecret, setHasClientSecret] = useState(false);
+  const [gcpProjectNumber, setGcpProjectNumber] = useState<string | null>(null);
   const [clientIdDirty, setClientIdDirty] = useState(false);
   const [clientSecretDirty, setClientSecretDirty] = useState(false);
   const [services, setServices] = useState("all");
@@ -90,6 +91,9 @@ export default function GoogleSettingsPage() {
 
       setHasClientId(!!envData.GOOGLE_OAUTH_CLIENT_ID);
       setHasClientSecret(!!envData.GOOGLE_OAUTH_CLIENT_SECRET);
+      // Extract GCP project number from client ID (format: {number}-{hash}.apps.googleusercontent.com)
+      const cidMatch = envData.GOOGLE_OAUTH_CLIENT_ID?.match(/^(\d+)-/);
+      setGcpProjectNumber(cidMatch ? cidMatch[1] : null);
       setClientId("");
       setClientSecret("");
       setClientIdDirty(false);
@@ -333,6 +337,97 @@ export default function GoogleSettingsPage() {
             </span>
           </div>
         </div>
+      </section>
+
+      {/* Setup Guide */}
+      <section className="mb-8 rounded-xl border border-surface0 bg-mantle p-5">
+        <h2 className="text-sm font-semibold text-subtext1 uppercase tracking-wider mb-4">
+          Setup Guide
+        </h2>
+        <div className="space-y-3 text-sm text-subtext0">
+          <div className="flex gap-3">
+            <span className="flex items-center justify-center w-5 h-5 rounded-full bg-surface0 text-xs font-bold text-mauve shrink-0 mt-0.5">
+              1
+            </span>
+            <div>
+              <p className="text-text font-medium">Create OAuth credentials</p>
+              <p className="text-xs text-overlay0 mt-0.5">
+                Go to{" "}
+                <a
+                  href="https://console.cloud.google.com/apis/credentials"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-blue hover:text-blue/80 inline-flex items-center gap-0.5"
+                >
+                  GCP Credentials <ExternalLink size={9} />
+                </a>{" "}
+                → Create Credentials → OAuth Client ID → Application type:{" "}
+                <strong className="text-text">Desktop app</strong>
+              </p>
+            </div>
+          </div>
+          <div className="flex gap-3">
+            <span className="flex items-center justify-center w-5 h-5 rounded-full bg-surface0 text-xs font-bold text-mauve shrink-0 mt-0.5">
+              2
+            </span>
+            <div>
+              <p className="text-text font-medium">Enable Google APIs</p>
+              <p className="text-xs text-overlay0 mt-0.5">
+                Enable each API your agent needs in the{" "}
+                <a
+                  href={`https://console.cloud.google.com/apis/library${gcpProjectNumber ? `?project=${gcpProjectNumber}` : ""}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-blue hover:text-blue/80 inline-flex items-center gap-0.5"
+                >
+                  API Library <ExternalLink size={9} />
+                </a>
+              </p>
+              <div className="flex flex-wrap gap-1.5 mt-2">
+                {[
+                  { name: "Gmail", api: "gmail.googleapis.com" },
+                  { name: "Drive", api: "drive.googleapis.com" },
+                  { name: "Calendar", api: "calendar-json.googleapis.com" },
+                  { name: "Docs", api: "docs.googleapis.com" },
+                  { name: "Sheets", api: "sheets.googleapis.com" },
+                  { name: "Slides", api: "slides.googleapis.com" },
+                  { name: "Tasks", api: "tasks.googleapis.com" },
+                ].map(({ name, api }) => (
+                  <a
+                    key={api}
+                    href={`https://console.cloud.google.com/apis/api/${api}/overview${gcpProjectNumber ? `?project=${gcpProjectNumber}` : ""}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-surface0 text-xs text-subtext0 hover:text-text hover:bg-surface1 transition-colors"
+                  >
+                    {name} <ExternalLink size={8} />
+                  </a>
+                ))}
+              </div>
+            </div>
+          </div>
+          <div className="flex gap-3">
+            <span className="flex items-center justify-center w-5 h-5 rounded-full bg-surface0 text-xs font-bold text-mauve shrink-0 mt-0.5">
+              3
+            </span>
+            <div>
+              <p className="text-text font-medium">Add credentials below & authorize</p>
+              <p className="text-xs text-overlay0 mt-0.5">
+                Paste your Client ID and Secret, save, then click Authorize to sign in with your
+                Google account.
+              </p>
+            </div>
+          </div>
+        </div>
+        {isConfigured && accounts.length === 0 && !hasValidToken && (
+          <div className="flex items-start gap-2 mt-4 p-3 rounded-lg border border-peach/20 bg-peach/5">
+            <Info size={14} className="text-peach shrink-0 mt-0.5" />
+            <p className="text-xs text-peach">
+              OAuth credentials are configured but no account is authorized. Click &quot;Authorize
+              New Account&quot; below to connect your Google account.
+            </p>
+          </div>
+        )}
       </section>
 
       {/* Authorized Accounts */}

@@ -33,6 +33,11 @@ export class CronEngine {
     await this.cronSystem.refresh();
     this.cronSystem.start();
 
+    // Listen for refresh events from MCP tools (schedule_task, delete_scheduled_task)
+    process.on("cron:refresh" as never, () => {
+      this.refresh().catch((err) => console.error("[cron-engine] Refresh failed:", err));
+    });
+
     const jobs = await this.cronSystem.store.listJobs({ enabled: true });
     console.log(`[cron-engine] Started with ${jobs.length} job(s)`);
   }

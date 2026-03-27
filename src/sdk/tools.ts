@@ -498,6 +498,232 @@ export function createMemoryMcpServer(): McpSdkServerConfigWithInstance {
     },
   );
 
+  const scheduleTaskTool = tool(
+    "schedule_task",
+    "Create a scheduled background task that runs automatically in the daemon. Use this when the user asks for recurring checks, periodic actions, or timed tasks. The task prompt is executed by the agent on schedule. Schedule types: 'every' for intervals (e.g. '15m', '1h', '2d'), 'cron' for cron expressions (e.g. '0 9 * * 1-5' for weekday mornings), 'at' for one-time execution at a specific time (ISO 8601).",
+    {
+      name: z.string().describe("Short descriptive name for the task (e.g. 'check-urgent-emails')"),
+      prompt: z
+        .string()
+        .describe(
+          "The instruction the agent will execute on each run (e.g. 'Check my Gmail for urgent unread emails and summarize them')",
+        ),
+      schedule: z
+        .string()
+        .describe(
+          "Schedule string: interval like '15m'/'1h'/'2d', cron expression like '0 9 * * 1-5', or ISO timestamp for one-time",
+        ),
+      schedule_type: z
+        .enum(["every", "cron", "at"])
+        .describe(
+          "Type of schedule: 'every' for intervals, 'cron' for cron expressions, 'at' for one-time",
+        ),
+      platform: z
+        .string()
+        .optional()
+        .describe("Platform to deliver results to (e.g. 'slack', 'discord', 'telegram')"),
+      channel_id: z.string().optional().describe("Channel/chat ID to deliver results to"),
+      announce: z
+        .boolean()
+        .optional()
+        .describe("Whether to send the result to the specified channel (default: false)"),
+    },
+    async (args) => {
+      try {
+        const { getDb } = await import("../db/client.ts");
+        const { CronStore } = await import("../cron/store.ts");
+
+        const store = new CronStore(getDb());
+        const id = await store.createJob({
+          name: args.name,
+          prompt: args.prompt,
+          schedule: args.schedule,
+          scheduleType: args.schedule_type,
+          sessionTarget: "isolated",
+          deliveryMode: args.announce && args.platform && args.channel_id ? "announce" : "none",
+          platform: args.platform,
+          channelId: args.channel_id,
+          enabled: true,
+          errorCount: 0,
+        });
+
+        // Notify cron engine to refresh (if running in daemon)
+        try {
+          const { EventEmitter } = await import("node:events");
+          process.emit("cron:refresh" as never);
+        } catch {
+          // Not in daemon context — scheduler will pick it up on next poll
+        }
+
+        const scheduleDesc =
+          args.schedule_type === "every"
+            ? `every ${args.schedule}`
+            : args.schedule_type === "cron"
+              ? `cron: ${args.schedule}`
+              : `once at ${args.schedule}`;
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Scheduled task created:\n  ID: ${id.slice(0, 8)}\n  Name: ${args.name}\n  Schedule: ${scheduleDesc}\n  Prompt: ${args.prompt}${args.announce ? `\n  Delivers to: ${args.platform}/${args.channel_id}` : ""}`,
+            },
+          ],
+        };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return {
+          content: [{ type: "text", text: `Failed to create scheduled task: ${message}` }],
+          isError: true,
+        };
+      }
+    },
+    {
+      annotations: {
+        readOnly: false,
+      },
+    },
+  );
+
+  const listScheduledTasksTool = tool(
+    "list_scheduled_tasks",
+    "List all scheduled background tasks. Shows active and disabled tasks with their schedules and last run status.",
+    {
+      include_disabled: z.boolean().optional().describe("Include disabled tasks (default: false)"),
+    },
+    async (args) => {
+      try {
+        const { getDb } = await import("../db/client.ts");
+        const { CronStore } = await import("../cron/store.ts");
+
+        const store = new CronStore(getDb());
+        const jobs = await store.listJobs(args.include_disabled ? undefined : { enabled: true });
+
+        if (jobs.length === 0) {
+          return {
+            content: [{ type: "text", text: "No scheduled tasks found." }],
+          };
+        }
+
+        const formatted = jobs
+          .map((j) => {
+            const scheduleDesc =
+              j.scheduleType === "every"
+                ? `every ${j.schedule}`
+                : j.scheduleType === "cron"
+                  ? `cron: ${j.schedule}`
+                  : `at ${j.schedule}`;
+            const status = j.enabled ? "active" : "disabled";
+            const lastRun = j.lastRun ? `last run: ${j.lastRun.toISOString()}` : "never run";
+            const errorInfo = j.errorCount > 0 ? ` (${j.errorCount} errors)` : "";
+            return `- ${j.name} [${status}]\n  ID: ${j.id.slice(0, 8)}\n  Schedule: ${scheduleDesc}\n  Prompt: ${j.prompt}\n  ${lastRun}${errorInfo}`;
+          })
+          .join("\n\n");
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Scheduled Tasks (${jobs.length}):\n\n${formatted}`,
+            },
+          ],
+        };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return {
+          content: [{ type: "text", text: `Failed to list tasks: ${message}` }],
+          isError: true,
+        };
+      }
+    },
+    {
+      annotations: {
+        readOnly: true,
+      },
+    },
+  );
+
+  const deleteScheduledTaskTool = tool(
+    "delete_scheduled_task",
+    "Delete a scheduled background task by ID or name.",
+    {
+      id: z.string().optional().describe("Task ID (full or first 8 chars)"),
+      name: z.string().optional().describe("Task name (exact match)"),
+    },
+    async (args) => {
+      try {
+        if (!args.id && !args.name) {
+          return {
+            content: [{ type: "text", text: "Provide either task ID or name to delete." }],
+            isError: true,
+          };
+        }
+
+        const { getDb } = await import("../db/client.ts");
+        const { CronStore } = await import("../cron/store.ts");
+
+        const store = new CronStore(getDb());
+        let job = null;
+
+        if (args.name) {
+          job = await store.getJobByName(args.name);
+        }
+
+        if (!job && args.id) {
+          // Try exact match first
+          job = await store.getJob(args.id);
+
+          // Try prefix match if short ID given
+          if (!job && args.id.length < 36) {
+            const allJobs = await store.listJobs();
+            job = allJobs.find((j) => j.id.startsWith(args.id!)) ?? null;
+          }
+        }
+
+        if (!job) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: `No task found with ${args.name ? `name "${args.name}"` : `ID "${args.id}"`}`,
+              },
+            ],
+            isError: true,
+          };
+        }
+
+        await store.deleteJob(job.id);
+
+        // Notify cron engine to refresh
+        try {
+          process.emit("cron:refresh" as never);
+        } catch {
+          // Not in daemon context
+        }
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Deleted scheduled task: ${job.name} (${job.id.slice(0, 8)})`,
+            },
+          ],
+        };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return {
+          content: [{ type: "text", text: `Failed to delete task: ${message}` }],
+          isError: true,
+        };
+      }
+    },
+    {
+      annotations: {
+        readOnly: false,
+      },
+    },
+  );
+
   return createSdkMcpServer({
     name: "nomos-memory",
     version: "0.1.0",
@@ -511,6 +737,9 @@ export function createMemoryMcpServer(): McpSdkServerConfigWithInstance {
       checkPermissionTool,
       grantPermissionTool,
       revokePermissionTool,
+      scheduleTaskTool,
+      listScheduledTasksTool,
+      deleteScheduledTaskTool,
     ],
   });
 }
