@@ -34,6 +34,23 @@ class Nomos < Formula
     libexec.install "node_modules"
     libexec.install "package.json"
 
+    # Fix native .node addon dylib IDs to prevent Homebrew relocation failures.
+    # Some .node files (like ripgrep.node from @anthropic-ai/claude-agent-sdk)
+    # are Mach-O dylibs with long build-path IDs. Homebrew's fix_dynamic_linkage
+    # tries to rewrite these to /opt/homebrew/... paths that exceed the Mach-O
+    # header space. Setting a short @loader_path ID prevents this.
+    Dir.glob("#{libexec}/node_modules/**/*.node").each do |node_addon|
+      next unless File.file?(node_addon)
+      begin
+        macho = MachO.open(node_addon)
+        next unless macho.dylib?
+        MachO::Tools.change_dylib_id(node_addon, "@loader_path/#{File.basename(node_addon)}")
+        MachO.codesign!(node_addon) if Hardware::CPU.arm?
+      rescue MachO::MachOError
+        nil
+      end
+    end
+
     # Create wrapper script
     (bin/"nomos").write_env_script libexec/"dist/index.js",
       PATH: "#{Formula["node@22"].opt_bin}:$PATH"
