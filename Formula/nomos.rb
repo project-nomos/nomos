@@ -38,14 +38,15 @@ class Nomos < Formula
     # Some .node files (like ripgrep.node from @anthropic-ai/claude-agent-sdk)
     # are Mach-O dylibs with build-path IDs. Homebrew's post-install
     # fix_dynamic_linkage rewrites these to long /opt/homebrew/... paths that
-    # exceed the Mach-O header space. Fix by adding header padding so the
-    # longer path fits, then re-codesign on ARM.
+    # exceed the Mach-O header space. Clear the dylib ID so Homebrew skips
+    # relocation entirely — .node files are dlopen'd by Node.js and don't
+    # need a dylib ID.
     Dir.glob("#{libexec}/node_modules/**/*.node").each do |node_addon|
       next unless File.file?(node_addon)
       begin
         macho = MachO.open(node_addon)
         next unless macho.dylib?
-        system "install_name_tool", "-headerpad_max_install_names", node_addon
+        system "install_name_tool", "-id", "", node_addon
         MachO.codesign!(node_addon) if Hardware::CPU.arm?
       rescue MachO::MachOError
         nil
