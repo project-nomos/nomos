@@ -131,10 +131,10 @@ export async function listGwsAccounts(): Promise<{
     const { stdout } = await execFileAsync("npx", ["gws", "auth", "list"], { timeout: 10000 });
     const data = JSON.parse(stdout);
     const defaultAccount = data.default ?? "";
-    const accounts = (data.accounts ?? []).map((email: string) => ({
-      email,
-      default: email === defaultAccount,
-    }));
+    const accounts = (data.accounts ?? []).map((entry: string | { email: string }) => {
+      const email = typeof entry === "string" ? entry : entry.email;
+      return { email, default: email === defaultAccount };
+    });
     return { accounts, count: data.count ?? accounts.length };
   } catch {
     return { accounts: [], count: 0 };

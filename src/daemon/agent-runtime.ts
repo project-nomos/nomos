@@ -58,6 +58,9 @@ export class AgentRuntime {
   // Multi-agent team runtime (when teamMode is enabled)
   private teamRuntime?: TeamRuntime;
 
+  // Google Workspace authorized accounts
+  private gwsAccounts?: Array<{ email: string; isDefault: boolean }>;
+
   private initialized = false;
 
   /** Get the configured model name. */
@@ -141,6 +144,17 @@ export class AgentRuntime {
     }
     if (await isGoogleWorkspaceConfiguredAsync()) {
       Object.assign(this.mcpServers, await createGoogleWorkspaceMcpConfigsAsync());
+      // Load authorized accounts for system prompt
+      try {
+        const { listGwsAccounts } = await import("../sdk/google-workspace-mcp.ts");
+        const { accounts } = await listGwsAccounts();
+        this.gwsAccounts = accounts.map((a) => ({
+          email: typeof a === "string" ? a : a.email,
+          isDefault: typeof a === "string" ? false : a.default,
+        }));
+      } catch {
+        // Could not list accounts
+      }
     }
 
     // Load stored permissions for system prompt
@@ -243,6 +257,18 @@ export class AgentRuntime {
     }
     if (this.mcpServers["google-workspace"]) {
       parts.push("- **Google Workspace**: All services via gws CLI MCP");
+      // List authorized accounts so the agent knows about them
+      if (this.gwsAccounts && this.gwsAccounts.length > 0) {
+        const accountList = this.gwsAccounts
+          .map((a) => `  - ${a.email}${a.isDefault ? " (default)" : ""}`)
+          .join("\n");
+        parts.push(`  Authorized accounts:\n${accountList}`);
+        if (this.gwsAccounts.length > 1) {
+          parts.push(
+            "  Use `switch_google_account` to switch between accounts before making Google Workspace API calls.",
+          );
+        }
+      }
     }
 
     // Check for WhatsApp

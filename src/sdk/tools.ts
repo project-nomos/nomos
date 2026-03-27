@@ -724,6 +724,93 @@ export function createMemoryMcpServer(): McpSdkServerConfigWithInstance {
     },
   );
 
+  const switchGoogleAccountTool = tool(
+    "switch_google_account",
+    "Switch the active Google Workspace account. Use this before making Google API calls (Gmail, Drive, Calendar, etc.) when the user wants to access a different account.",
+    {
+      email: z.string().email().describe("The email address of the account to switch to"),
+    },
+    async (args) => {
+      try {
+        const { execFile } = await import("node:child_process");
+        const { promisify } = await import("node:util");
+        const execFileAsync = promisify(execFile);
+
+        await execFileAsync("npx", ["gws", "auth", "default", args.email], { timeout: 10000 });
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Switched default Google account to ${args.email}. Subsequent Google Workspace API calls will use this account.`,
+            },
+          ],
+        };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return {
+          content: [{ type: "text", text: `Failed to switch Google account: ${message}` }],
+          isError: true,
+        };
+      }
+    },
+    {
+      annotations: {
+        readOnly: false,
+      },
+    },
+  );
+
+  const listGoogleAccountsTool = tool(
+    "list_google_accounts",
+    "List all authorized Google Workspace accounts. Shows which account is currently the default.",
+    {},
+    async () => {
+      try {
+        const { execFile } = await import("node:child_process");
+        const { promisify } = await import("node:util");
+        const execFileAsync = promisify(execFile);
+
+        const { stdout } = await execFileAsync("npx", ["gws", "auth", "list"], { timeout: 10000 });
+        const data = JSON.parse(stdout);
+
+        if (!data.accounts || data.accounts.length === 0) {
+          return {
+            content: [{ type: "text", text: "No Google accounts authorized." }],
+          };
+        }
+
+        const formatted = data.accounts
+          .map((entry: string | { email: string }) => {
+            const email = typeof entry === "string" ? entry : entry.email;
+            const isDefault = email === data.default;
+            return `- ${email}${isDefault ? " (default/active)" : ""}`;
+          })
+          .join("\n");
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Google Workspace accounts (${data.count}):\n${formatted}\n\nUse switch_google_account to change the active account.`,
+            },
+          ],
+        };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return {
+          content: [{ type: "text", text: `Failed to list accounts: ${message}` }],
+          isError: true,
+        };
+      }
+    },
+    {
+      annotations: {
+        readOnly: true,
+      },
+    },
+  );
+
   return createSdkMcpServer({
     name: "nomos-memory",
     version: "0.1.0",
@@ -740,6 +827,8 @@ export function createMemoryMcpServer(): McpSdkServerConfigWithInstance {
       scheduleTaskTool,
       listScheduledTasksTool,
       deleteScheduledTaskTool,
+      switchGoogleAccountTool,
+      listGoogleAccountsTool,
     ],
   });
 }
