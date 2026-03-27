@@ -45,7 +45,7 @@ export async function getLatestVersion(): Promise<string | null> {
 
     const data = (await res.json()) as { tag_name?: string };
     const tag = data.tag_name ?? "";
-    const version = tag.replace(/^v/, "");
+    const version = tag.replace(/^v+/, "");
     if (!version) return null;
 
     cachedLatest = { version, checkedAt: Date.now() };
