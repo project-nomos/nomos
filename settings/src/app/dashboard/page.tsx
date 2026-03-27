@@ -2,14 +2,21 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Radio, User, Brain, ArrowRight } from "lucide-react";
+import { Radio, User, Brain, ArrowRight, ArrowUpCircle } from "lucide-react";
 import type { IntegrationStatus } from "@/lib/types";
+
+interface VersionInfo {
+  current: string;
+  latest: string | null;
+  updateAvailable: boolean;
+}
 
 interface DashboardData {
   identity: { name: string; emoji: string };
   model: string;
   activeChannels: number;
   memoryChunks: number;
+  version: VersionInfo;
 }
 
 function countActiveChannels(status: IntegrationStatus): number {
@@ -29,15 +36,17 @@ export default function DashboardPage() {
   useEffect(() => {
     async function load() {
       try {
-        const [statusRes, envRes, configRes] = await Promise.all([
+        const [statusRes, envRes, configRes, versionRes] = await Promise.all([
           fetch("/api/status"),
           fetch("/api/env"),
           fetch("/api/config"),
+          fetch("/api/version"),
         ]);
 
         const status: IntegrationStatus = await statusRes.json();
         const env = await envRes.json();
         const config = await configRes.json();
+        const version: VersionInfo = await versionRes.json();
 
         // Count memory chunks
         let memoryChunks = 0;
@@ -59,6 +68,7 @@ export default function DashboardPage() {
           model: env.NOMOS_MODEL || "claude-sonnet-4-6",
           activeChannels: countActiveChannels(status),
           memoryChunks,
+          version,
         });
       } catch (err) {
         console.error("Failed to load dashboard data:", err);
@@ -83,8 +93,29 @@ export default function DashboardPage() {
 
   return (
     <div className="max-w-4xl">
-      <h1 className="text-2xl font-bold text-text mb-1">Dashboard</h1>
+      <div className="flex items-center justify-between mb-1">
+        <h1 className="text-2xl font-bold text-text">Dashboard</h1>
+        <span className="text-xs text-overlay0">v{data.version.current}</span>
+      </div>
       <p className="text-sm text-overlay0 mb-8">Overview of your assistant</p>
+
+      {data.version.updateAvailable && data.version.latest && (
+        <div className="rounded-xl border border-peach/30 bg-peach/5 p-4 mb-6 flex items-center gap-3">
+          <ArrowUpCircle size={20} className="text-peach shrink-0" />
+          <div className="flex-1">
+            <p className="text-sm font-medium text-text">
+              Update available: v{data.version.current} → v{data.version.latest}
+            </p>
+            <p className="text-xs text-overlay0 mt-0.5">
+              Run{" "}
+              <code className="text-peach bg-surface0 px-1.5 py-0.5 rounded">
+                brew upgrade nomos
+              </code>{" "}
+              to update
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Status Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-10">

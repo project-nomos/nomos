@@ -16,6 +16,7 @@ import { getTranscript } from "../db/transcripts.ts";
 import { createSession } from "../db/sessions.ts";
 import { loadSkills, formatSkillsForPrompt } from "../skills/loader.ts";
 import { showBanner } from "./banner.ts";
+import { checkForUpgrade, getInstalledVersion } from "../config/version.ts";
 import type { McpServerConfig } from "../sdk/session.ts";
 import { App } from "./components/App.tsx";
 import type { GrpcClient } from "./grpc-client.ts";
@@ -33,6 +34,9 @@ export async function startRepl(options: ReplOptions): Promise<void> {
   // Use a stable session key so the same conversation resumes across restarts.
   // Only use a timestamp key when the user explicitly asks for a new session.
   const sessionKey = options.sessionKey ?? "cli:default";
+
+  // Start upgrade check early (non-blocking, runs in parallel with other setup)
+  const upgradePromise = checkForUpgrade();
 
   const session = await createSession({
     sessionKey,
@@ -111,14 +115,18 @@ export async function startRepl(options: ReplOptions): Promise<void> {
     permissions: permissionsSummary,
   });
 
+  // Await upgrade check (should be resolved by now since it ran in parallel)
+  const upgradeAvailable = await upgradePromise;
+
   // Show banner (before ink takes over stdout)
   showBanner({
     agentName: identity.name,
     agentEmoji: identity.emoji,
-    version: "0.1.0",
+    version: getInstalledVersion(),
     model: options.config.model,
     sessionKey: session.session_key,
     resumedCount: transcript.length > 0 ? transcript.length : undefined,
+    upgradeAvailable: upgradeAvailable ?? undefined,
   });
 
   if (skills.length > 0) {

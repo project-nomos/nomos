@@ -15,6 +15,9 @@ class Nomos < Formula
   depends_on "node@22"
   depends_on "pnpm" => :build
 
+  # Native Node.js addons (.node files) must not be relinked by Homebrew
+  skip_clean "libexec"
+
   def install
     # Install production dependencies only, skip postinstall (playwright/uvx)
     system "pnpm", "install", "--prod", "--ignore-scripts"

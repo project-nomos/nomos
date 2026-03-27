@@ -98,6 +98,7 @@ export function showBanner(opts: {
   model: string;
   sessionKey: string;
   resumedCount?: number;
+  upgradeAvailable?: { current: string; latest: string };
 }): void {
   const tagline = TAGLINES[Math.floor(Math.random() * TAGLINES.length)];
 
@@ -126,6 +127,17 @@ export function showBanner(opts: {
 
   if (opts.resumedCount && opts.resumedCount > 0) {
     console.log(chalk.dim(`   Resumed session with ${opts.resumedCount} messages`));
+  }
+
+  if (opts.upgradeAvailable) {
+    console.log(
+      chalk.hex("#FAB387").bold("   ⬆ Update available: ") +
+        chalk.dim(`v${opts.upgradeAvailable.current}`) +
+        chalk.hex("#FAB387")(" → ") +
+        chalk.hex("#A6E3A1").bold(`v${opts.upgradeAvailable.latest}`) +
+        chalk.dim("  Run: ") +
+        chalk.hex("#89B4FA")("brew upgrade nomos"),
+    );
   }
 
   console.log(chalk.dim("   Type /help for commands, /quit to exit\n"));

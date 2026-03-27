@@ -9,7 +9,7 @@
 import { runSession, type McpServerConfig, type SDKMessage } from "../sdk/session.ts";
 import { createMemoryMcpServer } from "../sdk/tools.ts";
 import { TeamRuntime, stripTeamPrefix } from "./team-runtime.ts";
-import { isSlackConfigured, createSlackMcpServer } from "../sdk/slack-mcp.ts";
+import { isSlackMcpConfiguredAsync, createSlackMcpConfigsAsync } from "../sdk/nomos-slack-mcp.ts";
 import {
   isDiscordConfigured,
   createDiscordMcpServer,
@@ -122,18 +122,9 @@ export class AgentRuntime {
     // Pre-load DB-backed tokens for integrations that use sync getters
     await Promise.all([loadDiscordTokenFromDb(), loadTelegramTokenFromDb()]);
 
-    // Channel MCP servers (when tokens are configured)
-    if (isSlackConfigured()) {
-      this.mcpServers["nomos-slack"] = createSlackMcpServer();
-    }
-
-    // Per-workspace Slack MCP servers for autonomous multi-workspace management
-    try {
-      const { createPerWorkspaceSlackMcpServers } = await import("../sdk/slack-workspace-mcp.ts");
-      const wsServers = await createPerWorkspaceSlackMcpServers();
-      Object.assign(this.mcpServers, wsServers);
-    } catch {
-      // DB not available or no workspaces configured — skip
+    // Slack MCP server (external stdio via nomos-slack-mcp)
+    if (await isSlackMcpConfiguredAsync()) {
+      Object.assign(this.mcpServers, await createSlackMcpConfigsAsync());
     }
 
     if (isDiscordConfigured()) {
@@ -238,16 +229,8 @@ export class AgentRuntime {
   private buildIntegrationsSummary(): string {
     const parts: string[] = [];
 
-    if (isSlackConfigured()) {
-      parts.push("- **Slack** (Bot Mode): Send and receive messages via Slack bot");
-    }
-    const slackWsCount = Object.keys(this.mcpServers).filter((k) =>
-      k.startsWith("slack-ws-"),
-    ).length;
-    if (slackWsCount > 0) {
-      parts.push(
-        `- **Slack** (User Mode): ${slackWsCount} workspace(s) connected — can send messages as the user`,
-      );
+    if (this.mcpServers["nomos-slack"]) {
+      parts.push("- **Slack**: Read/send messages, search, reactions, status via nomos-slack-mcp");
     }
     if (isDiscordConfigured()) {
       parts.push("- **Discord**: Send and receive messages via Discord bot");

@@ -811,6 +811,62 @@ export function createMemoryMcpServer(): McpSdkServerConfigWithInstance {
     },
   );
 
+  const checkForUpdatesTool = tool(
+    "check_for_updates",
+    "Check if a newer version of Nomos is available. Compares the installed version against the latest GitHub release. Use this proactively to inform the user about available upgrades.",
+    {},
+    async () => {
+      try {
+        const { getInstalledVersion, getLatestVersion, isNewerVersion } =
+          await import("../config/version.ts");
+        const current = getInstalledVersion();
+        const latest = await getLatestVersion();
+
+        if (!latest) {
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: `Installed version: v${current}\nCould not check for updates (offline or rate-limited).`,
+              },
+            ],
+          };
+        }
+
+        if (isNewerVersion(current, latest)) {
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: `Update available! v${current} → v${latest}\nUpgrade with: brew upgrade nomos`,
+              },
+            ],
+          };
+        }
+
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: `Nomos is up to date (v${current}).`,
+            },
+          ],
+        };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return {
+          content: [{ type: "text" as const, text: `Failed to check for updates: ${message}` }],
+          isError: true,
+        };
+      }
+    },
+    {
+      annotations: {
+        readOnly: true,
+      },
+    },
+  );
+
   return createSdkMcpServer({
     name: "nomos-memory",
     version: "0.1.0",
@@ -829,6 +885,7 @@ export function createMemoryMcpServer(): McpSdkServerConfigWithInstance {
       deleteScheduledTaskTool,
       switchGoogleAccountTool,
       listGoogleAccountsTool,
+      checkForUpdatesTool,
     ],
   });
 }
