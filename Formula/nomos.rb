@@ -27,35 +27,32 @@ class Nomos < Formula
     system "pnpm", "install", "--ignore-scripts"
     system "pnpm", "build"
 
-    # Install built artifacts to libexec
+    # Install everything except node_modules to libexec.
     libexec.install "dist"
     libexec.install "skills"
     libexec.install "proto"
-    libexec.install "node_modules"
     libexec.install "package.json"
 
-    # Fix native .node addon dylib IDs to prevent Homebrew relocation failures.
-    # Some .node files (like ripgrep.node from @anthropic-ai/claude-agent-sdk)
-    # are Mach-O dylibs with build-path IDs. Homebrew's post-install
-    # fix_dynamic_linkage rewrites these to long /opt/homebrew/... paths that
-    # exceed the Mach-O header space. Clear the dylib ID so Homebrew skips
-    # relocation entirely — .node files are dlopen'd by Node.js and don't
-    # need a dylib ID.
-    Dir.glob("#{libexec}/node_modules/**/*.node").each do |node_addon|
-      next unless File.file?(node_addon)
-      begin
-        macho = MachO.open(node_addon)
-        next unless macho.dylib?
-        system "install_name_tool", "-id", "", node_addon
-        MachO.codesign!(node_addon) if Hardware::CPU.arm?
-      rescue MachO::MachOError
-        nil
-      end
-    end
+    # Archive node_modules as a tarball to hide native .node dylibs
+    # from Homebrew's fix_dynamic_linkage phase, which fails on files
+    # like ripgrep.node (insufficient Mach-O header padding for the
+    # long /opt/homebrew/... dylib ID rewrite). Extracted in post_install.
+    system "tar", "cf", prefix/".node_modules.tar", "node_modules"
 
     # Create wrapper script
     (bin/"nomos").write_env_script libexec/"dist/index.js",
       PATH: "#{Formula["node@22"].opt_bin}:$PATH"
+  end
+
+  def post_install
+    # Extract node_modules after Homebrew's relocation phase
+    staging = prefix/".node_modules.tar"
+    if staging.exist?
+      cd libexec do
+        system "tar", "xf", staging
+      end
+      staging.delete
+    end
   end
 
   def caveats
