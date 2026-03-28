@@ -15,6 +15,7 @@ import { DraftManager } from "./draft-manager.ts";
 import { writePidFile, installSignalHandlers } from "./lifecycle.ts";
 import { SlackAdapter } from "./channels/slack.ts";
 import { SlackUserAdapter } from "./channels/slack-user.ts";
+import { SlackPollingAdapter } from "./channels/slack-polling.ts";
 import { DiscordAdapter } from "./channels/discord.ts";
 import { TelegramAdapter } from "./channels/telegram.ts";
 import { WhatsAppAdapter } from "./channels/whatsapp.ts";
@@ -118,6 +119,17 @@ export class Gateway {
     // Start gRPC server
     await this.grpcServer.start();
 
+    // Register command handler for hot-reload
+    this.grpcServer.onCommand(async (command) => {
+      if (command === "reload-slack-workspaces") {
+        const added = await this.reloadSlackWorkspaces();
+        return added.length > 0
+          ? `Loaded ${added.length} workspace(s): ${added.join(", ")}`
+          : "No new workspaces to load";
+      }
+      return `Unknown command: ${command}`;
+    });
+
     // Register and start channel adapters
     if (!this.options.skipChannels) {
       await this.registerChannelAdapters();
@@ -154,6 +166,112 @@ export class Gateway {
     await closeBrowser();
 
     console.log("[gateway] Daemon stopped");
+  }
+
+  /**
+   * Hot-reload Slack workspace adapters.
+   * Checks the DB for new/changed workspaces and registers adapters for any
+   * that aren't already running. Called after workspace add/remove.
+   */
+  async reloadSlackWorkspaces(): Promise<string[]> {
+    const { listWorkspaces, syncSlackConfigToFile } = await import("../db/slack-workspaces.ts");
+    const workspaces = await listWorkspaces();
+    const added: string[] = [];
+
+    // Sync config file for nomos-slack-mcp
+    try {
+      await syncSlackConfigToFile();
+    } catch {
+      // Non-critical
+    }
+
+    const enqueue = (rawMsg: IncomingMessage) => {
+      this.channelManager
+        .transformIncoming(rawMsg)
+        .then((msg) => {
+          const sessionKey = `${msg.platform}:${msg.channelId}`;
+          const adapter = this.channelManager.getAdapter(msg.platform);
+
+          let responder: StreamingResponder | null = null;
+          if (adapter?.postMessage && adapter?.updateMessage) {
+            responder = new StreamingResponder(
+              (text) => adapter.postMessage!(msg.channelId, text, msg.threadId),
+              (ts, text) => adapter.updateMessage!(msg.channelId, ts, text),
+              adapter.deleteMessage ? (ts) => adapter.deleteMessage!(msg.channelId, ts) : undefined,
+            );
+          }
+
+          this.messageQueue
+            .enqueue(sessionKey, msg, responder?.handleEvent ?? (() => {}))
+            .then(async (result) => {
+              if (responder) {
+                const handled = await responder.finalize(result.content);
+                if (!handled) await this.channelManager.send(result);
+              } else {
+                await this.channelManager.send(result);
+              }
+              indexConversationTurn(msg, result).catch((err) =>
+                console.error("[gateway] Memory indexing failed:", err),
+              );
+            })
+            .catch(async (err) => {
+              await responder?.finalize("Sorry, an error occurred.");
+              console.error(`[gateway] Failed to process message from ${msg.platform}:`, err);
+            });
+        })
+        .catch((err) => {
+          console.error(`[gateway] Incoming hook transform failed:`, err);
+        });
+    };
+
+    for (const ws of workspaces) {
+      const platform = `slack-user:${ws.team_id}`;
+      if (this.channelManager.hasAdapter(platform)) continue;
+
+      if (ws.access_token.startsWith("xoxc-") || ws.cookie_d) {
+        const adapter = new SlackPollingAdapter({
+          token: ws.access_token,
+          cookie: ws.cookie_d,
+          teamId: ws.team_id,
+          onMessage: enqueue,
+          draftManager: this.draftManager,
+          onAuthError: (teamId, teamName) => {
+            const event = {
+              type: "system" as const,
+              subtype: "auth_error",
+              message: `Slack session expired for ${teamName} (${teamId}) — run \`nomos slack auth\` to reconnect`,
+              data: { platform: `slack-user:${teamId}`, teamId, teamName },
+            };
+            this.wsServer.broadcast(event);
+            this.grpcServer.broadcast(event);
+          },
+        });
+        await this.channelManager.registerAndStart(adapter);
+        this.draftManager.registerSendFn(adapter.platform, (channelId, text, threadId) =>
+          adapter.sendAsUser(channelId, text, threadId),
+        );
+        added.push(`${ws.team_name} (${ws.team_id})`);
+      } else if (process.env.SLACK_APP_TOKEN) {
+        const adapter = new SlackUserAdapter({
+          userToken: ws.access_token,
+          appToken: process.env.SLACK_APP_TOKEN,
+          teamId: ws.team_id,
+          onMessage: enqueue,
+          draftManager: this.draftManager,
+        });
+        await this.channelManager.registerAndStart(adapter);
+        this.draftManager.registerSendFn(adapter.platform, (channelId, text, threadId) =>
+          adapter.sendAsUser(channelId, text, threadId),
+        );
+        added.push(`${ws.team_name} (${ws.team_id})`);
+      }
+    }
+
+    if (added.length > 0) {
+      console.log(`[gateway] Hot-loaded ${added.length} Slack workspace(s): ${added.join(", ")}`);
+    }
+
+    return added;
   }
 
   /** Verify LLM API access works before starting services. */
@@ -258,25 +376,64 @@ export class Gateway {
     }
 
     // Slack user mode: load workspaces from DB, fall back to env var
-    if (process.env.SLACK_APP_TOKEN) {
-      const { listWorkspaces } = await import("../db/slack-workspaces.ts");
+    {
+      const { listWorkspaces, syncSlackConfigToFile } = await import("../db/slack-workspaces.ts");
       const workspaces = await listWorkspaces();
+
+      // Sync DB tokens to ~/.nomos/slack/config.json for nomos-slack-mcp
+      if (workspaces.length > 0) {
+        try {
+          await syncSlackConfigToFile();
+        } catch (err) {
+          console.warn("[gateway] Failed to sync Slack config to file:", err);
+        }
+      }
 
       if (workspaces.length > 0) {
         for (const ws of workspaces) {
-          const adapter = new SlackUserAdapter({
-            userToken: ws.access_token,
-            appToken: process.env.SLACK_APP_TOKEN,
-            teamId: ws.team_id,
-            onMessage: enqueue,
-            draftManager: this.draftManager,
-          });
-          this.channelManager.register(adapter);
-          this.draftManager.registerSendFn(adapter.platform, (channelId, text, threadId) =>
-            adapter.sendAsUser(channelId, text, threadId),
-          );
+          if (ws.access_token.startsWith("xoxc-") || ws.cookie_d) {
+            // Browser-extracted session token → use polling adapter (no Slack app needed)
+            const adapter = new SlackPollingAdapter({
+              token: ws.access_token,
+              cookie: ws.cookie_d,
+              teamId: ws.team_id,
+              onMessage: enqueue,
+              draftManager: this.draftManager,
+              onAuthError: (teamId, teamName) => {
+                const event = {
+                  type: "system" as const,
+                  subtype: "auth_error",
+                  message: `Slack session expired for ${teamName} (${teamId}) — run \`nomos slack auth\` to reconnect`,
+                  data: { platform: `slack-user:${teamId}`, teamId, teamName },
+                };
+                this.wsServer.broadcast(event);
+                this.grpcServer.broadcast(event);
+              },
+            });
+            this.channelManager.register(adapter);
+            this.draftManager.registerSendFn(adapter.platform, (channelId, text, threadId) =>
+              adapter.sendAsUser(channelId, text, threadId),
+            );
+          } else if (process.env.SLACK_APP_TOKEN) {
+            // OAuth xoxp- token → use Socket Mode adapter (requires Slack app)
+            const adapter = new SlackUserAdapter({
+              userToken: ws.access_token,
+              appToken: process.env.SLACK_APP_TOKEN,
+              teamId: ws.team_id,
+              onMessage: enqueue,
+              draftManager: this.draftManager,
+            });
+            this.channelManager.register(adapter);
+            this.draftManager.registerSendFn(adapter.platform, (channelId, text, threadId) =>
+              adapter.sendAsUser(channelId, text, threadId),
+            );
+          } else {
+            console.warn(
+              `[gateway] Skipping workspace ${ws.team_name} (${ws.team_id}): xoxp- token requires SLACK_APP_TOKEN`,
+            );
+          }
         }
-      } else if (process.env.SLACK_USER_TOKEN) {
+      } else if (process.env.SLACK_USER_TOKEN && process.env.SLACK_APP_TOKEN) {
         // Backwards compat: single env var, no DB rows
         const adapter = new SlackUserAdapter({
           userToken: process.env.SLACK_USER_TOKEN,

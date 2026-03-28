@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { WebClient } from "@slack/web-api";
 import { getDb } from "@/lib/db";
 import { validateOrigin } from "@/lib/validate-request";
+import { syncSlackConfigToFile } from "@/lib/sync-slack-config";
+import { notifyDaemonReload } from "@/lib/notify-daemon";
 
 export async function GET() {
   try {
@@ -103,6 +105,11 @@ export async function POST(request: Request) {
       created_at: row.created_at,
       updated_at: row.updated_at,
     };
+
+    // Sync tokens to ~/.nomos/slack/config.json for nomos-slack-mcp
+    await syncSlackConfigToFile();
+    notifyDaemonReload();
+
     return NextResponse.json({ ok: true, workspace });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -132,17 +139,27 @@ export async function DELETE(request: Request) {
 
     if (ws?.secrets) {
       try {
-        const secrets = JSON.parse(ws.secrets as string);
-        if (secrets.access_token) {
-          const revokeClient = new WebClient(secrets.access_token);
-          await revokeClient.auth.revoke();
+        const raw = ws.secrets as string;
+        // Only attempt revocation if secrets look like JSON (not encrypted)
+        if (raw.startsWith("{")) {
+          const secrets = JSON.parse(raw);
+          if (secrets.access_token && !secrets.access_token.startsWith("xoxc-")) {
+            // Only revoke xoxp- tokens; xoxc- browser tokens can't be revoked via API
+            const revokeClient = new WebClient(secrets.access_token);
+            await revokeClient.auth.revoke();
+          }
         }
       } catch {
-        // Token may already be invalid or not parseable
+        // Token may already be invalid, encrypted, or not parseable
       }
     }
 
     await sql`DELETE FROM integrations WHERE name = ${name}`;
+
+    // Sync tokens to ~/.nomos/slack/config.json for nomos-slack-mcp
+    await syncSlackConfigToFile();
+    notifyDaemonReload();
+
     return NextResponse.json({ ok: true });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

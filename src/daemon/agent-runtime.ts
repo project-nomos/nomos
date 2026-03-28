@@ -60,6 +60,7 @@ export class AgentRuntime {
 
   // Google Workspace authorized accounts
   private gwsAccounts?: Array<{ email: string; isDefault: boolean }>;
+  private slackWorkspaces?: Array<{ teamId: string; teamName: string }>;
 
   private initialized = false;
 
@@ -127,6 +128,23 @@ export class AgentRuntime {
       Object.assign(this.mcpServers, await createSlackMcpConfigsAsync());
     }
 
+    // Per-workspace Slack MCP servers (in-process, one per connected workspace)
+    try {
+      const { createPerWorkspaceSlackMcpServers } = await import("../sdk/slack-workspace-mcp.ts");
+      const { listWorkspaces } = await import("../db/slack-workspaces.ts");
+      const wsServers = await createPerWorkspaceSlackMcpServers();
+      Object.assign(this.mcpServers, wsServers);
+      const workspaces = await listWorkspaces();
+      if (workspaces.length > 0) {
+        this.slackWorkspaces = workspaces.map((ws) => ({
+          teamId: ws.team_id,
+          teamName: ws.team_name,
+        }));
+      }
+    } catch {
+      // No workspaces configured — skip
+    }
+
     if (isDiscordConfigured()) {
       this.mcpServers["nomos-discord"] = createDiscordMcpServer();
     }
@@ -135,16 +153,26 @@ export class AgentRuntime {
     }
     if (await isGoogleWorkspaceConfiguredAsync()) {
       Object.assign(this.mcpServers, await createGoogleWorkspaceMcpConfigsAsync());
-      // Load authorized accounts for system prompt
+      // Sync authorized accounts from gws CLI to DB and load for system prompt
       try {
-        const { listGwsAccounts } = await import("../sdk/google-workspace-mcp.ts");
-        const { accounts } = await listGwsAccounts();
+        const { syncGoogleAccountsFromGws } = await import("../db/google-accounts.ts");
+        const accounts = await syncGoogleAccountsFromGws();
         this.gwsAccounts = accounts.map((a) => ({
-          email: typeof a === "string" ? a : a.email,
-          isDefault: typeof a === "string" ? false : a.default,
+          email: a.email,
+          isDefault: a.is_default,
         }));
       } catch {
-        // Could not list accounts
+        // Fall back to gws CLI directly
+        try {
+          const { listGwsAccounts } = await import("../sdk/google-workspace-mcp.ts");
+          const { accounts } = await listGwsAccounts();
+          this.gwsAccounts = accounts.map((a) => ({
+            email: typeof a === "string" ? a : a.email,
+            isDefault: typeof a === "string" ? false : a.default,
+          }));
+        } catch {
+          // Could not list accounts
+        }
       }
     }
 
@@ -231,6 +259,12 @@ export class AgentRuntime {
 
     if (this.mcpServers["nomos-slack"]) {
       parts.push("- **Slack**: Read/send messages, search, reactions, status via nomos-slack-mcp");
+    }
+    if (this.slackWorkspaces && this.slackWorkspaces.length > 0) {
+      const wsList = this.slackWorkspaces
+        .map((ws) => `  - ${ws.teamName} (${ws.teamId}) — tools via \`mcp__slack-ws-${ws.teamId}\``)
+        .join("\n");
+      parts.push(`- **Slack Workspaces** (connected as user):\n${wsList}`);
     }
     if (isDiscordConfigured()) {
       parts.push("- **Discord**: Send and receive messages via Discord bot");

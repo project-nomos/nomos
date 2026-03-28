@@ -44,13 +44,13 @@ export function isGoogleWorkspaceConfigured(): boolean {
 
 /**
  * Check if Google Workspace is configured (async, DB-backed).
- * Checks DB integration "google" first, then falls back to sync check.
+ * Checks DB for google-ws:* account entries first, then falls back to sync check.
  */
 export async function isGoogleWorkspaceConfiguredAsync(): Promise<boolean> {
   try {
-    const { getIntegration } = await import("../db/integrations.ts");
-    const integration = await getIntegration("google");
-    if (integration?.enabled) return true;
+    const { listGoogleAccounts } = await import("../db/google-accounts.ts");
+    const accounts = await listGoogleAccounts();
+    if (accounts.length > 0) return true;
   } catch {
     // DB not available — fall through
   }

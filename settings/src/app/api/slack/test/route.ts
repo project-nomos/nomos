@@ -48,6 +48,23 @@ export async function POST(request: Request) {
     const client = new WebClient(accessToken);
     const result = await client.auth.test();
 
+    // Update metadata if team name was missing or "unknown"
+    if (result.team && result.user_id) {
+      try {
+        await sql`
+          UPDATE integrations
+          SET metadata = metadata || ${JSON.stringify({
+            team_name: result.team,
+            user_id: result.user_id,
+          })}::jsonb,
+          updated_at = now()
+          WHERE name = ${name}
+        `;
+      } catch {
+        // Non-blocking — metadata update is best-effort
+      }
+    }
+
     return NextResponse.json({
       ok: true,
       message: `Connected as ${result.user} in ${result.team}`,

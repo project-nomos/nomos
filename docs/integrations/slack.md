@@ -1,141 +1,222 @@
 # Slack Integration
 
-Connect Nomos to Slack so it can respond to DMs and @mentions in channels. Messages stream in real-time — users see a "_Thinking..._" indicator followed by progressive text updates, just like ChatGPT's Slack bot.
+Connect Nomos to Slack so it can respond to DMs and @mentions in channels, read messages, search history, and act as you across multiple workspaces. Messages stream in real-time — users see a "_Thinking..._" indicator followed by progressive text updates.
 
-## Prerequisites
+## Architecture
 
-- A Slack workspace where you have permission to install apps
-- The Nomos daemon running (`pnpm daemon:dev` or `nomos daemon start`)
+Nomos uses two components for Slack:
 
-## Step 1: Create a Slack App
+| Component           | Purpose                                                                                       | How it connects                   |
+| ------------------- | --------------------------------------------------------------------------------------------- | --------------------------------- |
+| **Nomos daemon**    | Listens for DMs/@mentions, responds in real-time (bot mode or user mode)                      | Socket Mode via `SLACK_APP_TOKEN` |
+| **nomos-slack-mcp** | Gives the agent proactive Slack tools (read channels, send messages, search, reactions, etc.) | External MCP server over stdio    |
 
-1. Go to [https://api.slack.com/apps](https://api.slack.com/apps)
-2. Click **Create New App** > **From scratch**
-3. Enter a name (e.g., "Nomos") and select your workspace
-4. Click **Create App**
+Both can work independently or together. The daemon handles real-time messaging; `nomos-slack-mcp` gives the agent tools to interact with Slack proactively.
 
-## Step 2: Enable Socket Mode
+## Quick Start
 
-Socket Mode lets the bot connect without exposing a public URL.
+### Option A: App Manifest (recommended)
+
+Import the included manifest to create a pre-configured Slack app:
+
+1. Go to [api.slack.com/apps](https://api.slack.com/apps) → **Create New App** → **From an app manifest**
+2. Select your workspace
+3. Paste the contents of [`slack-app-manifest.yaml`](../../slack-app-manifest.yaml) (or `.json`)
+4. Review and click **Create**
+
+> **Note:** The manifest includes a placeholder redirect URL (`https://your-domain.com/slack/oauth/callback`). If you plan to distribute the app to multiple workspaces via OAuth, replace it with your actual HTTPS URL. For local-only use, you can remove the redirect URL entirely.
+
+5. Go to **Basic Information** → **App-Level Tokens** → generate a token with `connections:write` scope — this is your `SLACK_APP_TOKEN` (`xapp-...`)
+6. Go to **Install App** → install to your workspace → copy the **Bot User OAuth Token** (`xoxb-...`) — this is your `SLACK_BOT_TOKEN`
+
+### Option B: Manual Setup
+
+1. Go to [api.slack.com/apps](https://api.slack.com/apps) → **Create New App** → **From scratch**
+2. Follow Steps 1-6 below to configure scopes, events, and Socket Mode
+
+## Step 1: Enable Socket Mode
 
 1. In the app settings sidebar, go to **Socket Mode**
 2. Toggle **Enable Socket Mode** to On
-3. You'll be prompted to create an App-Level Token:
+3. Create an App-Level Token:
    - Name it `socket-token`
    - Add the scope `connections:write`
    - Click **Generate**
-4. Copy the token (starts with `xapp-`) — this is your `SLACK_APP_TOKEN`
+4. Copy the token (`xapp-...`) — this is your `SLACK_APP_TOKEN`
 
-## Step 3: Configure Bot Scopes
+## Step 2: Configure Bot Scopes
 
-1. Go to **OAuth & Permissions** in the sidebar
-2. Scroll to **Scopes** > **Bot Token Scopes**
-3. Add the following scopes:
+1. Go to **OAuth & Permissions** → **Bot Token Scopes**
+2. Add:
 
-| Scope              | Purpose                           |
-| ------------------ | --------------------------------- |
-| `chat:write`       | Send and update messages          |
-| `channels:read`    | List public channels              |
-| `channels:history` | Read messages in public channels  |
-| `groups:read`      | List private channels             |
-| `groups:history`   | Read messages in private channels |
-| `im:history`       | Read direct messages              |
-| `im:read`          | View DM metadata                  |
-| `im:write`         | Send direct messages              |
-| `users:read`       | Look up user names and details    |
-| `reactions:write`  | Add emoji reactions               |
-| `pins:write`       | Pin and unpin messages            |
-| `files:write`      | Upload files                      |
-| `search:read`      | Search workspace messages         |
+| Scope               | Purpose                           |
+| ------------------- | --------------------------------- |
+| `app_mentions:read` | Receive @mention events           |
+| `channels:history`  | Read messages in public channels  |
+| `channels:read`     | List public channels              |
+| `chat:write`        | Send and update messages          |
+| `files:write`       | Upload files                      |
+| `groups:history`    | Read messages in private channels |
+| `groups:read`       | List private channels             |
+| `im:history`        | Read direct messages              |
+| `im:read`           | View DM metadata                  |
+| `im:write`          | Send direct messages              |
+| `pins:write`        | Pin and unpin messages            |
+| `reactions:write`   | Add emoji reactions               |
+| `users:read`        | Look up user names                |
 
-## Step 4: Enable App Home & Direct Messages
+## Step 3: Enable App Home & Direct Messages
 
-This step is required for users to DM the bot. Without it, Slack shows "Sending messages to this app has been turned off."
+1. Go to **App Home** → **Show Tabs**
+2. Check **Messages Tab**
+3. Enable **"Allow users to send Slash commands and messages from the messages tab"**
 
-1. Go to **App Home** in the sidebar
-2. Scroll to **Show Tabs**
-3. Check **Messages Tab**
-4. Enable the checkbox **"Allow users to send Slash commands and messages from the messages tab"**
+## Step 4: Enable Event Subscriptions
 
-## Step 5: Enable Event Subscriptions
+1. Go to **Event Subscriptions** → toggle **Enable Events** to On
+2. Under **Subscribe to bot events**, add:
+   - `app_mention`
+   - `message.im`
+3. Click **Save Changes**
 
-1. Go to **Event Subscriptions** in the sidebar
-2. Toggle **Enable Events** to On
-3. Under **Subscribe to bot events**, add:
-   - `app_mention` — triggers when the bot is @mentioned in a channel
-   - `message.im` — triggers on direct messages to the bot
-4. Click **Save Changes**
+## Step 5: Install the App
 
-## Step 6: Install the App
+1. Go to **Install App** → **Install to Workspace**
+2. Copy the **Bot User OAuth Token** (`xoxb-...`) — this is your `SLACK_BOT_TOKEN`
 
-After configuring scopes, App Home, and events, install (or reinstall) the app to apply the changes.
+> Any time you change scopes or events, you must reinstall the app.
 
-1. Go to **Install App** in the sidebar
-2. Click **Install to Workspace** (or **Reinstall to Workspace** if already installed)
-3. Review the permissions and click **Allow**
-4. Copy the **Bot User OAuth Token** (starts with `xoxb-`) — this is your `SLACK_BOT_TOKEN`
+## Step 6: Configure
 
-> **Important:** Any time you change scopes, events, or App Home settings, you must reinstall the app for the changes to take effect.
-
-## Step 7: Configure Environment Variables
-
-Add the tokens to your `.env` file in the project root:
+Add tokens to `~/.nomos/.env` (or via Settings UI at `localhost:3456/integrations/slack`):
 
 ```bash
-SLACK_BOT_TOKEN=xoxb-your-bot-token-here
-SLACK_APP_TOKEN=xapp-your-app-token-here
+SLACK_APP_TOKEN=xapp-...    # App-Level Token (Socket Mode)
+SLACK_BOT_TOKEN=xoxb-...    # Bot User OAuth Token
 ```
 
 ### Optional: Restrict to Specific Channels
-
-To limit the bot to certain channels, set a comma-separated list of channel IDs:
 
 ```bash
 SLACK_ALLOWED_CHANNELS=C01ABC123,C02DEF456
 ```
 
-To find a channel ID: right-click a channel in Slack > **View channel details** > the ID is at the bottom of the popup.
-
 ## Step 7: Start the Daemon
 
 ```bash
-# Development mode (foreground with logs)
-pnpm daemon:dev
-
-# Or production mode (background)
 nomos daemon start
+# or development mode:
+pnpm daemon:dev
 ```
 
-You should see output confirming the Slack adapter started:
+You should see:
 
 ```
 [slack-adapter] Running (bot: U0XXXXXX)
 [gateway]   Channels: slack
 ```
 
-## Usage
+## Multi-Workspace Support
 
-### Direct Messages
+Nomos supports connecting to multiple Slack workspaces simultaneously. Each workspace gets its own user token (`xoxp-`) stored encrypted in the database.
 
-Send a DM to the bot — it responds to all messages in DMs automatically.
+### Adding Workspaces
 
-### Channel Mentions
+There are three ways to connect a workspace:
 
-In any channel the bot has been invited to, @mention it:
+#### Option A: Via `nomos-slack-mcp` OAuth (recommended for multi-workspace)
 
+```bash
+npx nomos-slack-mcp add-workspace
 ```
-@Nomos what's the weather like today?
+
+This opens a browser for OAuth authorization. The token is stored in `~/.nomos/slack/config.json`. On the next daemon start (or workspace add via Settings UI/CLI), tokens are synced to the database.
+
+> **Note:** Multi-workspace OAuth requires your Slack app to have [distribution enabled](#enabling-distribution). For your home workspace only, distribution is not needed.
+
+#### Option B: Manual token
+
+If you already have a `xoxp-` user token:
+
+```bash
+nomos slack auth --token xoxp-...
 ```
 
-The bot must be invited to a channel before it can receive mentions there. Type `/invite @Nomos` in the channel.
+Or via the Settings UI: **Integrations → Slack → Manual Token** section. This works for any workspace without distribution.
 
-### Threaded Conversations
+#### Option C: Settings UI OAuth
 
-All replies are posted in-thread. The bot maintains conversation context within each thread.
+Authorize workspaces directly from the Settings UI:
+
+1. Configure `SLACK_CLIENT_ID` and `SLACK_CLIENT_SECRET` in **App Configuration**
+2. Click **Authorize Workspace**
+
+> Multi-workspace requires [distribution enabled](#enabling-distribution).
+
+### Enabling Distribution
+
+To connect workspaces other than your home workspace via OAuth (Options A or C), your Slack app must have distribution enabled:
+
+1. Go to [api.slack.com/apps](https://api.slack.com/apps) → your app → **OAuth & Permissions** → **Redirect URLs**
+2. Add an HTTPS redirect URL (e.g., `https://your-domain.com/slack/oauth/callback`)
+3. Go to **Manage Distribution**
+4. Check **"Remove Hard Coded Information"**
+5. Click **Activate Public Distribution**
+
+> Slack requires HTTPS for distributed apps. If you don't have an HTTPS endpoint, use Option B (manual token) — you can generate user tokens from the **OAuth & Permissions** page for each workspace where the app is installed.
+
+### Managing Workspaces
+
+```bash
+nomos slack workspaces       # List all connected workspaces
+nomos slack remove T01ABC    # Disconnect a workspace
+```
+
+### How Tokens Are Stored
+
+- **Database** (source of truth) — tokens encrypted at rest via AES-256-GCM in the `integrations` table
+- **Config file** (runtime sync) — `~/.nomos/slack/config.json` is auto-synced from DB for `nomos-slack-mcp` to read
+- Tokens are synced whenever workspaces are added/removed and on daemon startup
+
+## nomos-slack-mcp Tools
+
+When `nomos-slack-mcp` is configured (workspaces in DB or `~/.nomos/slack/config.json`), the agent gets proactive Slack tools:
+
+| Tool                                        | Description                            |
+| ------------------------------------------- | -------------------------------------- |
+| `slack_read_channel`                        | Read recent messages (up to 100)       |
+| `slack_read_thread`                         | Read thread replies                    |
+| `slack_send_message`                        | Send messages to any channel or thread |
+| `slack_edit_message`                        | Edit previously sent messages          |
+| `slack_delete_message`                      | Delete messages                        |
+| `slack_search`                              | Search workspace messages              |
+| `slack_list_channels`                       | List accessible channels               |
+| `slack_user_info`                           | Look up user details                   |
+| `slack_react`                               | Add emoji reactions                    |
+| `slack_pin_message` / `slack_unpin_message` | Pin/unpin messages                     |
+| `slack_list_pins`                           | List pinned items                      |
+| `slack_upload_file`                         | Upload files to channels               |
+| `slack_set_status`                          | Set your Slack status                  |
+
+These tools work with multi-workspace — each tool accepts an optional `workspace` parameter to target a specific workspace.
+
+## User Mode
+
+In addition to bot mode, Nomos supports **User Mode** — it acts as you instead of as a bot. Messages appear as if you typed them.
+
+```bash
+# Connect a workspace
+nomos slack auth --token xoxp-...
+
+# Start listening as you
+nomos slack listen
+```
+
+For full details including draft approval, daemon integration, and required scopes, see [Slack User Mode](slack-user-mode.md).
 
 ## Real-Time Streaming
 
-When the bot processes a message in Slack:
+When the bot processes a message:
 
 1. A "_Thinking..._" placeholder appears immediately
 2. As the agent generates text, the message updates every ~1.5 seconds
@@ -144,80 +225,36 @@ When the bot processes a message in Slack:
 
 For long responses (over 4,000 characters), the streaming message is replaced with properly chunked messages.
 
-## MCP Tools
-
-When `SLACK_BOT_TOKEN` is set, the agent also gets access to Slack MCP tools for proactive actions:
-
-| Tool                   | Description                            |
-| ---------------------- | -------------------------------------- |
-| `slack_send_message`   | Send messages to any channel or thread |
-| `slack_edit_message`   | Edit previously sent messages          |
-| `slack_delete_message` | Delete messages                        |
-| `slack_read_channel`   | Read recent messages (up to 100)       |
-| `slack_read_thread`    | Read thread replies                    |
-| `slack_react`          | Add emoji reactions                    |
-| `slack_pin_message`    | Pin a message                          |
-| `slack_unpin_message`  | Unpin a message                        |
-| `slack_list_pins`      | List pinned items in a channel         |
-| `slack_list_channels`  | List accessible channels               |
-| `slack_user_info`      | Look up user details                   |
-| `slack_upload_file`    | Upload files to channels               |
-| `slack_search`         | Search workspace messages              |
-
-These tools let the agent interact with Slack beyond just replying — it can search history, read other channels, pin important messages, and more.
-
 ## Troubleshooting
 
 ### "Sending messages to this app has been turned off"
 
-This means the Messages Tab isn't enabled for the bot:
-
-1. Go to your app settings > **App Home** > **Show Tabs**
-2. Check **Messages Tab**
-3. Enable **"Allow users to send Slash commands and messages from the messages tab"**
-4. Go to **OAuth & Permissions** and confirm the `im:history`, `im:read`, and `im:write` scopes are added
-5. Go to **Event Subscriptions** > **Subscribe to bot events** and confirm `message.im` is listed
-6. **Reinstall the app** — go to **Install App** and click **Reinstall to Workspace**
-
-All of these must be in place, and the app must be reinstalled after making changes.
+1. Go to **App Home** → check **Messages Tab** + **"Allow users to send..."**
+2. Confirm `im:history`, `im:read`, `im:write` scopes are added
+3. Confirm `message.im` is in bot events
+4. **Reinstall the app**
 
 ### Bot doesn't respond to messages
 
-- Verify both `SLACK_BOT_TOKEN` and `SLACK_APP_TOKEN` are set correctly
-- Check the daemon logs for connection errors
-- Make sure `message.im` and `app_mention` events are subscribed
-- For channel messages, ensure the bot is invited to the channel
+- Verify both `SLACK_BOT_TOKEN` and `SLACK_APP_TOKEN` are set
+- Check daemon logs for connection errors
+- For channel messages, invite the bot: `/invite @Nomos`
 
 ### "not_in_channel" errors
 
-The bot needs to be a member of any channel it posts to. Invite it with `/invite @Nomos`.
+The bot must be a member of the channel. Invite it with `/invite @Nomos`.
 
-### Rate limiting
+### "invalid_team_for_non_distributed_app"
 
-The streaming responder throttles updates to ~40/minute per conversation, well within Slack's Tier 3 limit of 50 requests/minute. If you see rate limit errors in logs, they're handled gracefully — the update is skipped and retried on the next interval.
+Your Slack app isn't enabled for multi-workspace distribution. Either:
+
+- Enable distribution: **Manage Distribution** → **Activate Public Distribution** (requires HTTPS redirect URL)
+- Or use `npx nomos-slack-mcp add-workspace` instead (no distribution needed)
 
 ### Socket Mode disconnections
 
-Socket Mode automatically reconnects. If the bot appears offline, check:
+Socket Mode auto-reconnects. If the bot appears offline:
 
-- The `SLACK_APP_TOKEN` hasn't been revoked
-- The app's Socket Mode setting is still enabled
-- The daemon process is running (`nomos daemon status`)
-
-## Slack User Mode
-
-In addition to bot mode, Nomos supports **User Mode** — where it acts as you (the authenticated user) instead of as a bot. It listens to DMs and @mentions directed at your personal Slack account and responds using your user token so messages appear as if you typed them.
-
-### Quick Start (CLI listener)
-
-```bash
-# Connect your workspace with a user token
-nomos slack auth --token xoxp-your-token
-
-# Start listening as you
-nomos slack listen
-```
-
-The CLI listener sends responses directly. For unattended background use with draft approval, run via the daemon instead.
-
-For full setup instructions, see [Slack User Mode](slack-user-mode.md).
+- Check that `SLACK_APP_TOKEN` hasn't been revoked
+- Verify Socket Mode is still enabled in app settings
+- Confirm the daemon is running: `nomos daemon status`
