@@ -49,6 +49,12 @@ jobs:
           registry-url: "https://npm.pkg.github.com"
           scope: "@project-nomos"
 
+      - name: Set package version from tag
+        run: |
+          VERSION="${RELEASE_VERSION#v}"
+          VERSION="${VERSION#v}"
+          npm pkg set version="$VERSION"
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
         env:
