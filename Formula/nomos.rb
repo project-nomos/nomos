@@ -19,6 +19,9 @@ class Nomos < Formula
   skip_clean "libexec"
 
   def install
+    # Set package.json version from formula version (source tarball has 0.1.0)
+    system "npm", "pkg", "set", "version=#{version}"
+
     # Install production dependencies only, skip postinstall (playwright/uvx)
     system "pnpm", "install", "--prod", "--ignore-scripts"
 
