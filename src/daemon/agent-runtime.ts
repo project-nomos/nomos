@@ -60,13 +60,45 @@ export class AgentRuntime {
 
   // Google Workspace authorized accounts
   private gwsAccounts?: Array<{ email: string; isDefault: boolean }>;
-  private slackWorkspaces?: Array<{ teamId: string; teamName: string }>;
+  private slackWorkspaces?: Array<{ teamId: string; teamName: string; userId: string }>;
 
   private initialized = false;
 
   /** Get the configured model name. */
   getModel(): string {
     return this.config?.model ?? "claude-sonnet-4-6";
+  }
+
+  /** Reload per-workspace Slack MCP servers from DB (called by gateway on workspace changes). */
+  async reloadSlackWorkspaceMcps(): Promise<void> {
+    try {
+      const { createPerWorkspaceSlackMcpServers } = await import("../sdk/slack-workspace-mcp.ts");
+      const { listWorkspaces } = await import("../db/slack-workspaces.ts");
+
+      // Remove old workspace MCP servers
+      for (const key of Object.keys(this.mcpServers)) {
+        if (key.startsWith("slack-ws-")) {
+          delete this.mcpServers[key];
+        }
+      }
+
+      // Add current ones from DB
+      const wsServers = await createPerWorkspaceSlackMcpServers();
+      Object.assign(this.mcpServers, wsServers);
+
+      const workspaces = await listWorkspaces();
+      this.slackWorkspaces = workspaces.map((ws) => ({
+        teamId: ws.team_id,
+        teamName: ws.team_name,
+        userId: ws.user_id,
+      }));
+
+      console.log(
+        `[agent-runtime] Reloaded ${Object.keys(wsServers).length} workspace MCP server(s)`,
+      );
+    } catch (err) {
+      console.error("[agent-runtime] Failed to reload workspace MCPs:", err);
+    }
   }
 
   /** Initialize the runtime: run migrations, load all config. */
@@ -139,6 +171,7 @@ export class AgentRuntime {
         this.slackWorkspaces = workspaces.map((ws) => ({
           teamId: ws.team_id,
           teamName: ws.team_name,
+          userId: ws.user_id,
         }));
       }
     } catch {
@@ -262,9 +295,14 @@ export class AgentRuntime {
     }
     if (this.slackWorkspaces && this.slackWorkspaces.length > 0) {
       const wsList = this.slackWorkspaces
-        .map((ws) => `  - ${ws.teamName} (${ws.teamId}) — tools via \`mcp__slack-ws-${ws.teamId}\``)
+        .map(
+          (ws) =>
+            `  - ${ws.teamName} (${ws.teamId}) — connected as user ${ws.userId}, tools via \`mcp__slack-ws-${ws.teamId}\``,
+        )
         .join("\n");
-      parts.push(`- **Slack Workspaces** (connected as user):\n${wsList}`);
+      parts.push(
+        `- **Slack Workspaces** (acting as the user — messages appear as them):\n${wsList}\n  Use \`slack_user_info\` to look up display names when the user refers to people by name.`,
+      );
     }
     if (isDiscordConfigured()) {
       parts.push("- **Discord**: Send and receive messages via Discord bot");

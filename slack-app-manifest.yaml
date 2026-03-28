@@ -18,7 +18,7 @@ features:
 
 oauth_config:
   redirect_urls:
-    - https://your-domain.com/slack/oauth/callback
+    - https://localhost:8934/oauth/callback
   scopes:
     bot:
       - app_mentions:read
@@ -66,3 +66,6 @@ settings:
   org_deploy_enabled: false
   socket_mode_enabled: true
   token_rotation_enabled: false
+  # Distribution: after importing this manifest, go to Manage Distribution
+  # → check "Remove Hard Coded Information" → Activate Public Distribution.
+  # This is required for multi-workspace OAuth.

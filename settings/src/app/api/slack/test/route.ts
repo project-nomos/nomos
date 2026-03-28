@@ -51,12 +51,10 @@ export async function POST(request: Request) {
     // Update metadata if team name was missing or "unknown"
     if (result.team && result.user_id) {
       try {
+        const patch = { team_name: result.team, user_id: result.user_id };
         await sql`
           UPDATE integrations
-          SET metadata = metadata || ${JSON.stringify({
-            team_name: result.team,
-            user_id: result.user_id,
-          })}::jsonb,
+          SET metadata = metadata || ${sql.json(patch)},
           updated_at = now()
           WHERE name = ${name}
         `;

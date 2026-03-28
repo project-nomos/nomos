@@ -41,6 +41,7 @@ export default function SlackSettingsPage() {
   useUnsavedChanges(isDirty);
 
   const hasOAuthCreds = hasClientId && hasClientSecret;
+  const [browserAuthEnabled, setBrowserAuthEnabled] = useState(false);
 
   const loadData = useCallback(async () => {
     try {
@@ -56,6 +57,7 @@ export default function SlackSettingsPage() {
       setHasBotToken(!!envData.SLACK_BOT_TOKEN);
       setHasClientId(!!envData.SLACK_CLIENT_ID);
       setHasClientSecret(!!envData.SLACK_CLIENT_SECRET);
+      setBrowserAuthEnabled(!!envData.NOMOS_BROWSER_AUTH);
       setAppToken("");
       setBotToken("");
       setClientId("");
@@ -393,44 +395,51 @@ export default function SlackSettingsPage() {
           </div>
         ) : (
           <p className="text-sm text-overlay0 mb-4">
-            No workspaces connected yet. Click &quot;Sign in via Browser&quot; to connect a
-            workspace.
+            No workspaces connected yet. Use OAuth to authorize a workspace.
           </p>
         )}
 
-        {/* Sign in via Browser (primary — no Slack app needed) */}
+        {/* Authorize via OAuth (primary) */}
         <div className="flex items-center gap-3 mb-3">
-          <button
-            onClick={startBrowserAuth}
-            disabled={browserAuth}
-            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-mauve text-crust text-sm font-medium hover:bg-mauve/90 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
-          >
-            {browserAuth ? <RefreshCw size={14} className="animate-spin" /> : <Globe size={14} />}
-            {browserAuth ? "Waiting for sign-in..." : "Sign in via Browser"}
-          </button>
-        </div>
-        <p className="text-xs text-overlay0 mb-4">
-          Opens a browser window — sign in to Slack and tokens are captured automatically. No Slack
-          app required.
-        </p>
-
-        {/* Authorize via OAuth (alternative) */}
-        <div className="flex items-center gap-3">
           <button
             onClick={startOAuth}
             disabled={!hasOAuthCreds || authorizing}
-            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-surface0 border border-surface1 text-sm text-subtext0 hover:text-text hover:border-surface2 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-mauve text-crust text-sm font-medium hover:bg-mauve/90 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
           >
             {authorizing ? <RefreshCw size={14} className="animate-spin" /> : <Plus size={14} />}
-            Authorize via OAuth
+            {authorizing ? "Waiting for authorization..." : "Authorize Workspace"}
           </button>
           {!hasOAuthCreds && (
             <span className="text-xs text-overlay0">Requires OAuth credentials below</span>
           )}
         </div>
-        <p className="text-xs text-overlay0 mt-3">
-          Alternative: OAuth flow via Slack app. Requires Client ID/Secret and app distribution.
+        <p className="text-xs text-overlay0 mb-4">
+          Opens Slack OAuth in your browser. Requires Client ID &amp; Secret configured below.
         </p>
+
+        {/* Sign in via Browser (experimental — enabled via NOMOS_BROWSER_AUTH) */}
+        {browserAuthEnabled && (
+          <>
+            <div className="flex items-center gap-3">
+              <button
+                onClick={startBrowserAuth}
+                disabled={browserAuth}
+                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-surface0 border border-surface1 text-sm text-subtext0 hover:text-text hover:border-surface2 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                {browserAuth ? (
+                  <RefreshCw size={14} className="animate-spin" />
+                ) : (
+                  <Globe size={14} />
+                )}
+                {browserAuth ? "Waiting for sign-in..." : "Sign in via Browser"}
+              </button>
+            </div>
+            <p className="text-xs text-overlay0 mt-3">
+              Experimental: Opens a browser window to capture tokens automatically. No Slack app
+              required.
+            </p>
+          </>
+        )}
       </section>
 
       {/* Manual Token (collapsible alternative) */}

@@ -393,11 +393,29 @@ async function authWithOAuth(port: number): Promise<void> {
     process.exit(1);
   }
 
-  const http = await import("node:http");
+  const https = await import("node:https");
+  const { execSync } = await import("node:child_process");
   const crypto = await import("node:crypto");
 
+  // Generate ephemeral self-signed cert (required by Slack for distributed apps)
+  const opensslResult = execSync(
+    "openssl req -x509 -newkey rsa:2048 -keyout /dev/stdout -out /dev/stdout " +
+      '-days 1 -nodes -subj "/CN=localhost" 2>/dev/null',
+    { encoding: "utf-8" },
+  );
+  const keyMatch = opensslResult.match(
+    /-----BEGIN PRIVATE KEY-----[\s\S]+?-----END PRIVATE KEY-----/,
+  );
+  const certMatch = opensslResult.match(
+    /-----BEGIN CERTIFICATE-----[\s\S]+?-----END CERTIFICATE-----/,
+  );
+  if (!keyMatch || !certMatch) {
+    console.error("Failed to generate self-signed certificate. Ensure OpenSSL is installed.");
+    process.exit(1);
+  }
+
   const state = crypto.randomBytes(16).toString("hex");
-  const redirectUri = `http://localhost:${port}/slack/oauth/callback`;
+  const redirectUri = `https://localhost:${port}/oauth/callback`;
   const userScopes = [
     "channels:history",
     "channels:read",
@@ -406,15 +424,21 @@ async function authWithOAuth(port: number): Promise<void> {
     "im:history",
     "im:read",
     "mpim:history",
+    "mpim:read",
     "chat:write",
     "users:read",
+    "users:read.email",
+    "search:read",
+    "reactions:write",
+    "reactions:read",
+    "users.profile:write",
   ].join(",");
 
   const authorizeUrl = `https://slack.com/oauth/v2/authorize?client_id=${clientId}&user_scope=${userScopes}&redirect_uri=${encodeURIComponent(redirectUri)}&state=${state}`;
 
-  const server = http.createServer(async (req, res) => {
-    const url = new URL(req.url ?? "/", `http://localhost:${port}`);
-    if (url.pathname !== "/slack/oauth/callback") {
+  const server = https.createServer({ key: keyMatch[0], cert: certMatch[0] }, async (req, res) => {
+    const url = new URL(req.url ?? "/", `https://localhost:${port}`);
+    if (url.pathname !== "/oauth/callback") {
       res.writeHead(404);
       res.end("Not found");
       return;
@@ -508,8 +532,8 @@ async function authWithOAuth(port: number): Promise<void> {
     server.close();
   }
 
-  server.listen(port, () => {
-    console.log(`OAuth callback server listening on port ${port}`);
+  server.listen(port, "127.0.0.1", () => {
+    console.log(`OAuth callback server listening on https://localhost:${port}/oauth/callback`);
     console.log(`\nOpen this URL in your browser to authorize:\n`);
     console.log(`  ${authorizeUrl}\n`);
 

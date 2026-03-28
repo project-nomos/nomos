@@ -169,20 +169,30 @@ export class Gateway {
   }
 
   /**
-   * Hot-reload Slack workspace adapters.
-   * Checks the DB for new/changed workspaces and registers adapters for any
-   * that aren't already running. Called after workspace add/remove.
+   * Full sync of Slack workspace adapters against DB state.
+   * Adds new workspaces, removes deleted ones, refreshes tokens for existing ones.
    */
   async reloadSlackWorkspaces(): Promise<string[]> {
     const { listWorkspaces, syncSlackConfigToFile } = await import("../db/slack-workspaces.ts");
     const workspaces = await listWorkspaces();
-    const added: string[] = [];
+    const changes: string[] = [];
 
     // Sync config file for nomos-slack-mcp
     try {
       await syncSlackConfigToFile();
     } catch {
       // Non-critical
+    }
+
+    // Build set of expected platforms from DB
+    const expectedPlatforms = new Set(workspaces.map((ws) => `slack-user:${ws.team_id}`));
+
+    // Remove adapters for workspaces no longer in DB
+    for (const platform of this.channelManager.listPlatforms()) {
+      if (platform.startsWith("slack-user:") && !expectedPlatforms.has(platform)) {
+        await this.channelManager.removeAdapter(platform);
+        changes.push(`removed ${platform}`);
+      }
     }
 
     const enqueue = (rawMsg: IncomingMessage) => {
@@ -224,9 +234,10 @@ export class Gateway {
         });
     };
 
+    // Add new or refresh all workspaces (registerAndStart replaces existing adapters)
     for (const ws of workspaces) {
       const platform = `slack-user:${ws.team_id}`;
-      if (this.channelManager.hasAdapter(platform)) continue;
+      const existing = this.channelManager.hasAdapter(platform);
 
       if (ws.access_token.startsWith("xoxc-") || ws.cookie_d) {
         const adapter = new SlackPollingAdapter({
@@ -250,7 +261,7 @@ export class Gateway {
         this.draftManager.registerSendFn(adapter.platform, (channelId, text, threadId) =>
           adapter.sendAsUser(channelId, text, threadId),
         );
-        added.push(`${ws.team_name} (${ws.team_id})`);
+        changes.push(`${existing ? "refreshed" : "added"} ${ws.team_name} (${ws.team_id})`);
       } else if (process.env.SLACK_APP_TOKEN) {
         const adapter = new SlackUserAdapter({
           userToken: ws.access_token,
@@ -263,15 +274,22 @@ export class Gateway {
         this.draftManager.registerSendFn(adapter.platform, (channelId, text, threadId) =>
           adapter.sendAsUser(channelId, text, threadId),
         );
-        added.push(`${ws.team_name} (${ws.team_id})`);
+        changes.push(`${existing ? "refreshed" : "added"} ${ws.team_name} (${ws.team_id})`);
       }
     }
 
-    if (added.length > 0) {
-      console.log(`[gateway] Hot-loaded ${added.length} Slack workspace(s): ${added.join(", ")}`);
+    // Refresh agent runtime's workspace MCP servers
+    try {
+      await this.runtime.reloadSlackWorkspaceMcps();
+    } catch (err) {
+      console.error("[gateway] Failed to reload workspace MCP servers:", err);
     }
 
-    return added;
+    if (changes.length > 0) {
+      console.log(`[gateway] Slack workspace sync: ${changes.join(", ")}`);
+    }
+
+    return changes;
   }
 
   /** Verify LLM API access works before starting services. */

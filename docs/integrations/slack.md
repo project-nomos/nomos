@@ -24,7 +24,7 @@ Import the included manifest to create a pre-configured Slack app:
 3. Paste the contents of [`slack-app-manifest.yaml`](../../slack-app-manifest.yaml) (or `.json`)
 4. Review and click **Create**
 
-> **Note:** The manifest includes a placeholder redirect URL (`https://your-domain.com/slack/oauth/callback`). If you plan to distribute the app to multiple workspaces via OAuth, replace it with your actual HTTPS URL. For local-only use, you can remove the redirect URL entirely.
+> **Note:** The manifest includes the default local redirect URL (`https://localhost:8934/oauth/callback`). Both the CLI (`nomos slack auth --oauth`) and Settings UI use this URL with an ephemeral self-signed certificate. If you need a different redirect URL, update it in both the manifest and your Slack app's OAuth settings.
 
 5. Go to **Basic Information** → **App-Level Tokens** → generate a token with `connections:write` scope — this is your `SLACK_APP_TOKEN` (`xapp-...`)
 6. Go to **Install App** → install to your workspace → copy the **Bot User OAuth Token** (`xoxb-...`) — this is your `SLACK_BOT_TOKEN`
@@ -153,17 +153,27 @@ Authorize workspaces directly from the Settings UI:
 
 > Multi-workspace requires [distribution enabled](#enabling-distribution).
 
+#### Option D: Browser Auth (experimental)
+
+> **Experimental** — enabled by setting `NOMOS_BROWSER_AUTH=true`. This feature captures tokens via a Playwright browser session and may not work reliably in all environments.
+
+```bash
+NOMOS_BROWSER_AUTH=true
+```
+
+When enabled, a "Sign in via Browser" button appears in the Settings UI. It opens a browser window where you sign in to Slack normally — tokens are captured automatically without needing a Slack app or OAuth credentials.
+
 ### Enabling Distribution
 
-To connect workspaces other than your home workspace via OAuth (Options A or C), your Slack app must have distribution enabled:
+To connect workspaces other than your home workspace via OAuth (Options A, C), your Slack app must have distribution enabled:
 
 1. Go to [api.slack.com/apps](https://api.slack.com/apps) → your app → **OAuth & Permissions** → **Redirect URLs**
-2. Add an HTTPS redirect URL (e.g., `https://your-domain.com/slack/oauth/callback`)
+2. Add `https://localhost:8934/oauth/callback` (this is the local HTTPS callback used by both CLI and Settings UI)
 3. Go to **Manage Distribution**
 4. Check **"Remove Hard Coded Information"**
 5. Click **Activate Public Distribution**
 
-> Slack requires HTTPS for distributed apps. If you don't have an HTTPS endpoint, use Option B (manual token) — you can generate user tokens from the **OAuth & Permissions** page for each workspace where the app is installed.
+> The OAuth flow uses a temporary local HTTPS server with a self-signed certificate. Slack requires HTTPS for distributed apps — the self-signed cert satisfies this requirement for localhost. If you don't want to enable distribution, use Option B (manual token) instead.
 
 ### Managing Workspaces
 
@@ -248,8 +258,8 @@ The bot must be a member of the channel. Invite it with `/invite @Nomos`.
 
 Your Slack app isn't enabled for multi-workspace distribution. Either:
 
-- Enable distribution: **Manage Distribution** → **Activate Public Distribution** (requires HTTPS redirect URL)
-- Or use `npx nomos-slack-mcp add-workspace` instead (no distribution needed)
+- Enable distribution: add `https://localhost:8934/oauth/callback` as a redirect URL, then **Manage Distribution** → **Activate Public Distribution**
+- Or use manual token entry (`nomos slack auth --token xoxp-...`) which doesn't require distribution
 
 ### Socket Mode disconnections
 

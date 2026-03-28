@@ -83,11 +83,11 @@ export async function POST(request: Request) {
     const sql = getDb();
     const name = `slack-ws:${teamId}`;
     const secrets = JSON.stringify({ access_token: token });
-    const metadata = JSON.stringify({ team_name: teamName, user_id: userId, scopes: "" });
+    const metadataObj = { team_name: teamName, user_id: userId, scopes: "" };
 
     const [row] = await sql`
       INSERT INTO integrations (name, enabled, config, secrets, metadata)
-      VALUES (${name}, true, '{}', ${secrets}, ${metadata}::jsonb)
+      VALUES (${name}, true, '{}', ${secrets}, ${sql.json(metadataObj)})
       ON CONFLICT (name) DO UPDATE SET
         secrets = EXCLUDED.secrets,
         metadata = EXCLUDED.metadata,

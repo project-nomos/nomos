@@ -121,6 +121,20 @@ export class ChannelManager {
     }
   }
 
+  /** Stop and remove an adapter by platform name. */
+  async removeAdapter(platform: string): Promise<boolean> {
+    const adapter = this.adapters.get(platform);
+    if (!adapter) return false;
+    try {
+      await adapter.stop();
+      console.log(`[channel-manager] Removed: ${platform}`);
+    } catch {
+      // Ignore stop errors
+    }
+    this.adapters.delete(platform);
+    return true;
+  }
+
   /** Check if an adapter is registered for the given platform. */
   hasAdapter(platform: string): boolean {
     return this.adapters.has(platform);

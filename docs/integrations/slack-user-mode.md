@@ -152,6 +152,10 @@ Authorize workspaces directly from the Settings UI:
 
 > Multi-workspace requires [distribution enabled](slack.md#enabling-distribution).
 
+#### Option D: Browser Auth (experimental)
+
+Set `NOMOS_BROWSER_AUTH=true` to enable. Opens a browser window to capture tokens automatically — no Slack app required. See [Browser Auth](slack.md#option-d-browser-auth-experimental) for details.
+
 ### Managing Workspaces
 
 ```bash

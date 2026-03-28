@@ -40,6 +40,7 @@ const ALLOWED_KEYS = [
   "NOMOS_EXTRACTION_MODEL",
   "NOMOS_API_PROVIDER",
   "OPENROUTER_API_KEY",
+  "NOMOS_BROWSER_AUTH",
 ];
 
 /** Keys that contain secrets and should be masked in GET responses. */
@@ -382,12 +383,11 @@ export async function PUT(request: Request) {
         }
       }
 
-      const configJson = JSON.stringify(data.config);
       await sql`
         INSERT INTO integrations (name, enabled, config, secrets, metadata)
-        VALUES (${name}, true, ${configJson}::jsonb, ${secretsStr}, '{}'::jsonb)
+        VALUES (${name}, true, ${sql.json(data.config)}, ${secretsStr}, '{}'::jsonb)
         ON CONFLICT (name) DO UPDATE SET
-          config = ${configJson}::jsonb,
+          config = ${sql.json(data.config)},
           secrets = ${secretsStr},
           updated_at = now()
       `;
