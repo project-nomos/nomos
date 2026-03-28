@@ -30,11 +30,18 @@ class Nomos < Formula
     system "pnpm", "install", "--ignore-scripts"
     system "pnpm", "build"
 
+    # Build Settings UI (Next.js app)
+    cd "settings" do
+      system "pnpm", "install", "--ignore-scripts"
+      system "npx", "next", "build"
+    end
+
     # Install everything except node_modules to libexec.
     libexec.install "dist"
     libexec.install "skills"
     libexec.install "proto"
     libexec.install "package.json"
+    libexec.install "settings"
 
     # Archive node_modules as a tarball to hide native .node dylibs
     # from Homebrew's fix_dynamic_linkage phase, which fails on files
