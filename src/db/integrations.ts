@@ -70,8 +70,8 @@ export async function upsertIntegration(
 ): Promise<Integration> {
   const sql = getDb();
   const secretsStr = params.secrets ? encryptSecrets(params.secrets) : "";
-  const configJson = JSON.stringify(params.config ?? {});
-  const metadataJson = JSON.stringify(params.metadata ?? {});
+  const configObj = (params.config ?? {}) as Record<string, never>;
+  const metadataObj = (params.metadata ?? {}) as Record<string, never>;
   const enabled = params.enabled ?? true;
 
   const [row] = await sql<IntegrationRow[]>`
@@ -79,15 +79,15 @@ export async function upsertIntegration(
     VALUES (
       ${name},
       ${enabled},
-      ${configJson}::jsonb,
+      ${sql.json(configObj)},
       ${secretsStr},
-      ${metadataJson}::jsonb
+      ${sql.json(metadataObj)}
     )
     ON CONFLICT (name) DO UPDATE SET
       enabled = COALESCE(${params.enabled ?? null}::boolean, integrations.enabled),
-      config = CASE WHEN ${params.config !== undefined} THEN ${configJson}::jsonb ELSE integrations.config END,
+      config = CASE WHEN ${params.config !== undefined} THEN ${sql.json(configObj)} ELSE integrations.config END,
       secrets = CASE WHEN ${params.secrets !== undefined} THEN ${secretsStr} ELSE integrations.secrets END,
-      metadata = CASE WHEN ${params.metadata !== undefined} THEN ${metadataJson}::jsonb ELSE integrations.metadata END,
+      metadata = CASE WHEN ${params.metadata !== undefined} THEN ${sql.json(metadataObj)} ELSE integrations.metadata END,
       updated_at = now()
     RETURNING *
   `;

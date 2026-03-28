@@ -19,11 +19,19 @@ import { createSlackTools } from "./slack-mcp.ts";
 /**
  * Create a single per-workspace Slack MCP server.
  */
-function createWorkspaceMcpServer(token: string, teamId: string): McpSdkServerConfigWithInstance {
+function createWorkspaceMcpServer(
+  token: string,
+  teamId: string,
+  cookie?: string,
+): McpSdkServerConfigWithInstance {
   const getClient = async () => {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { WebClient } = require("@slack/web-api") as typeof import("@slack/web-api");
-    return new WebClient(token);
+    const { WebClient } = await import("@slack/web-api");
+    const options: ConstructorParameters<typeof WebClient>[1] = {};
+    // xoxc- tokens require the d cookie for authentication
+    if (cookie && token.startsWith("xoxc-")) {
+      options.headers = { Cookie: `d=${cookie}` };
+    }
+    return new WebClient(token, options);
   };
 
   return createSdkMcpServer({
@@ -48,7 +56,7 @@ export async function createPerWorkspaceSlackMcpServers(): Promise<
 
   for (const ws of workspaces) {
     const serverName = `slack-ws-${ws.team_id}`;
-    servers[serverName] = createWorkspaceMcpServer(ws.access_token, ws.team_id);
+    servers[serverName] = createWorkspaceMcpServer(ws.access_token, ws.team_id, ws.cookie_d);
   }
 
   return servers;

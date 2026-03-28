@@ -37,11 +37,17 @@ export class GrpcServer {
   private messageQueue: MessageQueue;
   private draftManager: DraftManager | null;
   private port: number;
+  private commandHandler?: (command: string) => Promise<string>;
 
   constructor(messageQueue: MessageQueue, port: number = 8766, draftManager?: DraftManager) {
     this.messageQueue = messageQueue;
     this.draftManager = draftManager ?? null;
     this.port = port;
+  }
+
+  /** Register a handler for Command RPCs. */
+  onCommand(handler: (command: string) => Promise<string>): void {
+    this.commandHandler = handler;
   }
 
   /** Start listening for gRPC connections. */
@@ -210,10 +216,13 @@ export class GrpcServer {
     callback: grpc.sendUnaryData<{ success: boolean; message: string }>,
   ): void {
     const command = call.request?.command ?? "";
-    callback(null, {
-      success: true,
-      message: `Command received: ${command}`,
-    });
+    if (this.commandHandler) {
+      this.commandHandler(command)
+        .then((message) => callback(null, { success: true, message }))
+        .catch((err) => callback(null, { success: false, message: String(err) }));
+    } else {
+      callback(null, { success: true, message: `Command received: ${command}` });
+    }
   }
 
   /** Handle GetStatus RPC. */

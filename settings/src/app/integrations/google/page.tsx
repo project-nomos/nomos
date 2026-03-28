@@ -516,6 +516,7 @@ export default function GoogleSettingsPage() {
                 : "...apps.googleusercontent.com"
             }
             helperText="OAuth 2.0 Desktop Client ID"
+            configured={hasClientId}
           />
           <TokenInput
             label="Client Secret"
@@ -526,6 +527,7 @@ export default function GoogleSettingsPage() {
             }}
             placeholder={hasClientSecret ? "Configured - enter new value to replace" : "GOCSPX-..."}
             helperText="OAuth 2.0 Client Secret"
+            configured={hasClientSecret}
           />
         </div>
       </section>

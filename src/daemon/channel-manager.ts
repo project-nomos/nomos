@@ -98,6 +98,48 @@ export class ChannelManager {
     await adapter.send(transformed);
   }
 
+  /** Register and start a new adapter at runtime (hot-reload). */
+  async registerAndStart(adapter: ChannelAdapter): Promise<void> {
+    // Stop and remove existing adapter for this platform if present
+    const existing = this.adapters.get(adapter.platform);
+    if (existing) {
+      try {
+        await existing.stop();
+      } catch {
+        // Ignore stop errors on old adapter
+      }
+      this.adapters.delete(adapter.platform);
+    }
+
+    this.adapters.set(adapter.platform, adapter);
+    try {
+      await adapter.start();
+      console.log(`[channel-manager] Hot-loaded: ${adapter.platform}`);
+    } catch (err) {
+      console.error(`[channel-manager] Failed to hot-load ${adapter.platform}:`, err);
+      this.adapters.delete(adapter.platform);
+    }
+  }
+
+  /** Stop and remove an adapter by platform name. */
+  async removeAdapter(platform: string): Promise<boolean> {
+    const adapter = this.adapters.get(platform);
+    if (!adapter) return false;
+    try {
+      await adapter.stop();
+      console.log(`[channel-manager] Removed: ${platform}`);
+    } catch {
+      // Ignore stop errors
+    }
+    this.adapters.delete(platform);
+    return true;
+  }
+
+  /** Check if an adapter is registered for the given platform. */
+  hasAdapter(platform: string): boolean {
+    return this.adapters.has(platform);
+  }
+
   /** Look up a registered adapter by platform name. */
   getAdapter(platform: string): ChannelAdapter | undefined {
     return this.adapters.get(platform);

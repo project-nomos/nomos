@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { readEnv } from "@/lib/env";
+import { syncGoogleAccountsToDb } from "@/lib/sync-google-accounts";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
@@ -88,13 +89,17 @@ export async function POST() {
     }, 120_000);
 
     // Clean up references when the process exits naturally
-    child.on("exit", () => {
+    child.on("exit", (code) => {
       if (activeChild === child) {
         activeChild = null;
       }
       if (killTimer) {
         clearTimeout(killTimer);
         killTimer = null;
+      }
+      // Sync accounts to DB after successful OAuth
+      if (code === 0) {
+        syncGoogleAccountsToDb().catch(() => {});
       }
     });
 
