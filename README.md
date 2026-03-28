@@ -58,7 +58,7 @@ brew install project-nomos/nomos/nomos
 nomos chat
 ```
 
-That's it. A browser-based setup wizard handles the rest — database connection, API provider, assistant personality, and channel integrations. Everything is saved encrypted in PostgreSQL.
+That's it. A browser-based setup wizard handles the rest — database connection, API provider, assistant personality, and channel integrations. Everything is saved encrypted in PostgreSQL. Configuration is stored in `~/.nomos/.env` and works from any directory.
 
 <details>
 <summary><strong>Other installation methods</strong></summary>
@@ -313,15 +313,19 @@ Each channel adapter is automatically registered when its required environment v
 
 ### Slack
 
+Nomos integrates with Slack via [`nomos-slack-mcp`](https://github.com/project-nomos/nomos-slack-mcp), an external MCP server that provides channel/user name resolution, message formatting, search, reactions, and multi-workspace support.
+
 ```bash
+# Add a Slack workspace (interactive OAuth or manual token)
+npx nomos-slack-add-workspace
+
+# Or for daemon bot mode (receives messages via Socket Mode):
 SLACK_BOT_TOKEN=xoxb-...          # Bot User OAuth Token
 SLACK_APP_TOKEN=xapp-...          # App-Level Token (Socket Mode)
 SLACK_ALLOWED_CHANNELS=C123,C456  # Optional: restrict to specific channels
 ```
 
-Responds to `@mentions` and direct messages. Supports threaded conversations.
-
-**Slack User Mode** — add `SLACK_USER_TOKEN=xoxp-...` to act as you rather than as a bot. Generates draft responses for your approval before sending. See [docs/integrations/slack-user-mode.md](docs/integrations/slack-user-mode.md).
+`nomos-slack-mcp` uses user tokens (`xoxp-`) stored in `~/.nomos/slack/config.json`, supporting `#channel-name` and `@username` resolution, message search, status updates, and reactions.
 
 ### Discord
 
@@ -454,7 +458,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, architecture, code
 <details>
 <summary><strong>Configuration Reference</strong></summary>
 
-Configuration is loaded with the following precedence: **Database > environment variables > hardcoded defaults**. API keys and secrets are stored encrypted (AES-256-GCM) in the `integrations` table.
+Configuration is loaded with the following precedence: **Database > environment variables > hardcoded defaults**. Environment variables are loaded from `~/.nomos/.env` (primary) and `.env` in the current directory (fallback). API keys and secrets are stored encrypted (AES-256-GCM) in the `integrations` table.
 
 ### Required
 

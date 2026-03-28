@@ -1,8 +1,24 @@
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 
 function getEnvPath(): string {
-  return path.resolve(process.cwd(), "..", ".env");
+  // Prefer ~/.nomos/.env so settings persist across Homebrew upgrades
+  // and are accessible from any working directory
+  const nomosEnv = path.join(os.homedir(), ".nomos", ".env");
+  if (fs.existsSync(nomosEnv)) {
+    return nomosEnv;
+  }
+
+  // Legacy: .env in project root (parent of settings/)
+  const projectEnv = path.resolve(process.cwd(), "..", ".env");
+  if (fs.existsSync(projectEnv)) {
+    return projectEnv;
+  }
+
+  // Default to ~/.nomos/.env for new installs
+  fs.mkdirSync(path.join(os.homedir(), ".nomos"), { recursive: true });
+  return nomosEnv;
 }
 
 export function readEnv(): Record<string, string> {
