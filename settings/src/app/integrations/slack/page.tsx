@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { RefreshCw, Trash2, Zap, Plus, ExternalLink, KeyRound, Globe } from "lucide-react";
+import { RefreshCw, Trash2, Zap, Plus, ExternalLink, KeyRound, Globe, Bell } from "lucide-react";
 import { TokenInput } from "@/components/token-input";
 import { StatusBadge } from "@/components/status-badge";
 import { ConfirmModal } from "@/components/confirm-modal";
@@ -42,14 +42,23 @@ export default function SlackSettingsPage() {
 
   const hasOAuthCreds = hasClientId && hasClientSecret;
   const [browserAuthEnabled, setBrowserAuthEnabled] = useState(false);
+  const [notifDefault, setNotifDefault] = useState<{
+    platform: string;
+    channelId: string;
+    label?: string;
+  } | null>(null);
+  const [savingNotif, setSavingNotif] = useState(false);
 
   const loadData = useCallback(async () => {
     try {
-      const [wsRes, envRes] = await Promise.all([
+      const [wsRes, envRes, notifRes] = await Promise.all([
         fetch("/api/slack/workspaces"),
         fetch("/api/env"),
+        fetch("/api/notifications"),
       ]);
       const wsData = await wsRes.json();
+      const notifData = await notifRes.json();
+      setNotifDefault(notifData);
       const envData = await envRes.json();
 
       setWorkspaces(wsData.workspaces ?? []);
@@ -342,6 +351,90 @@ export default function SlackSettingsPage() {
           </div>
         </div>
       </section>
+
+      {/* Default Notification Channel */}
+      {workspaces.length > 0 && (
+        <section className="mb-8 rounded-xl border border-surface0 bg-mantle p-5">
+          <h2 className="text-sm font-semibold text-subtext1 uppercase tracking-wider mb-4">
+            Default Notification Channel
+          </h2>
+          <p className="text-xs text-overlay0 mb-3">
+            Where the agent sends summaries, alerts, and scheduled task results. Defaults to DM with
+            the connected user.
+          </p>
+          {notifDefault ? (
+            <div className="flex items-center justify-between rounded-lg border border-surface0 bg-base p-3 mb-3">
+              <div className="flex items-center gap-2">
+                <Bell size={14} className="text-mauve shrink-0" />
+                <div>
+                  <p className="text-sm font-medium text-text">
+                    {notifDefault.label ?? notifDefault.channelId}
+                  </p>
+                  <p className="text-xs text-overlay0">
+                    {notifDefault.platform} / {notifDefault.channelId}
+                  </p>
+                </div>
+              </div>
+              <div className="flex gap-1.5">
+                <button
+                  onClick={async () => {
+                    try {
+                      await fetch("/api/notifications", { method: "DELETE" });
+                      setNotifDefault(null);
+                      addToast("Notification default cleared", "success");
+                    } catch {
+                      addToast("Failed to clear notification default", "error");
+                    }
+                  }}
+                  className="p-1.5 rounded-md text-overlay0 hover:text-red hover:bg-surface0 transition-colors"
+                  title="Clear default"
+                >
+                  <Trash2 size={14} />
+                </button>
+              </div>
+            </div>
+          ) : (
+            <p className="text-xs text-yellow mb-3">
+              No default set — the agent will auto-set this to your DM on next daemon start.
+            </p>
+          )}
+          {workspaces.length > 0 && !notifDefault && (
+            <button
+              disabled={savingNotif}
+              onClick={async () => {
+                setSavingNotif(true);
+                const ws = workspaces[0];
+                const nd = {
+                  platform: `slack-user:${ws.team_id}`,
+                  channelId: ws.user_id,
+                  label: `DM in ${ws.team_name}`,
+                };
+                try {
+                  const res = await fetch("/api/notifications", {
+                    method: "PUT",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(nd),
+                  });
+                  if (res.ok) {
+                    setNotifDefault(nd);
+                    addToast("Notification default set to DM", "success");
+                  } else {
+                    addToast("Failed to set notification default", "error");
+                  }
+                } catch {
+                  addToast("Failed to set notification default", "error");
+                } finally {
+                  setSavingNotif(false);
+                }
+              }}
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-mauve text-crust text-sm font-medium hover:bg-mauve/90 transition-colors disabled:opacity-60"
+            >
+              <Bell size={14} />
+              Set to DM with me
+            </button>
+          )}
+        </section>
+      )}
 
       {/* Connected Workspaces */}
       <section className="mb-8 rounded-xl border border-surface0 bg-mantle p-5">

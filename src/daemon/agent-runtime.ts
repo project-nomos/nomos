@@ -61,6 +61,7 @@ export class AgentRuntime {
   // Google Workspace authorized accounts
   private gwsAccounts?: Array<{ email: string; isDefault: boolean }>;
   private slackWorkspaces?: Array<{ teamId: string; teamName: string; userId: string }>;
+  private notificationDefault?: { platform: string; channelId: string; label?: string };
 
   private initialized = false;
 
@@ -234,6 +235,15 @@ export class AgentRuntime {
       }
     }
 
+    // Load notification default for system prompt
+    try {
+      const { getNotificationDefault } = await import("../db/notification-defaults.ts");
+      const nd = await getNotificationDefault();
+      if (nd) this.notificationDefault = nd;
+    } catch {
+      // Config table may not exist yet
+    }
+
     // Build system prompt (after MCP servers so integrations summary is accurate)
     this.systemPromptAppend = buildSystemPromptAppend({
       profile: this.profile,
@@ -335,6 +345,18 @@ export class AgentRuntime {
       parts.push("- **iMessage**: Receive and respond to messages via iMessage");
     }
 
+    // Notification default
+    if (this.notificationDefault) {
+      const nd = this.notificationDefault;
+      parts.push(
+        `- **Default notification channel**: ${nd.label ?? nd.channelId} (${nd.platform}/${nd.channelId}). When creating scheduled tasks with \`announce: true\`, this channel is used automatically if no explicit target is given.`,
+      );
+    } else {
+      parts.push(
+        "- **No default notification channel configured.** When creating scheduled tasks with `announce: true`, you must specify `platform` and `channel_id` explicitly, or ask the user to set a default in Settings.",
+      );
+    }
+
     if (parts.length === 0) {
       return "No channel integrations are currently active. Only memory search is available.";
     }
@@ -344,6 +366,7 @@ export class AgentRuntime {
       ...parts,
       "",
       "Use these integrations proactively when they can help fulfill the user's request.",
+      "Use `schedule_task` to create recurring or timed background tasks. With `announce: true`, results are delivered to the default notification channel automatically.",
     ].join("\n");
   }
 

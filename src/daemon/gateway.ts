@@ -285,6 +285,24 @@ export class Gateway {
       console.error("[gateway] Failed to reload workspace MCP servers:", err);
     }
 
+    // Auto-set default notification channel if none exists
+    try {
+      const { getNotificationDefault, setNotificationDefault } =
+        await import("../db/notification-defaults.ts");
+      const existing = await getNotificationDefault();
+      if (!existing && workspaces.length > 0) {
+        const ws = workspaces[0];
+        await setNotificationDefault({
+          platform: `slack-user:${ws.team_id}`,
+          channelId: ws.user_id,
+          label: `DM in ${ws.team_name}`,
+        });
+        console.log(`[gateway] Auto-set notification default: DM in ${ws.team_name}`);
+      }
+    } catch {
+      // Non-critical
+    }
+
     if (changes.length > 0) {
       console.log(`[gateway] Slack workspace sync: ${changes.join(", ")}`);
     }

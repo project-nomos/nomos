@@ -533,6 +533,19 @@ export function createMemoryMcpServer(): McpSdkServerConfigWithInstance {
         const { getDb } = await import("../db/client.ts");
         const { CronStore } = await import("../cron/store.ts");
 
+        // Resolve platform/channelId from default notification channel if not provided
+        let platform = args.platform;
+        let channelId = args.channel_id;
+
+        if (args.announce && (!platform || !channelId)) {
+          const { getNotificationDefault } = await import("../db/notification-defaults.ts");
+          const nd = await getNotificationDefault();
+          if (nd) {
+            platform = platform ?? nd.platform;
+            channelId = channelId ?? nd.channelId;
+          }
+        }
+
         const store = new CronStore(getDb());
         const id = await store.createJob({
           name: args.name,
@@ -540,16 +553,15 @@ export function createMemoryMcpServer(): McpSdkServerConfigWithInstance {
           schedule: args.schedule,
           scheduleType: args.schedule_type,
           sessionTarget: "isolated",
-          deliveryMode: args.announce && args.platform && args.channel_id ? "announce" : "none",
-          platform: args.platform,
-          channelId: args.channel_id,
+          deliveryMode: args.announce && platform && channelId ? "announce" : "none",
+          platform,
+          channelId,
           enabled: true,
           errorCount: 0,
         });
 
         // Notify cron engine to refresh (if running in daemon)
         try {
-          const { EventEmitter } = await import("node:events");
           process.emit("cron:refresh" as never);
         } catch {
           // Not in daemon context — scheduler will pick it up on next poll
@@ -562,11 +574,14 @@ export function createMemoryMcpServer(): McpSdkServerConfigWithInstance {
               ? `cron: ${args.schedule}`
               : `once at ${args.schedule}`;
 
+        const deliverTo =
+          args.announce && platform && channelId ? `\n  Delivers to: ${platform}/${channelId}` : "";
+
         return {
           content: [
             {
               type: "text",
-              text: `Scheduled task created:\n  ID: ${id.slice(0, 8)}\n  Name: ${args.name}\n  Schedule: ${scheduleDesc}\n  Prompt: ${args.prompt}${args.announce ? `\n  Delivers to: ${args.platform}/${args.channel_id}` : ""}`,
+              text: `Scheduled task created:\n  ID: ${id.slice(0, 8)}\n  Name: ${args.name}\n  Schedule: ${scheduleDesc}\n  Prompt: ${args.prompt}${deliverTo}`,
             },
           ],
         };
