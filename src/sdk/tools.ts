@@ -1132,11 +1132,17 @@ export function createMemoryMcpServer(): McpSdkServerConfigWithInstance {
           }
           const duration = task.durationMs ? ` (${(task.durationMs / 1000).toFixed(1)}s)` : "";
           const error = task.error ? `\n  Error: ${task.error}` : "";
+          const deps = task.blockedBy?.length
+            ? `\n  Blocked by: ${task.blockedBy.map((id: string) => id.slice(0, 8)).join(", ")}`
+            : "";
+          const blocks = task.blocks?.length
+            ? `\n  Blocks: ${task.blocks.map((id: string) => id.slice(0, 8)).join(", ")}`
+            : "";
           return {
             content: [
               {
                 type: "text",
-                text: `Task: ${task.name} [${task.status}]${duration}\n  ID: ${task.id.slice(0, 8)}\n  Source: ${task.source}\n  Description: ${task.description}${error}`,
+                text: `Task: ${task.name} [${task.status}]${duration}\n  ID: ${task.id.slice(0, 8)}\n  Source: ${task.source}\n  Description: ${task.description}${deps}${blocks}${error}`,
               },
             ],
           };
@@ -1299,6 +1305,240 @@ export function createMemoryMcpServer(): McpSdkServerConfigWithInstance {
         }
       });
     },
+  );
+
+  // ── Plan Mode Tool ──
+
+  const proposePlanTool = tool(
+    "propose_plan",
+    "Propose an implementation plan for the user to review before execution. Use this for complex, multi-step tasks where you want to align with the user before making changes. The plan is stored and the user can approve, modify, or reject it. Only propose plans for significant changes — don't use this for simple tasks.",
+    {
+      title: z.string().describe("Short title for the plan (e.g., 'Refactor auth middleware')"),
+      summary: z.string().describe("1-2 sentence summary of what will be done and why"),
+      steps: z
+        .array(
+          z.object({
+            description: z.string().describe("What this step does"),
+            files: z
+              .array(z.string())
+              .optional()
+              .describe("Files that will be created or modified"),
+            risk: z.enum(["low", "medium", "high"]).optional().describe("Risk level of this step"),
+          }),
+        )
+        .describe("Ordered list of implementation steps"),
+      alternatives_considered: z
+        .string()
+        .optional()
+        .describe(
+          "Brief note on alternatives that were considered and why this approach was chosen",
+        ),
+    },
+    async (args) => {
+      // Store the plan for later reference
+      const planId = `plan-${Date.now()}`;
+      const planText = [
+        `# ${args.title}`,
+        "",
+        args.summary,
+        "",
+        "## Steps",
+        ...args.steps.map((step, i) => {
+          const files = step.files?.length ? ` (${step.files.join(", ")})` : "";
+          const risk = step.risk ? ` [${step.risk} risk]` : "";
+          return `${i + 1}. ${step.description}${files}${risk}`;
+        }),
+        ...(args.alternatives_considered
+          ? ["", "## Alternatives Considered", args.alternatives_considered]
+          : []),
+        "",
+        `Plan ID: ${planId}`,
+        "Reply with 'approved', 'modify', or 'reject' to proceed.",
+      ].join("\n");
+
+      // Store plan in memory for retrieval
+      try {
+        const { getDb } = await import("../db/client.ts");
+        const sql = getDb();
+        await sql`
+          INSERT INTO config (key, value, updated_at)
+          VALUES (${`plan.${planId}`}, ${JSON.stringify({ title: args.title, steps: args.steps, summary: args.summary })}::jsonb, now())
+          ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()
+        `;
+      } catch {
+        // Non-critical — plan is returned inline anyway
+      }
+
+      return {
+        content: [{ type: "text", text: planText }],
+      };
+    },
+    { annotations: { readOnly: true } },
+  );
+
+  // ── LSP Code Intelligence Tools ──
+
+  const lspGoToDefinitionTool = tool(
+    "lsp_go_to_definition",
+    "Jump to the definition of a symbol (function, class, variable, type) at a specific position in a TypeScript/JavaScript file. Returns the file path and line number where the symbol is defined. Useful for understanding where something is implemented.",
+    {
+      file: z.string().describe("Path to the file containing the symbol"),
+      line: z.number().int().min(1).describe("Line number (1-based)"),
+      character: z.number().int().min(0).describe("Column/character offset (0-based)"),
+    },
+    async (args) => {
+      try {
+        const { goToDefinition } = await import("./lsp.ts");
+        const results = await goToDefinition(args.file, args.line, args.character);
+
+        if (results.length === 0) {
+          return { content: [{ type: "text", text: "No definition found at that position." }] };
+        }
+
+        const formatted = results.map((r) => `${r.path}:${r.line}:${r.character}`).join("\n");
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Definition${results.length > 1 ? "s" : ""} found:\n${formatted}`,
+            },
+          ],
+        };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return {
+          content: [{ type: "text", text: `Go-to-definition failed: ${message}` }],
+          isError: true,
+        };
+      }
+    },
+    { annotations: { readOnly: true } },
+  );
+
+  const lspFindReferencesTool = tool(
+    "lsp_find_references",
+    "Find all references to a symbol at a specific position in a TypeScript/JavaScript file. Returns every location where the symbol is used across the project. Useful for understanding impact before refactoring.",
+    {
+      file: z.string().describe("Path to the file containing the symbol"),
+      line: z.number().int().min(1).describe("Line number (1-based)"),
+      character: z.number().int().min(0).describe("Column/character offset (0-based)"),
+      include_declaration: z
+        .boolean()
+        .optional()
+        .describe("Include the declaration itself in results (default: true)"),
+    },
+    async (args) => {
+      try {
+        const { findReferences } = await import("./lsp.ts");
+        const results = await findReferences(
+          args.file,
+          args.line,
+          args.character,
+          args.include_declaration ?? true,
+        );
+
+        if (results.length === 0) {
+          return { content: [{ type: "text", text: "No references found." }] };
+        }
+
+        const formatted = results.map((r) => `${r.path}:${r.line}:${r.character}`).join("\n");
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: `${results.length} reference${results.length > 1 ? "s" : ""} found:\n${formatted}`,
+            },
+          ],
+        };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return {
+          content: [{ type: "text", text: `Find-references failed: ${message}` }],
+          isError: true,
+        };
+      }
+    },
+    { annotations: { readOnly: true } },
+  );
+
+  const lspHoverTool = tool(
+    "lsp_hover",
+    "Get type information and documentation for a symbol at a specific position. Returns the inferred type signature and any JSDoc comments. Use this to understand what a variable/function is without reading the definition.",
+    {
+      file: z.string().describe("Path to the file containing the symbol"),
+      line: z.number().int().min(1).describe("Line number (1-based)"),
+      character: z.number().int().min(0).describe("Column/character offset (0-based)"),
+    },
+    async (args) => {
+      try {
+        const { hover } = await import("./lsp.ts");
+        const result = await hover(args.file, args.line, args.character);
+
+        if (!result) {
+          return { content: [{ type: "text", text: "No hover information available." }] };
+        }
+
+        return { content: [{ type: "text", text: result }] };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return {
+          content: [{ type: "text", text: `Hover failed: ${message}` }],
+          isError: true,
+        };
+      }
+    },
+    { annotations: { readOnly: true } },
+  );
+
+  const lspDocumentSymbolsTool = tool(
+    "lsp_document_symbols",
+    "Get all symbols (functions, classes, interfaces, variables, etc.) defined in a file. Returns a hierarchical list with symbol names, kinds, and line numbers. Use this for a quick overview of a file's structure.",
+    {
+      file: z.string().describe("Path to the TypeScript/JavaScript file"),
+    },
+    async (args) => {
+      try {
+        const { documentSymbols } = await import("./lsp.ts");
+        const symbols = await documentSymbols(args.file);
+
+        if (symbols.length === 0) {
+          return { content: [{ type: "text", text: "No symbols found in file." }] };
+        }
+
+        function formatSymbol(
+          sym: { name: string; kind: string; line: number; endLine: number; children?: unknown[] },
+          indent = 0,
+        ): string {
+          const prefix = "  ".repeat(indent);
+          let line = `${prefix}[${sym.kind}] ${sym.name} (L${sym.line}–${sym.endLine})`;
+          if (sym.children) {
+            for (const child of sym.children as typeof symbols) {
+              line += "\n" + formatSymbol(child, indent + 1);
+            }
+          }
+          return line;
+        }
+
+        const formatted = symbols.map((s) => formatSymbol(s)).join("\n");
+        return {
+          content: [
+            {
+              type: "text",
+              text: `${symbols.length} top-level symbol${symbols.length > 1 ? "s" : ""}:\n${formatted}`,
+            },
+          ],
+        };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return {
+          content: [{ type: "text", text: `Document symbols failed: ${message}` }],
+          isError: true,
+        };
+      }
+    },
+    { annotations: { readOnly: true } },
   );
 
   // ── Proactive Message Delivery Helper ──
@@ -1544,6 +1784,13 @@ export function createMemoryMcpServer(): McpSdkServerConfigWithInstance {
       // Inter-agent messaging
       sendWorkerMessageTool,
       checkWorkerMessagesTool,
+      // Plan mode
+      proposePlanTool,
+      // LSP code intelligence
+      lspGoToDefinitionTool,
+      lspFindReferencesTool,
+      lspHoverTool,
+      lspDocumentSymbolsTool,
     ],
   });
 }
