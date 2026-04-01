@@ -4,9 +4,12 @@
  * Ensures no concurrent agent runs on the same conversation.
  * Messages for the same session key are processed sequentially;
  * messages for different sessions process concurrently.
+ *
+ * Integrates with TaskManager for lifecycle tracking and abort support.
  */
 
 import type { IncomingMessage, OutgoingMessage, AgentEvent, MessageHandler } from "./types.ts";
+import { getTaskManager } from "./task-manager.ts";
 
 interface QueueEntry {
   message: IncomingMessage;
@@ -77,11 +80,24 @@ export class MessageQueue {
 
         const entry = queue.shift()!;
 
+        // Register task in TaskManager for lifecycle tracking
+        const tm = getTaskManager();
+        const taskName = `${entry.message.platform}:${entry.message.channelId}`;
+        const task = tm.create({
+          name: taskName,
+          description: entry.message.content.slice(0, 200),
+          source: (entry.message.metadata?.source as string) ?? entry.message.platform,
+          sessionKey,
+        });
+        tm.start(task.id);
+
         try {
           const result = await this.handler(entry.message, entry.emit);
+          tm.complete(task.id, result.content?.slice(0, 500));
           entry.resolve(result);
         } catch (err) {
           const error = err instanceof Error ? err : new Error(String(err));
+          tm.fail(task.id, error.message);
           entry.emit({ type: "error", message: error.message });
           entry.reject(error);
         }

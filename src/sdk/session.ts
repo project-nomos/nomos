@@ -48,6 +48,8 @@ export interface RunSessionParams {
   debug?: boolean;
   /** Callback for stderr output from the Claude Code process */
   stderr?: (data: string) => void;
+  /** Working directory for the agent (e.g., git worktree path) */
+  cwd?: string;
 }
 
 /**
@@ -102,6 +104,7 @@ export function runSession(params: RunSessionParams): Query {
       debug: params.debug,
       stderr: params.stderr,
       env,
+      ...(params.cwd ? { cwd: params.cwd } : {}),
     },
   });
 }
