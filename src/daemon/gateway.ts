@@ -23,6 +23,7 @@ import { IMessageAdapter } from "./channels/imessage.ts";
 import { StreamingResponder } from "./streaming-responder.ts";
 import { indexConversationTurn } from "./memory-indexer.ts";
 import { closeBrowser } from "../sdk/browser.ts";
+import { sendProactiveMessage } from "./proactive-sender.ts";
 import type { IncomingMessage, AgentEvent } from "./types.ts";
 import type { DraftRow } from "../db/drafts.ts";
 
@@ -144,6 +145,25 @@ export class Gateway {
         console.warn("[gateway] Cron engine failed to start:", err);
       }
     }
+
+    // Listen for proactive send events from agent tools
+    process.on(
+      "proactive:send" as never,
+      ((event: {
+        platform: string;
+        channelId: string;
+        content: string;
+        callback: (result: boolean) => void;
+      }) => {
+        sendProactiveMessage(this.channelManager, {
+          platform: event.platform,
+          channelId: event.channelId,
+          content: event.content,
+        })
+          .then((delivered: boolean) => event.callback(delivered))
+          .catch(() => event.callback(false));
+      }) as never,
+    );
 
     const platforms = this.channelManager.listPlatforms();
     const wsPort = this.options.port ?? 8765;

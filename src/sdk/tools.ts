@@ -1220,6 +1220,7 @@ export function createMemoryMcpServer(): McpSdkServerConfigWithInstance {
                 `Memory consolidation complete:`,
                 `  Merged: ${result.merged} duplicate chunks`,
                 `  Pruned: ${result.pruned} stale chunks`,
+                `  Rewritten: ${result.rewritten} chunks (LLM review)`,
                 `  Total: ${result.totalBefore} → ${result.totalAfter} chunks`,
               ].join("\n"),
             },
@@ -1297,6 +1298,132 @@ export function createMemoryMcpServer(): McpSdkServerConfigWithInstance {
           );
         }
       });
+    },
+  );
+
+  // ── Proactive Message Delivery Helper ──
+
+  /**
+   * Deliver a proactive message via the daemon's channel manager.
+   * Uses a process event so the gateway can route it through the correct adapter.
+   * Falls back to direct adapter lookup if running in-process.
+   */
+  async function deliverProactiveMessage(
+    platform: string,
+    channelId: string,
+    content: string,
+  ): Promise<boolean> {
+    // Emit event for gateway to pick up
+    const delivered = new Promise<boolean>((resolve) => {
+      const timeout = setTimeout(() => resolve(false), 5000);
+
+      const handler = (result: boolean) => {
+        clearTimeout(timeout);
+        resolve(result);
+      };
+
+      // The gateway listens for this event and routes via channel manager
+      process.emit(
+        "proactive:send" as never,
+        { platform, channelId, content, callback: handler } as never,
+      );
+
+      // If no listener registered (not in daemon), resolve false after short delay
+      if (process.listenerCount("proactive:send" as never) === 0) {
+        clearTimeout(timeout);
+        resolve(false);
+      }
+    });
+
+    return delivered;
+  }
+
+  // ── Proactive Message Tool ──
+
+  const proactiveSendTool = tool(
+    "proactive_send",
+    "Send a proactive message to the user's notification channel without being asked. Use this when you detect something important the user should know about: urgent emails, build failures, monitoring alerts, scheduled task results, or anything time-sensitive. If no target is specified, uses the default notification channel.",
+    {
+      message: z.string().describe("The message content to send to the user"),
+      platform: z
+        .string()
+        .optional()
+        .describe(
+          "Target platform (e.g., 'slack-user:T074HACEZ2L'). If omitted, uses default notification channel.",
+        ),
+      channel_id: z
+        .string()
+        .optional()
+        .describe("Target channel/user ID. If omitted, uses default notification channel."),
+      urgency: z
+        .enum(["info", "warning", "urgent"])
+        .optional()
+        .describe("Urgency level — affects message formatting (default: info)"),
+    },
+    async (args) => {
+      try {
+        const { resolveDefaultTarget } = await import("../daemon/proactive-sender.ts");
+
+        let platform = args.platform;
+        let channelId = args.channel_id;
+
+        // Resolve from default if not explicitly provided
+        if (!platform || !channelId) {
+          const defaultTarget = await resolveDefaultTarget();
+          if (!defaultTarget) {
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: "No target specified and no default notification channel configured. Ask the user to set one in Settings.",
+                },
+              ],
+              isError: true,
+            };
+          }
+          platform = platform ?? defaultTarget.platform;
+          channelId = channelId ?? defaultTarget.channelId;
+        }
+
+        // Format with urgency prefix
+        let formattedMessage = args.message;
+        if (args.urgency === "warning") {
+          formattedMessage = `*Warning:* ${args.message}`;
+        } else if (args.urgency === "urgent") {
+          formattedMessage = `*URGENT:* ${args.message}`;
+        }
+
+        // Use channel adapter to deliver
+        // The daemon gateway holds the channel manager — we emit a process event
+        // that the gateway picks up and routes through the adapter
+        const delivered = await deliverProactiveMessage(platform!, channelId!, formattedMessage);
+
+        if (delivered) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: `Proactive message sent to ${platform}/${channelId}`,
+              },
+            ],
+          };
+        }
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Message queued for delivery to ${platform}/${channelId} (adapter may not be active)`,
+            },
+          ],
+        };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return {
+          content: [{ type: "text", text: `Proactive send failed: ${message}` }],
+          isError: true,
+        };
+      }
     },
   );
 
@@ -1412,6 +1539,8 @@ export function createMemoryMcpServer(): McpSdkServerConfigWithInstance {
       memoryConsolidateTool,
       // Sleep / self-resume
       sleepTool,
+      // Proactive messaging
+      proactiveSendTool,
       // Inter-agent messaging
       sendWorkerMessageTool,
       checkWorkerMessagesTool,

@@ -366,6 +366,7 @@ export class AgentRuntime {
       ...parts,
       "",
       "Use these integrations proactively when they can help fulfill the user's request.",
+      "**Proactive mode**: Use `proactive_send` to notify the user about important events without being asked — urgent emails, build failures, monitoring alerts, or time-sensitive information.",
       "Use `schedule_task` to create recurring or timed background tasks. With `announce: true`, results are delivered to the default notification channel automatically.",
     ].join("\n");
   }

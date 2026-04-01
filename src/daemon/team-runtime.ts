@@ -31,6 +31,8 @@ export interface TeamConfig {
   workerModel?: string;
   /** Enable git worktree isolation for workers (each gets its own branch) */
   worktreeIsolation?: boolean;
+  /** Enable verification agent after workers complete (adversarial testing) */
+  verification?: boolean;
 }
 
 export interface TeamTask {
@@ -82,6 +84,37 @@ Worker results:
 
 Provide a unified, well-structured response that integrates all worker outputs. If any worker failed, note what couldn't be completed.`;
 
+const VERIFICATION_PROMPT = `You are a verification agent. Your job is to critically review work completed by other agents and try to find problems. Be adversarial — actively try to break things.
+
+CRITICAL RULES:
+- DO NOT modify any project files. You are READ-ONLY.
+- Only use read operations: file reads, grep, glob, running tests/builds/lints
+- For each check, report: PASS, FAIL, or PARTIAL with details
+
+Original task: {task}
+
+Worker results:
+{results}
+
+Verification strategy:
+1. Read the files that were modified and check for obvious errors
+2. Run the test suite if tests exist (look for package.json scripts, test files)
+3. Run the build if a build command exists
+4. Run the linter if configured
+5. Check for common issues: missing imports, type errors, undefined variables
+6. Try adversarial edge cases if applicable
+
+After all checks, output your final verdict on the LAST LINE:
+VERDICT: PASS — if everything looks correct
+VERDICT: FAIL — if there are real issues that need fixing
+VERDICT: PARTIAL — if some things work but others need attention`;
+
+interface VerificationResult {
+  verdict: "PASS" | "FAIL" | "PARTIAL";
+  summary: string;
+  checks: Array<{ name: string; result: string; detail?: string }>;
+}
+
 export class TeamRuntime {
   private config: TeamConfig;
 
@@ -92,6 +125,7 @@ export class TeamRuntime {
       coordinatorModel: config.coordinatorModel,
       workerModel: config.workerModel,
       worktreeIsolation: config.worktreeIsolation ?? false,
+      verification: config.verification ?? true,
     };
   }
 
@@ -127,6 +161,25 @@ export class TeamRuntime {
 
     // Step 3: Synthesize
     const synthesized = await this.synthesize(task.prompt, results, task);
+
+    // Step 4: Verification (if enabled)
+    if (this.config.verification) {
+      emit?.({ type: "team", message: "Running verification agent..." });
+      const verification = await this.verify(task.prompt, results, task);
+
+      if (verification.verdict !== "PASS") {
+        const verificationNote = [
+          "",
+          "---",
+          `**Verification: ${verification.verdict}**`,
+          verification.summary,
+          ...verification.checks.map(
+            (c) => `- ${c.result} ${c.name}${c.detail ? `: ${c.detail}` : ""}`,
+          ),
+        ].join("\n");
+        return synthesized + verificationNote;
+      }
+    }
 
     return synthesized;
   }
@@ -303,6 +356,73 @@ Execute this subtask thoroughly and provide your output.`;
           // Worktree cleanup failed — leave for manual cleanup
         }
       }
+    }
+  }
+
+  /** Run a verification agent to adversarially test worker outputs. */
+  private async verify(
+    originalTask: string,
+    results: WorkerResult[],
+    task: TeamTask,
+  ): Promise<VerificationResult> {
+    const resultsText = results
+      .map((r, i) => {
+        const status = r.status === "fulfilled" ? "COMPLETED" : "FAILED";
+        return `--- Worker ${i + 1} [${status}] ---\nSubtask: ${r.description}\nOutput:\n${r.output}`;
+      })
+      .join("\n\n");
+
+    const prompt = VERIFICATION_PROMPT.replace("{task}", originalTask).replace(
+      "{results}",
+      resultsText,
+    );
+
+    try {
+      const output = await this.runSingleAgent(prompt, {
+        model: this.config.workerModel ?? this.config.coordinatorModel,
+        systemPromptAppend: task.systemPromptAppend,
+        mcpServers: task.mcpServers,
+        // Read-only: bypass permissions but the prompt restricts to read ops
+        permissionMode: "bypassPermissions",
+        maxTurns: 15,
+      });
+
+      // Parse verdict from last line
+      const verdictMatch = output.match(/VERDICT:\s*(PASS|FAIL|PARTIAL)/i);
+      const verdict = (verdictMatch?.[1]?.toUpperCase() ?? "PARTIAL") as
+        | "PASS"
+        | "FAIL"
+        | "PARTIAL";
+
+      // Extract check results (lines matching "PASS/FAIL/PARTIAL: description")
+      const checks: Array<{ name: string; result: string; detail?: string }> = [];
+      const checkPattern = /(?:^|\n)\s*\*?\*?\s*(PASS|FAIL|PARTIAL)\s*[-:]\s*(.+)/gi;
+      let match;
+      while ((match = checkPattern.exec(output)) !== null) {
+        checks.push({
+          name: match[2]!.trim().slice(0, 100),
+          result: match[1]!.toUpperCase(),
+        });
+      }
+
+      return {
+        verdict,
+        summary: output.slice(0, 500),
+        checks,
+      };
+    } catch (err) {
+      console.error("[team-runtime] Verification agent failed:", err);
+      return {
+        verdict: "PARTIAL",
+        summary: "Verification agent failed to complete",
+        checks: [
+          {
+            name: "Verification execution",
+            result: "FAIL",
+            detail: err instanceof Error ? err.message : String(err),
+          },
+        ],
+      };
     }
   }
 
