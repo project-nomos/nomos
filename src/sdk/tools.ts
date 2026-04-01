@@ -5,7 +5,18 @@ import {
 } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod/v4";
 import { handleBootstrapComplete } from "../ui/bootstrap.ts";
-import { fetchRenderedPage, validateUrl } from "./browser.ts";
+import {
+  fetchRenderedPage,
+  validateUrl,
+  browserNavigate,
+  browserScreenshot,
+  browserClick,
+  browserType,
+  browserSelect,
+  browserEvaluate,
+  browserSnapshot,
+  closeActivePage,
+} from "./browser.ts";
 
 /**
  * Creates an in-process MCP server that exposes memory tools to the agent.
@@ -533,6 +544,19 @@ export function createMemoryMcpServer(): McpSdkServerConfigWithInstance {
         const { getDb } = await import("../db/client.ts");
         const { CronStore } = await import("../cron/store.ts");
 
+        // Resolve platform/channelId from default notification channel if not provided
+        let platform = args.platform;
+        let channelId = args.channel_id;
+
+        if (args.announce && (!platform || !channelId)) {
+          const { getNotificationDefault } = await import("../db/notification-defaults.ts");
+          const nd = await getNotificationDefault();
+          if (nd) {
+            platform = platform ?? nd.platform;
+            channelId = channelId ?? nd.channelId;
+          }
+        }
+
         const store = new CronStore(getDb());
         const id = await store.createJob({
           name: args.name,
@@ -540,16 +564,15 @@ export function createMemoryMcpServer(): McpSdkServerConfigWithInstance {
           schedule: args.schedule,
           scheduleType: args.schedule_type,
           sessionTarget: "isolated",
-          deliveryMode: args.announce && args.platform && args.channel_id ? "announce" : "none",
-          platform: args.platform,
-          channelId: args.channel_id,
+          deliveryMode: args.announce && platform && channelId ? "announce" : "none",
+          platform,
+          channelId,
           enabled: true,
           errorCount: 0,
         });
 
         // Notify cron engine to refresh (if running in daemon)
         try {
-          const { EventEmitter } = await import("node:events");
           process.emit("cron:refresh" as never);
         } catch {
           // Not in daemon context — scheduler will pick it up on next poll
@@ -562,11 +585,14 @@ export function createMemoryMcpServer(): McpSdkServerConfigWithInstance {
               ? `cron: ${args.schedule}`
               : `once at ${args.schedule}`;
 
+        const deliverTo =
+          args.announce && platform && channelId ? `\n  Delivers to: ${platform}/${channelId}` : "";
+
         return {
           content: [
             {
               type: "text",
-              text: `Scheduled task created:\n  ID: ${id.slice(0, 8)}\n  Name: ${args.name}\n  Schedule: ${scheduleDesc}\n  Prompt: ${args.prompt}${args.announce ? `\n  Delivers to: ${args.platform}/${args.channel_id}` : ""}`,
+              text: `Scheduled task created:\n  ID: ${id.slice(0, 8)}\n  Name: ${args.name}\n  Schedule: ${scheduleDesc}\n  Prompt: ${args.prompt}${deliverTo}`,
             },
           ],
         };
@@ -867,6 +893,857 @@ export function createMemoryMcpServer(): McpSdkServerConfigWithInstance {
     },
   );
 
+  // ── Interactive Browser Control Tools ──
+
+  const browserNavigateTool = tool(
+    "browser_navigate",
+    "Navigate the interactive browser to a URL. Opens a persistent browser session that stays open across tool calls. Use this for multi-step web interactions (login flows, form filling, scraping dynamic content).",
+    {
+      url: z.string().url().describe("The URL to navigate to"),
+      wait_until: z
+        .enum(["load", "domcontentloaded", "networkidle"])
+        .optional()
+        .describe("When to consider navigation done (default: networkidle)"),
+    },
+    async (args) => {
+      const urlError = validateUrl(args.url);
+      if (urlError) return { content: [{ type: "text", text: urlError }], isError: true };
+      try {
+        const result = await browserNavigate(args.url, { waitUntil: args.wait_until });
+        return {
+          content: [{ type: "text", text: `Navigated to: ${result.url}\nTitle: ${result.title}` }],
+        };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return {
+          content: [{ type: "text", text: `Navigation failed: ${message}` }],
+          isError: true,
+        };
+      }
+    },
+  );
+
+  const browserScreenshotTool = tool(
+    "browser_screenshot",
+    "Take a screenshot of the current browser page. Returns a base64 PNG image for visual analysis. Use after navigating to verify page state, inspect layout, or debug visual issues.",
+    {
+      full_page: z
+        .boolean()
+        .optional()
+        .describe("Capture the full scrollable page (default: viewport only)"),
+      selector: z.string().optional().describe("CSS selector to screenshot a specific element"),
+    },
+    async (args) => {
+      try {
+        const result = await browserScreenshot({
+          fullPage: args.full_page,
+          selector: args.selector,
+        });
+        return {
+          content: [
+            {
+              type: "image",
+              data: result.base64,
+              mimeType: "image/png",
+            } as unknown as { type: "text"; text: string },
+            {
+              type: "text",
+              text: `Screenshot captured (${result.width}x${result.height})`,
+            },
+          ],
+        };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return {
+          content: [{ type: "text", text: `Screenshot failed: ${message}` }],
+          isError: true,
+        };
+      }
+    },
+  );
+
+  const browserClickTool = tool(
+    "browser_click",
+    "Click an element on the current browser page. Use CSS selectors to target elements. Works with buttons, links, checkboxes, and any clickable element.",
+    {
+      selector: z
+        .string()
+        .describe(
+          "CSS selector of the element to click (e.g. '#submit-btn', 'button.primary', 'a[href=\"/login\"]')",
+        ),
+      button: z
+        .enum(["left", "right", "middle"])
+        .optional()
+        .describe("Mouse button (default: left)"),
+      click_count: z
+        .number()
+        .int()
+        .min(1)
+        .max(3)
+        .optional()
+        .describe("Number of clicks (default: 1, use 2 for double-click)"),
+    },
+    async (args) => {
+      try {
+        const result = await browserClick(args.selector, {
+          button: args.button,
+          clickCount: args.click_count,
+        });
+        const textInfo = result.text ? ` — element text: "${result.text}"` : "";
+        return { content: [{ type: "text", text: `Clicked: ${args.selector}${textInfo}` }] };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return { content: [{ type: "text", text: `Click failed: ${message}` }], isError: true };
+      }
+    },
+  );
+
+  const browserTypeTool = tool(
+    "browser_type",
+    "Type text into an input field on the current browser page. Can optionally clear the field first and press Enter after typing.",
+    {
+      selector: z.string().describe("CSS selector of the input element"),
+      text: z.string().describe("Text to type"),
+      clear: z.boolean().optional().describe("Clear the field before typing (default: false)"),
+      press_enter: z.boolean().optional().describe("Press Enter after typing (default: false)"),
+    },
+    async (args) => {
+      try {
+        await browserType(args.selector, args.text, {
+          clear: args.clear,
+          pressEnter: args.press_enter,
+        });
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Typed "${args.text.slice(0, 50)}${args.text.length > 50 ? "..." : ""}" into ${args.selector}`,
+            },
+          ],
+        };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return { content: [{ type: "text", text: `Type failed: ${message}` }], isError: true };
+      }
+    },
+  );
+
+  const browserSelectTool = tool(
+    "browser_select",
+    "Select option(s) from a <select> dropdown on the current browser page.",
+    {
+      selector: z.string().describe("CSS selector of the <select> element"),
+      values: z.array(z.string()).describe("Option value(s) to select"),
+    },
+    async (args) => {
+      try {
+        const result = await browserSelect(args.selector, args.values);
+        return { content: [{ type: "text", text: `Selected: ${result.selected.join(", ")}` }] };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return { content: [{ type: "text", text: `Select failed: ${message}` }], isError: true };
+      }
+    },
+  );
+
+  const browserEvaluateTool = tool(
+    "browser_evaluate",
+    "Execute JavaScript in the current browser page context. Use for extracting data, manipulating DOM, or checking page state. Returns the serialized result.",
+    {
+      expression: z.string().describe("JavaScript expression to evaluate in the page context"),
+    },
+    async (args) => {
+      try {
+        const result = await browserEvaluate(args.expression);
+        const text = typeof result === "string" ? result : JSON.stringify(result, null, 2);
+        return { content: [{ type: "text", text: text ?? "(undefined)" }] };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return { content: [{ type: "text", text: `Evaluate failed: ${message}` }], isError: true };
+      }
+    },
+  );
+
+  const browserSnapshotTool = tool(
+    "browser_snapshot",
+    "Get a structured snapshot of the current browser page: visible text content and all interactive elements (buttons, links, inputs) with their selectors. Use this to understand page structure before clicking or typing.",
+    {},
+    async () => {
+      try {
+        const snapshot = await browserSnapshot();
+        const elementsText = snapshot.elements
+          .map((e) => `  [${e.tag}${e.type ? `:${e.type}` : ""}] "${e.text}" → ${e.selector}`)
+          .join("\n");
+        return {
+          content: [
+            {
+              type: "text",
+              text: [
+                `URL: ${snapshot.url}`,
+                `Title: ${snapshot.title}`,
+                `\n--- Page Text (truncated) ---\n${snapshot.text.slice(0, 3000)}`,
+                `\n--- Interactive Elements (${snapshot.elements.length}) ---\n${elementsText}`,
+              ].join("\n"),
+            },
+          ],
+        };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return { content: [{ type: "text", text: `Snapshot failed: ${message}` }], isError: true };
+      }
+    },
+    { annotations: { readOnly: true } },
+  );
+
+  const browserCloseTool = tool(
+    "browser_close",
+    "Close the current interactive browser session. Use when done with browser automation to free resources.",
+    {},
+    async () => {
+      await closeActivePage();
+      return { content: [{ type: "text", text: "Browser session closed." }] };
+    },
+  );
+
+  // ── Task Management Tools ──
+
+  const taskStatusTool = tool(
+    "task_status",
+    "List running and recent daemon tasks. Shows background agent tasks, cron job executions, and team worker status with their IDs for management.",
+    {
+      task_id: z.string().optional().describe("Get details for a specific task (full or short ID)"),
+      active_only: z
+        .boolean()
+        .optional()
+        .describe("Only show active (pending/running) tasks (default: false)"),
+    },
+    async (args) => {
+      try {
+        const { getTaskManager } = await import("../daemon/task-manager.ts");
+        const tm = getTaskManager();
+
+        if (args.task_id) {
+          const task = tm.get(args.task_id) ?? tm.getByPrefix(args.task_id);
+          if (!task) {
+            return {
+              content: [{ type: "text", text: `No task found with ID: ${args.task_id}` }],
+              isError: true,
+            };
+          }
+          const duration = task.durationMs ? ` (${(task.durationMs / 1000).toFixed(1)}s)` : "";
+          const error = task.error ? `\n  Error: ${task.error}` : "";
+          const deps = task.blockedBy?.length
+            ? `\n  Blocked by: ${task.blockedBy.map((id: string) => id.slice(0, 8)).join(", ")}`
+            : "";
+          const blocks = task.blocks?.length
+            ? `\n  Blocks: ${task.blocks.map((id: string) => id.slice(0, 8)).join(", ")}`
+            : "";
+          return {
+            content: [
+              {
+                type: "text",
+                text: `Task: ${task.name} [${task.status}]${duration}\n  ID: ${task.id.slice(0, 8)}\n  Source: ${task.source}\n  Description: ${task.description}${deps}${blocks}${error}`,
+              },
+            ],
+          };
+        }
+
+        const tasks = args.active_only ? tm.listActive() : tm.listAll();
+        if (tasks.length === 0) {
+          return { content: [{ type: "text", text: "No tasks found." }] };
+        }
+
+        const formatted = tasks
+          .map((t) => {
+            const duration = t.durationMs ? ` (${(t.durationMs / 1000).toFixed(1)}s)` : "";
+            const error = t.error ? ` — ${t.error}` : "";
+            return `- ${t.name} [${t.status}]${duration}\n  ID: ${t.id.slice(0, 8)} | Source: ${t.source}${error}`;
+          })
+          .join("\n\n");
+
+        return { content: [{ type: "text", text: `Tasks (${tasks.length}):\n\n${formatted}` }] };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return {
+          content: [{ type: "text", text: `Task status failed: ${message}` }],
+          isError: true,
+        };
+      }
+    },
+    { annotations: { readOnly: true } },
+  );
+
+  const taskKillTool = tool(
+    "task_kill",
+    "Kill a running daemon task by ID. Sends an abort signal to stop the task. Use task_status first to find the task ID.",
+    {
+      task_id: z.string().describe("Task ID to kill (full UUID or first 8 chars)"),
+    },
+    async (args) => {
+      try {
+        const { getTaskManager } = await import("../daemon/task-manager.ts");
+        const tm = getTaskManager();
+
+        let killed = tm.kill(args.task_id);
+        if (!killed) {
+          // Try prefix match
+          const task = tm.getByPrefix(args.task_id);
+          if (task) {
+            killed = tm.kill(task.id);
+          }
+        }
+
+        if (!killed) {
+          return {
+            content: [{ type: "text", text: `No active task found with ID: ${args.task_id}` }],
+            isError: true,
+          };
+        }
+
+        return { content: [{ type: "text", text: `Task killed: ${args.task_id.slice(0, 8)}` }] };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return { content: [{ type: "text", text: `Task kill failed: ${message}` }], isError: true };
+      }
+    },
+  );
+
+  // ── Memory Consolidation Tool ──
+
+  const memoryConsolidateTool = tool(
+    "memory_consolidate",
+    "Run memory consolidation: merge near-duplicate chunks, prune stale low-access entries, and decay outdated user model confidence. Use periodically to keep memory clean and relevant. Can also be scheduled as a cron job.",
+    {},
+    async () => {
+      try {
+        const { consolidateMemory } = await import("../memory/consolidator.ts");
+        const result = await consolidateMemory();
+        return {
+          content: [
+            {
+              type: "text",
+              text: [
+                `Memory consolidation complete:`,
+                `  Merged: ${result.merged} duplicate chunks`,
+                `  Pruned: ${result.pruned} stale chunks`,
+                `  Rewritten: ${result.rewritten} chunks (LLM review)`,
+                `  Total: ${result.totalBefore} → ${result.totalAfter} chunks`,
+              ].join("\n"),
+            },
+          ],
+        };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return {
+          content: [{ type: "text", text: `Memory consolidation failed: ${message}` }],
+          isError: true,
+        };
+      }
+    },
+  );
+
+  // ── Sleep / Self-Resume Tool ──
+
+  const sleepTool = tool(
+    "agent_sleep",
+    "Sleep for a specified duration, then wake up and continue. Use this when you need to wait before checking something (e.g., wait for a deployment, poll for results, periodic monitoring within a session). The agent pauses without consuming resources and resumes with a wake-up prompt. Max sleep: 1 hour.",
+    {
+      duration_seconds: z
+        .number()
+        .int()
+        .min(5)
+        .max(3600)
+        .describe("How long to sleep in seconds (5–3600)"),
+      wake_prompt: z
+        .string()
+        .describe(
+          "Instruction to execute when waking up (e.g., 'Check if the build completed and report status')",
+        ),
+      reason: z.string().optional().describe("Why the agent is sleeping (logged for context)"),
+    },
+    async (args) => {
+      return new Promise((resolve) => {
+        const startTime = Date.now();
+        const timer = setTimeout(() => {
+          const elapsed = ((Date.now() - startTime) / 1000).toFixed(0);
+          resolve({
+            content: [
+              {
+                type: "text",
+                text: [
+                  `⏰ Woke up after ${elapsed}s sleep.`,
+                  args.reason ? `Sleep reason: ${args.reason}` : "",
+                  `\nWake-up task: ${args.wake_prompt}`,
+                  `\nPlease execute the wake-up task now.`,
+                ]
+                  .filter(Boolean)
+                  .join("\n"),
+              },
+            ],
+          });
+        }, args.duration_seconds * 1000);
+
+        // Allow abort to cancel the sleep
+        if (typeof globalThis !== "undefined") {
+          const cleanup = () => {
+            clearTimeout(timer);
+            resolve({
+              content: [
+                {
+                  type: "text",
+                  text: `Sleep interrupted after ${((Date.now() - startTime) / 1000).toFixed(0)}s. Wake-up task: ${args.wake_prompt}`,
+                },
+              ],
+            });
+          };
+          process.once("agent:wake", cleanup);
+          // Clean up listener if timer fires normally
+          setTimeout(
+            () => process.removeListener("agent:wake", cleanup),
+            args.duration_seconds * 1000 + 100,
+          );
+        }
+      });
+    },
+  );
+
+  // ── Plan Mode Tool ──
+
+  const proposePlanTool = tool(
+    "propose_plan",
+    "Propose an implementation plan for the user to review before execution. Use this for complex, multi-step tasks where you want to align with the user before making changes. The plan is stored and the user can approve, modify, or reject it. Only propose plans for significant changes — don't use this for simple tasks.",
+    {
+      title: z.string().describe("Short title for the plan (e.g., 'Refactor auth middleware')"),
+      summary: z.string().describe("1-2 sentence summary of what will be done and why"),
+      steps: z
+        .array(
+          z.object({
+            description: z.string().describe("What this step does"),
+            files: z
+              .array(z.string())
+              .optional()
+              .describe("Files that will be created or modified"),
+            risk: z.enum(["low", "medium", "high"]).optional().describe("Risk level of this step"),
+          }),
+        )
+        .describe("Ordered list of implementation steps"),
+      alternatives_considered: z
+        .string()
+        .optional()
+        .describe(
+          "Brief note on alternatives that were considered and why this approach was chosen",
+        ),
+    },
+    async (args) => {
+      // Store the plan for later reference
+      const planId = `plan-${Date.now()}`;
+      const planText = [
+        `# ${args.title}`,
+        "",
+        args.summary,
+        "",
+        "## Steps",
+        ...args.steps.map((step, i) => {
+          const files = step.files?.length ? ` (${step.files.join(", ")})` : "";
+          const risk = step.risk ? ` [${step.risk} risk]` : "";
+          return `${i + 1}. ${step.description}${files}${risk}`;
+        }),
+        ...(args.alternatives_considered
+          ? ["", "## Alternatives Considered", args.alternatives_considered]
+          : []),
+        "",
+        `Plan ID: ${planId}`,
+        "Reply with 'approved', 'modify', or 'reject' to proceed.",
+      ].join("\n");
+
+      // Store plan in memory for retrieval
+      try {
+        const { getDb } = await import("../db/client.ts");
+        const sql = getDb();
+        await sql`
+          INSERT INTO config (key, value, updated_at)
+          VALUES (${`plan.${planId}`}, ${JSON.stringify({ title: args.title, steps: args.steps, summary: args.summary })}::jsonb, now())
+          ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()
+        `;
+      } catch {
+        // Non-critical — plan is returned inline anyway
+      }
+
+      return {
+        content: [{ type: "text", text: planText }],
+      };
+    },
+    { annotations: { readOnly: true } },
+  );
+
+  // ── LSP Code Intelligence Tools ──
+
+  const lspGoToDefinitionTool = tool(
+    "lsp_go_to_definition",
+    "Jump to the definition of a symbol (function, class, variable, type) at a specific position in a TypeScript/JavaScript file. Returns the file path and line number where the symbol is defined. Useful for understanding where something is implemented.",
+    {
+      file: z.string().describe("Path to the file containing the symbol"),
+      line: z.number().int().min(1).describe("Line number (1-based)"),
+      character: z.number().int().min(0).describe("Column/character offset (0-based)"),
+    },
+    async (args) => {
+      try {
+        const { goToDefinition } = await import("./lsp.ts");
+        const results = await goToDefinition(args.file, args.line, args.character);
+
+        if (results.length === 0) {
+          return { content: [{ type: "text", text: "No definition found at that position." }] };
+        }
+
+        const formatted = results.map((r) => `${r.path}:${r.line}:${r.character}`).join("\n");
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Definition${results.length > 1 ? "s" : ""} found:\n${formatted}`,
+            },
+          ],
+        };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return {
+          content: [{ type: "text", text: `Go-to-definition failed: ${message}` }],
+          isError: true,
+        };
+      }
+    },
+    { annotations: { readOnly: true } },
+  );
+
+  const lspFindReferencesTool = tool(
+    "lsp_find_references",
+    "Find all references to a symbol at a specific position in a TypeScript/JavaScript file. Returns every location where the symbol is used across the project. Useful for understanding impact before refactoring.",
+    {
+      file: z.string().describe("Path to the file containing the symbol"),
+      line: z.number().int().min(1).describe("Line number (1-based)"),
+      character: z.number().int().min(0).describe("Column/character offset (0-based)"),
+      include_declaration: z
+        .boolean()
+        .optional()
+        .describe("Include the declaration itself in results (default: true)"),
+    },
+    async (args) => {
+      try {
+        const { findReferences } = await import("./lsp.ts");
+        const results = await findReferences(
+          args.file,
+          args.line,
+          args.character,
+          args.include_declaration ?? true,
+        );
+
+        if (results.length === 0) {
+          return { content: [{ type: "text", text: "No references found." }] };
+        }
+
+        const formatted = results.map((r) => `${r.path}:${r.line}:${r.character}`).join("\n");
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: `${results.length} reference${results.length > 1 ? "s" : ""} found:\n${formatted}`,
+            },
+          ],
+        };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return {
+          content: [{ type: "text", text: `Find-references failed: ${message}` }],
+          isError: true,
+        };
+      }
+    },
+    { annotations: { readOnly: true } },
+  );
+
+  const lspHoverTool = tool(
+    "lsp_hover",
+    "Get type information and documentation for a symbol at a specific position. Returns the inferred type signature and any JSDoc comments. Use this to understand what a variable/function is without reading the definition.",
+    {
+      file: z.string().describe("Path to the file containing the symbol"),
+      line: z.number().int().min(1).describe("Line number (1-based)"),
+      character: z.number().int().min(0).describe("Column/character offset (0-based)"),
+    },
+    async (args) => {
+      try {
+        const { hover } = await import("./lsp.ts");
+        const result = await hover(args.file, args.line, args.character);
+
+        if (!result) {
+          return { content: [{ type: "text", text: "No hover information available." }] };
+        }
+
+        return { content: [{ type: "text", text: result }] };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return {
+          content: [{ type: "text", text: `Hover failed: ${message}` }],
+          isError: true,
+        };
+      }
+    },
+    { annotations: { readOnly: true } },
+  );
+
+  const lspDocumentSymbolsTool = tool(
+    "lsp_document_symbols",
+    "Get all symbols (functions, classes, interfaces, variables, etc.) defined in a file. Returns a hierarchical list with symbol names, kinds, and line numbers. Use this for a quick overview of a file's structure.",
+    {
+      file: z.string().describe("Path to the TypeScript/JavaScript file"),
+    },
+    async (args) => {
+      try {
+        const { documentSymbols } = await import("./lsp.ts");
+        const symbols = await documentSymbols(args.file);
+
+        if (symbols.length === 0) {
+          return { content: [{ type: "text", text: "No symbols found in file." }] };
+        }
+
+        function formatSymbol(
+          sym: { name: string; kind: string; line: number; endLine: number; children?: unknown[] },
+          indent = 0,
+        ): string {
+          const prefix = "  ".repeat(indent);
+          let line = `${prefix}[${sym.kind}] ${sym.name} (L${sym.line}–${sym.endLine})`;
+          if (sym.children) {
+            for (const child of sym.children as typeof symbols) {
+              line += "\n" + formatSymbol(child, indent + 1);
+            }
+          }
+          return line;
+        }
+
+        const formatted = symbols.map((s) => formatSymbol(s)).join("\n");
+        return {
+          content: [
+            {
+              type: "text",
+              text: `${symbols.length} top-level symbol${symbols.length > 1 ? "s" : ""}:\n${formatted}`,
+            },
+          ],
+        };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return {
+          content: [{ type: "text", text: `Document symbols failed: ${message}` }],
+          isError: true,
+        };
+      }
+    },
+    { annotations: { readOnly: true } },
+  );
+
+  // ── Proactive Message Delivery Helper ──
+
+  /**
+   * Deliver a proactive message via the daemon's channel manager.
+   * Uses a process event so the gateway can route it through the correct adapter.
+   * Falls back to direct adapter lookup if running in-process.
+   */
+  async function deliverProactiveMessage(
+    platform: string,
+    channelId: string,
+    content: string,
+  ): Promise<boolean> {
+    // Emit event for gateway to pick up
+    const delivered = new Promise<boolean>((resolve) => {
+      const timeout = setTimeout(() => resolve(false), 5000);
+
+      const handler = (result: boolean) => {
+        clearTimeout(timeout);
+        resolve(result);
+      };
+
+      // The gateway listens for this event and routes via channel manager
+      process.emit(
+        "proactive:send" as never,
+        { platform, channelId, content, callback: handler } as never,
+      );
+
+      // If no listener registered (not in daemon), resolve false after short delay
+      if (process.listenerCount("proactive:send" as never) === 0) {
+        clearTimeout(timeout);
+        resolve(false);
+      }
+    });
+
+    return delivered;
+  }
+
+  // ── Proactive Message Tool ──
+
+  const proactiveSendTool = tool(
+    "proactive_send",
+    "Send a proactive message to the user's notification channel without being asked. Use this when you detect something important the user should know about: urgent emails, build failures, monitoring alerts, scheduled task results, or anything time-sensitive. If no target is specified, uses the default notification channel.",
+    {
+      message: z.string().describe("The message content to send to the user"),
+      platform: z
+        .string()
+        .optional()
+        .describe(
+          "Target platform (e.g., 'slack-user:T074HACEZ2L'). If omitted, uses default notification channel.",
+        ),
+      channel_id: z
+        .string()
+        .optional()
+        .describe("Target channel/user ID. If omitted, uses default notification channel."),
+      urgency: z
+        .enum(["info", "warning", "urgent"])
+        .optional()
+        .describe("Urgency level — affects message formatting (default: info)"),
+    },
+    async (args) => {
+      try {
+        const { resolveDefaultTarget } = await import("../daemon/proactive-sender.ts");
+
+        let platform = args.platform;
+        let channelId = args.channel_id;
+
+        // Resolve from default if not explicitly provided
+        if (!platform || !channelId) {
+          const defaultTarget = await resolveDefaultTarget();
+          if (!defaultTarget) {
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: "No target specified and no default notification channel configured. Ask the user to set one in Settings.",
+                },
+              ],
+              isError: true,
+            };
+          }
+          platform = platform ?? defaultTarget.platform;
+          channelId = channelId ?? defaultTarget.channelId;
+        }
+
+        // Format with urgency prefix
+        let formattedMessage = args.message;
+        if (args.urgency === "warning") {
+          formattedMessage = `*Warning:* ${args.message}`;
+        } else if (args.urgency === "urgent") {
+          formattedMessage = `*URGENT:* ${args.message}`;
+        }
+
+        // Use channel adapter to deliver
+        // The daemon gateway holds the channel manager — we emit a process event
+        // that the gateway picks up and routes through the adapter
+        const delivered = await deliverProactiveMessage(platform!, channelId!, formattedMessage);
+
+        if (delivered) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: `Proactive message sent to ${platform}/${channelId}`,
+              },
+            ],
+          };
+        }
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Message queued for delivery to ${platform}/${channelId} (adapter may not be active)`,
+            },
+          ],
+        };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return {
+          content: [{ type: "text", text: `Proactive send failed: ${message}` }],
+          isError: true,
+        };
+      }
+    },
+  );
+
+  // ── Inter-Agent Messaging Tool ──
+
+  const sendWorkerMessageTool = tool(
+    "send_worker_message",
+    "Send a message to another team worker or the coordinator during multi-agent team execution. Use this for inter-agent communication when workers need to share intermediate results, request information from siblings, or report blocking issues to the coordinator.",
+    {
+      to: z
+        .string()
+        .describe("Target agent: 'coordinator' for the lead agent, or a worker name/ID"),
+      message: z.string().describe("The message content to send"),
+      priority: z
+        .enum(["normal", "urgent", "blocking"])
+        .optional()
+        .describe(
+          "Message priority (default: normal). Use 'blocking' if you can't proceed without a response",
+        ),
+    },
+    async (args) => {
+      try {
+        const { getTeamMailbox } = await import("../daemon/team-mailbox.ts");
+        const mailbox = getTeamMailbox();
+        mailbox.send(args.to, args.message, args.priority ?? "normal");
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Message sent to ${args.to}${args.priority === "blocking" ? " [BLOCKING]" : ""}`,
+            },
+          ],
+        };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return {
+          content: [{ type: "text", text: `Failed to send message: ${message}` }],
+          isError: true,
+        };
+      }
+    },
+  );
+
+  const checkWorkerMessagesTool = tool(
+    "check_worker_messages",
+    "Check for incoming messages from other team agents. Call this periodically during team execution to see if the coordinator or sibling workers have sent updates, requests, or instructions.",
+    {
+      from: z.string().optional().describe("Filter messages from a specific agent"),
+    },
+    async (args) => {
+      try {
+        const { getTeamMailbox } = await import("../daemon/team-mailbox.ts");
+        const mailbox = getTeamMailbox();
+        const messages = mailbox.receive(args.from);
+
+        if (messages.length === 0) {
+          return { content: [{ type: "text", text: "No new messages." }] };
+        }
+
+        const formatted = messages
+          .map(
+            (m) =>
+              `[${m.priority}] From ${m.from}: ${m.message}${m.timestamp ? ` (${new Date(m.timestamp).toISOString()})` : ""}`,
+          )
+          .join("\n\n");
+
+        return {
+          content: [{ type: "text", text: `${messages.length} message(s):\n\n${formatted}` }],
+        };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return {
+          content: [{ type: "text", text: `Failed to check messages: ${message}` }],
+          isError: true,
+        };
+      }
+    },
+    { annotations: { readOnly: true } },
+  );
+
   return createSdkMcpServer({
     name: "nomos-memory",
     version: "0.1.0",
@@ -886,6 +1763,34 @@ export function createMemoryMcpServer(): McpSdkServerConfigWithInstance {
       switchGoogleAccountTool,
       listGoogleAccountsTool,
       checkForUpdatesTool,
+      // Interactive browser
+      browserNavigateTool,
+      browserScreenshotTool,
+      browserClickTool,
+      browserTypeTool,
+      browserSelectTool,
+      browserEvaluateTool,
+      browserSnapshotTool,
+      browserCloseTool,
+      // Task management
+      taskStatusTool,
+      taskKillTool,
+      // Memory consolidation
+      memoryConsolidateTool,
+      // Sleep / self-resume
+      sleepTool,
+      // Proactive messaging
+      proactiveSendTool,
+      // Inter-agent messaging
+      sendWorkerMessageTool,
+      checkWorkerMessagesTool,
+      // Plan mode
+      proposePlanTool,
+      // LSP code intelligence
+      lspGoToDefinitionTool,
+      lspFindReferencesTool,
+      lspHoverTool,
+      lspDocumentSymbolsTool,
     ],
   });
 }

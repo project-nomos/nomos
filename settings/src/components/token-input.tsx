@@ -9,9 +9,18 @@ interface TokenInputProps {
   onChange: (value: string) => void;
   placeholder?: string;
   helperText?: React.ReactNode;
+  /** Show a "Configured" badge next to the label */
+  configured?: boolean;
 }
 
-export function TokenInput({ label, value, onChange, placeholder, helperText }: TokenInputProps) {
+export function TokenInput({
+  label,
+  value,
+  onChange,
+  placeholder,
+  helperText,
+  configured,
+}: TokenInputProps) {
   const [visible, setVisible] = useState(false);
   const [copied, setCopied] = useState(false);
 
@@ -24,7 +33,15 @@ export function TokenInput({ label, value, onChange, placeholder, helperText }: 
 
   return (
     <div className="space-y-1.5">
-      <label className="block text-sm font-medium text-subtext1">{label}</label>
+      <label className="flex items-center gap-2 text-sm font-medium text-subtext1">
+        {label}
+        {configured && (
+          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs bg-green/10 text-green">
+            <Check size={10} />
+            Set
+          </span>
+        )}
+      </label>
       <div className="flex gap-2">
         <div className="relative flex-1">
           <input

@@ -42,13 +42,13 @@ export function isSlackMcpConfigured(): boolean {
 
 /**
  * Check if nomos-slack-mcp is configured (async, DB-backed).
- * Checks DB integration "slack" first, then falls back to sync check.
+ * Checks DB for slack-ws:* workspace entries first, then falls back to sync check.
  */
 export async function isSlackMcpConfiguredAsync(): Promise<boolean> {
   try {
-    const { getIntegration } = await import("../db/integrations.ts");
-    const integration = await getIntegration("slack");
-    if (integration?.enabled) return true;
+    const { listWorkspaces } = await import("../db/slack-workspaces.ts");
+    const workspaces = await listWorkspaces();
+    if (workspaces.length > 0) return true;
   } catch {
     // DB not available — fall through
   }

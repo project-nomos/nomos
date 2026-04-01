@@ -3,13 +3,32 @@
  *
  * Usage:
  *   nomos slack listen             — Listen as you (user mode, foreground)
- *   nomos slack auth               — Connect a workspace via OAuth
+ *   nomos slack auth               — Connect a workspace via browser login
  *   nomos slack auth --token ...   — Connect with a manual token
  *   nomos slack workspaces         — List connected workspaces
  *   nomos slack remove <team-id>   — Remove a workspace
  */
 
 import type { Command } from "commander";
+
+/** Tell the running daemon to hot-reload Slack workspaces. */
+async function notifyDaemonReload(): Promise<void> {
+  try {
+    const { GrpcClient } = await import("../ui/grpc-client.ts");
+    const client = new GrpcClient({ autoReconnect: false });
+    await client.connect();
+    await new Promise<void>((resolve) => {
+      client.sendCommand("reload-slack-workspaces", "cli:default");
+      // sendCommand is fire-and-forget with event listeners, just wait briefly
+      setTimeout(() => {
+        client.disconnect();
+        resolve();
+      }, 1000);
+    });
+  } catch {
+    // Daemon not running — will pick up workspaces on next start
+  }
+}
 
 export function registerSlackCommand(program: Command): void {
   const slack = program.command("slack").description("Manage Slack workspace connections");
@@ -23,14 +42,18 @@ export function registerSlackCommand(program: Command): void {
 
   slack
     .command("auth")
-    .description("Connect a Slack workspace (OAuth or manual token)")
-    .option("-t, --token <token>", "Manual xoxp- token (skips OAuth)")
+    .description("Connect a Slack workspace")
+    .option("-t, --token <token>", "Manual xoxp-/xoxc- token (skips browser)")
+    .option("--browser", "Sign in via browser to extract session token (default)")
+    .option("--oauth", "Use OAuth flow (requires SLACK_CLIENT_ID/SECRET)")
     .option("-p, --port <port>", "OAuth callback port", "9876")
     .action(async (options) => {
       if (options.token) {
         await authWithToken(options.token);
-      } else {
+      } else if (options.oauth) {
         await authWithOAuth(parseInt(options.port, 10));
+      } else {
+        await authWithBrowser();
       }
     });
 
@@ -342,7 +365,7 @@ async function authWithToken(token: string): Promise<void> {
   const { runMigrations } = await import("../db/migrate.ts");
   await runMigrations();
 
-  const { upsertWorkspace } = await import("../db/slack-workspaces.ts");
+  const { upsertWorkspace, syncSlackConfigToFile } = await import("../db/slack-workspaces.ts");
   await upsertWorkspace({
     teamId,
     teamName,
@@ -350,9 +373,12 @@ async function authWithToken(token: string): Promise<void> {
     accessToken: token,
   });
 
+  // Sync tokens to ~/.nomos/slack/config.json for nomos-slack-mcp
+  await syncSlackConfigToFile();
+  await notifyDaemonReload();
+
   console.log(`Connected workspace: ${teamName} (${teamId})`);
   console.log(`  User: ${authResult.user} (${userId})`);
-  console.log("  Restart the daemon to activate this workspace.");
 
   const { closeDb } = await import("../db/client.ts");
   await closeDb();
@@ -367,11 +393,29 @@ async function authWithOAuth(port: number): Promise<void> {
     process.exit(1);
   }
 
-  const http = await import("node:http");
+  const https = await import("node:https");
+  const { execSync } = await import("node:child_process");
   const crypto = await import("node:crypto");
 
+  // Generate ephemeral self-signed cert (required by Slack for distributed apps)
+  const opensslResult = execSync(
+    "openssl req -x509 -newkey rsa:2048 -keyout /dev/stdout -out /dev/stdout " +
+      '-days 1 -nodes -subj "/CN=localhost" 2>/dev/null',
+    { encoding: "utf-8" },
+  );
+  const keyMatch = opensslResult.match(
+    /-----BEGIN PRIVATE KEY-----[\s\S]+?-----END PRIVATE KEY-----/,
+  );
+  const certMatch = opensslResult.match(
+    /-----BEGIN CERTIFICATE-----[\s\S]+?-----END CERTIFICATE-----/,
+  );
+  if (!keyMatch || !certMatch) {
+    console.error("Failed to generate self-signed certificate. Ensure OpenSSL is installed.");
+    process.exit(1);
+  }
+
   const state = crypto.randomBytes(16).toString("hex");
-  const redirectUri = `http://localhost:${port}/slack/oauth/callback`;
+  const redirectUri = `https://localhost:${port}/oauth/callback`;
   const userScopes = [
     "channels:history",
     "channels:read",
@@ -380,15 +424,21 @@ async function authWithOAuth(port: number): Promise<void> {
     "im:history",
     "im:read",
     "mpim:history",
+    "mpim:read",
     "chat:write",
     "users:read",
+    "users:read.email",
+    "search:read",
+    "reactions:write",
+    "reactions:read",
+    "users.profile:write",
   ].join(",");
 
   const authorizeUrl = `https://slack.com/oauth/v2/authorize?client_id=${clientId}&user_scope=${userScopes}&redirect_uri=${encodeURIComponent(redirectUri)}&state=${state}`;
 
-  const server = http.createServer(async (req, res) => {
-    const url = new URL(req.url ?? "/", `http://localhost:${port}`);
-    if (url.pathname !== "/slack/oauth/callback") {
+  const server = https.createServer({ key: keyMatch[0], cert: certMatch[0] }, async (req, res) => {
+    const url = new URL(req.url ?? "/", `https://localhost:${port}`);
+    if (url.pathname !== "/oauth/callback") {
       res.writeHead(404);
       res.end("Not found");
       return;
@@ -437,7 +487,7 @@ async function authWithOAuth(port: number): Promise<void> {
       const { runMigrations } = await import("../db/migrate.ts");
       await runMigrations();
 
-      const { upsertWorkspace } = await import("../db/slack-workspaces.ts");
+      const { upsertWorkspace, syncSlackConfigToFile } = await import("../db/slack-workspaces.ts");
       await upsertWorkspace({
         teamId: team.id,
         teamName: team.name ?? "unknown",
@@ -445,6 +495,10 @@ async function authWithOAuth(port: number): Promise<void> {
         accessToken: authedUser.access_token,
         scopes: authedUser.scope ?? "",
       });
+
+      // Sync tokens to ~/.nomos/slack/config.json for nomos-slack-mcp
+      await syncSlackConfigToFile();
+      await notifyDaemonReload();
 
       res.writeHead(200, { "Content-Type": "text/html" });
       res.end(`
@@ -478,8 +532,8 @@ async function authWithOAuth(port: number): Promise<void> {
     server.close();
   }
 
-  server.listen(port, () => {
-    console.log(`OAuth callback server listening on port ${port}`);
+  server.listen(port, "127.0.0.1", () => {
+    console.log(`OAuth callback server listening on https://localhost:${port}/oauth/callback`);
     console.log(`\nOpen this URL in your browser to authorize:\n`);
     console.log(`  ${authorizeUrl}\n`);
 
@@ -510,6 +564,102 @@ async function authWithOAuth(port: number): Promise<void> {
   await new Promise<void>((resolve) => {
     server.on("close", resolve);
   });
+}
+
+async function authWithBrowser(): Promise<void> {
+  const chalk = (await import("chalk")).default;
+
+  console.log(chalk.hex("#CBA6F7").bold("\nSlack Browser Login\n"));
+  console.log(chalk.dim("  A browser will open. Sign in to your Slack workspace."));
+  console.log(chalk.dim("  Once you're in, tokens are extracted automatically.\n"));
+
+  const { captureSlackTokensViaBrowser } = await import("../auth/slack-browser.ts");
+  type CapturedWorkspace = Awaited<ReturnType<typeof captureSlackTokensViaBrowser>>[number];
+
+  const resolved = await captureSlackTokensViaBrowser({
+    onCapture: (ws) => {
+      console.log(chalk.green(`    ✓ ${ws.teamName} (${ws.teamId}) — ${ws.userId}`));
+    },
+    onStatus: (msg) => {
+      console.log(chalk.dim(`  ${msg}`));
+    },
+    onTimeout: () => {
+      console.error(chalk.red("\n  Timed out (2 min). No tokens captured."));
+      console.error(chalk.dim("  Make sure you're signed in to Slack in the browser window."));
+      process.exit(1);
+    },
+  });
+
+  if (resolved.length === 0) {
+    console.error(chalk.red("\n  No workspace tokens captured."));
+    process.exit(1);
+  }
+
+  // ── Let user select which workspaces to connect ──
+
+  let selected: CapturedWorkspace[];
+
+  if (resolved.length === 1) {
+    selected = resolved;
+  } else {
+    console.log(
+      chalk.hex("#CBA6F7")(`\n  Found ${resolved.length} workspaces. Which ones to connect?\n`),
+    );
+    for (let i = 0; i < resolved.length; i++) {
+      console.log(`    ${i + 1}. ${resolved[i].teamName} (${resolved[i].teamId})`);
+    }
+    console.log(`    a. All workspaces`);
+
+    const readline = await import("node:readline");
+    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+    const answer = await new Promise<string>((resolve) => {
+      rl.question(chalk.dim("\n  Enter choice (e.g. 1,3 or a): "), (ans) => {
+        rl.close();
+        resolve(ans.trim().toLowerCase());
+      });
+    });
+
+    if (answer === "a" || answer === "all") {
+      selected = resolved;
+    } else {
+      const indices = answer.split(",").map((s) => parseInt(s.trim(), 10) - 1);
+      selected = indices.filter((i) => i >= 0 && i < resolved.length).map((i) => resolved[i]);
+    }
+
+    if (selected.length === 0) {
+      console.error(chalk.red("  No workspaces selected."));
+      process.exit(1);
+    }
+  }
+
+  // ── Store in DB ──
+
+  const { runMigrations } = await import("../db/migrate.ts");
+  await runMigrations();
+
+  const { upsertWorkspace, syncSlackConfigToFile } = await import("../db/slack-workspaces.ts");
+
+  for (const ws of selected) {
+    await upsertWorkspace({
+      teamId: ws.teamId,
+      teamName: ws.teamName,
+      userId: ws.userId,
+      accessToken: ws.token,
+      scopes: "browser-session",
+      cookie: ws.cookie,
+    });
+  }
+
+  await syncSlackConfigToFile();
+  await notifyDaemonReload();
+
+  console.log(chalk.green(`\n  Connected ${selected.length} workspace(s):`));
+  for (const ws of selected) {
+    console.log(chalk.dim(`    • ${ws.teamName} (${ws.teamId})`));
+  }
+
+  const { closeDb } = await import("../db/client.ts");
+  await closeDb();
 }
 
 async function listWorkspaces(): Promise<void> {
@@ -561,8 +711,13 @@ async function removeWorkspace(teamId: string): Promise<void> {
   }
 
   await dbRemove(teamId);
+
+  // Sync tokens to ~/.nomos/slack/config.json for nomos-slack-mcp
+  const { syncSlackConfigToFile } = await import("../db/slack-workspaces.ts");
+  await syncSlackConfigToFile();
+  await notifyDaemonReload();
+
   console.log(`Removed workspace: ${ws.team_name} (${ws.team_id})`);
-  console.log("Restart the daemon to apply changes.");
 
   const { closeDb } = await import("../db/client.ts");
   await closeDb();

@@ -10,6 +10,7 @@
 <p align="center">
   <a href="#get-running-in-2-minutes">Quick Start</a> &middot;
   <a href="#what-you-get">Features</a> &middot;
+  <a href="#advanced-agent-capabilities">Advanced</a> &middot;
   <a href="#daemon-mode">Daemon</a> &middot;
   <a href="#channel-integrations">Channels</a> &middot;
   <a href="#skills-system">Skills</a> &middot;
@@ -128,6 +129,11 @@ nomos chat
 | :lock:                    | [**Secrets Encrypted at Rest**](#secrets-encrypted-at-rest)                        | AES-256-GCM for all API keys and tokens. Auto-key on first run.                             |
 | :brain:                   | [**Adaptive Memory**](#adaptive-memory--user-model)                                | Extracts facts, preferences, corrections. Builds a persistent user model.                   |
 | :arrows_counterclockwise: | [**Self-Improvement**](#self-improvement--an-agent-that-evolves-itself)            | Nomos can analyze its own code, implement fixes, and open PRs to itself.                    |
+| :globe_with_meridians:    | [**Browser Automation**](#interactive-browser-automation)                          | Playwright-based interactive browser with persistent sessions across tool calls.            |
+| :gear:                    | [**Task Management**](#task-state-machine--dependency-graph)                       | Task lifecycle tracking with dependency graphs, auto-unblock, and cancellation.             |
+| :mag:                     | [**LSP Code Intelligence**](#lsp-code-intelligence)                                | Go-to-definition, find-references, hover, document symbols via TypeScript LSP.              |
+| :sleeping:                | [**Sleep & Self-Resume**](#sleep--self-resume)                                     | Agents pause and wake with a prompt — for polling, monitoring, and async waits.             |
+| :clipboard:               | [**Plan Mode**](#plan-mode)                                                        | Agent proposes structured plans for review before making changes.                           |
 
 ---
 
@@ -243,6 +249,68 @@ Generate images (via Gemini) and videos (via Veo) directly from conversation. As
 - **Image generation** — `gemini-3-pro-image-preview`. Photorealistic images, illustrations, logos, concept art.
 - **Video generation** — `veo-3.0-generate-preview`. Short cinematic clips with camera and style control.
 - **Shared API key** — both use `GEMINI_API_KEY` from [Google AI Studio](https://aistudio.google.com/apikey)
+
+---
+
+## Advanced Agent Capabilities
+
+Nomos goes beyond basic chat with a full suite of autonomous agent features:
+
+### Interactive Browser Automation
+
+Full Playwright-based browser control with persistent page sessions. Navigate, click, type, screenshot, and execute JavaScript — all from conversation. Perfect for login flows, form filling, scraping dynamic content, and visual verification.
+
+Tools: `browser_navigate`, `browser_screenshot`, `browser_click`, `browser_type`, `browser_select`, `browser_evaluate`, `browser_snapshot`, `browser_close`
+
+### Task State Machine & Dependency Graph
+
+Every daemon operation is tracked as a task with lifecycle states (`pending → running → completed | failed | killed`). Tasks support dependency graphs — declare `blockedBy` relationships, and tasks auto-start when their dependencies complete. Includes cycle detection and abort-controller-based cancellation.
+
+Tools: `task_status`, `task_kill`
+
+### Sleep & Self-Resume
+
+Agents can pause execution for up to an hour and resume with a wake-up prompt. Useful for polling deployments, waiting for async operations, or periodic monitoring within a session.
+
+Tool: `agent_sleep`
+
+### Plan Mode
+
+For complex tasks, the agent proposes a structured plan (steps, affected files, risk levels) before execution. Plans are stored for review — approve, modify, or reject before any changes are made.
+
+Tool: `propose_plan`
+
+### LSP Code Intelligence
+
+Language Server Protocol integration providing TypeScript/JavaScript code intelligence. Go-to-definition, find-all-references, hover for type info, and document symbols — powered by `typescript-language-server`.
+
+Tools: `lsp_go_to_definition`, `lsp_find_references`, `lsp_hover`, `lsp_document_symbols`
+
+### Proactive Messaging
+
+The agent can send messages to your notification channels without being asked — for urgent alerts, monitoring results, or scheduled task output. Messages route through the daemon's channel manager via a process event bridge.
+
+Tool: `proactive_send`
+
+### Inter-Agent Messaging
+
+During multi-agent team execution, workers communicate via an in-memory message bus with priority levels (normal, urgent, blocking). Workers can share intermediate results or report blockers to the coordinator.
+
+Tools: `send_worker_message`, `check_worker_messages`
+
+### Verification Agent
+
+After team workers complete, a read-only adversarial agent runs tests, build, and lint to verify changes. Reports PASS/FAIL/PARTIAL with details.
+
+### Memory Consolidation
+
+Four-phase automatic memory cleanup: prune stale chunks (SQL), merge near-duplicates (vector similarity), LLM-powered review (Haiku), and confidence decay for outdated user model entries.
+
+Tool: `memory_consolidate`
+
+### Git Worktree Isolation
+
+Team workers can operate in isolated git worktrees to avoid conflicts when modifying the same repo concurrently. Auto-cleanup if no changes were made.
 
 ---
 

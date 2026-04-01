@@ -60,12 +60,46 @@ export class AgentRuntime {
 
   // Google Workspace authorized accounts
   private gwsAccounts?: Array<{ email: string; isDefault: boolean }>;
+  private slackWorkspaces?: Array<{ teamId: string; teamName: string; userId: string }>;
+  private notificationDefault?: { platform: string; channelId: string; label?: string };
 
   private initialized = false;
 
   /** Get the configured model name. */
   getModel(): string {
     return this.config?.model ?? "claude-sonnet-4-6";
+  }
+
+  /** Reload per-workspace Slack MCP servers from DB (called by gateway on workspace changes). */
+  async reloadSlackWorkspaceMcps(): Promise<void> {
+    try {
+      const { createPerWorkspaceSlackMcpServers } = await import("../sdk/slack-workspace-mcp.ts");
+      const { listWorkspaces } = await import("../db/slack-workspaces.ts");
+
+      // Remove old workspace MCP servers
+      for (const key of Object.keys(this.mcpServers)) {
+        if (key.startsWith("slack-ws-")) {
+          delete this.mcpServers[key];
+        }
+      }
+
+      // Add current ones from DB
+      const wsServers = await createPerWorkspaceSlackMcpServers();
+      Object.assign(this.mcpServers, wsServers);
+
+      const workspaces = await listWorkspaces();
+      this.slackWorkspaces = workspaces.map((ws) => ({
+        teamId: ws.team_id,
+        teamName: ws.team_name,
+        userId: ws.user_id,
+      }));
+
+      console.log(
+        `[agent-runtime] Reloaded ${Object.keys(wsServers).length} workspace MCP server(s)`,
+      );
+    } catch (err) {
+      console.error("[agent-runtime] Failed to reload workspace MCPs:", err);
+    }
   }
 
   /** Initialize the runtime: run migrations, load all config. */
@@ -127,6 +161,24 @@ export class AgentRuntime {
       Object.assign(this.mcpServers, await createSlackMcpConfigsAsync());
     }
 
+    // Per-workspace Slack MCP servers (in-process, one per connected workspace)
+    try {
+      const { createPerWorkspaceSlackMcpServers } = await import("../sdk/slack-workspace-mcp.ts");
+      const { listWorkspaces } = await import("../db/slack-workspaces.ts");
+      const wsServers = await createPerWorkspaceSlackMcpServers();
+      Object.assign(this.mcpServers, wsServers);
+      const workspaces = await listWorkspaces();
+      if (workspaces.length > 0) {
+        this.slackWorkspaces = workspaces.map((ws) => ({
+          teamId: ws.team_id,
+          teamName: ws.team_name,
+          userId: ws.user_id,
+        }));
+      }
+    } catch {
+      // No workspaces configured — skip
+    }
+
     if (isDiscordConfigured()) {
       this.mcpServers["nomos-discord"] = createDiscordMcpServer();
     }
@@ -135,16 +187,26 @@ export class AgentRuntime {
     }
     if (await isGoogleWorkspaceConfiguredAsync()) {
       Object.assign(this.mcpServers, await createGoogleWorkspaceMcpConfigsAsync());
-      // Load authorized accounts for system prompt
+      // Sync authorized accounts from gws CLI to DB and load for system prompt
       try {
-        const { listGwsAccounts } = await import("../sdk/google-workspace-mcp.ts");
-        const { accounts } = await listGwsAccounts();
+        const { syncGoogleAccountsFromGws } = await import("../db/google-accounts.ts");
+        const accounts = await syncGoogleAccountsFromGws();
         this.gwsAccounts = accounts.map((a) => ({
-          email: typeof a === "string" ? a : a.email,
-          isDefault: typeof a === "string" ? false : a.default,
+          email: a.email,
+          isDefault: a.is_default,
         }));
       } catch {
-        // Could not list accounts
+        // Fall back to gws CLI directly
+        try {
+          const { listGwsAccounts } = await import("../sdk/google-workspace-mcp.ts");
+          const { accounts } = await listGwsAccounts();
+          this.gwsAccounts = accounts.map((a) => ({
+            email: typeof a === "string" ? a : a.email,
+            isDefault: typeof a === "string" ? false : a.default,
+          }));
+        } catch {
+          // Could not list accounts
+        }
       }
     }
 
@@ -171,6 +233,15 @@ export class AgentRuntime {
       } catch {
         // Table may not exist yet — skip
       }
+    }
+
+    // Load notification default for system prompt
+    try {
+      const { getNotificationDefault } = await import("../db/notification-defaults.ts");
+      const nd = await getNotificationDefault();
+      if (nd) this.notificationDefault = nd;
+    } catch {
+      // Config table may not exist yet
     }
 
     // Build system prompt (after MCP servers so integrations summary is accurate)
@@ -232,6 +303,17 @@ export class AgentRuntime {
     if (this.mcpServers["nomos-slack"]) {
       parts.push("- **Slack**: Read/send messages, search, reactions, status via nomos-slack-mcp");
     }
+    if (this.slackWorkspaces && this.slackWorkspaces.length > 0) {
+      const wsList = this.slackWorkspaces
+        .map(
+          (ws) =>
+            `  - ${ws.teamName} (${ws.teamId}) — connected as user ${ws.userId}, tools via \`mcp__slack-ws-${ws.teamId}\``,
+        )
+        .join("\n");
+      parts.push(
+        `- **Slack Workspaces** (acting as the user — messages appear as them):\n${wsList}\n  Use \`slack_user_info\` to look up display names when the user refers to people by name.`,
+      );
+    }
     if (isDiscordConfigured()) {
       parts.push("- **Discord**: Send and receive messages via Discord bot");
     }
@@ -263,6 +345,18 @@ export class AgentRuntime {
       parts.push("- **iMessage**: Receive and respond to messages via iMessage");
     }
 
+    // Notification default
+    if (this.notificationDefault) {
+      const nd = this.notificationDefault;
+      parts.push(
+        `- **Default notification channel**: ${nd.label ?? nd.channelId} (${nd.platform}/${nd.channelId}). When creating scheduled tasks with \`announce: true\`, this channel is used automatically if no explicit target is given.`,
+      );
+    } else {
+      parts.push(
+        "- **No default notification channel configured.** When creating scheduled tasks with `announce: true`, you must specify `platform` and `channel_id` explicitly, or ask the user to set a default in Settings.",
+      );
+    }
+
     if (parts.length === 0) {
       return "No channel integrations are currently active. Only memory search is available.";
     }
@@ -272,6 +366,8 @@ export class AgentRuntime {
       ...parts,
       "",
       "Use these integrations proactively when they can help fulfill the user's request.",
+      "**Proactive mode**: Use `proactive_send` to notify the user about important events without being asked — urgent emails, build failures, monitoring alerts, or time-sensitive information.",
+      "Use `schedule_task` to create recurring or timed background tasks. With `announce: true`, results are delivered to the default notification channel automatically.",
     ].join("\n");
   }
 

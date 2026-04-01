@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { syncGoogleAccountsToDb } from "@/lib/sync-google-accounts";
 
 const execFileAsync = promisify(execFile);
 
@@ -21,6 +22,13 @@ export async function GET() {
     // gws not available or no accounts
   }
 
+  // Sync accounts to DB so the agent can reference them
+  try {
+    await syncGoogleAccountsToDb();
+  } catch {
+    // Non-blocking — UI still shows accounts from gws
+  }
+
   return NextResponse.json({ accounts });
 }
 
@@ -39,6 +47,14 @@ export async function DELETE(request: NextRequest) {
 
   try {
     await execFileAsync("npx", ["gws", "auth", "logout", "--account", email], { timeout: 10000 });
+
+    // Sync DB after removal
+    try {
+      await syncGoogleAccountsToDb();
+    } catch {
+      // Non-blocking
+    }
+
     return NextResponse.json({ ok: true });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

@@ -115,57 +115,62 @@ After adding new scopes and events, you must reinstall:
 
 ## Step 5: Configure Environment
 
-You can connect workspaces in two ways:
-
-### Option A: Multi-workspace via OAuth (recommended)
-
-Add your Slack app's OAuth credentials to `.env`:
+You need `SLACK_APP_TOKEN` (`xapp-`) for Socket Mode, then connect one or more workspaces:
 
 ```bash
 SLACK_APP_TOKEN=xapp-...           # Same as bot mode
-SLACK_CLIENT_ID=your-client-id
-SLACK_CLIENT_SECRET=your-client-secret
 ```
 
-Then connect each workspace:
+### Connecting Workspaces
+
+There are three ways to connect a workspace:
+
+#### Option A: Via `nomos-slack-mcp` OAuth (recommended for multi-workspace)
 
 ```bash
-nomos slack auth
+npx nomos-slack-mcp add-workspace
 ```
 
-This opens a browser for OAuth authorization. The token is stored in the database. Repeat for each workspace.
+This opens a browser for OAuth authorization. Tokens are stored in `~/.nomos/slack/config.json` and synced to the database on daemon start.
 
-You can also provide a token directly:
+> Multi-workspace OAuth requires your Slack app to have distribution enabled. See [Enabling Distribution](slack.md#enabling-distribution).
+
+#### Option B: Manual token
 
 ```bash
 nomos slack auth --token xoxp-...
 ```
 
-Manage connected workspaces:
+Or via the Settings UI: **Integrations → Slack → Manual Token**. Works for any workspace without distribution.
+
+#### Option C: Settings UI OAuth
+
+Authorize workspaces directly from the Settings UI:
+
+1. Set `SLACK_CLIENT_ID` and `SLACK_CLIENT_SECRET` in **App Configuration**
+2. Click **Authorize Workspace**
+
+> Multi-workspace requires [distribution enabled](slack.md#enabling-distribution).
+
+#### Option D: Browser Auth (experimental)
+
+Set `NOMOS_BROWSER_AUTH=true` to enable. Opens a browser window to capture tokens automatically — no Slack app required. See [Browser Auth](slack.md#option-d-browser-auth-experimental) for details.
+
+### Managing Workspaces
 
 ```bash
 nomos slack workspaces       # List all connected workspaces
 nomos slack remove T01ABC    # Disconnect a workspace
 ```
 
-### Option B: Single workspace via env var (legacy)
+### Legacy: Single workspace via env var
 
 ```bash
 SLACK_APP_TOKEN=xapp-...
 SLACK_USER_TOKEN=xoxp-...
 ```
 
-Both `SLACK_APP_TOKEN` and `SLACK_USER_TOKEN` are required for user mode. The app token is shared with bot mode — Slack supports up to 10 concurrent Socket Mode connections per app.
-
-> **Note:** If both DB workspaces and `SLACK_USER_TOKEN` are present, DB workspaces take priority. The env var is only used as a fallback when no workspaces are stored in the database.
-
-### OAuth Redirect URL
-
-If using OAuth, add this redirect URL to your Slack app settings under **OAuth & Permissions**:
-
-```
-http://localhost:9876/slack/oauth/callback
-```
+> If both DB workspaces and `SLACK_USER_TOKEN` are present, DB workspaces take priority. The env var is only used as a fallback when no workspaces are stored in the database.
 
 ## Step 6: Run Migrations
 
@@ -316,10 +321,17 @@ WebSocket clients can also send approval/rejection commands:
 
 ## Database
 
-User mode adds two tables to the schema:
+User mode uses the unified `integrations` table and a `draft_messages` table:
 
 ```sql
--- Draft messages (for approve-before-send)
+-- Workspace tokens are stored in the integrations table as "slack-ws:{teamId}"
+-- Secrets (xoxp- tokens) are encrypted at rest via AES-256-GCM
+-- Example row:
+--   name: "slack-ws:T01ABC"
+--   secrets: { "access_token": "xoxp-..." }  (encrypted)
+--   metadata: { "team_name": "My Company", "user_id": "U0ABC" }
+
+-- Draft messages (for approve-before-send in daemon mode)
 CREATE TABLE draft_messages (
   id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   platform     TEXT NOT NULL,          -- "slack-user:T01ABC"
@@ -335,21 +347,15 @@ CREATE TABLE draft_messages (
   sent_at      TIMESTAMPTZ,
   expires_at   TIMESTAMPTZ NOT NULL    -- 24h from creation
 );
-
--- Slack workspace tokens (for multi-workspace support)
-CREATE TABLE slack_user_tokens (
-  id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  team_id      TEXT UNIQUE NOT NULL,   -- Slack team ID (e.g., "T01ABC")
-  team_name    TEXT NOT NULL,
-  user_id      TEXT NOT NULL,
-  access_token TEXT NOT NULL,          -- xoxp- token
-  scopes       TEXT NOT NULL,
-  created_at   TIMESTAMPTZ NOT NULL,
-  updated_at   TIMESTAMPTZ NOT NULL
-);
 ```
 
 Status flow: `pending` → `approved` → `sent`, or `pending` → `rejected`.
+
+### Token Storage
+
+- **Database** is the source of truth — tokens encrypted at rest via AES-256-GCM in the `integrations` table (`slack-ws:{teamId}` naming)
+- **`~/.nomos/slack/config.json`** is a plaintext runtime snapshot (0600 permissions) auto-synced from DB for `nomos-slack-mcp` to read
+- Sync happens on workspace add/remove and on daemon startup
 
 ## Troubleshooting
 

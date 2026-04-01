@@ -4,10 +4,21 @@
  * A coordinator agent decomposes a complex task into subtasks,
  * spawns parallel worker agents via independent `runSession()` calls,
  * and synthesizes their results into a single response.
+ *
+ * Supports:
+ * - Git worktree isolation: each worker gets its own branch
+ * - Inter-agent messaging via team mailbox
+ * - Task lifecycle tracking via TaskManager
  */
 
 import { randomUUID } from "node:crypto";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { runSession, type McpServerConfig } from "../sdk/session.ts";
+import { getTeamMailbox } from "./team-mailbox.ts";
+import { getTaskManager } from "./task-manager.ts";
+
+const execFileAsync = promisify(execFile);
 
 export interface TeamConfig {
   /** Maximum number of parallel worker agents (default: 3) */
@@ -18,6 +29,10 @@ export interface TeamConfig {
   coordinatorModel?: string;
   /** Model for worker agents (defaults to coordinator model) */
   workerModel?: string;
+  /** Enable git worktree isolation for workers (each gets its own branch) */
+  worktreeIsolation?: boolean;
+  /** Enable verification agent after workers complete (adversarial testing) */
+  verification?: boolean;
 }
 
 export interface TeamTask {
@@ -69,6 +84,37 @@ Worker results:
 
 Provide a unified, well-structured response that integrates all worker outputs. If any worker failed, note what couldn't be completed.`;
 
+const VERIFICATION_PROMPT = `You are a verification agent. Your job is to critically review work completed by other agents and try to find problems. Be adversarial — actively try to break things.
+
+CRITICAL RULES:
+- DO NOT modify any project files. You are READ-ONLY.
+- Only use read operations: file reads, grep, glob, running tests/builds/lints
+- For each check, report: PASS, FAIL, or PARTIAL with details
+
+Original task: {task}
+
+Worker results:
+{results}
+
+Verification strategy:
+1. Read the files that were modified and check for obvious errors
+2. Run the test suite if tests exist (look for package.json scripts, test files)
+3. Run the build if a build command exists
+4. Run the linter if configured
+5. Check for common issues: missing imports, type errors, undefined variables
+6. Try adversarial edge cases if applicable
+
+After all checks, output your final verdict on the LAST LINE:
+VERDICT: PASS — if everything looks correct
+VERDICT: FAIL — if there are real issues that need fixing
+VERDICT: PARTIAL — if some things work but others need attention`;
+
+interface VerificationResult {
+  verdict: "PASS" | "FAIL" | "PARTIAL";
+  summary: string;
+  checks: Array<{ name: string; result: string; detail?: string }>;
+}
+
 export class TeamRuntime {
   private config: TeamConfig;
 
@@ -78,6 +124,8 @@ export class TeamRuntime {
       workerMaxTurns: config.workerMaxTurns ?? 20,
       coordinatorModel: config.coordinatorModel,
       workerModel: config.workerModel,
+      worktreeIsolation: config.worktreeIsolation ?? false,
+      verification: config.verification ?? true,
     };
   }
 
@@ -113,6 +161,25 @@ export class TeamRuntime {
 
     // Step 3: Synthesize
     const synthesized = await this.synthesize(task.prompt, results, task);
+
+    // Step 4: Verification (if enabled)
+    if (this.config.verification) {
+      emit?.({ type: "team", message: "Running verification agent..." });
+      const verification = await this.verify(task.prompt, results, task);
+
+      if (verification.verdict !== "PASS") {
+        const verificationNote = [
+          "",
+          "---",
+          `**Verification: ${verification.verdict}**`,
+          verification.summary,
+          ...verification.checks.map(
+            (c) => `- ${c.result} ${c.name}${c.detail ? `: ${c.detail}` : ""}`,
+          ),
+        ].join("\n");
+        return synthesized + verificationNote;
+      }
+    }
 
     return synthesized;
   }
@@ -184,32 +251,179 @@ export class TeamRuntime {
     task: TeamTask,
     emit?: (event: { type: string; message: string }) => void,
   ): Promise<string> {
-    const workerPrompt = `You are a worker agent assigned a specific subtask. Focus ONLY on this subtask and produce a clear, complete result.
+    const workerId = `worker-${subtask.id.slice(0, 8)}`;
+    const mailbox = getTeamMailbox();
+    const tm = getTaskManager();
+
+    // Register task in TaskManager
+    const daemonTask = tm.create({
+      name: `team:${workerId}`,
+      description: subtask.description.slice(0, 200),
+      source: "team-worker",
+    });
+    tm.start(daemonTask.id);
+
+    const workerPrompt = `You are worker agent "${workerId}" assigned a specific subtask within a team. Focus ONLY on this subtask and produce a clear, complete result.
 
 Subtask: ${subtask.description}
 
+You have access to these inter-agent communication tools:
+- send_worker_message: Send messages to "coordinator" or other workers
+- check_worker_messages: Check for messages from the coordinator or other workers
+
+If you encounter a blocking issue, send a message to "coordinator" with priority "blocking".
 Execute this subtask thoroughly and provide your output.`;
 
     emit?.({
       type: "team",
-      message: `Worker started: ${subtask.description.slice(0, 80)}...`,
+      message: `Worker ${workerId} started: ${subtask.description.slice(0, 80)}...`,
     });
 
-    const output = await this.runSingleAgent(workerPrompt, {
-      model: this.config.workerModel ?? this.config.coordinatorModel,
-      systemPromptAppend: task.systemPromptAppend,
-      mcpServers: task.mcpServers,
-      permissionMode: task.permissionMode,
-      allowedTools: task.allowedTools,
-      maxTurns: this.config.workerMaxTurns,
-    });
+    let worktreePath: string | undefined;
+    let worktreeBranch: string | undefined;
 
-    emit?.({
-      type: "team",
-      message: `Worker completed: ${subtask.description.slice(0, 80)}...`,
-    });
+    try {
+      // Set up git worktree isolation if enabled
+      if (this.config.worktreeIsolation) {
+        try {
+          worktreeBranch = `team/${workerId}-${Date.now()}`;
+          worktreePath = `.claude/worktrees/${workerId}`;
+          await execFileAsync("git", ["worktree", "add", "-b", worktreeBranch, worktreePath]);
+          emit?.({
+            type: "team",
+            message: `Worker ${workerId} isolated in worktree: ${worktreeBranch}`,
+          });
+        } catch {
+          // Git worktree not available or not a git repo — continue without isolation
+          worktreePath = undefined;
+          worktreeBranch = undefined;
+        }
+      }
 
-    return output;
+      const output = await this.runSingleAgent(workerPrompt, {
+        model: this.config.workerModel ?? this.config.coordinatorModel,
+        systemPromptAppend: task.systemPromptAppend,
+        mcpServers: task.mcpServers,
+        permissionMode: task.permissionMode,
+        allowedTools: task.allowedTools,
+        maxTurns: this.config.workerMaxTurns,
+        cwd: worktreePath,
+      });
+
+      tm.complete(daemonTask.id, output.slice(0, 500));
+
+      // Notify coordinator via mailbox
+      mailbox.sendFrom(
+        workerId,
+        "coordinator",
+        `Subtask completed: ${subtask.description.slice(0, 100)}`,
+      );
+
+      emit?.({
+        type: "team",
+        message: `Worker ${workerId} completed${worktreeBranch ? ` (branch: ${worktreeBranch})` : ""}`,
+      });
+
+      // Include worktree info in output if changes were made
+      const finalOutput = worktreeBranch
+        ? `${output}\n\n[Changes on branch: ${worktreeBranch}]`
+        : output;
+
+      return finalOutput;
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      tm.fail(daemonTask.id, errMsg);
+      mailbox.sendFrom(workerId, "coordinator", `Subtask FAILED: ${errMsg}`, "urgent");
+      throw err;
+    } finally {
+      // Clean up worktree if no changes were made
+      if (worktreePath) {
+        try {
+          const { stdout } = await execFileAsync("git", [
+            "-C",
+            worktreePath,
+            "status",
+            "--porcelain",
+          ]);
+          if (!stdout.trim()) {
+            // No changes — remove worktree
+            await execFileAsync("git", ["worktree", "remove", worktreePath, "--force"]);
+            if (worktreeBranch) {
+              await execFileAsync("git", ["branch", "-D", worktreeBranch]).catch(() => {});
+            }
+          }
+        } catch {
+          // Worktree cleanup failed — leave for manual cleanup
+        }
+      }
+    }
+  }
+
+  /** Run a verification agent to adversarially test worker outputs. */
+  private async verify(
+    originalTask: string,
+    results: WorkerResult[],
+    task: TeamTask,
+  ): Promise<VerificationResult> {
+    const resultsText = results
+      .map((r, i) => {
+        const status = r.status === "fulfilled" ? "COMPLETED" : "FAILED";
+        return `--- Worker ${i + 1} [${status}] ---\nSubtask: ${r.description}\nOutput:\n${r.output}`;
+      })
+      .join("\n\n");
+
+    const prompt = VERIFICATION_PROMPT.replace("{task}", originalTask).replace(
+      "{results}",
+      resultsText,
+    );
+
+    try {
+      const output = await this.runSingleAgent(prompt, {
+        model: this.config.workerModel ?? this.config.coordinatorModel,
+        systemPromptAppend: task.systemPromptAppend,
+        mcpServers: task.mcpServers,
+        // Read-only: bypass permissions but the prompt restricts to read ops
+        permissionMode: "bypassPermissions",
+        maxTurns: 15,
+      });
+
+      // Parse verdict from last line
+      const verdictMatch = output.match(/VERDICT:\s*(PASS|FAIL|PARTIAL)/i);
+      const verdict = (verdictMatch?.[1]?.toUpperCase() ?? "PARTIAL") as
+        | "PASS"
+        | "FAIL"
+        | "PARTIAL";
+
+      // Extract check results (lines matching "PASS/FAIL/PARTIAL: description")
+      const checks: Array<{ name: string; result: string; detail?: string }> = [];
+      const checkPattern = /(?:^|\n)\s*\*?\*?\s*(PASS|FAIL|PARTIAL)\s*[-:]\s*(.+)/gi;
+      let match;
+      while ((match = checkPattern.exec(output)) !== null) {
+        checks.push({
+          name: match[2]!.trim().slice(0, 100),
+          result: match[1]!.toUpperCase(),
+        });
+      }
+
+      return {
+        verdict,
+        summary: output.slice(0, 500),
+        checks,
+      };
+    } catch (err) {
+      console.error("[team-runtime] Verification agent failed:", err);
+      return {
+        verdict: "PARTIAL",
+        summary: "Verification agent failed to complete",
+        checks: [
+          {
+            name: "Verification execution",
+            result: "FAIL",
+            detail: err instanceof Error ? err.message : String(err),
+          },
+        ],
+      };
+    }
   }
 
   /** Synthesize worker results into a final response. */
@@ -249,9 +463,12 @@ Execute this subtask thoroughly and provide your output.`;
       permissionMode?: "default" | "acceptEdits" | "bypassPermissions" | "plan" | "dontAsk";
       allowedTools?: string[];
       maxTurns?: number;
+      cwd?: string;
     },
   ): Promise<string> {
-    console.log(`[team-runtime] Running agent (model: ${options.model ?? "default"})...`);
+    console.log(
+      `[team-runtime] Running agent (model: ${options.model ?? "default"}${options.cwd ? `, cwd: ${options.cwd}` : ""})...`,
+    );
 
     const sdkQuery = runSession({
       prompt,
@@ -261,6 +478,7 @@ Execute this subtask thoroughly and provide your output.`;
       permissionMode: options.permissionMode ?? "bypassPermissions",
       allowedTools: options.allowedTools,
       maxTurns: options.maxTurns ?? 20,
+      ...(options.cwd ? { cwd: options.cwd } : {}),
     });
 
     let fullText = "";
