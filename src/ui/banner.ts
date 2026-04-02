@@ -1,44 +1,5 @@
 import chalk from "chalk";
 
-const TAGLINES: string[] = [
-  // Coding & development
-  "Your AI pair programmer",
-  "From idea to implementation",
-  "I read the docs so you don't have to",
-  "Making TODO into DONE",
-  "Your codebase whisperer",
-  "Less typing, more shipping",
-  "The debugger that debugs itself",
-  // Channels & communication
-  "Slack, Discord, Telegram — one brain",
-  "Monitoring your channels, minding your inbox",
-  "Every channel, one conversation",
-  "Your messages, handled",
-  // Meetings & calendar
-  "Meetings prepped before you wake up",
-  "Calendar briefings on autopilot",
-  "You walk in prepared, every time",
-  // Email & triage
-  "Inbox triaged, drafts ready",
-  "Zero unread, zero stress",
-  // Memory & context
-  "Remembers everything, forgets nothing",
-  "Context that carries across every conversation",
-  "Your second brain, always online",
-  // Autonomy & loops
-  "Working in the background so you don't have to",
-  "Always on, always thinking",
-  "The agent that acts before you ask",
-  "Runs while you sleep, reports when you wake",
-  // General
-  "All your tools, one conversation",
-  "Ask me anything, I'll figure it out",
-  "Ready when you are",
-  "Your terminal, supercharged",
-  "One agent, every workflow",
-  "Not just another chatbot",
-];
-
 // Catppuccin Mocha gradient: Mauve → Blue → Teal
 const GRADIENT = ["#CBA6F7", "#B4BEFE", "#89B4FA", "#74C7EC", "#89DCEB"];
 
@@ -100,7 +61,9 @@ export function showBanner(opts: {
   resumedCount?: number;
   upgradeAvailable?: { current: string; latest: string };
 }): void {
-  const tagline = TAGLINES[Math.floor(Math.random() * TAGLINES.length)];
+  const dim = chalk.dim;
+  const blue = chalk.hex("#89B4FA");
+  const mauve = chalk.hex("#CBA6F7");
 
   console.log();
 
@@ -112,33 +75,39 @@ export function showBanner(opts: {
   // Custom agent name (if not default "Nomos")
   if (opts.agentName !== "Nomos") {
     const nameDisplay = opts.agentEmoji ? `${opts.agentEmoji} ${opts.agentName}` : opts.agentName;
-    console.log(chalk.hex("#CBA6F7").bold(`   ${nameDisplay}`));
+    console.log(mauve.bold(`   ${nameDisplay}`));
   }
 
-  // Tagline
-  console.log(chalk.italic(`   ${chalk.hex("#89B4FA")(tagline)}`));
+  console.log();
 
-  // Info line
+  // Tips for getting started (Gemini CLI style)
+  console.log(dim("   Tips for getting started:"));
+  console.log(dim("   1. Ask questions, edit files, or run commands."));
+  console.log(dim("   2. Be specific for the best results."));
+  console.log(dim("   3. ") + blue("/help") + dim(" for more information."));
+
+  console.log();
+
+  // Version + model info
   console.log(
-    chalk.dim(`   v${opts.version}`) +
-      chalk.dim(` · ${opts.model}`) +
-      chalk.dim(` · session: ${opts.sessionKey}`),
+    dim(`   v${opts.version}`) + dim(` · ${opts.model}`) + dim(` · session: ${opts.sessionKey}`),
   );
 
   if (opts.resumedCount && opts.resumedCount > 0) {
-    console.log(chalk.dim(`   Resumed session with ${opts.resumedCount} messages`));
+    console.log(dim(`   Resumed session with ${opts.resumedCount} messages`));
   }
 
   if (opts.upgradeAvailable) {
+    console.log();
     console.log(
       chalk.hex("#FAB387").bold("   ⬆ Update available: ") +
-        chalk.dim(`v${opts.upgradeAvailable.current}`) +
+        dim(`v${opts.upgradeAvailable.current}`) +
         chalk.hex("#FAB387")(" → ") +
         chalk.hex("#A6E3A1").bold(`v${opts.upgradeAvailable.latest}`) +
-        chalk.dim("  Run: ") +
-        chalk.hex("#89B4FA")("brew upgrade nomos"),
+        dim("  Run: ") +
+        blue("brew upgrade nomos"),
     );
   }
 
-  console.log(chalk.dim("   Type /help for commands, /quit to exit\n"));
+  console.log();
 }

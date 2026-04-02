@@ -11,7 +11,7 @@
  * @see https://github.com/project-nomos/nomos-slack-mcp
  */
 
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import type { McpServerConfig } from "@anthropic-ai/claude-agent-sdk";
@@ -27,7 +27,7 @@ export function isSlackMcpConfigured(): boolean {
   try {
     const configPath = join(homedir(), ".nomos", "slack", "config.json");
     if (existsSync(configPath)) {
-      const data = JSON.parse(require("node:fs").readFileSync(configPath, "utf-8"));
+      const data = JSON.parse(readFileSync(configPath, "utf-8"));
       if (data.workspaces && Object.keys(data.workspaces).length > 0) {
         return true;
       }

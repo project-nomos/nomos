@@ -117,16 +117,33 @@ export function CommandInput({
     { isActive: focus },
   );
 
+  const termWidth = process.stdout.columns || 80;
+
+  // Box drawing characters for the input border
+  const topBorder = "\u250C" + "\u2500".repeat(termWidth - 2) + "\u2510";
+  const bottomBorder = "\u2514" + "\u2500".repeat(termWidth - 2) + "\u2518";
+
   return (
     <Box flexDirection="column">
-      {/* Input line — onSubmit intentionally omitted; Enter is handled
-          in the useInput hook above for correct value tracking. */}
+      {/* Bordered input box */}
+      <Text dimColor>{topBorder}</Text>
       <Box>
+        <Text dimColor>{"\u2502 "}</Text>
         <Text color={theme.text.user} bold>
           {prompt}
         </Text>
-        <TextInput key={inputKey} value={value} onChange={handleChange} focus={focus} />
+        <Box flexGrow={1}>
+          <TextInput
+            key={inputKey}
+            value={value}
+            onChange={handleChange}
+            focus={focus}
+            placeholder="Type your message or /help for commands"
+          />
+        </Box>
+        <Text dimColor>{" \u2502"}</Text>
       </Box>
+      <Text dimColor>{bottomBorder}</Text>
 
       {/* Dropdown suggestions */}
       {showDropdown && (

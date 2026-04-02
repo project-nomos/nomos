@@ -910,15 +910,13 @@ export function App({
 
           {/* Input area */}
           {isInputActive && (
-            <Box marginTop={1}>
-              <CommandInput
-                value={inputValue}
-                onChange={setInputValue}
-                onSubmit={handleSubmit}
-                focus={isInputActive && !copyMode}
-                prompt={`${promptChar}${theme.symbol.user} `}
-              />
-            </Box>
+            <CommandInput
+              value={inputValue}
+              onChange={setInputValue}
+              onSubmit={handleSubmit}
+              focus={isInputActive && !copyMode}
+              prompt={`${promptChar}${theme.symbol.user} `}
+            />
           )}
 
           {/* Connection status (daemon mode) */}
