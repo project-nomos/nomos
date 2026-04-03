@@ -64,8 +64,15 @@ class Nomos < Formula
       staging.delete
     end
 
+    # Ensure ~/.nomos directories exist (post_install sandbox may block mkdir from Node)
+    nomos_dir = "#{Dir.home}/.nomos"
+    mkdir_p nomos_dir
+    mkdir_p "#{nomos_dir}/logs"
+
     # Install and start the launchd service (handles both fresh install and upgrades)
-    system bin/"nomos", "service", "install"
+    # Uses Kernel.system (not Formula#system) to avoid failing the install if
+    # launchctl is blocked by sandbox or the daemon can't start yet
+    Kernel.system(bin/"nomos", "service", "install")
   end
 
   def caveats
