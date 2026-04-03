@@ -385,9 +385,9 @@ export async function PUT(request: Request) {
 
       await sql`
         INSERT INTO integrations (name, enabled, config, secrets, metadata)
-        VALUES (${name}, true, ${sql.json(data.config)}, ${secretsStr}, '{}'::jsonb)
+        VALUES (${name}, true, ${sql.json(data.config as Record<string, string>)}, ${secretsStr}, '{}'::jsonb)
         ON CONFLICT (name) DO UPDATE SET
-          config = ${sql.json(data.config)},
+          config = ${sql.json(data.config as Record<string, string>)},
           secrets = ${secretsStr},
           updated_at = now()
       `;
