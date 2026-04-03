@@ -59,7 +59,7 @@ brew install project-nomos/nomos/nomos
 nomos chat
 ```
 
-That's it. A browser-based setup wizard handles the rest — database connection, API provider, assistant personality, and channel integrations. Everything is saved encrypted in PostgreSQL. Configuration is stored in `~/.nomos/.env` and works from any directory.
+That's it. The daemon and Settings UI start automatically after install. A browser-based setup wizard handles the rest — database connection, API provider, assistant personality, and channel integrations. Everything is saved encrypted in PostgreSQL. Configuration is stored in `~/.nomos/.env` and works from any directory.
 
 <details>
 <summary><strong>Other installation methods</strong></summary>
@@ -424,10 +424,19 @@ The daemon turns Nomos into an always-on, multi-channel AI gateway. It boots an 
 4. **Agent runtime** loads config, profile, identity, skills, and MCP servers once at startup, then processes each message through the agent SDK.
 
 ```bash
-nomos daemon start    # Background mode
-nomos daemon run      # Development mode (foreground with logs)
-nomos daemon status   # Check if running
-nomos daemon logs     # Tail logs
+nomos daemon start               # Background mode (includes Settings UI)
+nomos daemon start --no-settings # Daemon only, no Settings UI
+nomos daemon run                 # Development mode (foreground with logs)
+nomos daemon stop                # Stop running daemon
+nomos daemon restart             # Restart daemon
+nomos daemon status              # Check if running
+nomos daemon logs                # Tail logs
+
+nomos status                     # Show all process status at a glance
+nomos service install            # Install as launchd service (auto-start on login)
+nomos service uninstall          # Remove launchd service
+
+nomos chat --mode plan           # Start chat in plan mode
 ```
 
 ---
@@ -698,8 +707,9 @@ A local Next.js app at `settings/` for managing your assistant via the browser (
 | `/admin/context`  | Context window visualization with token budget breakdown                        |
 
 ```bash
-nomos settings              # Start on http://localhost:3456 and open browser
+nomos settings              # Start standalone on http://localhost:3456
 nomos settings --port 4000  # Custom port
+# Note: Settings UI also starts automatically with the daemon (nomos daemon start)
 ```
 
 </details>
