@@ -31,9 +31,9 @@ export interface ReplOptions {
 }
 
 export async function startRepl(options: ReplOptions): Promise<void> {
-  // Use a stable session key so the same conversation resumes across restarts.
-  // Only use a timestamp key when the user explicitly asks for a new session.
-  const sessionKey = options.sessionKey ?? "cli:default";
+  // Each CLI launch gets a fresh session by default.
+  // Use --continue or --resume to pick up a previous conversation.
+  const sessionKey = options.sessionKey ?? `cli:${crypto.randomUUID()}`;
 
   // Start upgrade check early (non-blocking, runs in parallel with other setup)
   const upgradePromise = checkForUpgrade();

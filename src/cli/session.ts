@@ -32,7 +32,7 @@ export function registerSessionCommand(program: Command): void {
           `  ${chalk.cyan(s.id.slice(0, 8))}  ${chalk.dim(s.session_key)}  ${chalk.dim(date)}  ${chalk.dim(tokens)}  ${s.model ?? "default"}`,
         );
       }
-      console.log(chalk.dim(`\nResume with: nomos chat --session <session_key>`));
+      console.log(chalk.dim(`\nResume with: nomos chat --resume <session_key>`));
     });
 
   cmd

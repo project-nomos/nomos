@@ -88,13 +88,16 @@ export function showBanner(opts: {
 
   console.log();
 
-  // Version + model info
+  // Version + model info — show short session ID for UUID-based keys
+  const shortSession = opts.sessionKey.replace(/^cli:/, "").slice(0, 8);
   console.log(
-    dim(`   v${opts.version}`) + dim(` · ${opts.model}`) + dim(` · session: ${opts.sessionKey}`),
+    dim(`   v${opts.version}`) + dim(` · ${opts.model}`) + dim(` · session: ${shortSession}`),
   );
 
   if (opts.resumedCount && opts.resumedCount > 0) {
     console.log(dim(`   Resumed session with ${opts.resumedCount} messages`));
+  } else {
+    console.log(dim("   New session · use ") + blue("--continue") + dim(" to resume"));
   }
 
   if (opts.upgradeAvailable) {

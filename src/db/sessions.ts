@@ -8,6 +8,10 @@ export interface SessionRow {
   status: string;
   metadata: Record<string, unknown>;
   token_usage: { input: number; output: number };
+  total_cost_usd: number;
+  input_tokens: number;
+  output_tokens: number;
+  turn_count: number;
   created_at: Date;
   updated_at: Date;
 }
@@ -113,4 +117,22 @@ export async function archiveSession(sessionId: string): Promise<void> {
 export async function deleteSession(sessionId: string): Promise<void> {
   const sql = getDb();
   await sql`DELETE FROM sessions WHERE id = ${sessionId}`;
+}
+
+export async function updateSessionCost(
+  sessionKey: string,
+  costUsd: number,
+  inputTokens: number,
+  outputTokens: number,
+): Promise<void> {
+  const sql = getDb();
+  await sql`
+    UPDATE sessions SET
+      total_cost_usd = total_cost_usd + ${costUsd},
+      input_tokens = input_tokens + ${inputTokens},
+      output_tokens = output_tokens + ${outputTokens},
+      turn_count = turn_count + 1,
+      updated_at = now()
+    WHERE session_key = ${sessionKey}
+  `;
 }

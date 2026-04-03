@@ -196,6 +196,15 @@ CREATE TABLE IF NOT EXISTS user_model (
 
 CREATE INDEX IF NOT EXISTS idx_user_model_category ON user_model(category);
 
+-- Migration: add cost tracking columns to sessions (idempotent)
+DO $$ BEGIN
+  ALTER TABLE sessions ADD COLUMN IF NOT EXISTS total_cost_usd NUMERIC NOT NULL DEFAULT 0;
+  ALTER TABLE sessions ADD COLUMN IF NOT EXISTS input_tokens BIGINT NOT NULL DEFAULT 0;
+  ALTER TABLE sessions ADD COLUMN IF NOT EXISTS output_tokens BIGINT NOT NULL DEFAULT 0;
+  ALTER TABLE sessions ADD COLUMN IF NOT EXISTS turn_count INT NOT NULL DEFAULT 0;
+EXCEPTION WHEN OTHERS THEN NULL;
+END $$;
+
 -- Migration: copy slack_user_tokens → integrations (idempotent)
 DO $$ BEGIN
   IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'slack_user_tokens') THEN

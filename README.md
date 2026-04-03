@@ -42,7 +42,7 @@ Most AI assistants forget you the moment a conversation ends. Nomos doesn't.
 
 Nomos is an autonomous AI agent platform that **remembers every interaction**, connects to your tools and channels, and gets smarter over time. It runs as a persistent background daemon — always on, always learning — reachable from Slack, Discord, Telegram, WhatsApp, the terminal, or any gRPC/WebSocket client.
 
-It comes with **persistent vector memory** across sessions and channels, **multi-agent team orchestration** for complex tasks, **smart model routing** to optimize cost and quality, **27 bundled skills**, a **web management dashboard**, and built-in **image and video generation**.
+It comes with **persistent vector memory** across sessions and channels, **multi-agent team orchestration** for complex tasks, **smart model routing** to optimize cost and quality, **27 bundled skills**, a **web management dashboard**, built-in **image and video generation**, **event-driven hooks**, **cost tracking**, **context visualization**, **background memory consolidation**, and **self-updating documentation**.
 
 > **What powers Nomos?** Under the hood, Nomos is built on Anthropic's [Claude Agent SDK](https://docs.anthropic.com/en/docs/claude-code/sdk) — inheriting the full agent loop, built-in tools, streaming, and compaction. Nomos adds the infrastructure layer on top: memory, channels, teams, scheduling, and a management UI.
 
@@ -116,24 +116,30 @@ nomos chat
 
 ## What You Get
 
-|                           | Feature                                                                            | What it does                                                                                |
-| ------------------------- | ---------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| :brain:                   | [**Memory That Persists**](#memory-that-persists-across-sessions-and-channels)     | Every conversation auto-indexed into pgvector. Recall anything from any session or channel. |
-| :speech_balloon:          | [**6 Channel Integrations**](#deploy-to-6-platforms-in-minutes)                    | Slack, Discord, Telegram, WhatsApp, iMessage — thin adapters, one agent runtime.            |
-| :busts_in_silhouette:     | [**Multi-Agent Teams**](#multi-agent-teams--parallelize-complex-work)              | Coordinator + parallel workers. Hand off complex tasks, get synthesized results.            |
-| :zap:                     | [**Smart Model Routing**](#smart-model-routing--cut-costs-without-cutting-quality) | Route by complexity across any provider — cloud, local, or hybrid. Cut costs automatically. |
-| :globe_with_meridians:    | [**Multiple API Providers**](#multiple-api-providers)                              | 5 providers supported: direct API, Vertex AI, OpenRouter, Ollama, or custom.                |
-| :art:                     | [**Image & Video Gen**](#image--video-generation--built-in-not-bolted-on)          | Gemini image + Veo video generation, conversational — just ask.                             |
-| :desktop_computer:        | [**Web Dashboard**](#web-based-management-dashboard)                               | Next.js 16 settings UI with setup wizard. No YAML editing.                                  |
-| :jigsaw:                  | [**27 Bundled Skills**](#extend-without-forking)                                   | Three-tier loading: bundled, personal, project. Create your own in minutes.                 |
-| :lock:                    | [**Secrets Encrypted at Rest**](#secrets-encrypted-at-rest)                        | AES-256-GCM for all API keys and tokens. Auto-key on first run.                             |
-| :brain:                   | [**Adaptive Memory**](#adaptive-memory--user-model)                                | Extracts facts, preferences, corrections. Builds a persistent user model.                   |
-| :arrows_counterclockwise: | [**Self-Improvement**](#self-improvement--an-agent-that-evolves-itself)            | Nomos can analyze its own code, implement fixes, and open PRs to itself.                    |
-| :globe_with_meridians:    | [**Browser Automation**](#interactive-browser-automation)                          | Playwright-based interactive browser with persistent sessions across tool calls.            |
-| :gear:                    | [**Task Management**](#task-state-machine--dependency-graph)                       | Task lifecycle tracking with dependency graphs, auto-unblock, and cancellation.             |
-| :mag:                     | [**LSP Code Intelligence**](#lsp-code-intelligence)                                | Go-to-definition, find-references, hover, document symbols via TypeScript LSP.              |
-| :sleeping:                | [**Sleep & Self-Resume**](#sleep--self-resume)                                     | Agents pause and wake with a prompt — for polling, monitoring, and async waits.             |
-| :clipboard:               | [**Plan Mode**](#plan-mode)                                                        | Agent proposes structured plans for review before making changes.                           |
+|                           | Feature                                                                            | What it does                                                                                 |
+| ------------------------- | ---------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| :brain:                   | [**Memory That Persists**](#memory-that-persists-across-sessions-and-channels)     | Every conversation auto-indexed into pgvector. Recall anything from any session or channel.  |
+| :speech_balloon:          | [**6 Channel Integrations**](#deploy-to-6-platforms-in-minutes)                    | Slack, Discord, Telegram, WhatsApp, iMessage — thin adapters, one agent runtime.             |
+| :busts_in_silhouette:     | [**Multi-Agent Teams**](#multi-agent-teams--parallelize-complex-work)              | Coordinator + parallel workers. Hand off complex tasks, get synthesized results.             |
+| :zap:                     | [**Smart Model Routing**](#smart-model-routing--cut-costs-without-cutting-quality) | Route by complexity across any provider — cloud, local, or hybrid. Cut costs automatically.  |
+| :globe_with_meridians:    | [**Multiple API Providers**](#multiple-api-providers)                              | 5 providers supported: direct API, Vertex AI, OpenRouter, Ollama, or custom.                 |
+| :art:                     | [**Image & Video Gen**](#image--video-generation--built-in-not-bolted-on)          | Gemini image + Veo video generation, conversational — just ask.                              |
+| :desktop_computer:        | [**Web Dashboard**](#web-based-management-dashboard)                               | Next.js 16 settings UI with setup wizard. No YAML editing.                                   |
+| :jigsaw:                  | [**27 Bundled Skills**](#extend-without-forking)                                   | Three-tier loading: bundled, personal, project. Create your own in minutes.                  |
+| :lock:                    | [**Secrets Encrypted at Rest**](#secrets-encrypted-at-rest)                        | AES-256-GCM for all API keys and tokens. Auto-key on first run.                              |
+| :brain:                   | [**Adaptive Memory**](#adaptive-memory--user-model)                                | Extracts facts, preferences, corrections. Builds a persistent user model.                    |
+| :arrows_counterclockwise: | [**Self-Improvement**](#self-improvement--an-agent-that-evolves-itself)            | Nomos can analyze its own code, implement fixes, and open PRs to itself.                     |
+| :globe_with_meridians:    | [**Browser Automation**](#interactive-browser-automation)                          | Playwright-based interactive browser with persistent sessions across tool calls.             |
+| :gear:                    | [**Task Management**](#task-state-machine--dependency-graph)                       | Task lifecycle tracking with dependency graphs, auto-unblock, and cancellation.              |
+| :mag:                     | [**LSP Code Intelligence**](#lsp-code-intelligence)                                | Go-to-definition, find-references, hover, document symbols via TypeScript LSP.               |
+| :sleeping:                | [**Sleep & Self-Resume**](#sleep--self-resume)                                     | Agents pause and wake with a prompt — for polling, monitoring, and async waits.              |
+| :clipboard:               | [**Plan Mode**](#plan-mode)                                                        | Agent proposes structured plans for review before making changes.                            |
+| :moneybag:                | [**Cost Tracking**](#cost-tracking)                                                | Per-model pricing, session cost summaries, and usage breakdown in CLI and web dashboard.     |
+| :anchor:                  | [**Event Hooks**](#event-hooks)                                                    | Extend the agent with command, HTTP, or prompt hooks on tool use, lifecycle, and compaction. |
+| :bar_chart:               | [**Context Visualization**](#context-visualization)                                | See how your context window is used — system prompt, conversation, tools, memory, skills.    |
+| :shield:                  | [**Bash Safety Analysis**](#bash-safety-analysis)                                  | Detects destructive commands, elevated privileges, and dangerous git ops before execution.   |
+| :crescent_moon:           | [**Auto-Dream Memory**](#auto-dream-memory-consolidation)                          | Background memory consolidation with 4-phase cleanup — triggered by time and turn count.     |
+| :page_facing_up:          | [**Magic Docs**](#magic-docs)                                                      | Self-updating markdown docs — files with a magic marker auto-refresh when stale.             |
 
 ---
 
@@ -311,6 +317,57 @@ Tool: `memory_consolidate`
 ### Git Worktree Isolation
 
 Team workers can operate in isolated git worktrees to avoid conflicts when modifying the same repo concurrently. Auto-cleanup if no changes were made.
+
+### Cost Tracking
+
+Per-session and per-model token usage and USD cost tracking. Supports all current Claude model pricing tiers (Haiku $1/$5, Sonnet $3/$15, Opus $5/$25 per Mtok). Session summaries show input/output/cache tokens and total spend. Available in the CLI via `/cost` and in the Settings UI at `/admin/costs`.
+
+### Event Hooks
+
+Extend the agent with event-driven hooks defined in `~/.nomos/hooks.json` or `.nomos/hooks.json`. Three hook types:
+
+- **Command** — run a shell command with JSON context on stdin; exit code 2 blocks the tool call
+- **HTTP** — POST to a webhook URL; 403 response blocks the tool call
+- **Prompt** — return text to inject into context
+
+Events: `PreToolUse`, `PostToolUse`, `Notification`, `Stop`, `SessionStart`, `SessionEnd`, `PreCompact`, `PostCompact`. Matchers support exact match, glob (`Tool(*)`), and wildcard (`*`).
+
+### Context Visualization
+
+See exactly how your context window is being used — system prompt, conversation, tools, memory, and skills — with a color-coded bar chart in the CLI and a web dashboard at `/admin/context`. Includes capacity warnings when context exceeds 75% or 90%.
+
+### Bash Safety Analysis
+
+Lightweight command analysis that detects potentially dangerous bash operations before execution. Checks for destructive commands (`rm`, `mkfs`), dangerous flags (`rm -rf`, `chmod 777`, `sudo`), network commands (`curl`, `ssh`), destructive git operations (`push --force`, `reset --hard`), and piping to shell. Risk levels: safe, low, medium, high, critical.
+
+### Auto-Dream Memory Consolidation
+
+Background memory consolidation triggered by time (1hr) and turn count (10) gates. Uses lock-file coordination to prevent concurrent runs. Four-phase consolidation:
+
+1. **Orient** — survey existing memory structure
+2. **Gather** — collect recent signals from conversations
+3. **Consolidate** — write/update topic files, merge new knowledge
+4. **Prune** — remove stale entries, update index
+
+### Magic Docs
+
+Markdown files with a `<!-- MAGIC DOC: title -->` marker are automatically kept up-to-date. When the system detects a magic doc is stale (based on update interval and file modification time), a background forked agent reads the codebase and refreshes the document in place — preserving the marker and structure.
+
+### Adaptive Retry
+
+API calls automatically retry with exponential backoff and jitter on transient errors (429 rate limits, 529 capacity errors). Respects `Retry-After` headers. Persistent mode for daemon sessions retries indefinitely. Configurable max retries (default: 8) with abort signal support.
+
+### Prompt Cache Break Detection
+
+Tracks SHA-256 hashes of system prompt, tool schemas, model, and beta flags across API calls. When a cache-invalidating change is detected, logs a warning with details of what changed — helping avoid unnecessary cache misses that increase costs.
+
+### Forked Agents
+
+Spawn lightweight, isolated subagent queries for background tasks — classifiers, summaries, magic doc updates, knowledge extraction. Uses Haiku by default for cost efficiency. Cost is tracked in the global singleton. `runParallelForks()` enables concurrent execution of multiple subagent queries.
+
+### Tool Result Deduplication
+
+Large tool results (>2000 chars) are deduplicated via SHA-256 content hashing. When the same result appears again, it's replaced with a compact reference. LRU eviction at 500 entries keeps memory bounded.
 
 ---
 
@@ -637,6 +694,8 @@ A local Next.js app at `settings/` for managing your assistant via the browser (
 | `/integrations`   | Channel overview and per-platform configuration                                 |
 | `/admin/database` | Database connection and migration status                                        |
 | `/admin/memory`   | Memory store stats and management                                               |
+| `/admin/costs`    | Session cost tracking and per-model usage breakdown                             |
+| `/admin/context`  | Context window visualization with token budget breakdown                        |
 
 ```bash
 nomos settings              # Start on http://localhost:3456 and open browser

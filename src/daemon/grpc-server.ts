@@ -152,7 +152,7 @@ export class GrpcServer {
     const streamId = randomUUID();
     const request = call.request;
     const content = request?.content ?? "";
-    const sessionKey = request?.sessionKey ?? "cli:default";
+    const sessionKey = request?.sessionKey ?? `grpc:${randomUUID()}`;
 
     // Register as active stream
     this.activeStreams.set(streamId, { id: streamId, call });

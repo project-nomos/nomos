@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { config as loadDotenv } from "dotenv";
 import type { Command } from "commander";
 import type { McpServerConfig } from "@anthropic-ai/claude-agent-sdk";
@@ -16,14 +17,15 @@ import { loadMcpConfig } from "./mcp-config.ts";
 import { shouldRunWizard, runSetupWizard } from "./wizard.ts";
 import { isDaemonRunning } from "../daemon/lifecycle.ts";
 import { GrpcClient } from "../ui/grpc-client.ts";
+import { listSessions } from "../db/sessions.ts";
 
 export function registerChatCommand(program: Command): void {
   program
     .command("chat")
     .description("Start an interactive chat session")
     .option("-m, --model <model>", "Model to use")
-    .option("-s, --session <key>", "Resume a session by key")
-    .option("--fresh", "Start a new session (don't resume default)")
+    .option("-c, --continue", "Resume the most recent session")
+    .option("-r, --resume <key>", "Resume a specific session by key")
     .option("--direct", "Run the SDK in-process (skip daemon even if running)")
     .action(async (options) => {
       // First-run setup wizard
@@ -79,10 +81,24 @@ export function registerChatCommand(program: Command): void {
       }
 
       // Determine session key:
-      // --session <key>  → use that key (explicit resume)
-      // --fresh          → generate a new key (force new session)
-      // default          → "cli:default" (auto-resume)
-      const sessionKey = options.session ?? (options.fresh ? `cli:${Date.now()}` : undefined);
+      // --continue       → resume the most recent CLI session
+      // --resume <key>   → resume a specific session by key
+      // default          → new session per launch (UUID-based)
+      let sessionKey: string;
+      if (options.continue) {
+        const recent = await listSessions({ status: "active", limit: 1 });
+        const cliSession = recent.find((s) => s.session_key.startsWith("cli:"));
+        if (cliSession) {
+          sessionKey = cliSession.session_key;
+        } else {
+          console.log("No previous session found — starting fresh.");
+          sessionKey = `cli:${randomUUID()}`;
+        }
+      } else if (options.resume) {
+        sessionKey = options.resume.startsWith("cli:") ? options.resume : `cli:${options.resume}`;
+      } else {
+        sessionKey = `cli:${randomUUID()}`;
+      }
 
       // If a daemon is running, connect via gRPC
       let grpcClient: GrpcClient | undefined;

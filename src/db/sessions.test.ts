@@ -11,6 +11,7 @@ import {
   updateSessionUsage,
   updateSessionModel,
   updateSessionSdkId,
+  updateSessionCost,
   archiveSession,
   deleteSession,
 } from "./sessions.ts";
@@ -23,6 +24,10 @@ const fakeSession = {
   status: "active",
   metadata: {},
   token_usage: { input: 0, output: 0 },
+  total_cost_usd: 0,
+  input_tokens: 0,
+  output_tokens: 0,
+  turn_count: 0,
   created_at: new Date(),
   updated_at: new Date(),
 };
@@ -112,6 +117,14 @@ describe("archiveSession", () => {
   it("calls sql to archive session", async () => {
     mockSql.mockResolvedValueOnce([]);
     await archiveSession("uuid-1");
+    expect(mockSql).toHaveBeenCalled();
+  });
+});
+
+describe("updateSessionCost", () => {
+  it("calls sql to increment cost counters", async () => {
+    mockSql.mockResolvedValueOnce([]);
+    await updateSessionCost("cli:abc123", 0.0042, 500, 200);
     expect(mockSql).toHaveBeenCalled();
   });
 });
