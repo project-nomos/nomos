@@ -26,6 +26,7 @@ export function registerChatCommand(program: Command): void {
     .option("-m, --model <model>", "Model to use")
     .option("-c, --continue", "Resume the most recent session")
     .option("-r, --resume <key>", "Resume a specific session by key")
+    .option("--mode <mode>", "Permission mode (default, acceptEdits, bypassPermissions, plan)")
     .option("--direct", "Run the SDK in-process (skip daemon even if running)")
     .action(async (options) => {
       // First-run setup wizard
@@ -39,6 +40,15 @@ export function registerChatCommand(program: Command): void {
 
       // Apply CLI overrides
       if (options.model) config.model = options.model;
+      if (options.mode) {
+        const validModes = ["default", "acceptEdits", "bypassPermissions", "plan", "dontAsk"];
+        if (validModes.includes(options.mode)) {
+          config.permissionMode = options.mode;
+        } else {
+          console.error(`Invalid mode: ${options.mode}. Valid: ${validModes.join(", ")}`);
+          process.exit(1);
+        }
+      }
 
       // Validate
       const errors = validateConfig(config);

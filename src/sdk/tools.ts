@@ -1744,6 +1744,39 @@ export function createMemoryMcpServer(): McpSdkServerConfigWithInstance {
     { annotations: { readOnly: true } },
   );
 
+  const switchModeTool = tool(
+    "switch_permission_mode",
+    "Switch the agent's permission mode at runtime. Use 'plan' mode when you want to propose changes without executing them, 'acceptEdits' to auto-accept file edits, or 'bypassPermissions' to skip all checks. The mode change takes effect on the next tool call.",
+    {
+      mode: z
+        .enum(["default", "acceptEdits", "bypassPermissions", "plan", "dontAsk"])
+        .describe("The permission mode to switch to"),
+      reason: z.string().optional().describe("Why the mode is being switched (for audit trail)"),
+    },
+    async (args) => {
+      const validModes = ["default", "acceptEdits", "bypassPermissions", "plan", "dontAsk"];
+      if (!validModes.includes(args.mode)) {
+        return {
+          content: [{ type: "text" as const, text: `Invalid mode: ${args.mode}` }],
+          isError: true,
+        };
+      }
+
+      // Emit event for the REPL to pick up
+      process.emit("nomos:mode_change" as never, args.mode as never);
+
+      const reason = args.reason ? ` (reason: ${args.reason})` : "";
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: `Permission mode switched to: ${args.mode}${reason}. The new mode will apply to subsequent tool calls.`,
+          },
+        ],
+      };
+    },
+  );
+
   return createSdkMcpServer({
     name: "nomos-memory",
     version: "0.1.0",
@@ -1791,6 +1824,8 @@ export function createMemoryMcpServer(): McpSdkServerConfigWithInstance {
       lspFindReferencesTool,
       lspHoverTool,
       lspDocumentSymbolsTool,
+      // Permission mode switching
+      switchModeTool,
     ],
   });
 }

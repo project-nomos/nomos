@@ -36,6 +36,7 @@ export const SLASH_COMMANDS = [
   { name: "approve", desc: "Approve a draft response" },
   { name: "reject", desc: "Reject a draft response" },
   { name: "slack", desc: "List connected Slack workspaces" },
+  { name: "mode", desc: "Show/switch permission mode" },
   { name: "permissions", desc: "Manage agent permissions" },
   { name: "integrations", desc: "Setup channel integrations" },
   { name: "team", desc: "Run a task with parallel agent workers" },
@@ -48,6 +49,7 @@ export interface CommandState {
   thinkingLevel?: "off" | "minimal" | "low" | "medium" | "high" | "max";
   sandboxEnabled?: boolean;
   activeAgentId?: string;
+  permissionMode?: "default" | "acceptEdits" | "bypassPermissions" | "plan" | "dontAsk";
 }
 
 /** Context passed to every slash command handler. */
@@ -147,6 +149,8 @@ export async function dispatchSlashCommand(
       return { output: await cmdRejectDraft(args) };
     case "slack":
       return { output: await cmdSlackWorkspaces() };
+    case "mode":
+      return { output: cmdMode(ctx, args) };
     case "permissions":
       return { output: await cmdPermissions(args) };
     case "integrations":
@@ -332,6 +336,47 @@ function cmdSandbox(ctx: CommandContext, args: string[]): string {
   } else {
     return chalk.yellow(`Invalid option: ${input}. Use 'on' or 'off'.`);
   }
+}
+
+const PERMISSION_MODES = [
+  { id: "default", desc: "prompt for all permissions" },
+  { id: "acceptEdits", desc: "auto-accept file edits, prompt for bash" },
+  { id: "bypassPermissions", desc: "skip all permission checks" },
+  { id: "plan", desc: "read-only planning mode, no writes" },
+  { id: "dontAsk", desc: "never prompt, deny if not auto-approved" },
+] as const;
+
+function cmdMode(ctx: CommandContext, args: string[]): string {
+  const input = args[0];
+
+  // Show current mode and available modes
+  if (!input) {
+    const current = ctx.state.permissionMode ?? ctx.config.permissionMode;
+    const lines = [
+      chalk.dim(`Permission mode: ${chalk.bold(current)}`),
+      "",
+      ...PERMISSION_MODES.map((m) => {
+        const marker = m.id === current ? chalk.green("●") : chalk.dim("○");
+        return `  ${marker} ${chalk.bold(m.id)} ${chalk.dim("— " + m.desc)}`;
+      }),
+      "",
+      chalk.dim("Use /mode <name> to switch."),
+    ];
+    return lines.join("\n");
+  }
+
+  // Switch mode
+  const match = PERMISSION_MODES.find((m) => m.id.toLowerCase() === input.toLowerCase());
+  if (!match) {
+    return chalk.yellow(
+      `Invalid mode: ${input}. Valid: ${PERMISSION_MODES.map((m) => m.id).join(", ")}`,
+    );
+  }
+
+  const mode = match.id as NonNullable<CommandState["permissionMode"]>;
+  ctx.state.permissionMode = mode;
+  ctx.config.permissionMode = mode;
+  return chalk.dim(`Permission mode → ${chalk.bold(match.id)}: ${match.desc}`);
 }
 
 async function cmdSession(ctx: CommandContext): Promise<string> {

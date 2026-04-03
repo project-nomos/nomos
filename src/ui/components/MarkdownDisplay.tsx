@@ -29,6 +29,41 @@ type Block =
     }
   | { type: "empty" };
 
+// ─── LRU Block Cache ────────────────────────────────────────────
+// Avoids reparsing the same markdown on scroll/re-render.
+// Keyed by raw text, FIFO eviction at 500 entries.
+
+const BLOCK_CACHE = new Map<string, Block[]>();
+const BLOCK_CACHE_MAX = 500;
+
+/** Markdown syntax detection — skip parsing for plain text. */
+const MD_SYNTAX_RE = /[#*`|[>\-_~]|\n\n|^\d+\. |\n\d+\. /;
+
+function getCachedBlocks(text: string): Block[] {
+  const cached = BLOCK_CACHE.get(text);
+  if (cached) return cached;
+
+  // Fast path: plain text without markdown syntax
+  if (!MD_SYNTAX_RE.test(text.slice(0, 500))) {
+    const blocks: Block[] = [{ type: "paragraph", text }];
+    setCachedBlocks(text, blocks);
+    return blocks;
+  }
+
+  const blocks = parseBlocks(text);
+  setCachedBlocks(text, blocks);
+  return blocks;
+}
+
+function setCachedBlocks(key: string, blocks: Block[]): void {
+  if (BLOCK_CACHE.size >= BLOCK_CACHE_MAX) {
+    // FIFO eviction
+    const firstKey = BLOCK_CACHE.keys().next().value;
+    if (firstKey) BLOCK_CACHE.delete(firstKey);
+  }
+  BLOCK_CACHE.set(key, blocks);
+}
+
 // ─── Parser ─────────────────────────────────────────────────────
 
 function parseBlocks(text: string): Block[] {
@@ -389,7 +424,7 @@ function MarkdownDisplayInner({ text, width }: MarkdownDisplayProps): React.Reac
     return <Text>{""}</Text>;
   }
 
-  const blocks = parseBlocks(text);
+  const blocks = getCachedBlocks(text);
 
   return (
     <Box flexDirection="column">

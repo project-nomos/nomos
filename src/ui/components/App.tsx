@@ -18,9 +18,9 @@ import { ToolBlock } from "./ToolBlock.tsx";
 import { ThinkingBlock } from "./ThinkingBlock.tsx";
 import { CostLine } from "./CostLine.tsx";
 import { SystemMessage } from "./SystemMessage.tsx";
-import { StatusBar } from "./StatusBar.tsx";
+import { StatusLine } from "./StatusLine.tsx";
 import { CommandInput } from "./CommandInput.tsx";
-import { GradientSpinner } from "./GradientSpinner.tsx";
+import { StalledSpinner } from "./StalledSpinner.tsx";
 import { CopyModeIndicator } from "./CopyModeIndicator.tsx";
 import { ScrollableView } from "./ScrollableView.tsx";
 import { stripUnsafeCharacters } from "../text-utils.ts";
@@ -108,6 +108,9 @@ export function App({
   const [liveToolName, setLiveToolName] = useState<string | null>(null);
   // Copy mode — pauses all animations and live rendering for text selection
   const [copyMode, setCopyMode] = useState(false);
+  // Token tracking for stalled spinner and status line
+  const lastTokenAtRef = useRef(Date.now());
+  const [sessionTokens, setSessionTokens] = useState({ input: 0, output: 0, cost: 0, turns: 0 });
 
   // Alternate screen buffer (opt-in via NOMOS_ALTERNATE_BUFFER=true)
   useAlternateBuffer(config.alternateBuffer);
@@ -121,7 +124,10 @@ export function App({
   const needsTextSeparatorRef = useRef(false);
   const flushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const transcriptRef = useRef(transcript);
-  const stateRef = useRef<CommandState>({ model: config.model });
+  const stateRef = useRef<CommandState>({
+    model: config.model,
+    permissionMode: config.permissionMode,
+  });
   const systemPromptAppendRef = useRef(systemPromptAppend);
   const bootstrapChecked = useRef(false);
   // SDK session ID for multi-turn resume (enables auto-compaction).
@@ -187,9 +193,11 @@ export function App({
                   needsTextSeparatorRef.current = false;
                 }
                 setIsThinking(false);
+                lastTokenAtRef.current = Date.now();
                 appendDelta(delta.text);
               } else if (delta?.type === "thinking_delta" && delta.thinking) {
                 setIsThinking(false);
+                lastTokenAtRef.current = Date.now();
                 thinkingBufferRef.current += delta.thinking;
                 if (!flushTimerRef.current) {
                   flushTimerRef.current = setTimeout(flushBuffer, 50);
@@ -245,9 +253,12 @@ export function App({
           const inp = event.usage?.input_tokens ?? 0;
           const out = event.usage?.output_tokens ?? 0;
           if (inp > 0 || out > 0) {
-            const total = inp + out;
-            const fmt = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(1)}K` : String(n));
-            pushItem("cost", `tokens: ${fmt(inp)} in · ${fmt(out)} out · ${fmt(total)} total`);
+            setSessionTokens((prev) => ({
+              input: prev.input + inp,
+              output: prev.output + out,
+              cost: prev.cost,
+              turns: prev.turns + 1,
+            }));
           }
 
           setIsInputActive(true);
@@ -353,7 +364,7 @@ export function App({
               prompt: teamTask,
               systemPromptAppend: systemPromptAppendRef.current,
               mcpServers,
-              permissionMode: config.permissionMode,
+              permissionMode: stateRef.current.permissionMode ?? config.permissionMode,
               allowedTools,
             },
             (event) => {
@@ -437,7 +448,7 @@ export function App({
           model: stateRef.current.model,
           mcpServers,
           systemPromptAppend: systemPromptAppendRef.current,
-          permissionMode: config.permissionMode,
+          permissionMode: stateRef.current.permissionMode ?? config.permissionMode,
           resume: sdkSessionIdRef.current ?? undefined,
           thinking,
           allowedTools,
@@ -462,7 +473,7 @@ export function App({
                 model: stateRef.current.model,
                 mcpServers,
                 systemPromptAppend: systemPromptAppendRef.current,
-                permissionMode: config.permissionMode,
+                permissionMode: stateRef.current.permissionMode ?? config.permissionMode,
                 thinking,
                 allowedTools,
                 stderr: stderrCallback,
@@ -508,10 +519,12 @@ export function App({
                     needsTextSeparatorRef.current = false;
                   }
                   setIsThinking(false);
+                  lastTokenAtRef.current = Date.now();
                   appendDelta(delta.text);
                 } else if (delta.type === "thinking_delta" && delta.thinking) {
                   // Buffer thinking content
                   setIsThinking(false);
+                  lastTokenAtRef.current = Date.now();
                   thinkingBufferRef.current += delta.thinking;
                   if (!flushTimerRef.current) {
                     flushTimerRef.current = setTimeout(flushBuffer, 50);
@@ -608,18 +621,17 @@ export function App({
                   pushItem("system", `Error: ${errorMsg.errors.join(", ")}`);
                 }
               }
-              // Update token usage
+              // Update token usage and session usage
               const inp = msg.usage.input_tokens;
               const out = msg.usage.output_tokens;
               if (inp > 0 || out > 0) {
-                const total = inp + out;
-                const fmt = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(1)}K` : String(n));
-                pushItem("cost", `tokens: ${fmt(inp)} in · ${fmt(out)} out · ${fmt(total)} total`);
-              }
-
-              // Update session usage
-              if (inp > 0 || out > 0) {
                 updateSessionUsage(session.id, inp, out).catch(() => {});
+                setSessionTokens((prev) => ({
+                  input: prev.input + inp,
+                  output: prev.output + out,
+                  cost: prev.cost,
+                  turns: prev.turns + 1,
+                }));
               }
 
               // Persist SDK session ID to DB for resume across restarts
@@ -747,6 +759,22 @@ export function App({
       }
     };
   }, []);
+
+  // Listen for permission mode changes from MCP tool (switch_permission_mode)
+  useEffect(() => {
+    const validModes = ["default", "acceptEdits", "bypassPermissions", "plan", "dontAsk"] as const;
+    type Mode = (typeof validModes)[number];
+    const handler = (mode: unknown) => {
+      if (typeof mode === "string" && validModes.includes(mode as Mode)) {
+        stateRef.current.permissionMode = mode as Mode;
+        pushItem("system", `Permission mode changed to **${mode}**`);
+      }
+    };
+    process.on("nomos:mode_change" as never, handler as never);
+    return () => {
+      process.off("nomos:mode_change" as never, handler as never);
+    };
+  }, [pushItem]);
 
   // Heartbeat system: periodically check HEARTBEAT.md and send as user message if non-empty
   useEffect(() => {
@@ -901,10 +929,11 @@ export function App({
           {/* Thinking spinner — shown when waiting for first token */}
           {isThinking && !streamingText && !thinkingText && !liveToolName && (
             <Box marginTop={1}>
-              <Text color={theme.text.accent}>
-                <GradientSpinner />
-              </Text>
-              <Text dimColor>{"  Thinking..."}</Text>
+              <StalledSpinner
+                mode={liveToolName ? "tool-use" : "thinking"}
+                label="Thinking..."
+                lastTokenAt={lastTokenAtRef.current}
+              />
             </Box>
           )}
 
@@ -932,9 +961,18 @@ export function App({
             </Box>
           )}
 
-          {/* Status bar */}
+          {/* Status line */}
           {isInputActive && (
-            <StatusBar model={stateRef.current.model} messageCount={transcriptRef.current.length} />
+            <StatusLine
+              data={{
+                model: stateRef.current.model,
+                inputTokens: sessionTokens.input,
+                outputTokens: sessionTokens.output,
+                costUsd: sessionTokens.cost,
+                turnCount: sessionTokens.turns,
+                permissionMode: stateRef.current.permissionMode ?? config.permissionMode,
+              }}
+            />
           )}
         </>
       )}
