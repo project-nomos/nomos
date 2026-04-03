@@ -41,3 +41,21 @@ export interface CronJobFilter {
   platform?: string;
   sessionTarget?: SessionTarget;
 }
+
+export interface CronRun {
+  id: string;
+  jobId: string;
+  jobName: string;
+  startedAt: Date;
+  finishedAt?: Date;
+  success: boolean;
+  error?: string;
+  durationMs?: number;
+  sessionKey?: string;
+}
+
+export interface CronRunFilter {
+  jobId?: string;
+  success?: boolean;
+  limit?: number;
+}

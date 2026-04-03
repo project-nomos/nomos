@@ -56,14 +56,21 @@ CREATE TABLE IF NOT EXISTS memory_chunks (
 CREATE INDEX IF NOT EXISTS idx_memory_source ON memory_chunks(source);
 CREATE INDEX IF NOT EXISTS idx_memory_path ON memory_chunks(path);
 
--- Memory source files tracking
-CREATE TABLE IF NOT EXISTS memory_files (
-  path        TEXT PRIMARY KEY,
-  source      TEXT NOT NULL,
-  hash        TEXT,
-  mtime       BIGINT,
-  size        BIGINT
+-- Cron job execution history
+CREATE TABLE IF NOT EXISTS cron_runs (
+  id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  job_id       UUID NOT NULL REFERENCES cron_jobs(id) ON DELETE CASCADE,
+  job_name     TEXT NOT NULL,
+  started_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  finished_at  TIMESTAMPTZ,
+  success      BOOLEAN NOT NULL,
+  error        TEXT,
+  duration_ms  INT,
+  session_key  TEXT
 );
+
+CREATE INDEX IF NOT EXISTS idx_cron_runs_job ON cron_runs(job_id, started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_cron_runs_started ON cron_runs(started_at DESC);
 
 -- Full-text search index on memory chunks
 CREATE INDEX IF NOT EXISTS idx_memory_fts ON memory_chunks
@@ -204,6 +211,24 @@ DO $$ BEGIN
   ALTER TABLE sessions ADD COLUMN IF NOT EXISTS turn_count INT NOT NULL DEFAULT 0;
 EXCEPTION WHEN OTHERS THEN NULL;
 END $$;
+
+-- Migration: drop unused memory_files table, add cron_runs (idempotent)
+DROP TABLE IF EXISTS memory_files;
+
+CREATE TABLE IF NOT EXISTS cron_runs (
+  id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  job_id       UUID NOT NULL REFERENCES cron_jobs(id) ON DELETE CASCADE,
+  job_name     TEXT NOT NULL,
+  started_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  finished_at  TIMESTAMPTZ,
+  success      BOOLEAN NOT NULL,
+  error        TEXT,
+  duration_ms  INT,
+  session_key  TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_cron_runs_job ON cron_runs(job_id, started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_cron_runs_started ON cron_runs(started_at DESC);
 
 -- Migration: copy slack_user_tokens → integrations (idempotent)
 DO $$ BEGIN

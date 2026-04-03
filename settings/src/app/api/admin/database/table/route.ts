@@ -20,7 +20,7 @@ export async function GET(request: NextRequest) {
     "draft_messages",
     "integrations",
     "memory_chunks",
-    "memory_files",
+    "cron_runs",
     "pairing_requests",
     "sessions",
     "slack_user_tokens",

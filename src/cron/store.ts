@@ -1,6 +1,18 @@
 import type postgres from "postgres";
 import { randomUUID } from "node:crypto";
-import type { CronJob, CronJobUpdate, CronJobFilter } from "./types.ts";
+import type { CronJob, CronJobUpdate, CronJobFilter, CronRun, CronRunFilter } from "./types.ts";
+
+interface CronRunRow {
+  id: string;
+  job_id: string;
+  job_name: string;
+  started_at: Date;
+  finished_at: Date | null;
+  success: boolean;
+  error: string | null;
+  duration_ms: number | null;
+  session_key: string | null;
+}
 
 interface CronJobRow {
   id: string;
@@ -201,5 +213,121 @@ export class CronStore {
       UPDATE cron_jobs SET enabled = false
       WHERE id = ${id} AND error_count >= ${maxErrors}
     `;
+  }
+
+  // --- Cron run history ---
+
+  async recordRunStart(jobId: string, jobName: string, sessionKey: string): Promise<string> {
+    const id = randomUUID();
+    await this.sql`
+      INSERT INTO cron_runs (id, job_id, job_name, started_at, success, session_key)
+      VALUES (${id}, ${jobId}, ${jobName}, now(), false, ${sessionKey})
+    `;
+    return id;
+  }
+
+  async recordRunEnd(
+    runId: string,
+    success: boolean,
+    durationMs: number,
+    error?: string,
+  ): Promise<void> {
+    await this.sql`
+      UPDATE cron_runs SET
+        finished_at = now(),
+        success = ${success},
+        duration_ms = ${durationMs},
+        error = ${error ?? null}
+      WHERE id = ${runId}
+    `;
+  }
+
+  async listRuns(filter?: CronRunFilter): Promise<CronRun[]> {
+    const limit = filter?.limit ?? 50;
+
+    let rows: CronRunRow[];
+    if (filter?.jobId && filter?.success !== undefined) {
+      rows = await this.sql<CronRunRow[]>`
+        SELECT * FROM cron_runs
+        WHERE job_id = ${filter.jobId} AND success = ${filter.success}
+        ORDER BY started_at DESC LIMIT ${limit}
+      `;
+    } else if (filter?.jobId) {
+      rows = await this.sql<CronRunRow[]>`
+        SELECT * FROM cron_runs
+        WHERE job_id = ${filter.jobId}
+        ORDER BY started_at DESC LIMIT ${limit}
+      `;
+    } else if (filter?.success !== undefined) {
+      rows = await this.sql<CronRunRow[]>`
+        SELECT * FROM cron_runs
+        WHERE success = ${filter.success}
+        ORDER BY started_at DESC LIMIT ${limit}
+      `;
+    } else {
+      rows = await this.sql<CronRunRow[]>`
+        SELECT * FROM cron_runs
+        ORDER BY started_at DESC LIMIT ${limit}
+      `;
+    }
+
+    return rows.map((row) => this.rowToRun(row));
+  }
+
+  async getRunStats(jobId: string): Promise<{
+    totalRuns: number;
+    successCount: number;
+    failureCount: number;
+    avgDurationMs: number | null;
+    lastRun: Date | null;
+  }> {
+    const [row] = await this.sql<
+      {
+        total: number;
+        successes: number;
+        failures: number;
+        avg_duration: number | null;
+        last_run: Date | null;
+      }[]
+    >`
+      SELECT
+        count(*)::int AS total,
+        count(*) FILTER (WHERE success = true)::int AS successes,
+        count(*) FILTER (WHERE success = false AND finished_at IS NOT NULL)::int AS failures,
+        avg(duration_ms) FILTER (WHERE duration_ms IS NOT NULL)::int AS avg_duration,
+        max(started_at) AS last_run
+      FROM cron_runs
+      WHERE job_id = ${jobId}
+    `;
+
+    return {
+      totalRuns: row.total,
+      successCount: row.successes,
+      failureCount: row.failures,
+      avgDurationMs: row.avg_duration,
+      lastRun: row.last_run,
+    };
+  }
+
+  async pruneOldRuns(retentionDays: number = 30): Promise<number> {
+    const result = await this.sql`
+      DELETE FROM cron_runs
+      WHERE started_at < now() - interval '1 day' * ${retentionDays}
+    `;
+    return result.count;
+  }
+
+  private rowToRun(row: CronRunRow): CronRun {
+    return {
+      id: row.id,
+      jobId: row.job_id,
+      jobName: row.job_name,
+      startedAt: row.started_at,
+      finishedAt: row.finished_at ?? undefined,
+      success: row.success,
+      error: row.error ?? undefined,
+      durationMs: row.duration_ms ?? undefined,
+      sessionKey: row.session_key ?? undefined,
+    };
   }
 }

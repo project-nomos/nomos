@@ -74,6 +74,17 @@ export class CronEngine {
 
     const noop = () => {};
 
+    // Record run start
+    let runId: string | undefined;
+    const startTime = Date.now();
+    if (this.cronSystem) {
+      try {
+        runId = await this.cronSystem.store.recordRunStart(job.id, job.name, sessionKey);
+      } catch (err) {
+        console.error("[cron-engine] Failed to record run start:", err);
+      }
+    }
+
     try {
       const result = await this.messageQueue.enqueue(sessionKey, incoming, noop);
 
@@ -85,6 +96,9 @@ export class CronEngine {
       // Mark success
       if (this.cronSystem) {
         await this.cronSystem.store.markRun(job.id, true);
+        if (runId) {
+          await this.cronSystem.store.recordRunEnd(runId, true, Date.now() - startTime);
+        }
       }
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
@@ -93,6 +107,9 @@ export class CronEngine {
       if (this.cronSystem) {
         await this.cronSystem.store.markRun(job.id, false, errMsg);
         await this.cronSystem.store.disableOnErrors(job.id, 3);
+        if (runId) {
+          await this.cronSystem.store.recordRunEnd(runId, false, Date.now() - startTime, errMsg);
+        }
       }
     }
   }

@@ -80,13 +80,20 @@ CREATE INDEX IF NOT EXISTS idx_memory_source ON memory_chunks(source);
 CREATE INDEX IF NOT EXISTS idx_memory_path ON memory_chunks(path);
 CREATE INDEX IF NOT EXISTS idx_memory_fts ON memory_chunks USING gin(to_tsvector('english', text));
 
-CREATE TABLE IF NOT EXISTS memory_files (
-  path TEXT PRIMARY KEY,
-  source TEXT NOT NULL,
-  hash TEXT,
-  mtime BIGINT,
-  size BIGINT
+CREATE TABLE IF NOT EXISTS cron_runs (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  job_id UUID NOT NULL REFERENCES cron_jobs(id) ON DELETE CASCADE,
+  job_name TEXT NOT NULL,
+  started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  finished_at TIMESTAMPTZ,
+  success BOOLEAN NOT NULL,
+  error TEXT,
+  duration_ms INT,
+  session_key TEXT
 );
+
+CREATE INDEX IF NOT EXISTS idx_cron_runs_job ON cron_runs(job_id, started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_cron_runs_started ON cron_runs(started_at DESC);
 
 CREATE TABLE IF NOT EXISTS pairing_requests (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -200,6 +207,8 @@ DO $$ BEGIN
   ALTER TABLE memory_chunks ADD COLUMN IF NOT EXISTS last_accessed_at TIMESTAMPTZ;
 EXCEPTION WHEN OTHERS THEN NULL;
 END $$;
+
+DROP TABLE IF EXISTS memory_files;
 
 DO $$ BEGIN
   IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'slack_user_tokens') THEN
