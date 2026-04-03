@@ -123,7 +123,7 @@ export function loadEnvConfig(): NomosConfig {
       (isProduction ? "pairing" : "open"),
     sessionScope: (process.env.NOMOS_SESSION_SCOPE as ScopeMode) ?? "channel",
     toolApprovalPolicy: (process.env.TOOL_APPROVAL_POLICY as ApprovalPolicy) ?? "block_critical",
-    teamMode: process.env.NOMOS_TEAM_MODE === "true",
+    teamMode: process.env.NOMOS_TEAM_MODE !== "false",
     maxTeamWorkers: process.env.NOMOS_MAX_TEAM_WORKERS
       ? parseInt(process.env.NOMOS_MAX_TEAM_WORKERS, 10)
       : 4,

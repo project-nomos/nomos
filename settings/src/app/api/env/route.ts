@@ -326,11 +326,12 @@ export async function PUT(request: Request) {
       if (!mapping) continue;
 
       if (mapping.table === "config") {
+        const jsonValue = sql.json(value as string);
         await sql`
           INSERT INTO config (key, value, updated_at)
-          VALUES (${mapping.dbKey}, ${JSON.stringify(value)}, now())
+          VALUES (${mapping.dbKey}, ${jsonValue}, now())
           ON CONFLICT (key) DO UPDATE SET
-            value = ${JSON.stringify(value)},
+            value = ${jsonValue},
             updated_at = now()
         `;
       } else if (mapping.field) {

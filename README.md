@@ -42,7 +42,7 @@ Most AI assistants forget you the moment a conversation ends. Nomos doesn't.
 
 Nomos is an autonomous AI agent platform that **remembers every interaction**, connects to your tools and channels, and gets smarter over time. It runs as a persistent background daemon — always on, always learning — reachable from Slack, Discord, Telegram, WhatsApp, the terminal, or any gRPC/WebSocket client.
 
-It comes with **persistent vector memory** across sessions and channels, **multi-agent team orchestration** for complex tasks, **smart model routing** to optimize cost and quality, **27 bundled skills**, a **web management dashboard**, built-in **image and video generation**, **event-driven hooks**, **cost tracking**, **context visualization**, **background memory consolidation**, and **self-updating documentation**.
+It comes with **persistent vector memory** across sessions and channels, **multi-agent team orchestration** for complex tasks, **smart model routing** to optimize cost and quality, **60+ bundled skills**, a **web management dashboard**, built-in **image and video generation**, **event-driven hooks**, **cost tracking**, **context visualization**, **background memory consolidation**, and **self-updating documentation**.
 
 > **What powers Nomos?** Under the hood, Nomos is built on Anthropic's [Claude Agent SDK](https://docs.anthropic.com/en/docs/claude-code/sdk) — inheriting the full agent loop, built-in tools, streaming, and compaction. Nomos adds the infrastructure layer on top: memory, channels, teams, scheduling, and a management UI.
 
@@ -187,7 +187,7 @@ A full Next.js 16 app for onboarding, assistant configuration, channel managemen
 
 Add capabilities without modifying core code — drop in a skill file, point to an MCP server, or change a config value:
 
-- **27 bundled skills** covering GitHub, Google Workspace, document generation, design, and more
+- **60+ bundled skills** covering GitHub, Google Workspace, document generation, design, and more
 - **Three-tier skill loading**: ship your own skills per-project (`./skills/`), per-user (`~/.nomos/skills/`), or contribute upstream
 - **MCP server support** — connect any [MCP-compatible tool server](https://modelcontextprotocol.io/) via `.nomos/mcp.json`
 - **Config in the database** — everything persists in PostgreSQL, env vars work as fallback
@@ -502,7 +502,7 @@ Uses Baileys with QR code auth (no Meta Business API required). Auth state persi
 Skills are markdown files (`SKILL.md`) with YAML frontmatter that provide domain-specific instructions to the agent. Loaded from three tiers: **bundled** (`skills/`) -> **personal** (`~/.nomos/skills/`) -> **project** (`./skills/`).
 
 <details>
-<summary><strong>All 33 bundled skills</strong></summary>
+<summary><strong>All 60+ bundled skills</strong></summary>
 
 | Skill                   | Description                                                    |
 | ----------------------- | -------------------------------------------------------------- |

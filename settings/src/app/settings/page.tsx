@@ -221,7 +221,7 @@ export default function AssistantSettingsPage() {
       setTeamMode(tm);
       setInitialTeamMode(tm);
 
-      const mtw = envData.NOMOS_MAX_TEAM_WORKERS ?? "4";
+      const mtw = envData.NOMOS_MAX_TEAM_WORKERS || "4";
       setMaxTeamWorkers(mtw);
       setInitialMaxTeamWorkers(mtw);
 

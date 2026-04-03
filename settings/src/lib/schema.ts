@@ -176,6 +176,20 @@ END $$;
 
 DROP TABLE IF EXISTS memory_files;
 
+INSERT INTO config (key, value) VALUES
+  ('app.model',              '"claude-sonnet-4-6"'),
+  ('app.permissionMode',     '"acceptEdits"'),
+  ('app.teamMode',           '"true"'),
+  ('app.maxTeamWorkers',     '4'),
+  ('app.smartRouting',       '"false"'),
+  ('app.adaptiveMemory',     '"true"'),
+  ('app.extractionModel',    '"claude-haiku-4-5"'),
+  ('app.sessionScope',       '"channel"'),
+  ('app.toolApprovalPolicy', '"block_critical"'),
+  ('app.defaultDmPolicy',    '"open"'),
+  ('app.heartbeatIntervalMs','"1800000"')
+ON CONFLICT (key) DO NOTHING;
+
 DO $$ BEGIN
   IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'slack_user_tokens') THEN
     INSERT INTO integrations (name, enabled, config, secrets, metadata)

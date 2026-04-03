@@ -230,6 +230,21 @@ CREATE TABLE IF NOT EXISTS cron_runs (
 CREATE INDEX IF NOT EXISTS idx_cron_runs_job ON cron_runs(job_id, started_at DESC);
 CREATE INDEX IF NOT EXISTS idx_cron_runs_started ON cron_runs(started_at DESC);
 
+-- Seed config defaults (idempotent — never overwrites user values)
+INSERT INTO config (key, value) VALUES
+  ('app.model',              '"claude-sonnet-4-6"'),
+  ('app.permissionMode',     '"acceptEdits"'),
+  ('app.teamMode',           '"true"'),
+  ('app.maxTeamWorkers',     '4'),
+  ('app.smartRouting',       '"false"'),
+  ('app.adaptiveMemory',     '"true"'),
+  ('app.extractionModel',    '"claude-haiku-4-5"'),
+  ('app.sessionScope',       '"channel"'),
+  ('app.toolApprovalPolicy', '"block_critical"'),
+  ('app.defaultDmPolicy',    '"open"'),
+  ('app.heartbeatIntervalMs','"1800000"')
+ON CONFLICT (key) DO NOTHING;
+
 -- Migration: copy slack_user_tokens → integrations (idempotent)
 DO $$ BEGIN
   IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'slack_user_tokens') THEN

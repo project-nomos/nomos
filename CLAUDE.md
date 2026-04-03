@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-A TypeScript CLI and multi-channel AI agent built on `@anthropic-ai/claude-agent-sdk`. It wraps Claude Code to get all built-in tools (Bash, Read, Write, Edit, Glob, Grep, WebSearch, etc.), agent loop, compaction, and streaming — then adds persistent sessions, vector memory, a daemon with channel integrations, scheduled tasks, 25 bundled skills, multi-agent team orchestration, smart model routing, custom API endpoint support, personalization, event-driven hooks, background memory consolidation (auto-dream), cost tracking, context visualization, bash safety analysis, and self-updating documentation (magic docs).
+A TypeScript CLI and multi-channel AI agent built on `@anthropic-ai/claude-agent-sdk`. It wraps Claude Code to get all built-in tools (Bash, Read, Write, Edit, Glob, Grep, WebSearch, etc.), agent loop, compaction, and streaming — then adds persistent sessions, vector memory, a daemon with channel integrations, scheduled tasks, 60+ bundled skills, multi-agent team orchestration, smart model routing, custom API endpoint support, personalization, event-driven hooks, background memory consolidation (auto-dream), cost tracking, context visualization, bash safety analysis, and self-updating documentation (magic docs).
 
 ## Build & Development
 
