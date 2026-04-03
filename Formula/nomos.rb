@@ -63,6 +63,9 @@ class Nomos < Formula
       end
       staging.delete
     end
+
+    # Install and start the launchd service (handles both fresh install and upgrades)
+    system bin/"nomos", "service", "install"
   end
 
   def caveats
@@ -72,6 +75,14 @@ class Nomos < Formula
 
         export DATABASE_URL=postgresql://user:pass@localhost:5432/nomos
         export ANTHROPIC_API_KEY=sk-ant-...
+
+      The daemon and Settings UI start automatically after install.
+      Check status with:
+        nomos status
+
+      Manage the background service:
+        nomos service install     # Re-install / restart
+        nomos service uninstall   # Stop and remove
 
       Run first-time setup:
         nomos chat

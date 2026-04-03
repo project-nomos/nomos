@@ -5,6 +5,10 @@
  * graceful shutdown.
  */
 
+import { spawn, type ChildProcess } from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { AgentRuntime } from "./agent-runtime.ts";
 import { MessageQueue } from "./message-queue.ts";
 import { DaemonWebSocketServer } from "./websocket-server.ts";
@@ -36,6 +40,10 @@ export interface GatewayOptions {
   skipChannels?: boolean;
   /** Skip cron engine */
   skipCron?: boolean;
+  /** Launch the Settings UI as a child process (default: false) */
+  withSettings?: boolean;
+  /** Settings UI port (default: 3456) */
+  settingsPort?: number;
 }
 
 export class Gateway {
@@ -46,6 +54,7 @@ export class Gateway {
   private channelManager: ChannelManager;
   private cronEngine: CronEngine;
   private draftManager: DraftManager;
+  private settingsProcess: ChildProcess | null = null;
   private options: GatewayOptions;
 
   constructor(options: GatewayOptions = {}) {
@@ -86,8 +95,11 @@ export class Gateway {
     // 5. Create channel manager
     this.channelManager = new ChannelManager();
 
-    // 6. Create cron engine
-    this.cronEngine = new CronEngine(this.messageQueue, this.channelManager);
+    // 6. Create cron engine with broadcast to connected clients
+    this.cronEngine = new CronEngine(this.messageQueue, this.channelManager, (event) => {
+      this.wsServer.broadcast(event);
+      this.grpcServer.broadcast(event);
+    });
   }
 
   /** Start the daemon. */
@@ -165,12 +177,21 @@ export class Gateway {
       }) as never,
     );
 
+    // Start Settings UI as a child process
+    if (this.options.withSettings) {
+      await this.startSettingsServer();
+    }
+
     const platforms = this.channelManager.listPlatforms();
     const wsPort = this.options.port ?? 8765;
     const grpcPort = this.options.grpcPort ?? wsPort + 1;
+    const settingsPort = this.options.settingsPort ?? 3456;
     console.log("[gateway] Daemon is running");
     console.log(`[gateway]   gRPC:      localhost:${grpcPort}`);
     console.log(`[gateway]   WebSocket: ws://localhost:${wsPort}`);
+    if (this.settingsProcess) {
+      console.log(`[gateway]   Settings:  http://localhost:${settingsPort}`);
+    }
     console.log(`[gateway]   Channels: ${platforms.length > 0 ? platforms.join(", ") : "none"}`);
   }
 
@@ -179,6 +200,7 @@ export class Gateway {
     console.log("[gateway] Stopping daemon...");
 
     // Stop in reverse order
+    this.stopSettingsServer();
     this.cronEngine.stop();
     await this.channelManager.stop();
     await this.grpcServer.stop();
@@ -328,6 +350,86 @@ export class Gateway {
     }
 
     return changes;
+  }
+
+  /** Find the settings/ directory relative to the running script. */
+  private findSettingsDir(): string | null {
+    const __filename = fileURLToPath(import.meta.url);
+    let dir = path.dirname(__filename);
+    for (let i = 0; i < 5; i++) {
+      const candidate = path.join(dir, "settings");
+      if (fs.existsSync(path.join(candidate, "package.json"))) {
+        return candidate;
+      }
+      dir = path.dirname(dir);
+    }
+    return null;
+  }
+
+  /** Start the Settings UI (Next.js) as a managed child process. */
+  private async startSettingsServer(): Promise<void> {
+    const settingsDir = this.findSettingsDir();
+    if (!settingsDir) {
+      console.warn("[gateway] Settings directory not found — skipping Settings UI");
+      return;
+    }
+
+    const port = String(this.options.settingsPort ?? 3456);
+
+    // Check if .next build exists
+    const buildId = path.join(settingsDir, ".next", "BUILD_ID");
+    if (!fs.existsSync(buildId)) {
+      console.warn(
+        "[gateway] Settings UI not built — run `nomos settings` once to build, or `cd settings && pnpm build`",
+      );
+      return;
+    }
+
+    // Find the next binary — check settings/node_modules first, then parent
+    const nextBinCandidates = [
+      path.join(settingsDir, "node_modules", ".bin", "next"),
+      path.join(settingsDir, "..", "node_modules", ".bin", "next"),
+    ];
+    const nextBin = nextBinCandidates.find((p) => fs.existsSync(p));
+    if (!nextBin) {
+      console.warn("[gateway] Next.js binary not found — skipping Settings UI");
+      return;
+    }
+
+    const child = spawn(process.execPath, [nextBin, "start", "--port", port], {
+      cwd: settingsDir,
+      stdio: ["ignore", "pipe", "pipe"],
+      env: { ...process.env, PORT: port },
+    });
+
+    child.stdout?.on("data", (data: Buffer) => {
+      const line = data.toString().trim();
+      if (line) console.log(`[settings] ${line}`);
+    });
+
+    child.stderr?.on("data", (data: Buffer) => {
+      const line = data.toString().trim();
+      if (line) console.error(`[settings] ${line}`);
+    });
+
+    child.on("exit", (code, signal) => {
+      if (this.settingsProcess === child) {
+        console.warn(`[gateway] Settings UI exited (code=${code}, signal=${signal})`);
+        this.settingsProcess = null;
+      }
+    });
+
+    this.settingsProcess = child;
+    console.log(`[gateway] Settings UI starting on port ${port}`);
+  }
+
+  /** Stop the Settings UI child process. */
+  private stopSettingsServer(): void {
+    if (this.settingsProcess) {
+      console.log("[gateway] Stopping Settings UI...");
+      this.settingsProcess.kill("SIGTERM");
+      this.settingsProcess = null;
+    }
   }
 
   /** Verify LLM API access works before starting services. */

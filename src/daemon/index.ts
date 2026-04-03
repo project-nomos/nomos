@@ -11,6 +11,8 @@ import { Gateway } from "./gateway.ts";
 config({ path: [".env.local", ".env"], quiet: true });
 
 const port = process.env.DAEMON_PORT ? parseInt(process.env.DAEMON_PORT, 10) : 8765;
+const withSettings = process.env.DAEMON_WITH_SETTINGS !== "false";
+const settingsPort = process.env.SETTINGS_PORT ? parseInt(process.env.SETTINGS_PORT, 10) : 3456;
 
-const gateway = new Gateway({ port });
+const gateway = new Gateway({ port, withSettings, settingsPort });
 await gateway.start();

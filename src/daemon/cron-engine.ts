@@ -10,15 +10,22 @@ import { getDb } from "../db/client.ts";
 import { createCronSystem, type CronSystem, type CronJob } from "../cron/index.ts";
 import type { MessageQueue } from "./message-queue.ts";
 import type { ChannelManager } from "./channel-manager.ts";
+import type { AgentEvent } from "./types.ts";
 
 export class CronEngine {
   private cronSystem: CronSystem | null = null;
   private messageQueue: MessageQueue;
   private channelManager: ChannelManager;
+  private broadcast: (event: AgentEvent) => void;
 
-  constructor(messageQueue: MessageQueue, channelManager: ChannelManager) {
+  constructor(
+    messageQueue: MessageQueue,
+    channelManager: ChannelManager,
+    broadcast?: (event: AgentEvent) => void,
+  ) {
     this.messageQueue = messageQueue;
     this.channelManager = channelManager;
+    this.broadcast = broadcast ?? (() => {});
   }
 
   /** Initialize and start the cron system. */
@@ -72,7 +79,13 @@ export class CronEngine {
       timestamp: new Date(),
     };
 
-    const noop = () => {};
+    // Broadcast start notification to connected clients
+    this.broadcast({
+      type: "system",
+      subtype: "cron_start",
+      message: `Cron job started: ${job.name}`,
+      data: { jobId: job.id, jobName: job.name, sessionKey },
+    });
 
     // Record run start
     let runId: string | undefined;
@@ -86,29 +99,63 @@ export class CronEngine {
     }
 
     try {
-      const result = await this.messageQueue.enqueue(sessionKey, incoming, noop);
+      const result = await this.messageQueue.enqueue(sessionKey, incoming, (event) =>
+        this.broadcast(event),
+      );
 
       // If job has a delivery channel, send the result
       if (job.deliveryMode === "announce" && job.platform && job.channelId) {
         await this.channelManager.send(result);
       }
 
+      const durationMs = Date.now() - startTime;
+
+      // Broadcast completion to connected clients
+      this.broadcast({
+        type: "system",
+        subtype: "cron_result",
+        message: `Cron job completed: ${job.name}`,
+        data: {
+          jobId: job.id,
+          jobName: job.name,
+          success: true,
+          durationMs,
+          contentPreview: result.content.slice(0, 500),
+        },
+      });
+
       // Mark success
       if (this.cronSystem) {
         await this.cronSystem.store.markRun(job.id, true);
         if (runId) {
-          await this.cronSystem.store.recordRunEnd(runId, true, Date.now() - startTime);
+          await this.cronSystem.store.recordRunEnd(runId, true, durationMs);
         }
       }
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
       console.error(`[cron-engine] Job ${job.id} failed:`, errMsg);
 
+      const durationMs = Date.now() - startTime;
+
+      // Broadcast failure to connected clients
+      this.broadcast({
+        type: "system",
+        subtype: "cron_result",
+        message: `Cron job failed: ${job.name} — ${errMsg}`,
+        data: {
+          jobId: job.id,
+          jobName: job.name,
+          success: false,
+          durationMs,
+          error: errMsg,
+        },
+      });
+
       if (this.cronSystem) {
         await this.cronSystem.store.markRun(job.id, false, errMsg);
         await this.cronSystem.store.disableOnErrors(job.id, 3);
         if (runId) {
-          await this.cronSystem.store.recordRunEnd(runId, false, Date.now() - startTime, errMsg);
+          await this.cronSystem.store.recordRunEnd(runId, false, durationMs, errMsg);
         }
       }
     }

@@ -75,6 +75,8 @@ export function registerDaemonCommand(program: Command): void {
     .command("start")
     .description("Start the daemon in background")
     .option("-p, --port <port>", "WebSocket port", "8765")
+    .option("--no-settings", "Don't start the Settings UI")
+    .option("--settings-port <port>", "Settings UI port", "3456")
     .action(async (options) => {
       const { running, pid } = isDaemonRunning();
       if (running) {
@@ -94,6 +96,8 @@ export function registerDaemonCommand(program: Command): void {
         stdio: ["ignore", logFd, logFd],
         env: {
           ...process.env,
+          DAEMON_WITH_SETTINGS: options.settings === false ? "false" : "true",
+          SETTINGS_PORT: options.settingsPort,
         },
       });
 
@@ -102,6 +106,9 @@ export function registerDaemonCommand(program: Command): void {
 
       console.log(`Daemon started (PID ${child.pid})`);
       console.log(`  WebSocket: ws://localhost:${options.port}`);
+      if (options.settings !== false) {
+        console.log(`  Settings:  http://localhost:${options.settingsPort}`);
+      }
       console.log(`  Logs: ${logFile}`);
     });
 
@@ -132,6 +139,8 @@ export function registerDaemonCommand(program: Command): void {
     .command("restart")
     .description("Restart the daemon")
     .option("-p, --port <port>", "WebSocket port", "8765")
+    .option("--no-settings", "Don't start the Settings UI")
+    .option("--settings-port <port>", "Settings UI port", "3456")
     .action(async (options) => {
       const { running, pid } = isDaemonRunning();
 
@@ -159,6 +168,8 @@ export function registerDaemonCommand(program: Command): void {
         stdio: ["ignore", logFd, logFd],
         env: {
           ...process.env,
+          DAEMON_WITH_SETTINGS: options.settings === false ? "false" : "true",
+          SETTINGS_PORT: options.settingsPort,
         },
       });
 
@@ -167,6 +178,9 @@ export function registerDaemonCommand(program: Command): void {
 
       console.log(`Daemon started (PID ${child.pid})`);
       console.log(`  WebSocket: ws://localhost:${options.port}`);
+      if (options.settings !== false) {
+        console.log(`  Settings:  http://localhost:${options.settingsPort}`);
+      }
       console.log(`  Logs: ${logFile}`);
     });
 

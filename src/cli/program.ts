@@ -9,6 +9,8 @@ import { registerDaemonCommand } from "./daemon.ts";
 import { registerSlackCommand } from "./slack.ts";
 import { registerCronCommand } from "./cron.ts";
 import { registerSettingsCommand } from "./settings.ts";
+import { registerServiceCommand } from "./service.ts";
+import { registerStatusCommand } from "./status.ts";
 
 export function buildProgram(): Command {
   const program = new Command();
@@ -27,6 +29,8 @@ export function buildProgram(): Command {
   registerSlackCommand(program);
   registerCronCommand(program);
   registerSettingsCommand(program);
+  registerServiceCommand(program);
+  registerStatusCommand(program);
 
   // Default command: start daemon (if not running) + chat
   program.action(async () => {
