@@ -176,8 +176,20 @@ export function registerServiceCommand(program: Command): void {
       }
 
       // Write plist
-      fs.mkdirSync(PLIST_DIR, { recursive: true });
-      fs.writeFileSync(PLIST_PATH, generatePlist(nomosPath), "utf-8");
+      try {
+        fs.mkdirSync(PLIST_DIR, { recursive: true });
+        fs.writeFileSync(PLIST_PATH, generatePlist(nomosPath), "utf-8");
+      } catch (err) {
+        // Homebrew post_install sandbox blocks writes to ~/Library/LaunchAgents
+        if ((err as NodeJS.ErrnoException).code === "EPERM") {
+          console.warn(
+            chalk.yellow("⚠ Cannot write plist (sandbox restriction). Run manually after install:"),
+          );
+          console.warn(chalk.dim("  nomos service install"));
+          return;
+        }
+        throw err;
+      }
 
       // Load and start
       try {
