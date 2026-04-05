@@ -138,11 +138,33 @@ export function registerServiceCommand(program: Command): void {
       }
 
       const chalk = (await import("chalk")).default;
+      const { isDaemonRunning, isProcessRunning, removePidFile } =
+        await import("../daemon/lifecycle.ts");
       const nomosPath = getNomosPath();
 
       // Create log directory
       const logDir = path.join(os.homedir(), ".nomos", "logs");
       fs.mkdirSync(logDir, { recursive: true });
+
+      // Stop any manually-started daemon (PID-based) so ports are free for launchd
+      const { running, pid } = isDaemonRunning();
+      if (running && pid) {
+        console.log(chalk.dim(`Stopping existing daemon (PID ${pid})...`));
+        try {
+          process.kill(pid, "SIGTERM");
+          // Wait up to 5s for graceful shutdown
+          const start = Date.now();
+          while (Date.now() - start < 5000 && isProcessRunning(pid)) {
+            await new Promise((r) => setTimeout(r, 200));
+          }
+          if (isProcessRunning(pid)) {
+            process.kill(pid, "SIGKILL");
+          }
+        } catch {
+          // Process may have already exited
+        }
+        removePidFile();
+      }
 
       // Unload existing service if present
       if (isServiceLoaded()) {
