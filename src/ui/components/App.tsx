@@ -268,11 +268,10 @@ export function App({
         case "system": {
           if (event.subtype === "routing") {
             pushItem("routing", event.message);
-          } else if (
-            event.subtype !== "init" &&
-            event.subtype !== "status" &&
-            event.subtype !== "command_ack"
-          ) {
+          } else if (event.subtype === "status") {
+            // Team progress updates — show as dim system messages
+            pushItem("system", event.message);
+          } else if (event.subtype !== "init" && event.subtype !== "command_ack") {
             pushItem("system", event.message);
           }
           break;

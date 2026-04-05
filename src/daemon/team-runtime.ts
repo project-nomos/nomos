@@ -405,15 +405,25 @@ Execute this subtask thoroughly and provide your output.`;
         }
       }
 
-      const output = await this.runSingleAgent(workerPrompt, {
-        model: this.config.workerModel ?? this.config.coordinatorModel,
-        systemPromptAppend: task.systemPromptAppend,
-        mcpServers: task.mcpServers,
-        permissionMode: task.permissionMode,
-        allowedTools: task.allowedTools,
-        maxTurns: this.config.workerMaxTurns,
-        cwd: worktreePath,
-      });
+      // Forward worker events with worker ID prefix
+      const workerEmit = emit
+        ? (event: { type: string; message: string }) =>
+            emit({ ...event, message: `[${workerId}] ${event.message}` })
+        : undefined;
+
+      const output = await this.runSingleAgent(
+        workerPrompt,
+        {
+          model: this.config.workerModel ?? this.config.coordinatorModel,
+          systemPromptAppend: task.systemPromptAppend,
+          mcpServers: task.mcpServers,
+          permissionMode: task.permissionMode,
+          allowedTools: task.allowedTools,
+          maxTurns: this.config.workerMaxTurns,
+          cwd: worktreePath,
+        },
+        workerEmit,
+      );
 
       tm.complete(daemonTask.id, output.slice(0, 500));
 
@@ -573,6 +583,7 @@ Verify the workers' changes are correct. Run builds, tests, linters, and adversa
       maxTurns?: number;
       cwd?: string;
     },
+    emit?: (event: { type: string; message: string }) => void,
   ): Promise<string> {
     console.log(
       `[team-runtime] Running agent (model: ${options.model ?? "default"}${options.cwd ? `, cwd: ${options.cwd}` : ""})...`,
@@ -599,6 +610,8 @@ Verify the workers' changes are correct. Run builds, tests, linters, and adversa
           if (block.type === "text" && block.text) {
             if (fullText && !fullText.endsWith("\n")) fullText += "\n";
             fullText += block.text;
+          } else if (block.type === "tool_use" && emit) {
+            emit({ type: "team", message: `Using tool: ${block.name}` });
           }
         }
       } else if (msg.type === "result") {
