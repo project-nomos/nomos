@@ -379,28 +379,44 @@ export class Gateway {
     // Check if .next build exists
     const buildId = path.join(settingsDir, ".next", "BUILD_ID");
     if (!fs.existsSync(buildId)) {
-      console.warn(
-        "[gateway] Settings UI not built — run `nomos settings` once to build, or `cd settings && pnpm build`",
-      );
+      console.warn("[gateway] Settings UI not built — run `cd settings && pnpm build`");
       return;
     }
 
-    // Find the next binary — check settings/node_modules first, then parent
-    const nextBinCandidates = [
-      path.join(settingsDir, "node_modules", ".bin", "next"),
-      path.join(settingsDir, "..", "node_modules", ".bin", "next"),
+    // Prefer standalone server (output: "standalone" in next.config),
+    // fall back to `next start` if standalone not available
+    // Standalone server may be at .next/standalone/server.js or .next/standalone/<dirname>/server.js
+    const settingsDirName = path.basename(settingsDir);
+    const standaloneCandidates = [
+      path.join(settingsDir, ".next", "standalone", settingsDirName, "server.js"),
+      path.join(settingsDir, ".next", "standalone", "server.js"),
     ];
-    const nextBin = nextBinCandidates.find((p) => fs.existsSync(p));
-    if (!nextBin) {
-      console.warn("[gateway] Next.js binary not found — skipping Settings UI");
-      return;
-    }
+    const standaloneServer = standaloneCandidates.find((p) => fs.existsSync(p));
+    let child: import("node:child_process").ChildProcess;
 
-    const child = spawn(nextBin, ["start", "--port", port], {
-      cwd: settingsDir,
-      stdio: ["ignore", "pipe", "pipe"],
-      env: { ...process.env, PORT: port },
-    });
+    if (standaloneServer) {
+      child = spawn(process.execPath, [standaloneServer], {
+        cwd: settingsDir,
+        stdio: ["ignore", "pipe", "pipe"],
+        env: { ...process.env, PORT: port, HOSTNAME: "0.0.0.0" },
+      });
+    } else {
+      // Fallback: find the next binary
+      const nextBinCandidates = [
+        path.join(settingsDir, "node_modules", ".bin", "next"),
+        path.join(settingsDir, "..", "node_modules", ".bin", "next"),
+      ];
+      const nextBin = nextBinCandidates.find((p) => fs.existsSync(p));
+      if (!nextBin) {
+        console.warn("[gateway] Next.js binary not found — skipping Settings UI");
+        return;
+      }
+      child = spawn(nextBin, ["start", "--port", port], {
+        cwd: settingsDir,
+        stdio: ["ignore", "pipe", "pipe"],
+        env: { ...process.env, PORT: port },
+      });
+    }
 
     child.stdout?.on("data", (data: Buffer) => {
       const line = data.toString().trim();
