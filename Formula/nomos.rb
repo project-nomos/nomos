@@ -80,19 +80,9 @@ class Nomos < Formula
       staging.delete
     end
 
-    # Ensure ~/.nomos directories exist (post_install sandbox may block mkdir from Node)
+    # Ensure ~/.nomos directories exist
     mkdir_p "#{Dir.home}/.nomos"
     mkdir_p "#{Dir.home}/.nomos/logs"
-
-    # Stop any manually-started daemon so brew services can take over
-    Kernel.system(bin/"nomos", "daemon", "stop")
-
-    # Remove any legacy custom plist (from pre-service-block versions)
-    legacy = "#{Dir.home}/Library/LaunchAgents/com.projectnomos.daemon.plist"
-    if File.exist?(legacy)
-      Kernel.system("launchctl", "bootout", "gui/#{Process.uid}", legacy)
-      File.delete(legacy) rescue nil
-    end
   end
 
   def caveats
@@ -103,11 +93,10 @@ class Nomos < Formula
         export DATABASE_URL=postgresql://user:pass@localhost:5432/nomos
         export ANTHROPIC_API_KEY=sk-ant-...
 
-      Start the background service (daemon + Settings UI):
+      Start the background service (daemon + Settings UI) once:
         brew services start nomos
 
-      After upgrades:
-        brew services restart nomos
+      Future upgrades auto-restart the service.
 
       Check status:
         nomos status
