@@ -183,8 +183,10 @@ export function registerStatusCommand(program: Command): void {
             : age < 3_600_000
               ? `${Math.floor(age / 60_000)}m ago`
               : `${Math.floor(age / 3_600_000)}h ago`;
+        // Green if written recently (< 1h), yellow if stale, dim if very old
+        const logIcon = age < 3_600_000 ? ok : age < 86_400_000 ? warn : off;
         console.log(
-          `  ${chalk.dim("◦")} Logs           ${chalk.dim(logFile)}  ${chalk.dim(`(last write: ${ageStr})`)}`,
+          `  ${logIcon} Logs           ${chalk.dim(logFile)}  ${chalk.dim(`(last write: ${ageStr})`)}`,
         );
       }
 
