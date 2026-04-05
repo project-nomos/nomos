@@ -93,9 +93,6 @@ class Nomos < Formula
       Kernel.system("launchctl", "bootout", "gui/#{Process.uid}", legacy)
       File.delete(legacy) rescue nil
     end
-
-    # Restart via brew services (handles launchd outside sandbox)
-    Kernel.system("brew", "services", "restart", name)
   end
 
   def caveats
@@ -106,10 +103,10 @@ class Nomos < Formula
         export DATABASE_URL=postgresql://user:pass@localhost:5432/nomos
         export ANTHROPIC_API_KEY=sk-ant-...
 
-      The background service (daemon + Settings UI) starts automatically.
-      Manage it with:
+      Start the background service (daemon + Settings UI):
         brew services start nomos
-        brew services stop nomos
+
+      After upgrades:
         brew services restart nomos
 
       Check status:
