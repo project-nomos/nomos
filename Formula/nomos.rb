@@ -144,13 +144,17 @@ class Nomos < Formula
         export DATABASE_URL=postgresql://user:pass@localhost:5432/nomos
         export ANTHROPIC_API_KEY=sk-ant-...
 
-      The daemon and Settings UI start automatically after install.
-      Check status with:
+      Start the background service (daemon + Settings UI):
+        nomos service install
+
+      Check status:
         nomos status
 
       Manage the background service:
-        nomos service install     # Re-install / restart
+        nomos service install     # Install / restart
         nomos service uninstall   # Stop and remove
+
+      The service auto-starts on login once installed.
 
       Run first-time setup:
         nomos chat
