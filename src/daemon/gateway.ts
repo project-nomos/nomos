@@ -396,7 +396,7 @@ export class Gateway {
       return;
     }
 
-    const child = spawn(process.execPath, [nextBin, "start", "--port", port], {
+    const child = spawn(nextBin, ["start", "--port", port], {
       cwd: settingsDir,
       stdio: ["ignore", "pipe", "pipe"],
       env: { ...process.env, PORT: port },
