@@ -586,6 +586,7 @@ Verify the workers' changes are correct. Run builds, tests, linters, and adversa
       permissionMode: options.permissionMode ?? "bypassPermissions",
       allowedTools: options.allowedTools,
       maxTurns: options.maxTurns ?? 20,
+      stderr: (line: string) => console.error(`[team-runtime:stderr] ${line.trim()}`),
       ...(options.cwd ? { cwd: options.cwd } : {}),
     });
 
