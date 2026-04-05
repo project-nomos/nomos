@@ -1,6 +1,6 @@
 {
   "name": "@project-nomos/nomos",
-  "version": "0.1.26",
+  "version": "0.1.27",
   "description": "TypeScript CLI AI agent powered by Anthropic models",
   "keywords": [
     "agent",
