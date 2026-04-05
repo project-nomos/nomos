@@ -18,6 +18,22 @@ class Nomos < Formula
   # Native Node.js addons (.node files) must not be relinked by Homebrew
   skip_clean "libexec"
 
+  # Homebrew-managed launchd service (brew services start/stop/restart nomos)
+  service do
+    run [opt_bin/"nomos", "daemon", "run"]
+    keep_alive true
+    log_path var/"log/nomos/daemon.log"
+    error_log_path var/"log/nomos/daemon.log"
+    working_dir Dir.home
+    environment_variables(
+      HOME: Dir.home,
+      PATH: "#{HOMEBREW_PREFIX}/opt/node@22/bin:#{HOMEBREW_PREFIX}/bin:/usr/local/bin:/usr/bin:/bin",
+      DAEMON_WITH_SETTINGS: "true",
+      SETTINGS_PORT: "3456",
+    )
+    process_type :background
+  end
+
   def install
     # Set package.json version from formula version (source tarball has 0.1.0)
     system "npm", "pkg", "set", "version=#{version}"
@@ -65,75 +81,21 @@ class Nomos < Formula
     end
 
     # Ensure ~/.nomos directories exist (post_install sandbox may block mkdir from Node)
-    nomos_dir = "#{Dir.home}/.nomos"
-    mkdir_p nomos_dir
-    mkdir_p "#{nomos_dir}/logs"
+    mkdir_p "#{Dir.home}/.nomos"
+    mkdir_p "#{Dir.home}/.nomos/logs"
 
-    # Install and start the launchd service directly from Ruby to avoid
-    # sandbox EPERM when Node.js tries to write to ~/Library/LaunchAgents.
-    # Stop any existing daemon first so ports are free for the new version.
+    # Stop any manually-started daemon so brew services can take over
     Kernel.system(bin/"nomos", "daemon", "stop")
 
-    plist_label = "com.projectnomos.daemon"
-    plist_dir = "#{Dir.home}/Library/LaunchAgents"
-    plist_path = "#{plist_dir}/#{plist_label}.plist"
-    node_bin = Formula["node@22"].opt_bin
+    # Remove any legacy custom plist (from pre-service-block versions)
+    legacy = "#{Dir.home}/Library/LaunchAgents/com.projectnomos.daemon.plist"
+    if File.exist?(legacy)
+      Kernel.system("launchctl", "bootout", "gui/#{Process.uid}", legacy)
+      File.delete(legacy) rescue nil
+    end
 
-    # Unload existing service if present
-    Kernel.system("launchctl", "bootout", "gui/#{Process.uid}", plist_path) if File.exist?(plist_path)
-
-    # Write plist from Ruby (has write access that Node sandbox lacks)
-    mkdir_p plist_dir
-    File.write(plist_path, <<~XML)
-      <?xml version="1.0" encoding="UTF-8"?>
-      <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-      <plist version="1.0">
-      <dict>
-        <key>Label</key>
-        <string>#{plist_label}</string>
-
-        <key>ProgramArguments</key>
-        <array>
-          <string>#{bin/"nomos"}</string>
-          <string>daemon</string>
-          <string>run</string>
-        </array>
-
-        <key>EnvironmentVariables</key>
-        <dict>
-          <key>HOME</key>
-          <string>#{Dir.home}</string>
-          <key>PATH</key>
-          <string>#{node_bin}:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
-          <key>DAEMON_WITH_SETTINGS</key>
-          <string>true</string>
-          <key>SETTINGS_PORT</key>
-          <string>3456</string>
-        </dict>
-
-        <key>RunAtLoad</key>
-        <true/>
-
-        <key>KeepAlive</key>
-        <true/>
-
-        <key>StandardOutPath</key>
-        <string>#{nomos_dir}/logs/daemon.log</string>
-
-        <key>StandardErrorPath</key>
-        <string>#{nomos_dir}/logs/daemon.log</string>
-
-        <key>WorkingDirectory</key>
-        <string>#{Dir.home}</string>
-
-        <key>ProcessType</key>
-        <string>Background</string>
-      </dict>
-      </plist>
-    XML
-
-    # Load and start the service
-    Kernel.system("launchctl", "bootstrap", "gui/#{Process.uid}", plist_path)
+    # Restart via brew services (handles launchd outside sandbox)
+    Kernel.system("brew", "services", "restart", name)
   end
 
   def caveats
@@ -144,17 +106,14 @@ class Nomos < Formula
         export DATABASE_URL=postgresql://user:pass@localhost:5432/nomos
         export ANTHROPIC_API_KEY=sk-ant-...
 
-      Start the background service (daemon + Settings UI):
-        nomos service install
+      The background service (daemon + Settings UI) starts automatically.
+      Manage it with:
+        brew services start nomos
+        brew services stop nomos
+        brew services restart nomos
 
       Check status:
         nomos status
-
-      Manage the background service:
-        nomos service install     # Install / restart
-        nomos service uninstall   # Stop and remove
-
-      The service auto-starts on login once installed.
 
       Run first-time setup:
         nomos chat
