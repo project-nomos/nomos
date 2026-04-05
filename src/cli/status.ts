@@ -12,23 +12,43 @@ import { execSync } from "node:child_process";
 import type { Command } from "commander";
 import { isDaemonRunning, getLogFilePath, getPidFilePath } from "../daemon/lifecycle.ts";
 
-const PLIST_LABEL = "com.projectnomos.daemon";
-const PLIST_PATH = path.join(os.homedir(), "Library", "LaunchAgents", `${PLIST_LABEL}.plist`);
+// Check both brew services and legacy custom plist
+const BREW_PLIST_LABEL = "homebrew.mxcl.nomos";
+const LEGACY_PLIST_LABEL = "com.projectnomos.daemon";
+const BREW_PLIST_PATH = path.join(
+  os.homedir(),
+  "Library",
+  "LaunchAgents",
+  `${BREW_PLIST_LABEL}.plist`,
+);
+const LEGACY_PLIST_PATH = path.join(
+  os.homedir(),
+  "Library",
+  "LaunchAgents",
+  `${LEGACY_PLIST_LABEL}.plist`,
+);
 
-function isServiceLoaded(): boolean {
+function getActiveLabel(): string | null {
+  // Prefer brew services plist, fall back to legacy
+  if (fs.existsSync(BREW_PLIST_PATH)) return BREW_PLIST_LABEL;
+  if (fs.existsSync(LEGACY_PLIST_PATH)) return LEGACY_PLIST_LABEL;
+  return null;
+}
+
+function isServiceLoaded(label: string): boolean {
   try {
-    const output = execSync(`launchctl list ${PLIST_LABEL} 2>/dev/null`, {
+    const output = execSync(`launchctl list ${label} 2>/dev/null`, {
       encoding: "utf-8",
     });
-    return output.includes(PLIST_LABEL);
+    return output.includes(label);
   } catch {
     return false;
   }
 }
 
-function getServicePid(): number | null {
+function getServicePid(label: string): number | null {
   try {
-    const output = execSync(`launchctl list ${PLIST_LABEL} 2>/dev/null`, {
+    const output = execSync(`launchctl list ${label} 2>/dev/null`, {
       encoding: "utf-8",
     });
     const pidMatch = output.match(/"PID"\s*=\s*(\d+)/);
@@ -134,22 +154,26 @@ export function registerStatusCommand(program: Command): void {
 
       // 5. Launchd service (macOS only)
       if (process.platform === "darwin") {
-        const installed = fs.existsSync(PLIST_PATH);
-        const loaded = installed && isServiceLoaded();
-        const servicePid = loaded ? getServicePid() : null;
+        const label = getActiveLabel();
+        const loaded = label ? isServiceLoaded(label) : false;
+        const servicePid = loaded && label ? getServicePid(label) : null;
         if (loaded && servicePid) {
           console.log(`  ${ok} Service        launchd (PID ${servicePid})`);
-        } else if (installed) {
-          console.log(`  ${warn} Service        installed but not loaded`);
+        } else if (label) {
+          console.log(
+            `  ${warn} Service        installed but not loaded  ${chalk.dim("(brew services start nomos)")}`,
+          );
         } else {
           console.log(
-            `  ${off} Service        not installed  ${chalk.dim("(nomos service install)")}`,
+            `  ${off} Service        not installed  ${chalk.dim("(brew services start nomos)")}`,
           );
         }
       }
 
-      // 6. Logs
-      const logFile = getLogFilePath();
+      // 6. Logs — check brew services log first, then legacy
+      const brewLogPath = path.join("/opt/homebrew/var/log/nomos", "daemon.log");
+      const legacyLogPath = getLogFilePath();
+      const logFile = fs.existsSync(brewLogPath) ? brewLogPath : legacyLogPath;
       if (fs.existsSync(logFile)) {
         const stat = fs.statSync(logFile);
         const age = Date.now() - stat.mtimeMs;

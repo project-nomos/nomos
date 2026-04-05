@@ -80,9 +80,10 @@ class Nomos < Formula
       staging.delete
     end
 
-    # Ensure ~/.nomos directories exist
+    # Ensure directories exist
     mkdir_p "#{Dir.home}/.nomos"
     mkdir_p "#{Dir.home}/.nomos/logs"
+    mkdir_p var/"log/nomos"
   end
 
   def caveats
