@@ -420,6 +420,7 @@ Execute this subtask thoroughly and provide your output.`;
           permissionMode: task.permissionMode,
           allowedTools: task.allowedTools,
           maxTurns: this.config.workerMaxTurns,
+          maxBudgetUsd: 2,
           cwd: worktreePath,
         },
         workerEmit,
@@ -581,6 +582,7 @@ Verify the workers' changes are correct. Run builds, tests, linters, and adversa
       permissionMode?: "default" | "acceptEdits" | "bypassPermissions" | "plan" | "dontAsk";
       allowedTools?: string[];
       maxTurns?: number;
+      maxBudgetUsd?: number;
       cwd?: string;
     },
     emit?: (event: { type: string; message: string }) => void,
@@ -597,6 +599,7 @@ Verify the workers' changes are correct. Run builds, tests, linters, and adversa
       permissionMode: options.permissionMode ?? "bypassPermissions",
       allowedTools: options.allowedTools,
       maxTurns: options.maxTurns ?? 20,
+      maxBudgetUsd: options.maxBudgetUsd,
       stderr: (line: string) => console.error(`[team-runtime:stderr] ${line.trim()}`),
       ...(options.cwd ? { cwd: options.cwd } : {}),
     });
