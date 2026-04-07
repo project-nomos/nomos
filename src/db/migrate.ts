@@ -215,6 +215,7 @@ INSERT INTO config (key, value) VALUES
   ('app.permissionMode',     '"acceptEdits"'),
   ('app.teamMode',           '"true"'),
   ('app.maxTeamWorkers',     '4'),
+  ('app.workerBudgetUsd',    '2'),
   ('app.smartRouting',       '"false"'),
   ('app.adaptiveMemory',     '"true"'),
   ('app.extractionModel',    '"claude-haiku-4-5"'),

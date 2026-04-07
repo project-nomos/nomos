@@ -102,6 +102,11 @@ export function installSignalHandlers(onShutdown: () => Promise<void>): void {
   });
 
   process.on("unhandledRejection", (reason) => {
+    // Suppress known SDK cleanup race: ProcessTransport closes before pending
+    // MCP control requests finish. Harmless — the session is already done.
+    if (reason instanceof Error && reason.message.includes("ProcessTransport is not ready")) {
+      return;
+    }
     console.error("[daemon] Unhandled rejection:", reason);
   });
 }

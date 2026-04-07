@@ -55,6 +55,10 @@ export class AgentRuntime {
   // SDK session ID cache: sessionKey → SDK session ID
   private sdkSessionIds = new Map<string, string>();
 
+  // Per-session team context: carries the team result into subsequent turns
+  // so the regular agent has context of what the team did.
+  private teamContext = new Map<string, string>();
+
   // Multi-agent team runtime (when teamMode is enabled)
   private teamRuntime?: TeamRuntime;
 
@@ -262,6 +266,7 @@ export class AgentRuntime {
     if (this.config.teamMode) {
       this.teamRuntime = new TeamRuntime({
         maxWorkers: this.config.maxTeamWorkers,
+        workerBudgetUsd: this.config.workerBudgetUsd,
         coordinatorModel: this.config.model,
       });
     }
@@ -443,6 +448,8 @@ export class AgentRuntime {
             mcpServers: this.mcpServers,
             permissionMode: "bypassPermissions",
             allowedTools: Object.keys(this.mcpServers).map((name) => `mcp__${name}`),
+            // Use smart-routed model (or default) — not the base config which may be haiku
+            model,
           },
           (event) => {
             emit({
@@ -454,6 +461,15 @@ export class AgentRuntime {
         );
 
         const content = result || "_(no response)_";
+        console.log(`[agent-runtime] Team result: ${content.length} chars`);
+
+        // Store team result so subsequent turns have context
+        const teamSummary =
+          content.length > 4000 ? content.slice(0, 4000) + "\n...(truncated)" : content;
+        this.teamContext.set(
+          sessionKey,
+          `## Previous Team Result\nThe user asked: ${teamTask.slice(0, 500)}\n\nThe multi-agent team produced this result:\n${teamSummary}`,
+        );
 
         // Emit the team result as stream events so gRPC/WebSocket clients render it
         emit({
@@ -483,7 +499,22 @@ export class AgentRuntime {
       } catch (err) {
         const errMsg = err instanceof Error ? err.message : String(err);
         emit({ type: "error", message: errMsg });
-        throw err;
+
+        // Return error as content instead of re-throwing (prevents duplicate error events)
+        emit({
+          type: "result",
+          result: [{ type: "text", text: `Team error: ${errMsg}` }],
+          usage: { input_tokens: 0, output_tokens: 0 },
+          total_cost_usd: 0,
+        });
+
+        return {
+          inReplyTo: message.id,
+          platform: message.platform,
+          channelId: message.channelId,
+          threadId: message.threadId,
+          content: `Team error: ${errMsg}`,
+        };
       }
     }
 
@@ -494,7 +525,7 @@ export class AgentRuntime {
     });
 
     try {
-      const result = await this.runAgent(message.content, resumeId, emit, model);
+      const result = await this.runAgent(message.content, resumeId, emit, model, sessionKey);
 
       // Cache the new SDK session ID
       if (result.sessionId) {
@@ -523,7 +554,7 @@ export class AgentRuntime {
         });
 
         try {
-          const result = await this.runAgent(message.content, undefined, emit, model);
+          const result = await this.runAgent(message.content, undefined, emit, model, sessionKey);
 
           if (result.sessionId) {
             this.sdkSessionIds.set(sessionKey, result.sessionId);
@@ -555,14 +586,26 @@ export class AgentRuntime {
     resumeId: string | undefined,
     emit: (event: AgentEvent) => void,
     model?: string,
+    sessionKey?: string,
   ): Promise<{ text: string; sessionId?: string }> {
     // Auto-approve all tools from our MCP servers
     const allowedTools = Object.keys(this.mcpServers).map((name) => `mcp__${name}`);
 
+    // Inject team context from a previous /team turn (if any)
+    let systemPromptAppend = this.systemPromptAppend;
+    if (sessionKey) {
+      const teamCtx = this.teamContext.get(sessionKey);
+      if (teamCtx) {
+        systemPromptAppend = systemPromptAppend + "\n\n" + teamCtx;
+        // Clear after one use — it's now part of the conversation via the SDK session
+        this.teamContext.delete(sessionKey);
+      }
+    }
+
     const sdkQuery = runSession({
       prompt,
       model: model ?? this.config.model,
-      systemPromptAppend: this.systemPromptAppend,
+      systemPromptAppend,
       mcpServers: this.mcpServers,
       // Daemon runs unattended — no human to approve tool calls.
       // Use bypassPermissions so tools like filesystem search and web search work.

@@ -91,6 +91,8 @@ export default function AssistantSettingsPage() {
   const [initialTeamMode, setInitialTeamMode] = useState(false);
   const [maxTeamWorkers, setMaxTeamWorkers] = useState("4");
   const [initialMaxTeamWorkers, setInitialMaxTeamWorkers] = useState("4");
+  const [workerBudgetUsd, setWorkerBudgetUsd] = useState("2");
+  const [initialWorkerBudgetUsd, setInitialWorkerBudgetUsd] = useState("2");
 
   // Adaptive memory
   const [adaptiveMemory, setAdaptiveMemory] = useState(true);
@@ -143,6 +145,7 @@ export default function AssistantSettingsPage() {
     anthropicBaseUrl !== initialAnthropicBaseUrl ||
     teamMode !== initialTeamMode ||
     maxTeamWorkers !== initialMaxTeamWorkers ||
+    workerBudgetUsd !== initialWorkerBudgetUsd ||
     adaptiveMemory !== initialAdaptiveMemory ||
     extractionModel !== initialExtractionModel ||
     geminiApiKeyDirty ||
@@ -224,6 +227,10 @@ export default function AssistantSettingsPage() {
       const mtw = envData.NOMOS_MAX_TEAM_WORKERS || "4";
       setMaxTeamWorkers(mtw);
       setInitialMaxTeamWorkers(mtw);
+
+      const wbu = envData.NOMOS_WORKER_BUDGET_USD || "2";
+      setWorkerBudgetUsd(wbu);
+      setInitialWorkerBudgetUsd(wbu);
 
       // Adaptive memory
       const am = envData.NOMOS_ADAPTIVE_MEMORY !== "false";
@@ -339,6 +346,8 @@ export default function AssistantSettingsPage() {
         if (teamMode !== initialTeamMode) envUpdates.NOMOS_TEAM_MODE = teamMode ? "true" : "";
         if (maxTeamWorkers !== initialMaxTeamWorkers)
           envUpdates.NOMOS_MAX_TEAM_WORKERS = maxTeamWorkers;
+        if (workerBudgetUsd !== initialWorkerBudgetUsd)
+          envUpdates.NOMOS_WORKER_BUDGET_USD = workerBudgetUsd;
         if (adaptiveMemory !== initialAdaptiveMemory)
           envUpdates.NOMOS_ADAPTIVE_MEMORY = adaptiveMemory ? "true" : "";
         if (extractionModel !== initialExtractionModel)
@@ -766,21 +775,41 @@ export default function AssistantSettingsPage() {
           </label>
 
           {teamMode && (
-            <div className="space-y-1.5 pl-7 border-l-2 border-surface1 ml-2">
-              <label className="block text-sm font-medium text-subtext1">
-                Max Parallel Workers
-              </label>
-              <input
-                type="number"
-                min="1"
-                max="10"
-                value={maxTeamWorkers}
-                onChange={(e) => setMaxTeamWorkers(e.target.value)}
-                className="w-full max-w-xs rounded-lg border border-surface1 bg-surface0 px-3 py-2 text-sm text-text placeholder:text-overlay0 focus:outline-none focus:border-mauve focus:ring-1 focus:ring-mauve/30 font-mono"
-              />
-              <p className="text-xs text-overlay0">
-                Number of worker agents that can run simultaneously (default: 4)
-              </p>
+            <div className="space-y-4 pl-7 border-l-2 border-surface1 ml-2">
+              <div className="space-y-1.5">
+                <label className="block text-sm font-medium text-subtext1">
+                  Max Parallel Workers
+                </label>
+                <input
+                  type="number"
+                  min="1"
+                  max="10"
+                  value={maxTeamWorkers}
+                  onChange={(e) => setMaxTeamWorkers(e.target.value)}
+                  className="w-full max-w-xs rounded-lg border border-surface1 bg-surface0 px-3 py-2 text-sm text-text placeholder:text-overlay0 focus:outline-none focus:border-mauve focus:ring-1 focus:ring-mauve/30 font-mono"
+                />
+                <p className="text-xs text-overlay0">
+                  Number of worker agents that can run simultaneously (default: 4)
+                </p>
+              </div>
+              <div className="space-y-1.5">
+                <label className="block text-sm font-medium text-subtext1">
+                  Worker Budget (USD)
+                </label>
+                <input
+                  type="number"
+                  min="0.5"
+                  max="50"
+                  step="0.5"
+                  value={workerBudgetUsd}
+                  onChange={(e) => setWorkerBudgetUsd(e.target.value)}
+                  className="w-full max-w-xs rounded-lg border border-surface1 bg-surface0 px-3 py-2 text-sm text-text placeholder:text-overlay0 focus:outline-none focus:border-mauve focus:ring-1 focus:ring-mauve/30 font-mono"
+                />
+                <p className="text-xs text-overlay0">
+                  Maximum spend per worker agent in USD. Workers are terminated when they exceed
+                  this budget (default: $2)
+                </p>
+              </div>
             </div>
           )}
         </div>

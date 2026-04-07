@@ -35,6 +35,7 @@ const ALLOWED_KEYS = [
   "NOMOS_MODEL_COMPLEX",
   "NOMOS_TEAM_MODE",
   "NOMOS_MAX_TEAM_WORKERS",
+  "NOMOS_WORKER_BUDGET_USD",
   "ANTHROPIC_BASE_URL",
   "NOMOS_ADAPTIVE_MEMORY",
   "NOMOS_EXTRACTION_MODEL",
@@ -87,6 +88,7 @@ const WRITABLE_KEYS = new Set([
   "NOMOS_MODEL_COMPLEX",
   "NOMOS_TEAM_MODE",
   "NOMOS_MAX_TEAM_WORKERS",
+  "NOMOS_WORKER_BUDGET_USD",
   "ANTHROPIC_BASE_URL",
   "NOMOS_ADAPTIVE_MEMORY",
   "NOMOS_EXTRACTION_MODEL",
@@ -162,6 +164,7 @@ const ENV_TO_DB: Record<string, DbMapping> = {
   NOMOS_MODEL_COMPLEX: { table: "config", dbKey: "app.modelComplex" },
   NOMOS_TEAM_MODE: { table: "config", dbKey: "app.teamMode" },
   NOMOS_MAX_TEAM_WORKERS: { table: "config", dbKey: "app.maxTeamWorkers" },
+  NOMOS_WORKER_BUDGET_USD: { table: "config", dbKey: "app.workerBudgetUsd" },
   NOMOS_API_PROVIDER: { table: "config", dbKey: "app.apiProvider" },
   ANTHROPIC_BASE_URL: { table: "config", dbKey: "app.anthropicBaseUrl" },
   OPENROUTER_API_KEY: {

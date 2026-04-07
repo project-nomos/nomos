@@ -56,6 +56,8 @@ export interface NomosConfig {
   teamMode: boolean;
   /** Maximum parallel workers for team mode (default: 3) */
   maxTeamWorkers: number;
+  /** Budget cap per team worker in USD (default: 2) */
+  workerBudgetUsd: number;
   /** Custom Anthropic API base URL (for OpenRouter, Ollama, LiteLLM, etc.) */
   anthropicBaseUrl?: string;
   /** OpenRouter API key (stored separately so provider switching preserves keys) */
@@ -127,6 +129,9 @@ export function loadEnvConfig(): NomosConfig {
     maxTeamWorkers: process.env.NOMOS_MAX_TEAM_WORKERS
       ? parseInt(process.env.NOMOS_MAX_TEAM_WORKERS, 10)
       : 4,
+    workerBudgetUsd: process.env.NOMOS_WORKER_BUDGET_USD
+      ? parseFloat(process.env.NOMOS_WORKER_BUDGET_USD)
+      : 2,
     anthropicBaseUrl: process.env.ANTHROPIC_BASE_URL,
     openrouterApiKey: process.env.OPENROUTER_API_KEY,
     adaptiveMemory: process.env.NOMOS_ADAPTIVE_MEMORY !== "false",

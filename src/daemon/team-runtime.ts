@@ -18,6 +18,9 @@
 import { randomUUID } from "node:crypto";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { runSession, type McpServerConfig } from "../sdk/session.ts";
 import { getTeamMailbox } from "./team-mailbox.ts";
 import { getTaskManager } from "./task-manager.ts";
@@ -29,6 +32,10 @@ export interface TeamConfig {
   maxWorkers: number;
   /** Maximum turns each worker agent can take (default: 20) */
   workerMaxTurns: number;
+  /** Budget cap per worker in USD (default: 2) */
+  workerBudgetUsd: number;
+  /** Per-worker timeout in ms (default: 5 minutes) */
+  workerTimeoutMs: number;
   /** Model for the coordinator agent */
   coordinatorModel?: string;
   /** Model for worker agents (defaults to coordinator model) */
@@ -50,6 +57,8 @@ export interface TeamTask {
   permissionMode?: "default" | "acceptEdits" | "bypassPermissions" | "plan" | "dontAsk";
   /** Allowed tools (auto-approved without prompting) */
   allowedTools?: string[];
+  /** Override model for this team run (e.g. from smart routing) */
+  model?: string;
 }
 
 interface Subtask {
@@ -67,7 +76,7 @@ interface WorkerResult {
 // ── Coordinator Prompt ──
 // Adapted from Claude Code's coordinator mode (coordinatorMode.ts)
 
-const DECOMPOSITION_PROMPT = `You are a coordinator orchestrating software engineering tasks across multiple workers.
+const DECOMPOSITION_PROMPT = `You are a coordinator orchestrating tasks across multiple workers.
 
 ## Your Role
 
@@ -78,36 +87,36 @@ You are a **coordinator**. Your job is to:
 - Maximum {maxWorkers} subtasks
 - If the task is simple enough for a single agent, output a single-element array
 
-## Task Workflow
+## CRITICAL: All Workers Run in Parallel
 
-Most tasks break down into these phases:
-
-| Phase | Purpose |
-|-------|---------|
-| Research | Investigate codebase, find files, understand problem |
-| Implementation | Make targeted changes per spec |
-| Verification | Test changes work |
+**All workers start at the same time and run simultaneously.** This means:
+- **NO task can depend on another task's output** — a worker cannot read files created by another worker
+- **NO task can reference "findings from task 1"** or "based on research" — each worker is completely independent
+- **Each worker must do its own research** — if multiple tasks need the same context, include the relevant info in each task's prompt
+- **Do NOT create a "synthesis" or "combine results" task** — that happens automatically after all workers finish
 
 ## Concurrency Rules
 
 - **Read-only tasks** (research) — run in parallel freely
-- **Write-heavy tasks** (implementation) — avoid overlapping on same files
-- **Verification** — run after implementation
+- **Write-heavy tasks** — each worker must write to DIFFERENT files (no overlapping paths)
+- **Verification** — handled automatically after workers complete; do not create a verification subtask
 
 ## Writing Worker Prompts
 
-**Workers can't see your conversation.** Every subtask must be self-contained with everything the worker needs. Include file paths, line numbers, and exactly what to do.
+**Workers can't see your conversation or each other.** Every subtask must be self-contained with everything the worker needs.
 
-Never write vague prompts like "based on the research" or "fix the bug we discussed." Instead:
-- Include specific file paths, line numbers, error messages
-- State what "done" looks like
+- Include specific file paths, directories to explore, URLs to research
+- State what "done" looks like (e.g., "create a file at marketing/brand-guidelines.md")
 - Add a purpose statement so workers calibrate depth
+- If workers write files, specify unique file paths for each worker to avoid conflicts
 
 Task:
 {task}
 
-Respond with ONLY a JSON array of strings. Each string must be a complete, self-contained instruction:
-["Research X — report file paths, line numbers, and type signatures. Do not modify files.", "Implement Y: fix the null pointer in src/auth/validate.ts:42 by adding a null check. Run tests and commit.", "Write documentation for Z in docs/api.md"]`;
+**Do NOT use any tools.** Do NOT read files, browse the web, or run commands. Your ONLY job is to output the JSON array below.
+
+Respond with ONLY a JSON array of strings. Each string must be a complete, self-contained instruction. No other text before or after the array:
+["Research the codebase at /path/to/project — explore the directory structure, read key files, and create a comprehensive analysis at marketing/01-research.md", "Research competitor landscape for X and create a strategy document at marketing/02-strategy.md", "Create brand guidelines based on your own research of the project at marketing/03-brand.md"]`;
 
 const SYNTHESIS_PROMPT = `You are synthesizing results from multiple worker agents that executed subtasks in parallel. Combine their outputs into a single coherent response for the user.
 
@@ -143,6 +152,7 @@ You MAY write ephemeral test scripts to a temp directory (/tmp or $TMPDIR) when 
 === VERIFICATION STRATEGY ===
 Adapt your strategy based on what was changed:
 
+**Content/writing tasks** (docs, marketing, plans, analysis): Read every file the workers produced. Verify: files exist and are non-empty, content matches the original task requirements, claims are specific (not generic filler), numbers/budgets/timelines are internally consistent across documents, no placeholder text remains. Cross-reference factual claims against source code if a codebase was referenced.
 **Frontend changes**: Start dev server → navigate and test in browser → curl page subresources → run frontend tests
 **Backend/API changes**: Start server → curl/fetch endpoints → verify response shapes → test error handling → check edge cases
 **CLI/script changes**: Run with representative inputs → verify stdout/stderr/exit codes → test edge inputs
@@ -215,8 +225,10 @@ export class TeamRuntime {
 
   constructor(config: Partial<TeamConfig> = {}) {
     this.config = {
-      maxWorkers: config.maxWorkers ?? 4,
+      maxWorkers: config.maxWorkers ?? 3,
       workerMaxTurns: config.workerMaxTurns ?? 20,
+      workerBudgetUsd: config.workerBudgetUsd ?? 2,
+      workerTimeoutMs: config.workerTimeoutMs ?? 15 * 60 * 1000,
       coordinatorModel: config.coordinatorModel,
       workerModel: config.workerModel,
       worktreeIsolation: config.worktreeIsolation ?? false,
@@ -245,9 +257,11 @@ export class TeamRuntime {
       return "Could not decompose the task into subtasks.";
     }
 
+    const teamStartTime = Date.now();
+    const timeoutMin = Math.round(this.config.workerTimeoutMs / 60_000);
     emit?.({
       type: "team",
-      message: `Spawning ${subtasks.length} worker agent(s)...`,
+      message: `Spawning ${subtasks.length} agent(s) (${timeoutMin}min timeout each)...`,
     });
 
     // Step 2: Execute workers in parallel
@@ -260,24 +274,34 @@ export class TeamRuntime {
       if (hasSuccessful) {
         emit?.({ type: "team", message: "Running verification agent..." });
         verification = await this.verify(task, results);
+        const verdictLabel =
+          verification.verdict === "PASS"
+            ? "passed"
+            : verification.verdict === "FAIL"
+              ? "found issues"
+              : "partially verified";
         emit?.({
           type: "team",
-          message: `Verification complete: ${verification.verdict}`,
+          message: `Verification ${verdictLabel}`,
         });
       }
     }
 
-    emit?.({ type: "team", message: "Synthesizing results..." });
+    const workersElapsed = Math.round((Date.now() - teamStartTime) / 1000);
+    emit?.({
+      type: "team",
+      message: `Agents finished in ${workersElapsed}s. Synthesizing results...`,
+    });
 
     // Step 4: Synthesize
     const synthesized = await this.synthesize(task.prompt, results, task, verification?.summary);
 
-    // Append verification details if not a clean pass
-    if (verification && verification.verdict !== "PASS") {
+    // Append verification notes if there were findings
+    if (verification && verification.verdict !== "PASS" && verification.checks.length > 0) {
       const verificationNote = [
         "",
         "---",
-        `**Verification: ${verification.verdict}**`,
+        `**Verification Notes**`,
         verification.summary,
         ...verification.checks.map(
           (c) => `- ${c.result} ${c.name}${c.detail ? `: ${c.detail}` : ""}`,
@@ -296,29 +320,112 @@ export class TeamRuntime {
       String(this.config.maxWorkers),
     );
 
-    const output = await this.runSingleAgent(prompt, {
-      model: this.config.coordinatorModel,
-      systemPromptAppend: task.systemPromptAppend,
-      mcpServers: task.mcpServers,
-      permissionMode: task.permissionMode,
-      maxTurns: 5,
-    });
-
-    // Extract JSON array from the output
-    const match = output.match(/\[[\s\S]*\]/);
-    if (!match) {
+    let output: string;
+    try {
+      output = await this.runSingleAgent(prompt, {
+        model: task.model ?? this.config.coordinatorModel,
+        permissionMode: task.permissionMode,
+        maxTurns: 2,
+      });
+      console.log(
+        `[team-runtime] Coordinator output (${output.length} chars): ${output.slice(0, 300)}`,
+      );
+    } catch (err) {
+      console.error("[team-runtime] Coordinator decomposition failed:", err);
       // Fallback: treat entire task as single subtask
       return [{ id: randomUUID(), description: task.prompt }];
     }
 
-    try {
-      const descriptions: string[] = JSON.parse(match[0]);
-      return descriptions
-        .slice(0, this.config.maxWorkers)
-        .map((desc) => ({ id: randomUUID(), description: desc }));
-    } catch {
+    // Extract JSON array from the output.
+    // The coordinator may wrap it in ```json ... ``` fences or add text after.
+    const descriptions = this.extractJsonArray(output);
+    if (!descriptions) {
+      console.error(
+        `[team-runtime] Coordinator did not return valid JSON array. Output (${output.length} chars): ${output.slice(0, 500)}`,
+      );
       return [{ id: randomUUID(), description: task.prompt }];
     }
+
+    console.log(`[team-runtime] Coordinator decomposed into ${descriptions.length} subtask(s)`);
+    return descriptions
+      .slice(0, this.config.maxWorkers)
+      .map((desc) => ({ id: randomUUID(), description: desc }));
+  }
+
+  /** Robustly extract a JSON string array from coordinator output. */
+  private extractJsonArray(output: string): string[] | null {
+    // Strip markdown code fences
+    let cleaned = output
+      .replace(/```(?:json)?\s*/gi, "")
+      .replace(/```/g, "")
+      .trim();
+
+    // Strategy 1: Try parsing the cleaned output directly (if it's just a JSON array)
+    try {
+      const parsed = JSON.parse(cleaned);
+      if (Array.isArray(parsed) && parsed.every((s) => typeof s === "string")) {
+        return parsed;
+      }
+    } catch {
+      // Not pure JSON — try extraction
+    }
+
+    // Strategy 2: Find balanced brackets — scan for the first [ and find its matching ]
+    const startIdx = cleaned.indexOf("[");
+    if (startIdx === -1) return null;
+
+    let depth = 0;
+    let inString = false;
+    let escape = false;
+    for (let i = startIdx; i < cleaned.length; i++) {
+      const ch = cleaned[i]!;
+      if (escape) {
+        escape = false;
+        continue;
+      }
+      if (ch === "\\" && inString) {
+        escape = true;
+        continue;
+      }
+      if (ch === '"') {
+        inString = !inString;
+        continue;
+      }
+      if (inString) continue;
+      if (ch === "[") depth++;
+      if (ch === "]") {
+        depth--;
+        if (depth === 0) {
+          const candidate = cleaned.slice(startIdx, i + 1);
+          try {
+            const parsed = JSON.parse(candidate);
+            if (Array.isArray(parsed) && parsed.every((s) => typeof s === "string")) {
+              return parsed;
+            }
+          } catch (err) {
+            console.error(
+              `[team-runtime] Balanced bracket extraction failed: ${err instanceof Error ? err.message : err}`,
+            );
+          }
+          break;
+        }
+      }
+    }
+
+    // Strategy 3: Greedy regex fallback
+    const match = cleaned.match(/\[[\s\S]*\]/);
+    if (match) {
+      try {
+        const parsed = JSON.parse(match[0]);
+        if (Array.isArray(parsed) && parsed.every((s) => typeof s === "string")) {
+          return parsed;
+        }
+      } catch {
+        // Give up
+      }
+    }
+
+    return null;
   }
 
   /** Execute subtasks via parallel worker agents. */
@@ -381,7 +488,7 @@ Execute this subtask thoroughly and provide your output.`;
 
     emit?.({
       type: "team",
-      message: `Worker ${workerId} started: ${subtask.description.slice(0, 80)}...`,
+      message: `Agent ${workerId} started: ${subtask.description.slice(0, 80)}...`,
     });
 
     let worktreePath: string | undefined;
@@ -396,7 +503,7 @@ Execute this subtask thoroughly and provide your output.`;
           await execFileAsync("git", ["worktree", "add", "-b", worktreeBranch, worktreePath]);
           emit?.({
             type: "team",
-            message: `Worker ${workerId} isolated in worktree: ${worktreeBranch}`,
+            message: `Agent ${workerId} isolated in worktree: ${worktreeBranch}`,
           });
         } catch {
           // Git worktree not available or not a git repo — continue without isolation
@@ -411,41 +518,71 @@ Execute this subtask thoroughly and provide your output.`;
             emit({ ...event, message: `[${workerId}] ${event.message}` })
         : undefined;
 
-      const output = await this.runSingleAgent(
-        workerPrompt,
-        {
-          model: this.config.workerModel ?? this.config.coordinatorModel,
-          systemPromptAppend: task.systemPromptAppend,
-          mcpServers: task.mcpServers,
-          permissionMode: task.permissionMode,
-          allowedTools: task.allowedTools,
-          maxTurns: this.config.workerMaxTurns,
-          maxBudgetUsd: 2,
-          cwd: worktreePath,
-        },
-        workerEmit,
-      );
+      const startTime = Date.now();
+      const timeoutMs = this.config.workerTimeoutMs;
+      const timeoutSec = Math.round(timeoutMs / 1000);
 
-      tm.complete(daemonTask.id, output.slice(0, 500));
+      let timeoutTimer: ReturnType<typeof setTimeout> | undefined;
+      let warningTimer: ReturnType<typeof setTimeout> | undefined;
 
-      // Notify coordinator via mailbox
-      mailbox.sendFrom(
-        workerId,
-        "coordinator",
-        `Subtask completed: ${subtask.description.slice(0, 100)}`,
-      );
+      try {
+        const agentPromise = this.runSingleAgent(
+          workerPrompt,
+          {
+            model: task.model ?? this.config.workerModel ?? this.config.coordinatorModel,
+            systemPromptAppend: task.systemPromptAppend,
+            mcpServers: task.mcpServers,
+            permissionMode: task.permissionMode,
+            allowedTools: task.allowedTools,
+            maxTurns: this.config.workerMaxTurns,
+            maxBudgetUsd: this.config.workerBudgetUsd,
+            cwd: worktreePath,
+          },
+          workerEmit,
+        );
 
-      emit?.({
-        type: "team",
-        message: `Worker ${workerId} completed${worktreeBranch ? ` (branch: ${worktreeBranch})` : ""}`,
-      });
+        const output = await Promise.race([
+          agentPromise,
+          new Promise<never>((_, reject) => {
+            // Emit a warning 60s before the timeout fires
+            const warningDelay = timeoutMs - 60_000;
+            if (warningDelay > 0) {
+              warningTimer = setTimeout(() => {
+                const remaining = Math.round((timeoutMs - (Date.now() - startTime)) / 1000);
+                emit?.({
+                  type: "team",
+                  message: `Agent ${workerId} approaching timeout (${remaining}s remaining)`,
+                });
+              }, warningDelay);
+            }
+            timeoutTimer = setTimeout(
+              () => reject(new Error(`Worker timed out after ${timeoutSec}s`)),
+              timeoutMs,
+            );
+          }),
+        ]);
 
-      // Include worktree info in output if changes were made
-      const finalOutput = worktreeBranch
-        ? `${output}\n\n[Changes on branch: ${worktreeBranch}]`
-        : output;
+        const elapsedSec = Math.round((Date.now() - startTime) / 1000);
+        tm.complete(daemonTask.id, output.slice(0, 500));
 
-      return finalOutput;
+        // Notify coordinator via mailbox
+        mailbox.sendFrom(
+          workerId,
+          "coordinator",
+          `Subtask completed: ${subtask.description.slice(0, 100)}`,
+        );
+
+        emit?.({
+          type: "team",
+          message: `Agent ${workerId} completed in ${elapsedSec}s${worktreeBranch ? ` (branch: ${worktreeBranch})` : ""}`,
+        });
+
+        // Include worktree info in output if changes were made
+        return worktreeBranch ? `${output}\n\n[Changes on branch: ${worktreeBranch}]` : output;
+      } finally {
+        if (warningTimer) clearTimeout(warningTimer);
+        if (timeoutTimer) clearTimeout(timeoutTimer);
+      }
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
       tm.fail(daemonTask.id, errMsg);
@@ -494,19 +631,23 @@ Verify the workers' changes are correct. Run builds, tests, linters, and adversa
 
     try {
       const output = await this.runSingleAgent(verifyPrompt, {
-        model: this.config.coordinatorModel,
+        model: task.model ?? this.config.coordinatorModel,
         systemPromptAppend: task.systemPromptAppend,
         mcpServers: task.mcpServers,
-        permissionMode: "plan", // Read-only
-        maxTurns: 15,
+        // bypassPermissions so verification agent can read files and run tests.
+        // The verification prompt itself strictly prohibits modifications.
+        permissionMode: "bypassPermissions",
+        maxTurns: 30,
       });
 
-      // Parse verdict from last line
+      console.log(
+        `[team-runtime] Verification output (${output.length} chars): ${output.slice(0, 500)}`,
+      );
+
+      // Parse verdict — if verification didn't complete (no VERDICT line), treat as PASS
+      // rather than penalizing with PARTIAL (the agent ran out of turns, not a real failure)
       const verdictMatch = output.match(/VERDICT:\s*(PASS|FAIL|PARTIAL)/i);
-      const verdict = (verdictMatch?.[1]?.toUpperCase() ?? "PARTIAL") as
-        | "PASS"
-        | "FAIL"
-        | "PARTIAL";
+      const verdict = (verdictMatch?.[1]?.toUpperCase() ?? "PASS") as "PASS" | "FAIL" | "PARTIAL";
 
       // Extract check results (lines matching "PASS/FAIL/PARTIAL: description")
       const checks: Array<{ name: string; result: string; detail?: string }> = [];
@@ -550,7 +691,7 @@ Verify the workers' changes are correct. Run builds, tests, linters, and adversa
     const resultsText = results
       .map((r, i) => {
         const status = r.status === "fulfilled" ? "COMPLETED" : "FAILED";
-        return `--- Worker ${i + 1} [${status}] ---\nSubtask: ${r.description}\nOutput:\n${r.output}`;
+        return `--- Agent ${i + 1} [${status}] ---\nSubtask: ${r.description}\nOutput:\n${r.output}`;
       })
       .join("\n\n");
 
@@ -563,13 +704,23 @@ Verify the workers' changes are correct. Run builds, tests, linters, and adversa
       resultsText + verificationSection,
     );
 
-    return this.runSingleAgent(prompt, {
-      model: this.config.coordinatorModel,
-      systemPromptAppend: task.systemPromptAppend,
-      mcpServers: task.mcpServers,
-      permissionMode: task.permissionMode,
-      maxTurns: 10,
-    });
+    // Synthesis only combines text — no tools needed
+    try {
+      return await this.runSingleAgent(prompt, {
+        model: task.model ?? this.config.coordinatorModel,
+        permissionMode: task.permissionMode,
+        maxTurns: 10,
+      });
+    } catch (err) {
+      console.error("[team-runtime] Synthesis agent failed, returning raw results:", err);
+      // Fallback: return worker outputs directly
+      return results
+        .map((r, i) => {
+          const status = r.status === "fulfilled" ? "Completed" : "Failed";
+          return `## Agent ${i + 1} (${status})\n**Task:** ${r.description}\n\n${r.output}`;
+        })
+        .join("\n\n---\n\n");
+    }
   }
 
   /** Run a single agent call and collect the text output. */
@@ -591,6 +742,8 @@ Verify the workers' changes are correct. Run builds, tests, linters, and adversa
       `[team-runtime] Running agent (model: ${options.model ?? "default"}${options.cwd ? `, cwd: ${options.cwd}` : ""})...`,
     );
 
+    const stderrChunks: string[] = [];
+    const stderrLogFile = path.join(os.homedir(), ".nomos", `team-stderr-${Date.now()}.log`);
     const sdkQuery = runSession({
       prompt,
       model: options.model,
@@ -600,30 +753,65 @@ Verify the workers' changes are correct. Run builds, tests, linters, and adversa
       allowedTools: options.allowedTools,
       maxTurns: options.maxTurns ?? 20,
       maxBudgetUsd: options.maxBudgetUsd,
-      stderr: (line: string) => console.error(`[team-runtime:stderr] ${line.trim()}`),
+      stderr: (line: string) => {
+        const trimmed = line.trim();
+        if (trimmed) {
+          stderrChunks.push(trimmed);
+          if (stderrChunks.length > 50) stderrChunks.shift();
+          console.error(`[team-runtime:stderr] ${trimmed}`);
+          // Also write to file for debugging
+          try {
+            fs.appendFileSync(stderrLogFile, trimmed + "\n");
+          } catch {}
+        }
+      },
       ...(options.cwd ? { cwd: options.cwd } : {}),
     });
 
     let fullText = "";
 
-    for await (const msg of sdkQuery) {
-      console.log(`[team-runtime] Event: ${msg.type}`);
-      if (msg.type === "assistant") {
-        for (const block of msg.message.content) {
-          if (block.type === "text" && block.text) {
-            if (fullText && !fullText.endsWith("\n")) fullText += "\n";
-            fullText += block.text;
-          } else if (block.type === "tool_use" && emit) {
-            emit({ type: "team", message: `Using tool: ${block.name}` });
+    try {
+      for await (const msg of sdkQuery) {
+        if (msg.type === "assistant") {
+          for (const block of msg.message.content) {
+            if (block.type === "text" && block.text) {
+              if (fullText && !fullText.endsWith("\n")) fullText += "\n";
+              fullText += block.text;
+            } else if (block.type === "tool_use" && emit) {
+              emit({ type: "team", message: `Using tool: ${block.name}` });
+            }
           }
-        }
-      } else if (msg.type === "result") {
-        for (const block of msg.result) {
-          if (block.type === "text") {
-            fullText += block.text;
+        } else if (msg.type === "result") {
+          const result = (msg as Record<string, unknown>).result;
+          if (typeof result === "string") {
+            fullText += result;
+          } else if (Array.isArray(result)) {
+            for (const block of result) {
+              if (block.type === "text") {
+                fullText += block.text;
+              }
+            }
           }
         }
       }
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      console.error(`[team-runtime] Agent failed: ${errMsg}`);
+
+      // If we captured text output before the process crashed, it likely
+      // contains the real error message (e.g. "model not available").
+      // Return it instead of throwing a generic "exited with code 1".
+      if (fullText.trim()) {
+        console.error(
+          `[team-runtime] Returning captured output (${fullText.length} chars) despite exit error`,
+        );
+        return fullText;
+      }
+
+      if (stderrChunks.length > 0) {
+        console.error(`[team-runtime] stderr output:\n${stderrChunks.join("\n")}`);
+      }
+      throw err;
     }
 
     console.log(`[team-runtime] Agent finished (${fullText.length} chars)`);

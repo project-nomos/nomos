@@ -106,6 +106,8 @@ export function App({
   const [thinkingExpanded, setThinkingExpanded] = useState(false);
   // Live tool execution indicator
   const [liveToolName, setLiveToolName] = useState<string | null>(null);
+  // Live per-worker status for team mode (updates in place instead of appending)
+  const [teamWorkerStatus, setTeamWorkerStatus] = useState<Map<string, string>>(new Map());
   // Copy mode — pauses all animations and live rendering for text selection
   const [copyMode, setCopyMode] = useState(false);
   // Token tracking for stalled spinner and status line
@@ -142,6 +144,32 @@ export function App({
     },
     [],
   );
+
+  /** Parse worker tool-use messages like "[worker-abc123] Using tool: Read" */
+  const parseWorkerToolUse = useCallback((msg: string): boolean => {
+    const match = msg.match(/^\[worker-([a-f0-9]+)\] Using tool: (.+)$/);
+    if (!match) return false;
+    const workerId = match[1]!;
+    const toolName = match[2]!;
+    setTeamWorkerStatus((prev) => {
+      const next = new Map(prev);
+      next.set(workerId, toolName);
+      return next;
+    });
+    return true;
+  }, []);
+
+  /** Clear a worker from live status (e.g. on completion) */
+  const clearWorkerStatus = useCallback((msg: string) => {
+    const match = msg.match(/Agent worker-([a-f0-9]+) (completed|started)/);
+    if (match && match[2] === "completed") {
+      setTeamWorkerStatus((prev) => {
+        const next = new Map(prev);
+        next.delete(match[1]!);
+        return next;
+      });
+    }
+  }, []);
 
   const flushBuffer = useCallback(() => {
     if (bufferRef.current) {
@@ -248,6 +276,7 @@ export function App({
           setIsThinking(false);
           setLiveToolName(null);
           activeToolRef.current = null;
+          setTeamWorkerStatus(new Map());
 
           // Update token usage
           const inp = event.usage?.input_tokens ?? 0;
@@ -269,8 +298,11 @@ export function App({
           if (event.subtype === "routing") {
             pushItem("routing", event.message);
           } else if (event.subtype === "status") {
-            // Team progress updates — show as dim system messages
-            pushItem("system", event.message);
+            // Team worker tool-use updates — show as live-updating status per worker
+            if (!parseWorkerToolUse(event.message)) {
+              clearWorkerStatus(event.message);
+              pushItem("system", event.message);
+            }
           } else if (event.subtype !== "init" && event.subtype !== "command_ack") {
             pushItem("system", event.message);
           }
@@ -288,7 +320,7 @@ export function App({
         }
       }
     },
-    [pushItem, appendDelta, flushBuffer],
+    [pushItem, appendDelta, flushBuffer, parseWorkerToolUse, clearWorkerStatus],
   );
 
   // Connect to daemon (gRPC or WebSocket) if a daemon client is provided
@@ -367,12 +399,16 @@ export function App({
               allowedTools,
             },
             (event) => {
-              pushItem("system", event.message);
+              if (!parseWorkerToolUse(event.message)) {
+                clearWorkerStatus(event.message);
+                pushItem("system", event.message);
+              }
             },
           );
 
           if (bufferRef.current || thinkingBufferRef.current) flushBuffer();
           setIsThinking(false);
+          setTeamWorkerStatus(new Map());
 
           const content = result || "_(no response)_";
           appendDelta(content);
@@ -384,6 +420,17 @@ export function App({
             content,
           });
           transcriptRef.current.push({ role: "assistant", content });
+
+          // Inject team result into system prompt so subsequent turns have context.
+          // Also clear SDK session — the old session doesn't know about the team result.
+          const teamSummary =
+            content.length > 4000 ? content.slice(0, 4000) + "\n...(truncated)" : content;
+          systemPromptAppendRef.current =
+            systemPromptAppendRef.current +
+            "\n\n## Previous Team Result\n" +
+            `The user asked: ${teamTask.slice(0, 500)}\n\n` +
+            `The multi-agent team produced this result:\n${teamSummary}`;
+          sdkSessionIdRef.current = null;
 
           setIsInputActive(true);
           return;
@@ -679,7 +726,15 @@ export function App({
 
       setIsInputActive(true);
     },
-    [mcpServers, session.id, pushItem, appendDelta, flushBuffer],
+    [
+      mcpServers,
+      session.id,
+      pushItem,
+      appendDelta,
+      flushBuffer,
+      parseWorkerToolUse,
+      clearWorkerStatus,
+    ],
   );
 
   // When streaming finishes and input becomes active, finalize messages.
@@ -924,6 +979,30 @@ export function App({
 
           {/* Live tool execution indicator — inline spinner below content */}
           {liveToolName && !isInputActive && <ToolBlock name={liveToolName} status="executing" />}
+
+          {/* Live team worker status — one updating line per worker */}
+          {teamWorkerStatus.size > 0 && (
+            <Box flexDirection="column" paddingLeft={3}>
+              {Array.from(teamWorkerStatus.entries()).map(([workerId, toolName], idx) => {
+                const workerColors = [
+                  "#CBA6F7",
+                  "#89B4FA",
+                  "#89DCEB",
+                  "#A6E3A1",
+                  "#F9E2AF",
+                  "#F38BA8",
+                ] as const;
+                const color = workerColors[idx % workerColors.length]!;
+                return (
+                  <Box key={workerId}>
+                    <Text color={color}>
+                      ✦ [agent-{workerId}] {toolName}
+                    </Text>
+                  </Box>
+                );
+              })}
+            </Box>
+          )}
 
           {/* Thinking spinner — shown when waiting for first token */}
           {isThinking && !streamingText && !thinkingText && !liveToolName && (
