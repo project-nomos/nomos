@@ -28,6 +28,15 @@ import { StreamingResponder } from "./streaming-responder.ts";
 import { indexConversationTurn } from "./memory-indexer.ts";
 import { closeBrowser } from "../sdk/browser.ts";
 import { sendProactiveMessage } from "./proactive-sender.ts";
+import { registerDeltaSyncJobs } from "../ingest/delta-sync.ts";
+import { EmailAdapter } from "./channels/email.ts";
+import { observeMessage } from "./observer.ts";
+import { registerProactiveJobs } from "../proactive/scheduler.ts";
+import {
+  initCATEIntegration,
+  stopCATEIntegration,
+  type CATEIntegration,
+} from "../cate/integration.ts";
 import type { IncomingMessage, AgentEvent } from "./types.ts";
 import type { DraftRow } from "../db/drafts.ts";
 
@@ -55,6 +64,7 @@ export class Gateway {
   private cronEngine: CronEngine;
   private draftManager: DraftManager;
   private settingsProcess: ChildProcess | null = null;
+  private cateIntegration: CATEIntegration | null = null;
   private options: GatewayOptions;
 
   constructor(options: GatewayOptions = {}) {
@@ -158,6 +168,44 @@ export class Gateway {
       }
     }
 
+    // Register delta sync cron jobs for ingestion
+    try {
+      await registerDeltaSyncJobs();
+    } catch (err) {
+      console.warn("[gateway] Delta sync registration failed:", err);
+    }
+
+    // Register proactive feature cron jobs
+    try {
+      await registerProactiveJobs();
+    } catch (err) {
+      console.warn("[gateway] Proactive jobs registration failed:", err);
+    }
+
+    // Start CATE protocol server (agent-to-agent trust layer)
+    try {
+      this.cateIntegration = await initCATEIntegration({
+        port: 8801,
+        onMessage: async (envelope) => {
+          // Route incoming CATE envelopes to the message queue
+          const payload = envelope.payload ?? "";
+          const msg: IncomingMessage = {
+            id: envelope.header.msg_id,
+            platform: "cate",
+            channelId: envelope.header.thread_id,
+            threadId: envelope.header.thread_id,
+            userId: envelope.parties.from.did,
+            content: payload,
+            timestamp: new Date(envelope.header.timestamp),
+          };
+          const sessionKey = `cate:${envelope.header.thread_id}`;
+          this.messageQueue.enqueue(sessionKey, msg, () => {});
+        },
+      });
+    } catch (err) {
+      console.warn("[gateway] CATE integration failed to start:", err);
+    }
+
     // Listen for proactive send events from agent tools
     process.on(
       "proactive:send" as never,
@@ -200,6 +248,9 @@ export class Gateway {
     console.log("[gateway] Stopping daemon...");
 
     // Stop in reverse order
+    if (this.cateIntegration) {
+      await stopCATEIntegration(this.cateIntegration);
+    }
     this.stopSettingsServer();
     this.cronEngine.stop();
     await this.channelManager.stop();
@@ -503,8 +554,17 @@ export class Gateway {
       this.channelManager
         .transformIncoming(rawMsg)
         .then((msg) => {
-          const sessionKey = `${msg.platform}:${msg.channelId}`;
           const adapter = this.channelManager.getAdapter(msg.platform);
+
+          // Observe mode: index without agent response
+          if (adapter?.mode === "observe") {
+            observeMessage(msg).catch((err) =>
+              console.error("[gateway] Observe indexing failed:", err),
+            );
+            return;
+          }
+
+          const sessionKey = `${msg.platform}:${msg.channelId}`;
 
           // Create streaming responder if adapter supports progressive updates
           let responder: StreamingResponder | null = null;
@@ -624,21 +684,68 @@ export class Gateway {
     }
 
     if (process.env.DISCORD_BOT_TOKEN) {
-      this.channelManager.register(new DiscordAdapter(enqueue));
+      const adapter = new DiscordAdapter(enqueue);
+      this.channelManager.register(adapter);
+      this.draftManager.registerSendFn("discord", (channelId, text, threadId) =>
+        adapter.send({ inReplyTo: "", platform: "discord", channelId, threadId, content: text }),
+      );
     }
 
     if (process.env.TELEGRAM_BOT_TOKEN) {
-      this.channelManager.register(new TelegramAdapter(enqueue));
+      const adapter = new TelegramAdapter(enqueue);
+      this.channelManager.register(adapter);
+      this.draftManager.registerSendFn("telegram", (channelId, text, threadId) =>
+        adapter.send({ inReplyTo: "", platform: "telegram", channelId, threadId, content: text }),
+      );
     }
 
     // WhatsApp is always available (uses QR code auth)
     if (process.env.WHATSAPP_ENABLED === "true") {
-      this.channelManager.register(new WhatsAppAdapter(enqueue));
+      const adapter = new WhatsAppAdapter(enqueue);
+      this.channelManager.register(adapter);
+      this.draftManager.registerSendFn("whatsapp", (channelId, text, threadId) =>
+        adapter.send({ inReplyTo: "", platform: "whatsapp", channelId, threadId, content: text }),
+      );
     }
 
     // iMessage (macOS only — reads chat.db, sends via AppleScript)
     if (process.env.IMESSAGE_ENABLED === "true" && process.platform === "darwin") {
-      this.channelManager.register(new IMessageAdapter(enqueue));
+      const adapter = new IMessageAdapter(enqueue);
+      this.channelManager.register(adapter);
+      this.draftManager.registerSendFn("imessage", (channelId, text, threadId) =>
+        adapter.send({ inReplyTo: "", platform: "imessage", channelId, threadId, content: text }),
+      );
+    }
+
+    // Email adapter (IMAP/SMTP from integrations table)
+    try {
+      const { getIntegration } = await import("../db/integrations.ts");
+      const emailIntegration = await getIntegration("email");
+      if (emailIntegration?.enabled) {
+        const config = emailIntegration.config as Record<string, unknown>;
+        const secrets = emailIntegration.secrets as Record<string, string>;
+        const adapter = new EmailAdapter({
+          imap: {
+            host: (config.imap_host as string) ?? "",
+            port: (config.imap_port as number) ?? 993,
+            secure: true,
+            auth: { user: secrets.username ?? "", pass: secrets.password },
+          },
+          smtp: {
+            host: (config.smtp_host as string) ?? "",
+            port: (config.smtp_port as number) ?? 587,
+            secure: false,
+            auth: { user: secrets.username ?? "", pass: secrets.password },
+            from: secrets.username ?? "",
+          },
+          userEmail: secrets.username ?? "",
+          onMessage: enqueue,
+          draftManager: this.draftManager,
+        });
+        this.channelManager.register(adapter);
+      }
+    } catch {
+      // Email not configured — skip
     }
   }
 
