@@ -11,6 +11,7 @@
   <a href="#get-running-in-2-minutes">Quick Start</a> &middot;
   <a href="#why-nomos">Why Nomos</a> &middot;
   <a href="#what-you-get">Features</a> &middot;
+  <a href="#digital-clone">Digital Clone</a> &middot;
   <a href="#channel-integrations">Channels</a> &middot;
   <a href="#skills-system">Skills</a> &middot;
   <a href="#daemon-mode">Daemon</a> &middot;
@@ -43,10 +44,14 @@
 
 Most AI assistants are stateless chatbots that forget you the moment a conversation ends. Nomos is building toward something different: an **AI digital clone** that knows you deeply, acts on your behalf, and gets smarter with every interaction.
 
-- **Learns who you are** — Adaptive memory extracts your preferences, facts, communication style, and decisions. Over time, Nomos builds a persistent model of you that shapes every interaction.
-- **Acts on your behalf** — Drafts and sends emails, manages your calendar, preps meeting briefs, tracks action items, follows up, researches topics. Autonomously.
+- **Ingests your history** — Import years of Slack, Gmail, iMessage, and WhatsApp messages. Your clone starts with deep context from day one, not a blank slate. Continuous delta sync keeps it current.
+- **Learns your voice** — Per-contact communication style model analyzes how you write — formality, length, emoji, greetings — and drafts messages in your authentic voice. Different tone for your manager vs. your friends.
+- **Compiles knowledge** — A Karpathy-style knowledge wiki transforms raw messages into structured articles about your contacts, projects, and topics. The clone reads compiled knowledge first, RAG second.
+- **Unified identity graph** — Links contacts across Slack, email, iMessage, Discord, Telegram, and WhatsApp. One person, one profile, regardless of which platform they message you on.
+- **Acts on your behalf** — Drafts and sends emails, manages your calendar, preps meeting briefs, tracks commitments, follows up, triages across channels. Per-contact autonomy: auto-send, draft-for-approval, or silent.
 - **Remembers everything** — Every conversation is auto-indexed into vector memory. Ask "what did we decide about the API migration last week?" and it knows — across channels, across sessions.
-- **Represents you everywhere** — Slack, Discord, Telegram, WhatsApp, iMessage, terminal, web. Slack User Mode lets it draft and send messages as you. It's not a bot in your channel — it's you, augmented.
+- **Represents you everywhere** — Slack, Discord, Telegram, WhatsApp, iMessage, Email, terminal, web. Slack User Mode lets it draft and send messages as you. It's not a bot in your channel — it's you, augmented.
+- **Agent-to-agent trust** — CATE protocol (Consumer Agent Trust Envelope) enables secure communication between your clone and other agents with DID-based identity, verifiable credentials, policy enforcement, and anti-spam stamps.
 - **Multi-provider** — Anthropic, Vertex AI, OpenRouter, Ollama, or any compatible endpoint. Smart routing sends simple queries to fast models and complex ones to capable models — cutting costs 5-10x automatically.
 - **60+ built-in skills** — Gmail, Calendar, Drive, Docs, Sheets, document generation, image/video creation, browser automation, and more.
 - **Always on** — Runs as a background daemon with scheduled tasks, proactive notifications, and a web management dashboard.
@@ -124,8 +129,13 @@ nomos chat
 
 |                           | Feature                                     | What it does                                                                                |
 | ------------------------- | ------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| :dna:                     | [**Data Ingestion**](#digital-clone)        | Import years of Slack, Gmail, iMessage, and WhatsApp history. Continuous delta sync.        |
+| :pen:                     | [**Voice Modeling**](#digital-clone)        | Per-contact style analysis — formality, length, emoji, greetings. Drafts in your voice.     |
+| :books:                   | [**Knowledge Wiki**](#digital-clone)        | LLM-compiled articles about your contacts, projects, and topics. Structured knowledge.      |
+| :link:                    | [**Identity Graph**](#digital-clone)        | Unified contacts across all platforms. One person, one profile.                             |
+| :shield:                  | [**CATE Protocol**](#digital-clone)         | Agent-to-agent trust with DIDs, verifiable credentials, policy, and anti-spam stamps.       |
 | :brain:                   | [**Persistent Memory**](#features-in-depth) | Every conversation auto-indexed into pgvector. Recall anything from any session or channel. |
-| :speech_balloon:          | [**6 Channels**](#channel-integrations)     | Slack, Discord, Telegram, WhatsApp, iMessage — thin adapters, one agent runtime.            |
+| :speech_balloon:          | [**7 Channels**](#channel-integrations)     | Slack, Discord, Telegram, WhatsApp, iMessage, Email — thin adapters, one agent runtime.     |
 | :busts_in_silhouette:     | [**Multi-Agent Teams**](#features-in-depth) | Coordinator + parallel workers. Hand off complex tasks, get synthesized results.            |
 | :zap:                     | [**Smart Routing**](#features-in-depth)     | Route by complexity across any provider — cloud, local, or hybrid.                          |
 | :art:                     | [**Image & Video Gen**](#features-in-depth) | Gemini image + Veo video generation, conversational — just ask.                             |
@@ -150,6 +160,7 @@ nomos chat
 | **Telegram** | Bot              | grammY                                                   |
 | **WhatsApp** | Bridge           | Baileys (no Meta Business API needed)                    |
 | **iMessage** | Read-only bridge | macOS Messages.app SQLite                                |
+| **Email**    | IMAP + SMTP      | IMAP IDLE for real-time push, SMTP for sending           |
 | **Web/gRPC** | Client           | gRPC (8766) + WebSocket (8765)                           |
 
 Each adapter is ~50-100 LOC. All agent logic is centralized in `AgentRuntime`. See [docs/channels.md](docs/channels.md) for env vars and setup, or the [individual integration guides](docs/integrations/).
@@ -277,6 +288,109 @@ nomos service uninstall          # Remove launchd service
 
 ---
 
+## Digital Clone
+
+The digital clone features transform Nomos from a stateless chatbot into a persistent representation of you.
+
+<details>
+<summary><strong>Historical Data Ingestion</strong></summary>
+
+Import years of communication history from Slack, Gmail, iMessage, and WhatsApp. The ingestion pipeline deduplicates, chunks, embeds, and stores messages in pgvector-backed memory. Continuous delta sync keeps knowledge current — every 6 hours for Slack/Gmail, every hour for iMessage.
+
+```bash
+nomos ingest imessage --since 2024-01-01              # Import iMessage history
+nomos ingest slack --since 2024-06-01                 # Import Slack (sent only)
+nomos ingest status                                    # Check sync status
+```
+
+Smart filtering: Slack and Gmail ingest only sent messages. iMessage and WhatsApp ingest both directions for context, but style modeling uses sent messages exclusively.
+
+See [docs/ingestion.md](docs/ingestion.md) for full details.
+
+</details>
+
+<details>
+<summary><strong>Communication Style Model</strong></summary>
+
+Analyzes your sent messages to learn how you write — globally and per contact. Extracts formality level, typical message length, emoji usage, punctuation habits, greeting and sign-off patterns. The resulting `StyleProfile` is injected into the system prompt when drafting messages.
+
+- **Global profile** — Your overall writing voice
+- **Per-contact overrides** — More formal with your manager, casual with friends
+- **Confidence-tracked** — Warns when sample count is too low for reliable modeling
+
+See [docs/style-model.md](docs/style-model.md) for full details.
+
+</details>
+
+<details>
+<summary><strong>Knowledge Wiki</strong></summary>
+
+A Karpathy-style compiled knowledge base. An LLM periodically compiles raw ingested messages into structured markdown articles organized by contact, topic, and timeline. The agent reads compiled wiki articles first (cheap, structured), falls back to vector search for details.
+
+```
+~/.nomos/wiki/
+  contacts/sarah-chen.md     # Everything about Sarah
+  topics/kubernetes.md        # Cross-contact topic synthesis
+  timeline/2026-04.md         # Monthly activity digest
+```
+
+Articles stored in PostgreSQL (source of truth) and synced to disk as a browsable cache.
+
+See [docs/knowledge-wiki.md](docs/knowledge-wiki.md) for full details.
+
+</details>
+
+<details>
+<summary><strong>Cross-Channel Identity Graph</strong></summary>
+
+Unified contacts linking Slack ID, email, phone, Discord, and more into a single profile. Auto-linking heuristics merge contacts by display name, email, or user confirmation. Per-contact autonomy levels control how the clone handles outgoing messages:
+
+| Level    | Behavior                            |
+| -------- | ----------------------------------- |
+| `auto`   | Send immediately, no approval       |
+| `draft`  | Create draft for approval (default) |
+| `silent` | Observe only, don't respond         |
+
+```bash
+nomos contacts list                              # List all contacts
+nomos contacts link <id> slack U12345678         # Link identity
+nomos contacts merge <id1> <id2>                 # Merge contacts
+```
+
+See [docs/contacts.md](docs/contacts.md) for full details.
+
+</details>
+
+<details>
+<summary><strong>CATE Protocol (Agent-to-Agent Trust)</strong></summary>
+
+Secure agent-to-agent communication via the Consumer Agent Trust Envelope protocol. Built on `@cate-protocol/sdk` — a standalone, open-source library.
+
+- **DID-based identity** — Ed25519 key pairs with `did:key` identifiers
+- **Verifiable Credentials** — "Acts-for" VCs prove the agent acts on behalf of the user
+- **Policy engine** — Per-intent rules: allow personal, require approval for transactional, require stamps for promotional
+- **Anti-spam stamps** — Proof-of-work or micropayment stamps for unsolicited messages
+- **Signed Agent Cards** — A2A-compatible discovery format
+
+The CATE server starts automatically with the daemon on port 8801.
+
+See [docs/cate-protocol.md](docs/cate-protocol.md) for full details.
+
+</details>
+
+<details>
+<summary><strong>Proactive Agency</strong></summary>
+
+Beyond reactive responses — the clone tracks commitments, generates pre-meeting briefs, and triages across channels.
+
+- **Commitment tracking** — Extracts "I'll do X by Y" from conversations, tracks deadlines, sends reminders
+- **Meeting briefs** — Before meetings, looks up attendees in the identity graph, retrieves recent conversations, generates context
+- **Priority triage** — Aggregates unread across channels, ranks by sender importance and urgency
+
+</details>
+
+---
+
 ## Features in Depth
 
 <details>
@@ -364,16 +478,19 @@ Just say _"improve yourself"_, _"add tests for the chunker"_, or _"fix your sess
 
 A full Next.js app for onboarding, assistant configuration, channel management, and advanced settings — no YAML editing required.
 
-| Route             | Description                                                                     |
-| ----------------- | ------------------------------------------------------------------------------- |
-| `/setup`          | 5-step onboarding wizard (database, API, personality, channels, ready)          |
-| `/dashboard`      | Overview: assistant status, model, active channels, memory stats, quick actions |
-| `/settings`       | Assistant identity, API config, model, advanced settings                        |
-| `/integrations`   | Channel overview and per-platform configuration                                 |
-| `/admin/database` | Database connection and migration status                                        |
-| `/admin/memory`   | Memory store stats and management                                               |
-| `/admin/costs`    | Session cost tracking and per-model usage breakdown                             |
-| `/admin/context`  | Context window visualization with token budget breakdown                        |
+| Route              | Description                                                                       |
+| ------------------ | --------------------------------------------------------------------------------- |
+| `/setup`           | 6-step onboarding wizard (database, API, personality, channels, data sync, ready) |
+| `/dashboard`       | Overview: assistant status, model, active channels, memory stats, quick actions   |
+| `/settings`        | Assistant identity, API config, model, advanced settings                          |
+| `/integrations`    | Channel overview and per-platform configuration (incl. email)                     |
+| `/admin/database`  | Database connection and migration status                                          |
+| `/admin/memory`    | Memory store stats and management                                                 |
+| `/admin/costs`     | Session cost tracking and per-model usage breakdown                               |
+| `/admin/context`   | Context window visualization with token budget breakdown                          |
+| `/admin/ingestion` | Data ingestion dashboard: sync status, counts, trigger sync, delta toggle         |
+| `/admin/contacts`  | Contact management: identities, autonomy levels, merge/split                      |
+| `/admin/proactive` | Proactive features: commitments, triage, meeting briefs                           |
 
 ```bash
 nomos settings              # Start standalone on http://localhost:3456
