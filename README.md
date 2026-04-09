@@ -44,13 +44,13 @@
 
 Most AI assistants are stateless chatbots that forget you the moment a conversation ends. Nomos is building toward something different: an **AI digital clone** that knows you deeply, acts on your behalf, and gets smarter with every interaction.
 
-- **Ingests your history** — Import years of Slack, Gmail, iMessage, and WhatsApp messages. Your clone starts with deep context from day one, not a blank slate. Continuous delta sync keeps it current.
+- **Ingests your history** — Import years of Slack, Gmail, Messages.app, and WhatsApp messages. Your clone starts with deep context from day one, not a blank slate. Continuous delta sync keeps it current.
 - **Learns your voice** — Per-contact communication style model analyzes how you write — formality, length, emoji, greetings — and drafts messages in your authentic voice. Different tone for your manager vs. your friends.
 - **Compiles knowledge** — A Karpathy-style knowledge wiki transforms raw messages into structured articles about your contacts, projects, and topics. The clone reads compiled knowledge first, RAG second.
-- **Unified identity graph** — Links contacts across Slack, email, iMessage, Discord, Telegram, and WhatsApp. One person, one profile, regardless of which platform they message you on.
+- **Unified identity graph** — Links contacts across Slack, email, Messages.app, Discord, Telegram, and WhatsApp. One person, one profile, regardless of which platform they message you on.
 - **Acts on your behalf** — Drafts and sends emails, manages your calendar, preps meeting briefs, tracks commitments, follows up, triages across channels. Per-contact autonomy: auto-send, draft-for-approval, or silent.
 - **Remembers everything** — Every conversation is auto-indexed into vector memory. Ask "what did we decide about the API migration last week?" and it knows — across channels, across sessions.
-- **Represents you everywhere** — Slack, Discord, Telegram, WhatsApp, iMessage, Email, terminal, web. Slack User Mode lets it draft and send messages as you. It's not a bot in your channel — it's you, augmented.
+- **Represents you everywhere** — Slack, Discord, Telegram, WhatsApp, Messages.app, Email, terminal, web. Slack User Mode lets it draft and send messages as you. It's not a bot in your channel — it's you, augmented.
 - **Agent-to-agent trust** — CATE protocol (Consumer Agent Trust Envelope) enables secure communication between your clone and other agents with DID-based identity, verifiable credentials, policy enforcement, and anti-spam stamps.
 - **Multi-provider** — Anthropic, Vertex AI, OpenRouter, Ollama, or any compatible endpoint. Smart routing sends simple queries to fast models and complex ones to capable models — cutting costs 5-10x automatically.
 - **60+ built-in skills** — Gmail, Calendar, Drive, Docs, Sheets, document generation, image/video creation, browser automation, and more.
@@ -123,19 +123,77 @@ nomos chat
 - **PostgreSQL** with the [pgvector](https://github.com/pgvector/pgvector) extension
 - **One of**: Anthropic API key, Google Cloud credentials (Vertex AI), [OpenRouter](https://openrouter.ai) API key, or a local [Ollama](https://ollama.com) instance
 
+<details>
+<summary><strong>Database setup</strong></summary>
+
+Nomos requires PostgreSQL with the [pgvector](https://github.com/pgvector/pgvector) extension. Choose whichever method suits your setup:
+
+#### Option A: Homebrew (macOS)
+
+PostgreSQL and pgvector are separate packages — you need both:
+
+```bash
+# 1. Install PostgreSQL
+brew install postgresql@17
+brew services start postgresql@17
+
+# 2. Install the pgvector extension
+brew install pgvector
+
+# 3. Create the database
+createdb nomos
+
+# 4. Set your connection string
+export DATABASE_URL=postgresql://localhost:5432/nomos
+```
+
+#### Option B: Docker (recommended — includes pgvector out of the box)
+
+The `pgvector/pgvector` image bundles PostgreSQL + pgvector together, no separate install needed:
+
+```bash
+docker run -d --name nomos-db \
+  -e POSTGRES_USER=nomos \
+  -e POSTGRES_PASSWORD=nomos \
+  -e POSTGRES_DB=nomos \
+  -p 5432:5432 \
+  pgvector/pgvector:pg17
+
+export DATABASE_URL=postgresql://nomos:nomos@localhost:5432/nomos
+```
+
+#### Option C: Docker Compose (included in repo)
+
+```bash
+docker compose up -d db
+export DATABASE_URL=postgresql://nomos:nomos@localhost:5432/nomos
+```
+
+#### Then run migrations
+
+```bash
+nomos db migrate    # Creates all tables, enables pgvector extension
+```
+
+The setup wizard handles this automatically when you run `nomos chat` for the first time, but you can also run migrations manually at any time (they're idempotent).
+
+> **Already have PostgreSQL installed another way?** (Postgres.app, Linux package manager, etc.) — just install pgvector separately following the [pgvector install guide](https://github.com/pgvector/pgvector#installation), create a database, and set `DATABASE_URL`.
+
+</details>
+
 ---
 
 ## What You Get
 
 |                           | Feature                                     | What it does                                                                                |
 | ------------------------- | ------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| :dna:                     | [**Data Ingestion**](#digital-clone)        | Import years of Slack, Gmail, iMessage, and WhatsApp history. Continuous delta sync.        |
+| :dna:                     | [**Data Ingestion**](#digital-clone)        | Import years of Slack, Gmail, Messages.app, and WhatsApp history. Continuous delta sync.    |
 | :pen:                     | [**Voice Modeling**](#digital-clone)        | Per-contact style analysis — formality, length, emoji, greetings. Drafts in your voice.     |
 | :books:                   | [**Knowledge Wiki**](#digital-clone)        | LLM-compiled articles about your contacts, projects, and topics. Structured knowledge.      |
 | :link:                    | [**Identity Graph**](#digital-clone)        | Unified contacts across all platforms. One person, one profile.                             |
 | :shield:                  | [**CATE Protocol**](#digital-clone)         | Agent-to-agent trust with DIDs, verifiable credentials, policy, and anti-spam stamps.       |
 | :brain:                   | [**Persistent Memory**](#features-in-depth) | Every conversation auto-indexed into pgvector. Recall anything from any session or channel. |
-| :speech_balloon:          | [**7 Channels**](#channel-integrations)     | Slack, Discord, Telegram, WhatsApp, iMessage, Email — thin adapters, one agent runtime.     |
+| :speech_balloon:          | [**7 Channels**](#channel-integrations)     | Slack, Discord, Telegram, WhatsApp, Messages.app, Email — thin adapters, one agent runtime. |
 | :busts_in_silhouette:     | [**Multi-Agent Teams**](#features-in-depth) | Coordinator + parallel workers. Hand off complex tasks, get synthesized results.            |
 | :zap:                     | [**Smart Routing**](#features-in-depth)     | Route by complexity across any provider — cloud, local, or hybrid.                          |
 | :art:                     | [**Image & Video Gen**](#features-in-depth) | Gemini image + Veo video generation, conversational — just ask.                             |
@@ -153,15 +211,15 @@ nomos chat
 
 ## Channel Integrations
 
-| Platform     | Mode             | Transport                                                |
-| ------------ | ---------------- | -------------------------------------------------------- |
-| **Slack**    | Bot + User Mode  | Socket Mode + OAuth (multi-workspace, draft-before-send) |
-| **Discord**  | Bot              | Gateway                                                  |
-| **Telegram** | Bot              | grammY                                                   |
-| **WhatsApp** | Bridge           | Baileys (no Meta Business API needed)                    |
-| **iMessage** | Read-only bridge | macOS Messages.app SQLite                                |
-| **Email**    | IMAP + SMTP      | IMAP IDLE for real-time push, SMTP for sending           |
-| **Web/gRPC** | Client           | gRPC (8766) + WebSocket (8765)                           |
+| Platform         | Mode            | Transport                                                    |
+| ---------------- | --------------- | ------------------------------------------------------------ |
+| **Slack**        | Bot + User Mode | Socket Mode + OAuth (multi-workspace, draft-before-send)     |
+| **Discord**      | Bot             | Gateway                                                      |
+| **Telegram**     | Bot             | grammY                                                       |
+| **WhatsApp**     | Bridge          | Baileys (no Meta Business API needed)                        |
+| **Messages.app** | Dual mode       | Local chat.db (macOS) or BlueBubbles server (cross-platform) |
+| **Email**        | IMAP + SMTP     | IMAP IDLE for real-time push, SMTP for sending               |
+| **Web/gRPC**     | Client          | gRPC (8766) + WebSocket (8765)                               |
 
 Each adapter is ~50-100 LOC. All agent logic is centralized in `AgentRuntime`. See [docs/channels.md](docs/channels.md) for env vars and setup, or the [individual integration guides](docs/integrations/).
 
@@ -295,15 +353,15 @@ The digital clone features transform Nomos from a stateless chatbot into a persi
 <details>
 <summary><strong>Historical Data Ingestion</strong></summary>
 
-Import years of communication history from Slack, Gmail, iMessage, and WhatsApp. The ingestion pipeline deduplicates, chunks, embeds, and stores messages in pgvector-backed memory. Continuous delta sync keeps knowledge current — every 6 hours for Slack/Gmail, every hour for iMessage.
+Import years of communication history from Slack, Gmail, Messages.app, and WhatsApp. The ingestion pipeline deduplicates, chunks, embeds, and stores messages in pgvector-backed memory. Continuous delta sync keeps knowledge current — every 6 hours for Slack/Gmail, every hour for Messages.app.
 
 ```bash
-nomos ingest imessage --since 2024-01-01              # Import iMessage history
+nomos ingest imessage --since 2024-01-01              # Import Messages.app history
 nomos ingest slack --since 2024-06-01                 # Import Slack (sent only)
 nomos ingest status                                    # Check sync status
 ```
 
-Smart filtering: Slack and Gmail ingest only sent messages. iMessage and WhatsApp ingest both directions for context, but style modeling uses sent messages exclusively.
+Smart filtering: Slack and Gmail ingest only sent messages. Messages.app and WhatsApp ingest both directions for context, but style modeling uses sent messages exclusively.
 
 See [docs/ingestion.md](docs/ingestion.md) for full details.
 
@@ -560,13 +618,19 @@ Configuration is loaded with the following precedence: **Database > environment 
 
 ### Channel integrations
 
-| Variable             | Description                         | Default |
-| -------------------- | ----------------------------------- | ------- |
-| `SLACK_BOT_TOKEN`    | Slack Bot User OAuth Token          | --      |
-| `SLACK_APP_TOKEN`    | Slack App-Level Token (Socket Mode) | --      |
-| `DISCORD_BOT_TOKEN`  | Discord bot token                   | --      |
-| `TELEGRAM_BOT_TOKEN` | Telegram bot token from @BotFather  | --      |
-| `WHATSAPP_ENABLED`   | Set to `true` to enable WhatsApp    | --      |
+| Variable                 | Description                          | Default  |
+| ------------------------ | ------------------------------------ | -------- |
+| `SLACK_BOT_TOKEN`        | Slack Bot User OAuth Token           | --       |
+| `SLACK_APP_TOKEN`        | Slack App-Level Token (Socket Mode)  | --       |
+| `DISCORD_BOT_TOKEN`      | Discord bot token                    | --       |
+| `TELEGRAM_BOT_TOKEN`     | Telegram bot token from @BotFather   | --       |
+| `WHATSAPP_ENABLED`       | Set to `true` to enable WhatsApp     | --       |
+| `IMESSAGE_ENABLED`       | Set to `true` to enable Messages.app | --       |
+| `IMESSAGE_MODE`          | `chatdb` (macOS) or `bluebubbles`    | `chatdb` |
+| `BLUEBUBBLES_SERVER_URL` | BlueBubbles server URL               | --       |
+| `BLUEBUBBLES_PASSWORD`   | BlueBubbles API password             | --       |
+
+Email is configured via the Settings UI (`/integrations/email`) or the `integrations` table (IMAP/SMTP host, port, credentials).
 
 See `.env.example` for the complete list of all configuration options.
 

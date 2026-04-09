@@ -80,6 +80,27 @@ CREATE INDEX IF NOT EXISTS idx_memory_source ON memory_chunks(source);
 CREATE INDEX IF NOT EXISTS idx_memory_path ON memory_chunks(path);
 CREATE INDEX IF NOT EXISTS idx_memory_fts ON memory_chunks USING gin(to_tsvector('english', text));
 
+CREATE TABLE IF NOT EXISTS cron_jobs (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name TEXT NOT NULL,
+  schedule TEXT NOT NULL,
+  schedule_type TEXT NOT NULL CHECK (schedule_type IN ('at', 'every', 'cron')),
+  session_target TEXT NOT NULL DEFAULT 'isolated' CHECK (session_target IN ('main', 'isolated')),
+  delivery_mode TEXT NOT NULL DEFAULT 'none' CHECK (delivery_mode IN ('none', 'announce')),
+  prompt TEXT NOT NULL,
+  platform TEXT,
+  channel_id TEXT,
+  enabled BOOLEAN NOT NULL DEFAULT true,
+  error_count INT NOT NULL DEFAULT 0,
+  last_run TIMESTAMPTZ,
+  last_error TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_cron_name ON cron_jobs(name);
+CREATE INDEX IF NOT EXISTS idx_cron_enabled ON cron_jobs(enabled);
+CREATE INDEX IF NOT EXISTS idx_cron_platform ON cron_jobs(platform);
+
 CREATE TABLE IF NOT EXISTS cron_runs (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   job_id UUID NOT NULL REFERENCES cron_jobs(id) ON DELETE CASCADE,
@@ -121,27 +142,6 @@ CREATE TABLE IF NOT EXISTS channel_allowlists (
 );
 
 CREATE INDEX IF NOT EXISTS idx_allowlist_platform ON channel_allowlists(platform);
-
-CREATE TABLE IF NOT EXISTS cron_jobs (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  name TEXT NOT NULL,
-  schedule TEXT NOT NULL,
-  schedule_type TEXT NOT NULL CHECK (schedule_type IN ('at', 'every', 'cron')),
-  session_target TEXT NOT NULL DEFAULT 'isolated' CHECK (session_target IN ('main', 'isolated')),
-  delivery_mode TEXT NOT NULL DEFAULT 'none' CHECK (delivery_mode IN ('none', 'announce')),
-  prompt TEXT NOT NULL,
-  platform TEXT,
-  channel_id TEXT,
-  enabled BOOLEAN NOT NULL DEFAULT true,
-  error_count INT NOT NULL DEFAULT 0,
-  last_run TIMESTAMPTZ,
-  last_error TEXT,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
-CREATE UNIQUE INDEX IF NOT EXISTS idx_cron_name ON cron_jobs(name);
-CREATE INDEX IF NOT EXISTS idx_cron_enabled ON cron_jobs(enabled);
-CREATE INDEX IF NOT EXISTS idx_cron_platform ON cron_jobs(platform);
 
 CREATE TABLE IF NOT EXISTS draft_messages (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
