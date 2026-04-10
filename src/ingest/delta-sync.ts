@@ -10,6 +10,8 @@ import { runIngestionPipeline } from "./pipeline.ts";
 import { createSlackIngestSources } from "./sources/slack.ts";
 import { IMessageIngestSource } from "./sources/imessage.ts";
 import { GmailIngestSource } from "./sources/gmail.ts";
+import { DiscordIngestSource } from "./sources/discord.ts";
+import { TelegramIngestSource } from "./sources/telegram.ts";
 import type { IngestJobRow } from "./types.ts";
 
 /**
@@ -80,6 +82,12 @@ async function createSourceForPlatform(platform: string) {
   }
   if (platform === "gmail") {
     return new GmailIngestSource();
+  }
+  if (platform === "discord") {
+    return new DiscordIngestSource();
+  }
+  if (platform === "telegram") {
+    return new TelegramIngestSource();
   }
   return null;
 }

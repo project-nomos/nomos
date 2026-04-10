@@ -8,8 +8,9 @@
  */
 
 import { generateKeyPairSync, sign, verify, createPublicKey, createPrivateKey } from "node:crypto";
+import { sql } from "kysely";
 import type { Keystore, KeyPair } from "@cate-protocol/sdk/identity";
-import { getDb } from "../db/client.ts";
+import { getKysely } from "../db/client.ts";
 import { encrypt, decrypt } from "../db/encryption.ts";
 
 const INTEGRATION_PREFIX = "cate-key:";
@@ -26,7 +27,7 @@ export class NomosKeystore implements Keystore {
     const privateKey = new Uint8Array(privDer.subarray(privDer.length - 32));
 
     // Store encrypted in integrations table
-    const sql = getDb();
+    const db = getKysely();
     const secretData = JSON.stringify({
       publicKey: Buffer.from(publicKey).toString("hex"),
       privateKey: Buffer.from(privateKey).toString("hex"),
@@ -35,29 +36,33 @@ export class NomosKeystore implements Keystore {
     const configJson = JSON.stringify({ type: "cate-keypair", algorithm: "Ed25519" });
     const metadataJson = JSON.stringify({ keyId, createdAt: new Date().toISOString() });
 
-    await sql`
-      INSERT INTO integrations (name, enabled, config, secrets, metadata)
-      VALUES (
-        ${INTEGRATION_PREFIX + keyId},
-        true,
-        ${sql.json(configJson)},
-        ${encrypt(secretData)},
-        ${sql.json(metadataJson)}
+    await db
+      .insertInto("integrations")
+      .values({
+        name: INTEGRATION_PREFIX + keyId,
+        enabled: true,
+        config: configJson,
+        secrets: encrypt(secretData),
+        metadata: metadataJson,
+      })
+      .onConflict((oc) =>
+        oc.column("name").doUpdateSet({
+          secrets: sql`EXCLUDED.secrets`,
+          updated_at: sql`now()`,
+        }),
       )
-      ON CONFLICT (name) DO UPDATE SET
-        secrets = EXCLUDED.secrets,
-        updated_at = now()
-    `;
+      .execute();
 
     return { publicKey, privateKey };
   }
 
   async getKey(keyId: string): Promise<KeyPair | null> {
-    const sql = getDb();
-    const [row] = await sql<{ secrets: string }[]>`
-      SELECT secrets FROM integrations
-      WHERE name = ${INTEGRATION_PREFIX + keyId}
-    `;
+    const db = getKysely();
+    const row = await db
+      .selectFrom("integrations")
+      .select("secrets")
+      .where("name", "=", INTEGRATION_PREFIX + keyId)
+      .executeTakeFirst();
 
     if (!row) return null;
 
@@ -91,19 +96,20 @@ export class NomosKeystore implements Keystore {
   }
 
   async listKeys(): Promise<string[]> {
-    const sql = getDb();
-    const rows = await sql<{ name: string }[]>`
-      SELECT name FROM integrations
-      WHERE name LIKE ${INTEGRATION_PREFIX + "%"}
-    `;
+    const db = getKysely();
+    const rows = await db
+      .selectFrom("integrations")
+      .select("name")
+      .where("name", "like", INTEGRATION_PREFIX + "%")
+      .execute();
     return rows.map((r) => r.name.slice(INTEGRATION_PREFIX.length));
   }
 
   async deleteKey(keyId: string): Promise<void> {
-    const sql = getDb();
-    await sql`
-      DELETE FROM integrations
-      WHERE name = ${INTEGRATION_PREFIX + keyId}
-    `;
+    const db = getKysely();
+    await db
+      .deleteFrom("integrations")
+      .where("name", "=", INTEGRATION_PREFIX + keyId)
+      .execute();
   }
 }

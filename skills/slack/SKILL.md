@@ -1,6 +1,6 @@
 ---
 name: slack
-description: "Interact with Slack workspaces — send messages, react, pin/unpin, read history, manage threads, search, upload files, and look up members. Use when the user asks to send a Slack message, react to something, read a channel, or manage Slack content. Requires SLACK_BOT_TOKEN to be configured in .env."
+description: "Interact with Slack workspaces — send messages, react, pin/unpin, read history, manage threads, search, upload files, and look up members. Use when the user asks to send a Slack message, react to something, read a channel, or manage Slack content."
 emoji: "💬"
 ---
 

@@ -5,7 +5,8 @@
  * role, frequency, topics, and interaction history.
  */
 
-import { getDb } from "../db/client.ts";
+import { sql } from "kysely";
+import { getKysely } from "../db/client.ts";
 
 export interface RelationshipData {
   role?: string; // colleague, friend, family, client, manager, etc.
@@ -18,24 +19,28 @@ export interface RelationshipData {
 }
 
 export async function updateRelationship(contactId: string, data: RelationshipData): Promise<void> {
-  const sql = getDb();
+  const db = getKysely();
   const dataJson = JSON.stringify(data);
 
-  await sql`
-    UPDATE contacts
-    SET relationship = relationship || ${dataJson}::jsonb,
-        updated_at = now()
-    WHERE id = ${contactId}
-  `;
+  await db
+    .updateTable("contacts")
+    .set({
+      relationship: sql`relationship || ${dataJson}::jsonb`,
+      updated_at: sql`now()`,
+    })
+    .where("id", "=", contactId)
+    .execute();
 }
 
 export async function getRelationship(contactId: string): Promise<RelationshipData | null> {
-  const sql = getDb();
-  const rows = await sql<{ relationship: Record<string, unknown> }[]>`
-    SELECT relationship FROM contacts WHERE id = ${contactId}
-  `;
-  if (rows.length === 0) return null;
-  return rows[0].relationship as RelationshipData;
+  const db = getKysely();
+  const row = await db
+    .selectFrom("contacts")
+    .select("relationship")
+    .where("id", "=", contactId)
+    .executeTakeFirst();
+  if (!row) return null;
+  return row.relationship as unknown as RelationshipData;
 }
 
 /**
@@ -44,32 +49,29 @@ export async function getRelationship(contactId: string): Promise<RelationshipDa
 export async function computeRelationshipStats(
   contactId: string,
 ): Promise<RelationshipData | null> {
-  const sql = getDb();
+  const db = getKysely();
 
   // Get all identities for this contact
-  const identities = await sql<{ platform_user_id: string }[]>`
-    SELECT platform_user_id FROM contact_identities WHERE contact_id = ${contactId}
-  `;
+  const identities = await db
+    .selectFrom("contact_identities")
+    .select("platform_user_id")
+    .where("contact_id", "=", contactId)
+    .execute();
 
   if (identities.length === 0) return null;
 
   const userIds = identities.map((i) => i.platform_user_id);
 
-  const [stats] = await sql<
-    {
-      msg_count: number;
-      first_msg: string | null;
-      last_msg: string | null;
-    }[]
-  >`
-    SELECT
-      COUNT(*)::int AS msg_count,
-      MIN(metadata->>'timestamp') AS first_msg,
-      MAX(metadata->>'timestamp') AS last_msg
-    FROM memory_chunks
-    WHERE metadata->>'source' = 'ingest'
-      AND metadata->>'contact' = ANY(${userIds})
-  `;
+  const stats = await db
+    .selectFrom("memory_chunks")
+    .select([
+      sql<number>`COUNT(*)::int`.as("msg_count"),
+      sql<string | null>`MIN(metadata->>'timestamp')`.as("first_msg"),
+      sql<string | null>`MAX(metadata->>'timestamp')`.as("last_msg"),
+    ])
+    .where(sql`metadata->>'source'`, "=", "ingest")
+    .where(sql`metadata->>'contact'`, "=", sql`ANY(${userIds})`)
+    .executeTakeFirst();
 
   if (!stats || stats.msg_count === 0) return null;
 

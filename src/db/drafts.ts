@@ -5,7 +5,8 @@
  * being sent as the authenticated Slack user.
  */
 
-import { getDb } from "./client.ts";
+import { sql } from "kysely";
+import { getKysely } from "./client.ts";
 
 export interface DraftRow {
   id: string;
@@ -35,98 +36,105 @@ export async function createDraft(params: {
   context?: Record<string, unknown>;
   ttlHours?: number;
 }): Promise<DraftRow> {
-  const sql = getDb();
+  const db = getKysely();
   const ttl = params.ttlHours ?? DEFAULT_TTL_HOURS;
 
-  const [row] = await sql<DraftRow[]>`
-    INSERT INTO draft_messages (platform, channel_id, thread_id, user_id, in_reply_to, content, context, expires_at)
-    VALUES (
-      ${params.platform},
-      ${params.channelId},
-      ${params.threadId ?? null},
-      ${params.userId},
-      ${params.inReplyTo},
-      ${params.content},
-      ${JSON.stringify(params.context ?? {})},
-      now() + ${`${ttl} hours`}::interval
-    )
-    RETURNING *
-  `;
-  return row;
+  const row = await db
+    .insertInto("draft_messages")
+    .values({
+      platform: params.platform,
+      channel_id: params.channelId,
+      thread_id: params.threadId ?? null,
+      user_id: params.userId,
+      in_reply_to: params.inReplyTo,
+      content: params.content,
+      context: JSON.stringify(params.context ?? {}),
+      expires_at: sql`now() + ${`${ttl} hours`}::interval`,
+    })
+    .returningAll()
+    .executeTakeFirstOrThrow();
+  return row as unknown as DraftRow;
 }
 
 export async function getDraft(id: string): Promise<DraftRow | null> {
-  const sql = getDb();
-  const [row] = await sql<DraftRow[]>`
-    SELECT * FROM draft_messages WHERE id = ${id}
-  `;
-  return row ?? null;
+  const db = getKysely();
+  const row = await db
+    .selectFrom("draft_messages")
+    .selectAll()
+    .where("id", "=", id)
+    .executeTakeFirst();
+  return (row as unknown as DraftRow) ?? null;
 }
 
 export async function getDraftByPrefix(prefix: string): Promise<DraftRow | null> {
-  const sql = getDb();
-  const [row] = await sql<DraftRow[]>`
-    SELECT * FROM draft_messages
-    WHERE id::text LIKE ${prefix + "%"}
-    ORDER BY created_at DESC
-    LIMIT 1
-  `;
-  return row ?? null;
+  const db = getKysely();
+  const row = await db
+    .selectFrom("draft_messages")
+    .selectAll()
+    .where(sql`id::text`, "like", `${prefix}%`)
+    .orderBy("created_at", "desc")
+    .limit(1)
+    .executeTakeFirst();
+  return (row as unknown as DraftRow) ?? null;
 }
 
 export async function listPendingDrafts(userId?: string): Promise<DraftRow[]> {
-  const sql = getDb();
+  const db = getKysely();
+  let query = db
+    .selectFrom("draft_messages")
+    .selectAll()
+    .where("status", "=", "pending")
+    .where("expires_at", ">", sql<Date>`now()`)
+    .orderBy("created_at", "desc");
+
   if (userId) {
-    return sql<DraftRow[]>`
-      SELECT * FROM draft_messages
-      WHERE status = 'pending' AND expires_at > now() AND user_id = ${userId}
-      ORDER BY created_at DESC
-    `;
+    query = query.where("user_id", "=", userId);
   }
-  return sql<DraftRow[]>`
-    SELECT * FROM draft_messages
-    WHERE status = 'pending' AND expires_at > now()
-    ORDER BY created_at DESC
-  `;
+
+  return query.execute() as unknown as Promise<DraftRow[]>;
 }
 
 export async function approveDraft(id: string): Promise<DraftRow | null> {
-  const sql = getDb();
-  const [row] = await sql<DraftRow[]>`
-    UPDATE draft_messages
-    SET status = 'approved', approved_at = now()
-    WHERE id = ${id} AND status = 'pending'
-    RETURNING *
-  `;
-  return row ?? null;
+  const db = getKysely();
+  const row = await db
+    .updateTable("draft_messages")
+    .set({ status: "approved", approved_at: sql<Date>`now()` })
+    .where("id", "=", id)
+    .where("status", "=", "pending")
+    .returningAll()
+    .executeTakeFirst();
+  return (row as unknown as DraftRow) ?? null;
 }
 
 export async function rejectDraft(id: string): Promise<DraftRow | null> {
-  const sql = getDb();
-  const [row] = await sql<DraftRow[]>`
-    UPDATE draft_messages
-    SET status = 'rejected'
-    WHERE id = ${id} AND status = 'pending'
-    RETURNING *
-  `;
-  return row ?? null;
+  const db = getKysely();
+  const row = await db
+    .updateTable("draft_messages")
+    .set({ status: "rejected" })
+    .where("id", "=", id)
+    .where("status", "=", "pending")
+    .returningAll()
+    .executeTakeFirst();
+  return (row as unknown as DraftRow) ?? null;
 }
 
 export async function markDraftSent(id: string): Promise<DraftRow | null> {
-  const sql = getDb();
-  const [row] = await sql<DraftRow[]>`
-    UPDATE draft_messages
-    SET status = 'sent', sent_at = now()
-    WHERE id = ${id} AND status = 'approved'
-    RETURNING *
-  `;
-  return row ?? null;
+  const db = getKysely();
+  const row = await db
+    .updateTable("draft_messages")
+    .set({ status: "sent", sent_at: sql<Date>`now()` })
+    .where("id", "=", id)
+    .where("status", "=", "approved")
+    .returningAll()
+    .executeTakeFirst();
+  return (row as unknown as DraftRow) ?? null;
 }
 
 export async function cleanExpiredDrafts(): Promise<number> {
-  const sql = getDb();
-  const result = await sql`
-    DELETE FROM draft_messages WHERE expires_at < now()
-  `;
-  return result.count;
+  const db = getKysely();
+  const result = await db
+    .deleteFrom("draft_messages")
+    .where("expires_at", "<", sql<Date>`now()`)
+    .executeTakeFirst();
+  return Number(result.numDeletedRows ?? 0n);
 }

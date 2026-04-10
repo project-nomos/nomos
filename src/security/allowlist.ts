@@ -1,5 +1,6 @@
 import process from "node:process";
-import { getDb } from "../db/client.ts";
+import { sql } from "kysely";
+import { getKysely } from "../db/client.ts";
 import type { AllowlistEntry } from "./types.ts";
 
 export class AllowlistStore {
@@ -7,32 +8,36 @@ export class AllowlistStore {
    * Add a user to the allowlist
    */
   async addUser(platform: string, userId: string, addedBy?: string): Promise<AllowlistEntry> {
-    const sql = getDb();
+    const db = getKysely();
 
-    const [row] = await sql<AllowlistEntry[]>`
-      INSERT INTO channel_allowlists (platform, user_id, added_by)
-      VALUES (${platform}, ${userId}, ${addedBy ?? null})
-      ON CONFLICT (platform, user_id) DO UPDATE SET
-        added_by = EXCLUDED.added_by,
-        created_at = now()
-      RETURNING *
-    `;
+    const row = await db
+      .insertInto("channel_allowlists")
+      .values({ platform, user_id: userId, added_by: addedBy ?? null })
+      .onConflict((oc) =>
+        oc.columns(["platform", "user_id"]).doUpdateSet({
+          added_by: sql`EXCLUDED.added_by`,
+          created_at: sql`now()`,
+        }),
+      )
+      .returningAll()
+      .executeTakeFirstOrThrow();
 
-    return row;
+    return row as unknown as AllowlistEntry;
   }
 
   /**
    * Remove a user from the allowlist
    */
   async removeUser(platform: string, userId: string): Promise<boolean> {
-    const sql = getDb();
+    const db = getKysely();
 
-    const result = await sql`
-      DELETE FROM channel_allowlists
-      WHERE platform = ${platform} AND user_id = ${userId}
-    `;
+    const result = await db
+      .deleteFrom("channel_allowlists")
+      .where("platform", "=", platform)
+      .where("user_id", "=", userId)
+      .executeTakeFirst();
 
-    return (result.count ?? 0) > 0;
+    return Number(result.numDeletedRows ?? 0n) > 0;
   }
 
   /**
@@ -45,13 +50,16 @@ export class AllowlistStore {
     }
 
     // Check database
-    const sql = getDb();
-    const [row] = await sql<{ exists: boolean }[]>`
-      SELECT EXISTS(
+    const db = getKysely();
+    const row = await db
+      .selectFrom("channel_allowlists")
+      .select(
+        sql<boolean>`EXISTS(
         SELECT 1 FROM channel_allowlists
         WHERE platform = ${platform} AND user_id = ${userId}
-      ) as exists
-    `;
+      )`.as("exists"),
+      )
+      .executeTakeFirst();
 
     return row?.exists ?? false;
   }
@@ -60,13 +68,14 @@ export class AllowlistStore {
    * List all allowed users for a platform
    */
   async listUsers(platform: string): Promise<AllowlistEntry[]> {
-    const sql = getDb();
+    const db = getKysely();
 
-    return sql<AllowlistEntry[]>`
-      SELECT * FROM channel_allowlists
-      WHERE platform = ${platform}
-      ORDER BY created_at DESC
-    `;
+    return db
+      .selectFrom("channel_allowlists")
+      .selectAll()
+      .where("platform", "=", platform)
+      .orderBy("created_at", "desc")
+      .execute() as unknown as Promise<AllowlistEntry[]>;
   }
 
   /**

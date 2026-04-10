@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev --port 3456",
-    "build": "next build",
+    "build": "next build && cp -r .next/static .next/standalone/settings/.next/static",
     "start": "next start --port 3456"
   },
   "dependencies": {

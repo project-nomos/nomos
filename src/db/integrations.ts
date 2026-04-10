@@ -6,7 +6,8 @@
  * AES-256-GCM when ENCRYPTION_KEY is configured.
  */
 
-import { getDb } from "./client.ts";
+import { sql } from "kysely";
+import { getKysely } from "./client.ts";
 import { encrypt, decrypt } from "./encryption.ts";
 
 export interface Integration {
@@ -68,62 +69,70 @@ export async function upsertIntegration(
     enabled?: boolean;
   },
 ): Promise<Integration> {
-  const sql = getDb();
+  const db = getKysely();
   const secretsStr = params.secrets ? encryptSecrets(params.secrets) : "";
-  const configObj = (params.config ?? {}) as Record<string, never>;
-  const metadataObj = (params.metadata ?? {}) as Record<string, never>;
+  const configJson = JSON.stringify(params.config ?? {});
+  const metadataJson = JSON.stringify(params.metadata ?? {});
   const enabled = params.enabled ?? true;
 
-  const [row] = await sql<IntegrationRow[]>`
-    INSERT INTO integrations (name, enabled, config, secrets, metadata)
-    VALUES (
-      ${name},
-      ${enabled},
-      ${sql.json(configObj)},
-      ${secretsStr},
-      ${sql.json(metadataObj)}
+  const row = await db
+    .insertInto("integrations")
+    .values({
+      name,
+      enabled,
+      config: configJson,
+      secrets: secretsStr,
+      metadata: metadataJson,
+    })
+    .onConflict((oc) =>
+      oc.column("name").doUpdateSet({
+        enabled: sql`COALESCE(${params.enabled ?? null}::boolean, integrations.enabled)`,
+        config: sql`CASE WHEN ${params.config !== undefined} THEN ${configJson}::jsonb ELSE integrations.config END`,
+        secrets: sql`CASE WHEN ${params.secrets !== undefined} THEN ${secretsStr} ELSE integrations.secrets END`,
+        metadata: sql`CASE WHEN ${params.metadata !== undefined} THEN ${metadataJson}::jsonb ELSE integrations.metadata END`,
+        updated_at: sql`now()`,
+      }),
     )
-    ON CONFLICT (name) DO UPDATE SET
-      enabled = COALESCE(${params.enabled ?? null}::boolean, integrations.enabled),
-      config = CASE WHEN ${params.config !== undefined} THEN ${sql.json(configObj)} ELSE integrations.config END,
-      secrets = CASE WHEN ${params.secrets !== undefined} THEN ${secretsStr} ELSE integrations.secrets END,
-      metadata = CASE WHEN ${params.metadata !== undefined} THEN ${sql.json(metadataObj)} ELSE integrations.metadata END,
-      updated_at = now()
-    RETURNING *
-  `;
-  return rowToIntegration(row);
+    .returningAll()
+    .executeTakeFirstOrThrow();
+  return rowToIntegration(row as unknown as IntegrationRow);
 }
 
 export async function getIntegration(name: string): Promise<Integration | null> {
-  const sql = getDb();
-  const [row] = await sql<IntegrationRow[]>`
-    SELECT * FROM integrations WHERE name = ${name}
-  `;
-  return row ? rowToIntegration(row) : null;
+  const db = getKysely();
+  const row = await db
+    .selectFrom("integrations")
+    .selectAll()
+    .where("name", "=", name)
+    .executeTakeFirst();
+  return row ? rowToIntegration(row as unknown as IntegrationRow) : null;
 }
 
 export async function listIntegrations(): Promise<Integration[]> {
-  const sql = getDb();
-  const rows = await sql<IntegrationRow[]>`
-    SELECT * FROM integrations ORDER BY name
-  `;
-  return rows.map(rowToIntegration);
+  const db = getKysely();
+  const rows = await db.selectFrom("integrations").selectAll().orderBy("name").execute();
+  return rows.map((r) => rowToIntegration(r as unknown as IntegrationRow));
 }
 
 export async function listIntegrationsByPrefix(prefix: string): Promise<Integration[]> {
-  const sql = getDb();
-  const rows = await sql<IntegrationRow[]>`
-    SELECT * FROM integrations WHERE name LIKE ${prefix + "%"} ORDER BY name
-  `;
-  return rows.map(rowToIntegration);
+  const db = getKysely();
+  const rows = await db
+    .selectFrom("integrations")
+    .selectAll()
+    .where("name", "like", `${prefix}%`)
+    .orderBy("name")
+    .execute();
+  return rows.map((r) => rowToIntegration(r as unknown as IntegrationRow));
 }
 
 export async function removeIntegration(name: string): Promise<Integration | null> {
-  const sql = getDb();
-  const [row] = await sql<IntegrationRow[]>`
-    DELETE FROM integrations WHERE name = ${name} RETURNING *
-  `;
-  return row ? rowToIntegration(row) : null;
+  const db = getKysely();
+  const row = await db
+    .deleteFrom("integrations")
+    .where("name", "=", name)
+    .returningAll()
+    .executeTakeFirst();
+  return row ? rowToIntegration(row as unknown as IntegrationRow) : null;
 }
 
 /**

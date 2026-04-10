@@ -1,4 +1,5 @@
-import { getDb } from "./client.ts";
+import { sql } from "kysely";
+import { getKysely } from "./client.ts";
 
 export interface SessionRow {
   id: string;
@@ -22,53 +23,62 @@ export async function createSession(params: {
   model?: string;
   metadata?: Record<string, unknown>;
 }): Promise<SessionRow> {
-  const sql = getDb();
-  const [row] = await sql<SessionRow[]>`
-    INSERT INTO sessions (session_key, agent_id, model, metadata)
-    VALUES (
-      ${params.sessionKey},
-      ${params.agentId ?? "default"},
-      ${params.model ?? null},
-      ${JSON.stringify(params.metadata ?? {})}
+  const db = getKysely();
+  const row = await db
+    .insertInto("sessions")
+    .values({
+      session_key: params.sessionKey,
+      agent_id: params.agentId ?? "default",
+      model: params.model ?? null,
+      metadata: JSON.stringify(params.metadata ?? {}),
+    })
+    .onConflict((oc) =>
+      oc.column("session_key").doUpdateSet({
+        updated_at: sql`now()`,
+        status: "active",
+      }),
     )
-    ON CONFLICT (session_key) DO UPDATE SET
-      updated_at = now(),
-      status = 'active'
-    RETURNING *
-  `;
-  return row;
+    .returningAll()
+    .executeTakeFirstOrThrow();
+  return row as unknown as SessionRow;
 }
 
 export async function getSession(sessionId: string): Promise<SessionRow | null> {
-  const sql = getDb();
-  const [row] = await sql<SessionRow[]>`
-    SELECT * FROM sessions WHERE id = ${sessionId}
-  `;
-  return row ?? null;
+  const db = getKysely();
+  const row = await db
+    .selectFrom("sessions")
+    .selectAll()
+    .where("id", "=", sessionId)
+    .executeTakeFirst();
+  return (row as unknown as SessionRow) ?? null;
 }
 
 export async function getSessionByKey(sessionKey: string): Promise<SessionRow | null> {
-  const sql = getDb();
-  const [row] = await sql<SessionRow[]>`
-    SELECT * FROM sessions WHERE session_key = ${sessionKey}
-  `;
-  return row ?? null;
+  const db = getKysely();
+  const row = await db
+    .selectFrom("sessions")
+    .selectAll()
+    .where("session_key", "=", sessionKey)
+    .executeTakeFirst();
+  return (row as unknown as SessionRow) ?? null;
 }
 
 export async function listSessions(params?: {
   status?: string;
   limit?: number;
 }): Promise<SessionRow[]> {
-  const sql = getDb();
+  const db = getKysely();
   const status = params?.status ?? "active";
   const limit = params?.limit ?? 50;
 
-  return sql<SessionRow[]>`
-    SELECT * FROM sessions
-    WHERE status = ${status}
-    ORDER BY updated_at DESC
-    LIMIT ${limit}
-  `;
+  const rows = await db
+    .selectFrom("sessions")
+    .selectAll()
+    .where("status", "=", status)
+    .orderBy("updated_at", "desc")
+    .limit(limit)
+    .execute();
+  return rows as unknown as SessionRow[];
 }
 
 export async function updateSessionUsage(
@@ -76,47 +86,53 @@ export async function updateSessionUsage(
   inputTokens: number,
   outputTokens: number,
 ): Promise<void> {
-  const sql = getDb();
-  await sql`
-    UPDATE sessions SET
-      token_usage = jsonb_build_object(
+  const db = getKysely();
+  await db
+    .updateTable("sessions")
+    .set({
+      token_usage: sql`jsonb_build_object(
         'input', (COALESCE((token_usage->>'input')::int, 0) + ${inputTokens}),
         'output', (COALESCE((token_usage->>'output')::int, 0) + ${outputTokens})
-      ),
-      updated_at = now()
-    WHERE id = ${sessionId}
-  `;
+      )`,
+      updated_at: sql`now()`,
+    })
+    .where("id", "=", sessionId)
+    .execute();
 }
 
 export async function updateSessionModel(sessionId: string, model: string): Promise<void> {
-  const sql = getDb();
-  await sql`
-    UPDATE sessions SET model = ${model}, updated_at = now()
-    WHERE id = ${sessionId}
-  `;
+  const db = getKysely();
+  await db
+    .updateTable("sessions")
+    .set({ model, updated_at: sql`now()` })
+    .where("id", "=", sessionId)
+    .execute();
 }
 
 export async function updateSessionSdkId(sessionKey: string, sdkSessionId: string): Promise<void> {
-  const sql = getDb();
-  await sql`
-    UPDATE sessions SET
-      metadata = jsonb_set(COALESCE(metadata, '{}'), '{sdkSessionId}', ${JSON.stringify(sdkSessionId)}::jsonb),
-      updated_at = now()
-    WHERE session_key = ${sessionKey}
-  `;
+  const db = getKysely();
+  await db
+    .updateTable("sessions")
+    .set({
+      metadata: sql`jsonb_set(COALESCE(metadata, '{}'), '{sdkSessionId}', ${JSON.stringify(sdkSessionId)}::jsonb)`,
+      updated_at: sql`now()`,
+    })
+    .where("session_key", "=", sessionKey)
+    .execute();
 }
 
 export async function archiveSession(sessionId: string): Promise<void> {
-  const sql = getDb();
-  await sql`
-    UPDATE sessions SET status = 'archived', updated_at = now()
-    WHERE id = ${sessionId}
-  `;
+  const db = getKysely();
+  await db
+    .updateTable("sessions")
+    .set({ status: "archived", updated_at: sql`now()` })
+    .where("id", "=", sessionId)
+    .execute();
 }
 
 export async function deleteSession(sessionId: string): Promise<void> {
-  const sql = getDb();
-  await sql`DELETE FROM sessions WHERE id = ${sessionId}`;
+  const db = getKysely();
+  await db.deleteFrom("sessions").where("id", "=", sessionId).execute();
 }
 
 export async function updateSessionCost(
@@ -125,14 +141,16 @@ export async function updateSessionCost(
   inputTokens: number,
   outputTokens: number,
 ): Promise<void> {
-  const sql = getDb();
-  await sql`
-    UPDATE sessions SET
-      total_cost_usd = total_cost_usd + ${costUsd},
-      input_tokens = input_tokens + ${inputTokens},
-      output_tokens = output_tokens + ${outputTokens},
-      turn_count = turn_count + 1,
-      updated_at = now()
-    WHERE session_key = ${sessionKey}
-  `;
+  const db = getKysely();
+  await db
+    .updateTable("sessions")
+    .set({
+      total_cost_usd: sql`total_cost_usd + ${costUsd}`,
+      input_tokens: sql`input_tokens + ${inputTokens}`,
+      output_tokens: sql`output_tokens + ${outputTokens}`,
+      turn_count: sql`turn_count + 1`,
+      updated_at: sql`now()`,
+    })
+    .where("session_key", "=", sessionKey)
+    .execute();
 }

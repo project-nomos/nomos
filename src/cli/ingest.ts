@@ -7,13 +7,15 @@
  *   nomos ingest slack [--since DATE] [--dry-run]
  *   nomos ingest imessage [--since DATE] [--contact NAME] [--dry-run]
  *   nomos ingest gmail [--since DATE] [--contact NAME] [--dry-run]
+ *   nomos ingest discord [--since DATE] [--dry-run]
+ *   nomos ingest telegram [--since DATE] [--dry-run]
  *   nomos ingest whatsapp <file> --user-name NAME [--since DATE] [--dry-run]
  *   nomos ingest status
  */
 
 import { Command } from "commander";
 import chalk from "chalk";
-import { getDb } from "../db/client.ts";
+import { getDb, closeDb } from "../db/client.ts";
 import {
   runIngestionPipeline,
   listIngestJobs,
@@ -21,6 +23,8 @@ import {
   IMessageIngestSource,
   GmailIngestSource,
   WhatsAppIngestSource,
+  DiscordIngestSource,
+  TelegramIngestSource,
 } from "../ingest/index.ts";
 import type { IngestSource, IngestOptions } from "../ingest/types.ts";
 
@@ -37,15 +41,19 @@ export function registerIngestCommand(program: Command): void {
     .option("--dry-run", "Count messages without storing")
     .action(async (opts) => {
       getDb();
-      const sources = await createSlackIngestSources();
-      if (sources.length === 0) {
-        console.log(chalk.yellow("No Slack workspaces configured. Add one in Settings first."));
-        return;
-      }
+      try {
+        const sources = await createSlackIngestSources();
+        if (sources.length === 0) {
+          console.log(chalk.yellow("No Slack workspaces configured. Add one in Settings first."));
+          return;
+        }
 
-      for (const source of sources) {
-        console.log(chalk.blue(`\nIngesting from ${source.platform}...`));
-        await runSource(source, opts);
+        for (const source of sources) {
+          console.log(chalk.blue(`\nIngesting from ${source.platform}...`));
+          await runSource(source, opts);
+        }
+      } finally {
+        await closeDb();
       }
     });
 
@@ -59,9 +67,13 @@ export function registerIngestCommand(program: Command): void {
     .option("--db-path <path>", "Custom path to chat.db")
     .action(async (opts) => {
       getDb();
-      const source = new IMessageIngestSource(opts.dbPath);
-      console.log(chalk.blue("Ingesting from iMessage..."));
-      await runSource(source, opts);
+      try {
+        const source = new IMessageIngestSource(opts.dbPath);
+        console.log(chalk.blue("Ingesting from iMessage..."));
+        await runSource(source, opts);
+      } finally {
+        await closeDb();
+      }
     });
 
   // nomos ingest gmail
@@ -73,9 +85,47 @@ export function registerIngestCommand(program: Command): void {
     .option("--dry-run", "Count messages without storing")
     .action(async (opts) => {
       getDb();
-      const source = new GmailIngestSource();
-      console.log(chalk.blue("Ingesting from Gmail (sent folder)..."));
-      await runSource(source, opts);
+      try {
+        const source = new GmailIngestSource();
+        console.log(chalk.blue("Ingesting from Gmail (sent folder)..."));
+        await runSource(source, opts);
+      } finally {
+        await closeDb();
+      }
+    });
+
+  // nomos ingest discord
+  ingest
+    .command("discord")
+    .description("Ingest sent messages from Discord")
+    .option("--since <date>", "Only ingest messages after this date")
+    .option("--dry-run", "Count messages without storing")
+    .action(async (opts) => {
+      getDb();
+      try {
+        const source = new DiscordIngestSource();
+        console.log(chalk.blue("Ingesting from Discord..."));
+        await runSource(source, opts);
+      } finally {
+        await closeDb();
+      }
+    });
+
+  // nomos ingest telegram
+  ingest
+    .command("telegram")
+    .description("Ingest sent messages from Telegram")
+    .option("--since <date>", "Only ingest messages after this date")
+    .option("--dry-run", "Count messages without storing")
+    .action(async (opts) => {
+      getDb();
+      try {
+        const source = new TelegramIngestSource();
+        console.log(chalk.blue("Ingesting from Telegram..."));
+        await runSource(source, opts);
+      } finally {
+        await closeDb();
+      }
     });
 
   // nomos ingest whatsapp
@@ -87,9 +137,13 @@ export function registerIngestCommand(program: Command): void {
     .option("--dry-run", "Count messages without storing")
     .action(async (file: string, opts) => {
       getDb();
-      const source = new WhatsAppIngestSource(file, opts.userName);
-      console.log(chalk.blue(`Ingesting from WhatsApp export: ${file}...`));
-      await runSource(source, opts);
+      try {
+        const source = new WhatsAppIngestSource(file, opts.userName);
+        console.log(chalk.blue(`Ingesting from WhatsApp export: ${file}...`));
+        await runSource(source, opts);
+      } finally {
+        await closeDb();
+      }
     });
 
   // nomos ingest status
@@ -98,43 +152,47 @@ export function registerIngestCommand(program: Command): void {
     .description("Show ingestion job status")
     .action(async () => {
       getDb();
-      const jobs = await listIngestJobs();
+      try {
+        const jobs = await listIngestJobs();
 
-      if (jobs.length === 0) {
-        console.log(chalk.dim("No ingestion jobs found."));
-        return;
-      }
+        if (jobs.length === 0) {
+          console.log(chalk.dim("No ingestion jobs found."));
+          return;
+        }
 
-      console.log(chalk.bold("\nIngestion Jobs\n"));
-      for (const job of jobs) {
-        const statusColor =
-          job.status === "completed"
-            ? chalk.green
-            : job.status === "running"
-              ? chalk.blue
-              : job.status === "failed"
-                ? chalk.red
-                : chalk.dim;
+        console.log(chalk.bold("\nIngestion Jobs\n"));
+        for (const job of jobs) {
+          const statusColor =
+            job.status === "completed"
+              ? chalk.green
+              : job.status === "running"
+                ? chalk.blue
+                : job.status === "failed"
+                  ? chalk.red
+                  : chalk.dim;
 
-        console.log(
-          `  ${chalk.bold(job.platform)} (${job.source_type}) ` + statusColor(`[${job.status}]`),
-        );
-        console.log(
-          `    Messages: ${job.messages_processed} processed, ${job.messages_skipped} skipped`,
-        );
-        if (job.started_at) {
-          console.log(`    Started:  ${new Date(job.started_at).toLocaleString()}`);
+          console.log(
+            `  ${chalk.bold(job.platform)} (${job.source_type}) ` + statusColor(`[${job.status}]`),
+          );
+          console.log(
+            `    Messages: ${job.messages_processed} processed, ${job.messages_skipped} skipped`,
+          );
+          if (job.started_at) {
+            console.log(`    Started:  ${new Date(job.started_at).toLocaleString()}`);
+          }
+          if (job.finished_at) {
+            console.log(`    Finished: ${new Date(job.finished_at).toLocaleString()}`);
+          }
+          if (job.delta_enabled) {
+            console.log(`    Delta:    every ${job.delta_schedule}`);
+          }
+          if (job.error) {
+            console.log(`    Error:    ${chalk.red(job.error)}`);
+          }
+          console.log();
         }
-        if (job.finished_at) {
-          console.log(`    Finished: ${new Date(job.finished_at).toLocaleString()}`);
-        }
-        if (job.delta_enabled) {
-          console.log(`    Delta:    every ${job.delta_schedule}`);
-        }
-        if (job.error) {
-          console.log(`    Error:    ${chalk.red(job.error)}`);
-        }
-        console.log();
+      } finally {
+        await closeDb();
       }
     });
 }

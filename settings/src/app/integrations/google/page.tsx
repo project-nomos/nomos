@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from "react";
 import { RefreshCw, ExternalLink, Plus, Trash2, KeyRound, Check, Info } from "lucide-react";
 import { TokenInput } from "@/components/token-input";
 import { StatusBadge } from "@/components/status-badge";
+import { SyncProgress } from "@/components/sync-progress";
 import { DirtyIndicator } from "@/components/dirty-indicator";
 import { ConfirmModal } from "@/components/confirm-modal";
 import { useToast } from "@/contexts/toast-context";
@@ -588,6 +589,9 @@ export default function GoogleSettingsPage() {
           })}
         </div>
       </section>
+
+      {/* Sync Progress */}
+      {(accounts.length > 0 || hasValidToken) && <SyncProgress platform="gmail" />}
 
       {/* Actions */}
       <div className="flex items-center gap-3">

@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { RefreshCw, ExternalLink, CheckCircle, XCircle } from "lucide-react";
 import { StatusBadge } from "@/components/status-badge";
+import { SyncProgress } from "@/components/sync-progress";
 import { DirtyIndicator } from "@/components/dirty-indicator";
 import { useToast } from "@/contexts/toast-context";
 import { useUnsavedChanges } from "@/hooks/use-unsaved-changes";
@@ -78,7 +79,7 @@ export default function IMessageSettingsPage() {
       setInitialBbReadReceipts(rr);
     } catch (err) {
       console.error("Failed to load iMessage data:", err);
-      addToast("Failed to load iMessage data", "error");
+      addToast("Failed to load Messages.app data", "error");
     } finally {
       setLoading(false);
     }
@@ -139,7 +140,7 @@ export default function IMessageSettingsPage() {
         return;
       }
 
-      addToast("iMessage settings saved", "success");
+      addToast("Messages.app settings saved", "success");
       await loadData();
     } catch (err) {
       console.error("Failed to save iMessage settings:", err);
@@ -160,11 +161,11 @@ export default function IMessageSettingsPage() {
   return (
     <div className="max-w-2xl">
       <div className="flex items-center gap-3 mb-1">
-        <h1 className="text-2xl font-bold text-text">iMessage</h1>
+        <h1 className="text-2xl font-bold text-text">Messages.app</h1>
         <DirtyIndicator isDirty={isDirty} />
       </div>
       <div className="flex items-center gap-3 mb-8">
-        <p className="text-sm text-overlay0">Configure iMessage integration</p>
+        <p className="text-sm text-overlay0">Configure Messages.app integration</p>
         <a
           href="https://github.com/project-nomos/nomos/blob/main/docs/integrations/imessage.md"
           target="_blank"
@@ -181,7 +182,7 @@ export default function IMessageSettingsPage() {
           Connection Status
         </h2>
         <div className="flex items-center justify-between">
-          <span className="text-sm text-text">iMessage</span>
+          <span className="text-sm text-text">Messages.app</span>
           <StatusBadge
             status={enabled ? "connected" : "not_configured"}
             label={
@@ -206,9 +207,9 @@ export default function IMessageSettingsPage() {
             className="accent-mauve w-4 h-4 rounded"
           />
           <div>
-            <span className="text-sm font-medium text-text">Enable iMessage</span>
+            <span className="text-sm font-medium text-text">Enable Messages.app</span>
             <p className="text-xs text-overlay0">
-              Connect to iMessage via local database or BlueBubbles server.
+              Connect to Messages.app via local database or BlueBubbles server.
             </p>
           </div>
         </label>
@@ -381,6 +382,9 @@ export default function IMessageSettingsPage() {
           </div>
         </section>
       )}
+
+      {/* Sync Progress */}
+      {enabled && <SyncProgress platform="imessage" />}
 
       {/* Save */}
       <button

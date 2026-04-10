@@ -1,6 +1,6 @@
 ---
 name: telegram
-description: "Interact with Telegram — send messages, photos, documents, locations, edit and delete messages, get chat and member info. Use when the user asks to send a Telegram message, edit content, send media, or manage Telegram chats. Requires TELEGRAM_BOT_TOKEN to be configured in .env."
+description: "Interact with Telegram — send messages, photos, documents, locations, edit and delete messages, get chat and member info. Use when the user asks to send a Telegram message, edit content, send media, or manage Telegram chats."
 emoji: "📱"
 ---
 

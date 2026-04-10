@@ -8,9 +8,11 @@
  * style characteristics: formality, length, emoji usage, vocabulary, etc.
  */
 
-import { getDb } from "../db/client.ts";
+import { sql, type Kysely } from "kysely";
+import { getKysely } from "../db/client.ts";
 import { runForkedAgent } from "../sdk/forked-agent.ts";
 import { upsertStyleProfile, type StyleProfile } from "../db/style-profiles.ts";
+import type { Database } from "../db/types.ts";
 
 const MAX_SAMPLES_PER_ANALYSIS = 100;
 const MAX_CONTACTS_PER_BATCH = 50;
@@ -30,24 +32,25 @@ export async function analyzeStyle(): Promise<{
   globalProfile: StyleProfile;
   contactProfiles: number;
 }> {
-  const sql = getDb();
+  const db = getKysely();
 
   // Fetch sent messages grouped by contact
-  const contacts = await sql<{ contact: string; count: number }[]>`
-    SELECT
-      metadata->>'contact' AS contact,
-      COUNT(*)::int AS count
-    FROM memory_chunks
-    WHERE metadata->>'source' = 'ingest'
-      AND metadata->>'direction' = 'sent'
-      AND metadata->>'contact' IS NOT NULL
-    GROUP BY metadata->>'contact'
-    ORDER BY count DESC
-    LIMIT ${MAX_CONTACTS_PER_BATCH}
-  `;
+  const contacts = await db
+    .selectFrom("memory_chunks")
+    .select([
+      sql<string>`metadata->>'contact'`.as("contact"),
+      sql<number>`COUNT(*)::int`.as("count"),
+    ])
+    .where(sql`metadata->>'source'`, "=", "ingest")
+    .where(sql`metadata->>'direction'`, "=", "sent")
+    .where(sql`metadata->>'contact'`, "is not", null)
+    .groupBy(sql`metadata->>'contact'`)
+    .orderBy("count", "desc")
+    .limit(MAX_CONTACTS_PER_BATCH)
+    .execute();
 
   // Fetch global sample for overall style
-  const globalSamples = await fetchSamples(sql, null);
+  const globalSamples = await fetchSamples(db, null);
   const globalProfile = await extractStyleProfile(globalSamples, "global");
   await upsertStyleProfile(null, "global", globalProfile, globalSamples.length);
 
@@ -55,7 +58,7 @@ export async function analyzeStyle(): Promise<{
   let contactCount = 0;
   for (const { contact } of contacts) {
     if (!contact) continue;
-    const samples = await fetchSamples(sql, contact);
+    const samples = await fetchSamples(db, contact);
     if (samples.length < 5) continue; // Need minimum samples
 
     const profile = await extractStyleProfile(samples, contact);
@@ -68,37 +71,27 @@ export async function analyzeStyle(): Promise<{
 }
 
 async function fetchSamples(
-  sql: ReturnType<typeof getDb>,
+  db: Kysely<Database>,
   contact: string | null,
 ): Promise<MessageSample[]> {
+  let query = db
+    .selectFrom("memory_chunks")
+    .select([
+      sql<string>`metadata->>'contact'`.as("contact"),
+      sql<string | null>`metadata->>'contactName'`.as("contactName"),
+      sql<string>`text`.as("content"),
+      sql<string>`metadata->>'timestamp'`.as("timestamp"),
+    ])
+    .where(sql`metadata->>'source'`, "=", "ingest")
+    .where(sql`metadata->>'direction'`, "=", "sent");
+
   if (contact) {
-    return sql<MessageSample[]>`
-      SELECT
-        metadata->>'contact' AS contact,
-        metadata->>'contactName' AS "contactName",
-        text AS content,
-        metadata->>'timestamp' AS timestamp
-      FROM memory_chunks
-      WHERE metadata->>'source' = 'ingest'
-        AND metadata->>'direction' = 'sent'
-        AND metadata->>'contact' = ${contact}
-      ORDER BY created_at DESC
-      LIMIT ${MAX_SAMPLES_PER_ANALYSIS}
-    `;
+    query = query.where(sql`metadata->>'contact'`, "=", contact).orderBy("created_at", "desc");
+  } else {
+    query = query.orderBy(sql`RANDOM()`);
   }
 
-  return sql<MessageSample[]>`
-    SELECT
-      metadata->>'contact' AS contact,
-      metadata->>'contactName' AS "contactName",
-      text AS content,
-      metadata->>'timestamp' AS timestamp
-    FROM memory_chunks
-    WHERE metadata->>'source' = 'ingest'
-      AND metadata->>'direction' = 'sent'
-    ORDER BY RANDOM()
-    LIMIT ${MAX_SAMPLES_PER_ANALYSIS}
-  `;
+  return query.limit(MAX_SAMPLES_PER_ANALYSIS).execute() as unknown as Promise<MessageSample[]>;
 }
 
 async function extractStyleProfile(samples: MessageSample[], label: string): Promise<StyleProfile> {

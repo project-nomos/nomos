@@ -5,7 +5,9 @@
  * synced to ~/.nomos/wiki/ as a readable cache.
  */
 
-import { getDb } from "./client.ts";
+import { sql } from "kysely";
+import { getKysely } from "./client.ts";
+import { ftsMatch, ftsRank } from "./sql-helpers.ts";
 
 export interface WikiArticleRow {
   id: string;
@@ -29,67 +31,83 @@ export async function upsertArticle(
   backlinks: string[] = [],
   compileModel?: string,
 ): Promise<WikiArticleRow> {
-  const sql = getDb();
+  const db = getKysely();
   const wordCount = content.split(/\s+/).length;
 
-  const [row] = await sql<WikiArticleRow[]>`
-    INSERT INTO wiki_articles (path, title, content, category, backlinks, word_count, compile_model, compiled_at)
-    VALUES (${path}, ${title}, ${content}, ${category}, ${backlinks}, ${wordCount}, ${compileModel ?? null}, now())
-    ON CONFLICT (path)
-    DO UPDATE SET
-      title = EXCLUDED.title,
-      content = EXCLUDED.content,
-      category = EXCLUDED.category,
-      backlinks = EXCLUDED.backlinks,
-      word_count = EXCLUDED.word_count,
-      compile_model = EXCLUDED.compile_model,
-      compiled_at = now(),
-      updated_at = now()
-    RETURNING *
-  `;
-  return row;
+  const row = await db
+    .insertInto("wiki_articles")
+    .values({
+      path,
+      title,
+      content,
+      category,
+      backlinks,
+      word_count: wordCount,
+      compile_model: compileModel ?? null,
+      compiled_at: sql`now()`,
+    })
+    .onConflict((oc) =>
+      oc.column("path").doUpdateSet({
+        title: sql`EXCLUDED.title`,
+        content: sql`EXCLUDED.content`,
+        category: sql`EXCLUDED.category`,
+        backlinks: sql`EXCLUDED.backlinks`,
+        word_count: sql`EXCLUDED.word_count`,
+        compile_model: sql`EXCLUDED.compile_model`,
+        compiled_at: sql`now()`,
+        updated_at: sql`now()`,
+      }),
+    )
+    .returningAll()
+    .executeTakeFirstOrThrow();
+  return row as unknown as WikiArticleRow;
 }
 
 export async function getArticle(path: string): Promise<WikiArticleRow | null> {
-  const sql = getDb();
-  const rows = await sql<WikiArticleRow[]>`
-    SELECT * FROM wiki_articles WHERE path = ${path}
-  `;
-  return rows[0] ?? null;
+  const db = getKysely();
+  const row = await db
+    .selectFrom("wiki_articles")
+    .selectAll()
+    .where("path", "=", path)
+    .executeTakeFirst();
+  return (row as unknown as WikiArticleRow) ?? null;
 }
 
 export async function listArticles(category?: string): Promise<WikiArticleRow[]> {
-  const sql = getDb();
+  const db = getKysely();
+  let query = db.selectFrom("wiki_articles").selectAll().orderBy("path");
+
   if (category) {
-    return sql<WikiArticleRow[]>`
-      SELECT * FROM wiki_articles WHERE category = ${category} ORDER BY path
-    `;
+    query = query.where("category", "=", category);
   }
-  return sql<WikiArticleRow[]>`SELECT * FROM wiki_articles ORDER BY path`;
+
+  return query.execute() as unknown as Promise<WikiArticleRow[]>;
 }
 
 export async function searchArticles(query: string, limit: number = 10): Promise<WikiArticleRow[]> {
-  const sql = getDb();
-  return sql<WikiArticleRow[]>`
-    SELECT *, ts_rank(to_tsvector('english', content), plainto_tsquery('english', ${query})) AS rank
-    FROM wiki_articles
-    WHERE to_tsvector('english', content) @@ plainto_tsquery('english', ${query})
-    ORDER BY rank DESC
-    LIMIT ${limit}
-  `;
+  const db = getKysely();
+  const rows = await db
+    .selectFrom("wiki_articles")
+    .selectAll()
+    .select(ftsRank("content", query).as("rank"))
+    .where(ftsMatch("content", query))
+    .orderBy("rank", "desc")
+    .limit(limit)
+    .execute();
+  return rows as unknown as WikiArticleRow[];
 }
 
 export async function deleteArticle(path: string): Promise<void> {
-  const sql = getDb();
-  await sql`DELETE FROM wiki_articles WHERE path = ${path}`;
+  const db = getKysely();
+  await db.deleteFrom("wiki_articles").where("path", "=", path).execute();
 }
 
 export async function getArticlesByCategory(): Promise<Array<{ category: string; count: number }>> {
-  const sql = getDb();
-  return sql<{ category: string; count: number }[]>`
-    SELECT category, COUNT(*)::int AS count
-    FROM wiki_articles
-    GROUP BY category
-    ORDER BY count DESC
-  `;
+  const db = getKysely();
+  return db
+    .selectFrom("wiki_articles")
+    .select(["category", sql<number>`COUNT(*)::int`.as("count")])
+    .groupBy("category")
+    .orderBy("count", "desc")
+    .execute();
 }

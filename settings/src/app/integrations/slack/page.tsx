@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from "react";
 import { RefreshCw, Trash2, Zap, Plus, ExternalLink, KeyRound, Globe, Bell } from "lucide-react";
 import { TokenInput } from "@/components/token-input";
 import { StatusBadge } from "@/components/status-badge";
+import { SyncProgress } from "@/components/sync-progress";
 import { ConfirmModal } from "@/components/confirm-modal";
 import { DirtyIndicator } from "@/components/dirty-indicator";
 import { useToast } from "@/contexts/toast-context";
@@ -638,6 +639,9 @@ export default function SlackSettingsPage() {
           </button>
         </div>
       </section>
+
+      {/* Sync Progress */}
+      {workspaces.length > 0 && <SyncProgress platform="slack" />}
 
       {/* Confirm Modal for disconnect */}
       <ConfirmModal

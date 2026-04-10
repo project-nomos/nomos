@@ -2,7 +2,7 @@ import type { Command } from "commander";
 import fs from "node:fs";
 import chalk from "chalk";
 import { runMigrations } from "../db/migrate.ts";
-import { getDb, closeDb } from "../db/client.ts";
+import { closeDb } from "../db/client.ts";
 import { CronStore } from "../cron/store.ts";
 
 export function registerCronCommand(program: Command): void {
@@ -14,7 +14,7 @@ export function registerCronCommand(program: Command): void {
     .action(async () => {
       try {
         await runMigrations();
-        const store = new CronStore(getDb());
+        const store = new CronStore();
         const jobs = await store.listJobs();
 
         if (jobs.length === 0) {
@@ -56,7 +56,7 @@ export function registerCronCommand(program: Command): void {
     .action(async (name: string) => {
       try {
         await runMigrations();
-        const store = new CronStore(getDb());
+        const store = new CronStore();
         const job = await store.getJobByName(name);
 
         if (!job) {
@@ -82,7 +82,7 @@ export function registerCronCommand(program: Command): void {
     .action(async (name: string) => {
       try {
         await runMigrations();
-        const store = new CronStore(getDb());
+        const store = new CronStore();
         const job = await store.getJobByName(name);
 
         if (!job) {
@@ -108,7 +108,7 @@ export function registerCronCommand(program: Command): void {
     .action(async (name: string) => {
       try {
         await runMigrations();
-        const store = new CronStore(getDb());
+        const store = new CronStore();
         const job = await store.getJobByName(name);
 
         if (!job) {
@@ -148,7 +148,7 @@ export function registerCronCommand(program: Command): void {
         }
 
         await runMigrations();
-        const store = new CronStore(getDb());
+        const store = new CronStore();
 
         const existing = await store.getJobByName(name);
         if (existing) {

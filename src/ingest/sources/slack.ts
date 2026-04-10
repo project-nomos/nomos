@@ -10,7 +10,7 @@ import { WebClient } from "@slack/web-api";
 import { listWorkspaces } from "../../db/slack-workspaces.ts";
 import type { IngestSource, IngestMessage, IngestOptions } from "../types.ts";
 
-const PAGE_DELAY_MS = 1200; // ~50 req/min for Tier 3
+const PAGE_DELAY_MS = 2500; // Conservative: ~24 req/min, leaves headroom for polling adapter
 
 export class SlackIngestSource implements IngestSource {
   readonly platform: string;

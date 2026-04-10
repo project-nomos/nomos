@@ -92,7 +92,7 @@ export default function IntegrationsPage() {
         />
 
         <IntegrationCard
-          title="iMessage"
+          title="Messages.app"
           description="Local chat.db or BlueBubbles server"
           icon={Smartphone}
           href="/integrations/imessage"

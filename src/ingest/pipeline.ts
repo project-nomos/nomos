@@ -9,7 +9,8 @@ import { randomUUID } from "node:crypto";
 import { chunkText } from "../memory/chunker.ts";
 import { generateEmbeddings, isEmbeddingAvailable } from "../memory/embeddings.ts";
 import { storeMemoryChunk } from "../db/memory.ts";
-import { getDb } from "../db/client.ts";
+import { sql } from "kysely";
+import { getKysely } from "../db/client.ts";
 import { deduplicateBatch } from "./dedup.ts";
 import type {
   IngestSource,
@@ -190,44 +191,56 @@ async function createIngestJob(
   sourceType: string,
   options: IngestOptions,
 ): Promise<string> {
-  const sql = getDb();
-  const [row] = await sql<{ id: string }[]>`
-    INSERT INTO ingest_jobs (platform, source_type, status, contact, since_date)
-    VALUES (${platform}, ${sourceType}, 'running', ${options.contact ?? null}, ${options.since ?? null})
-    ON CONFLICT (platform, source_type, contact)
-    DO UPDATE SET
-      status = 'running',
-      started_at = now(),
-      error = NULL,
-      finished_at = NULL
-    RETURNING id
-  `;
+  const db = getKysely();
+  const row = await db
+    .insertInto("ingest_jobs")
+    .values({
+      platform,
+      source_type: sourceType,
+      status: "running",
+      contact: options.contact ?? null,
+      since_date: options.since ?? null,
+    })
+    .onConflict((oc) =>
+      oc.columns(["platform", "source_type", "contact"]).doUpdateSet({
+        status: "running",
+        started_at: sql`now()`,
+        error: null,
+        finished_at: null,
+      }),
+    )
+    .returning("id")
+    .executeTakeFirstOrThrow();
   return row.id;
 }
 
 async function updateIngestJobProgress(jobId: string, progress: IngestProgress): Promise<void> {
-  const sql = getDb();
-  await sql`
-    UPDATE ingest_jobs
-    SET messages_processed = ${progress.messagesProcessed},
-        messages_skipped = ${progress.messagesSkipped},
-        last_cursor = ${progress.cursor ?? null}
-    WHERE id = ${jobId}
-  `;
+  const db = getKysely();
+  await db
+    .updateTable("ingest_jobs")
+    .set({
+      messages_processed: progress.messagesProcessed,
+      messages_skipped: progress.messagesSkipped,
+      last_cursor: progress.cursor ?? null,
+    })
+    .where("id", "=", jobId)
+    .execute();
 }
 
 async function completeIngestJob(jobId: string, progress: IngestProgress): Promise<void> {
-  const sql = getDb();
-  await sql`
-    UPDATE ingest_jobs
-    SET status = 'completed',
-        messages_processed = ${progress.messagesProcessed},
-        messages_skipped = ${progress.messagesSkipped},
-        last_cursor = ${progress.cursor ?? null},
-        finished_at = now(),
-        last_successful_at = now()
-    WHERE id = ${jobId}
-  `;
+  const db = getKysely();
+  await db
+    .updateTable("ingest_jobs")
+    .set({
+      status: "completed",
+      messages_processed: progress.messagesProcessed,
+      messages_skipped: progress.messagesSkipped,
+      last_cursor: progress.cursor ?? null,
+      finished_at: sql`now()`,
+      last_successful_at: sql`now()`,
+    })
+    .where("id", "=", jobId)
+    .execute();
 }
 
 async function failIngestJob(
@@ -235,17 +248,19 @@ async function failIngestJob(
   error: string,
   progress: IngestProgress,
 ): Promise<void> {
-  const sql = getDb();
-  await sql`
-    UPDATE ingest_jobs
-    SET status = 'failed',
-        messages_processed = ${progress.messagesProcessed},
-        messages_skipped = ${progress.messagesSkipped},
-        last_cursor = ${progress.cursor ?? null},
-        error = ${error},
-        finished_at = now()
-    WHERE id = ${jobId}
-  `;
+  const db = getKysely();
+  await db
+    .updateTable("ingest_jobs")
+    .set({
+      status: "failed",
+      messages_processed: progress.messagesProcessed,
+      messages_skipped: progress.messagesSkipped,
+      last_cursor: progress.cursor ?? null,
+      error,
+      finished_at: sql`now()`,
+    })
+    .where("id", "=", jobId)
+    .execute();
 }
 
 async function getLastCursor(
@@ -253,26 +268,28 @@ async function getLastCursor(
   sourceType: string,
   contact: string | null,
 ): Promise<string | null> {
-  const sql = getDb();
-  const rows = await sql<{ last_cursor: string | null }[]>`
-    SELECT last_cursor FROM ingest_jobs
-    WHERE platform = ${platform}
-      AND source_type = ${sourceType}
-      AND contact IS NOT DISTINCT FROM ${contact}
-      AND status = 'completed'
-    ORDER BY last_successful_at DESC
-    LIMIT 1
-  `;
-  return rows[0]?.last_cursor ?? null;
+  const db = getKysely();
+  const row = await db
+    .selectFrom("ingest_jobs")
+    .select("last_cursor")
+    .where("platform", "=", platform)
+    .where("source_type", "=", sourceType)
+    .where(sql<import("kysely").SqlBool>`contact IS NOT DISTINCT FROM ${contact}`)
+    .where("status", "=", "completed")
+    .orderBy("last_successful_at", "desc")
+    .limit(1)
+    .executeTakeFirst();
+  return row?.last_cursor ?? null;
 }
 
 /** List all ingest jobs. */
 export async function listIngestJobs(): Promise<IngestJobRow[]> {
-  const sql = getDb();
-  return sql<IngestJobRow[]>`
-    SELECT * FROM ingest_jobs
-    ORDER BY started_at DESC
-  `;
+  const db = getKysely();
+  return db
+    .selectFrom("ingest_jobs")
+    .selectAll()
+    .orderBy("started_at", "desc")
+    .execute() as unknown as Promise<IngestJobRow[]>;
 }
 
 /** Get a single ingest job by platform. */
@@ -280,12 +297,14 @@ export async function getIngestJobByPlatform(
   platform: string,
   sourceType: string,
 ): Promise<IngestJobRow | null> {
-  const sql = getDb();
-  const rows = await sql<IngestJobRow[]>`
-    SELECT * FROM ingest_jobs
-    WHERE platform = ${platform} AND source_type = ${sourceType}
-    ORDER BY started_at DESC
-    LIMIT 1
-  `;
-  return rows[0] ?? null;
+  const db = getKysely();
+  const row = await db
+    .selectFrom("ingest_jobs")
+    .selectAll()
+    .where("platform", "=", platform)
+    .where("source_type", "=", sourceType)
+    .orderBy("started_at", "desc")
+    .limit(1)
+    .executeTakeFirst();
+  return (row as unknown as IngestJobRow) ?? null;
 }

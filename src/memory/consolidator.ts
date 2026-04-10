@@ -10,7 +10,8 @@
  * Uses a lightweight LLM (Haiku) for semantic understanding of memory content.
  */
 
-import { getDb } from "../db/client.ts";
+import { sql, type SqlBool } from "kysely";
+import { getKysely } from "../db/client.ts";
 import { loadEnvConfig } from "../config/env.ts";
 
 export interface ConsolidationResult {
@@ -41,10 +42,14 @@ const MAX_PRUNE_PER_RUN = 100;
  * 4. Decay user model confidence for stale entries
  */
 export async function consolidateMemory(): Promise<ConsolidationResult> {
-  const sql = getDb();
+  const db = getKysely();
 
   // Count before
-  const [{ count: totalBefore }] = await sql`SELECT count(*)::int AS count FROM memory_chunks`;
+  const before = await db
+    .selectFrom("memory_chunks")
+    .select(sql<number>`count(*)::int`.as("count"))
+    .executeTakeFirstOrThrow();
+  const totalBefore = before.count;
 
   // Phase 1: Prune old, rarely-accessed chunks
   const pruned = await pruneStaleChunks();
@@ -59,59 +64,70 @@ export async function consolidateMemory(): Promise<ConsolidationResult> {
   await decayUserModelConfidence();
 
   // Count after
-  const [{ count: totalAfter }] = await sql`SELECT count(*)::int AS count FROM memory_chunks`;
+  const after = await db
+    .selectFrom("memory_chunks")
+    .select(sql<number>`count(*)::int`.as("count"))
+    .executeTakeFirstOrThrow();
 
-  return { merged, pruned, rewritten, totalBefore, totalAfter };
+  return { merged, pruned, rewritten, totalBefore, totalAfter: after.count };
 }
 
 /** Remove chunks that are old and rarely accessed. */
 async function pruneStaleChunks(): Promise<number> {
-  const sql = getDb();
+  const db = getKysely();
   const cutoffDate = new Date();
   cutoffDate.setDate(cutoffDate.getDate() - MIN_AGE_DAYS);
 
-  const deleted = await sql`
-    DELETE FROM memory_chunks
-    WHERE id IN (
-      SELECT id FROM memory_chunks
-      WHERE access_count <= ${PRUNE_ACCESS_THRESHOLD}
-        AND created_at < ${cutoffDate}
-        AND (last_accessed_at IS NULL OR last_accessed_at < ${cutoffDate})
-        AND (metadata->>'category') NOT IN ('correction', 'skill')
-      ORDER BY access_count ASC, created_at ASC
-      LIMIT ${MAX_PRUNE_PER_RUN}
+  const deleted = await db
+    .deleteFrom("memory_chunks")
+    .where(
+      "id",
+      "in",
+      db
+        .selectFrom("memory_chunks")
+        .select("id")
+        .where("access_count", "<=", PRUNE_ACCESS_THRESHOLD)
+        .where("created_at", "<", cutoffDate)
+        .where((eb) =>
+          eb.or([eb("last_accessed_at", "is", null), eb("last_accessed_at", "<", cutoffDate)]),
+        )
+        .where(sql<SqlBool>`(metadata->>'category') NOT IN ('correction', 'skill')`)
+        .orderBy("access_count", "asc")
+        .orderBy("created_at", "asc")
+        .limit(MAX_PRUNE_PER_RUN),
     )
-    RETURNING id
-  `;
+    .returning("id")
+    .execute();
 
   return deleted.length;
 }
 
 /** Find and merge near-duplicate chunks based on vector similarity. */
 async function mergeNearDuplicates(): Promise<number> {
-  const sql = getDb();
+  const db = getKysely();
   let mergeCount = 0;
 
   // Find pairs of chunks with very high cosine similarity
-  const duplicatePairs = await sql`
-    SELECT
-      a.id AS id_a,
-      b.id AS id_b,
-      a.text AS text_a,
-      b.text AS text_b,
-      a.access_count AS access_a,
-      b.access_count AS access_b,
-      a.created_at AS created_a,
-      b.created_at AS created_b,
-      1 - (a.embedding <=> b.embedding) AS similarity
-    FROM memory_chunks a
-    JOIN memory_chunks b ON a.id < b.id
-    WHERE a.embedding IS NOT NULL
-      AND b.embedding IS NOT NULL
-      AND 1 - (a.embedding <=> b.embedding) > ${MERGE_SIMILARITY_THRESHOLD}
-    ORDER BY similarity DESC
-    LIMIT 50
-  `;
+  const duplicatePairs = await db
+    .selectFrom("memory_chunks as a")
+    .innerJoin("memory_chunks as b", (join) => join.on(sql`a.id < b.id`))
+    .select([
+      "a.id as id_a",
+      "b.id as id_b",
+      "a.text as text_a",
+      "b.text as text_b",
+      "a.access_count as access_a",
+      "b.access_count as access_b",
+      "a.created_at as created_a",
+      "b.created_at as created_b",
+      sql<number>`1 - (a.embedding <=> b.embedding)`.as("similarity"),
+    ])
+    .where("a.embedding", "is not", null)
+    .where("b.embedding", "is not", null)
+    .where(sql`1 - (a.embedding <=> b.embedding)`, ">", MERGE_SIMILARITY_THRESHOLD)
+    .orderBy("similarity", "desc")
+    .limit(50)
+    .execute();
 
   const deletedIds = new Set<string>();
 
@@ -131,13 +147,13 @@ async function mergeNearDuplicates(): Promise<number> {
 
     // Merge: combine access counts and update the kept chunk
     const combinedAccess = pair.access_a + pair.access_b;
-    await sql`
-      UPDATE memory_chunks
-      SET access_count = ${combinedAccess}, updated_at = now()
-      WHERE id = ${keepId}
-    `;
+    await db
+      .updateTable("memory_chunks")
+      .set({ access_count: combinedAccess, updated_at: sql`now()` })
+      .where("id", "=", keepId)
+      .execute();
 
-    await sql`DELETE FROM memory_chunks WHERE id = ${removeId}`;
+    await db.deleteFrom("memory_chunks").where("id", "=", removeId).execute();
     deletedIds.add(removeId);
     mergeCount++;
   }
@@ -174,18 +190,19 @@ const LLM_BATCH_SIZE = 20;
  * for semantic review, rewriting, and intelligent pruning.
  */
 async function llmConsolidate(): Promise<number> {
-  const sql = getDb();
+  const db = getKysely();
   const config = loadEnvConfig();
   const model = config.extractionModel ?? "claude-haiku-4-5";
 
   // Select candidates: older chunks with moderate access, grouped by category
-  const candidates = await sql`
-    SELECT id, text, metadata, access_count, created_at
-    FROM memory_chunks
-    WHERE created_at < now() - interval '3 days'
-    ORDER BY access_count ASC, created_at ASC
-    LIMIT ${LLM_BATCH_SIZE}
-  `;
+  const candidates = await db
+    .selectFrom("memory_chunks")
+    .select(["id", "text", "metadata", "access_count", "created_at"])
+    .where("created_at", "<", sql<Date>`now() - interval '3 days'`)
+    .orderBy("access_count", "asc")
+    .orderBy("created_at", "asc")
+    .limit(LLM_BATCH_SIZE)
+    .execute();
 
   if (candidates.length < 3) return 0; // Not enough to consolidate
 
@@ -247,18 +264,17 @@ async function llmConsolidate(): Promise<number> {
 
       switch (decision.action.toUpperCase()) {
         case "DROP": {
-          await sql`DELETE FROM memory_chunks WHERE id = ${decision.id}`;
+          await db.deleteFrom("memory_chunks").where("id", "=", decision.id).execute();
           changeCount++;
           break;
         }
         case "REWRITE": {
           if (decision.rewrite && decision.rewrite.length > 10) {
-            // Update text, optionally regenerate embedding
-            await sql`
-              UPDATE memory_chunks
-              SET text = ${decision.rewrite}, updated_at = now()
-              WHERE id = ${decision.id}
-            `;
+            await db
+              .updateTable("memory_chunks")
+              .set({ text: decision.rewrite, updated_at: sql`now()` })
+              .where("id", "=", decision.id)
+              .execute();
 
             // Try to regenerate embedding for the rewritten text
             try {
@@ -266,11 +282,11 @@ async function llmConsolidate(): Promise<number> {
               if (isEmbeddingAvailable()) {
                 const embedding = await generateEmbedding(decision.rewrite);
                 const embeddingStr = `[${embedding.join(",")}]`;
-                await sql`
-                  UPDATE memory_chunks
-                  SET embedding = ${embeddingStr}::vector
-                  WHERE id = ${decision.id}
-                `;
+                await db
+                  .updateTable("memory_chunks")
+                  .set({ embedding: sql`${embeddingStr}::vector` })
+                  .where("id", "=", decision.id)
+                  .execute();
               }
             } catch {
               // Continue without embedding update
@@ -282,21 +298,24 @@ async function llmConsolidate(): Promise<number> {
         }
         case "MERGE": {
           if (decision.merge_with && validIds.has(decision.merge_with)) {
-            // Combine access counts into the target, delete the source
-            const [target] = await sql`
-              SELECT access_count FROM memory_chunks WHERE id = ${decision.merge_with}
-            `;
-            const [source] = await sql`
-              SELECT access_count FROM memory_chunks WHERE id = ${decision.id}
-            `;
+            const target = await db
+              .selectFrom("memory_chunks")
+              .select("access_count")
+              .where("id", "=", decision.merge_with)
+              .executeTakeFirst();
+            const source = await db
+              .selectFrom("memory_chunks")
+              .select("access_count")
+              .where("id", "=", decision.id)
+              .executeTakeFirst();
             if (target && source) {
-              const combined = (target.access_count as number) + (source.access_count as number);
-              await sql`
-                UPDATE memory_chunks
-                SET access_count = ${combined}, updated_at = now()
-                WHERE id = ${decision.merge_with}
-              `;
-              await sql`DELETE FROM memory_chunks WHERE id = ${decision.id}`;
+              const combined = target.access_count + source.access_count;
+              await db
+                .updateTable("memory_chunks")
+                .set({ access_count: combined, updated_at: sql`now()` })
+                .where("id", "=", decision.merge_with)
+                .execute();
+              await db.deleteFrom("memory_chunks").where("id", "=", decision.id).execute();
               changeCount++;
             }
           }
@@ -321,16 +340,18 @@ async function llmConsolidate(): Promise<number> {
 
 /** Reduce confidence of user model entries that haven't been reinforced recently. */
 async function decayUserModelConfidence(): Promise<void> {
-  const sql = getDb();
+  const db = getKysely();
   const cutoffDate = new Date();
   cutoffDate.setDate(cutoffDate.getDate() - 30);
 
   // Decay confidence by 10% for entries not updated in 30+ days
-  await sql`
-    UPDATE user_model
-    SET confidence = GREATEST(confidence * 0.9, 0.1),
-        updated_at = now()
-    WHERE updated_at < ${cutoffDate}
-      AND confidence > 0.1
-  `;
+  await db
+    .updateTable("user_model")
+    .set({
+      confidence: sql`GREATEST(confidence * 0.9, 0.1)`,
+      updated_at: sql`now()`,
+    })
+    .where("updated_at", "<", cutoffDate)
+    .where("confidence", ">", 0.1)
+    .execute();
 }

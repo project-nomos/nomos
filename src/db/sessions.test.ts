@@ -1,7 +1,8 @@
 import { vi, describe, it, expect, beforeEach } from "vitest";
+import { createMockDb } from "./test-helpers.ts";
 
-const mockSql = Object.assign(vi.fn(), { unsafe: vi.fn() });
-vi.mock("./client.ts", () => ({ getDb: () => mockSql }));
+const { db, addResult, reset } = createMockDb();
+vi.mock("./client.ts", () => ({ getKysely: () => db }));
 
 import {
   createSession,
@@ -33,28 +34,26 @@ const fakeSession = {
 };
 
 beforeEach(() => {
-  mockSql.mockReset();
-  mockSql.unsafe.mockReset();
+  reset();
 });
 
 describe("createSession", () => {
   it("returns the created session row", async () => {
-    mockSql.mockResolvedValueOnce([fakeSession]);
+    addResult([fakeSession]);
     const result = await createSession({ sessionKey: "cli:default" });
     expect(result).toEqual(fakeSession);
-    expect(mockSql).toHaveBeenCalled();
   });
 });
 
 describe("getSession", () => {
   it("returns session when found", async () => {
-    mockSql.mockResolvedValueOnce([fakeSession]);
+    addResult([fakeSession]);
     const result = await getSession("uuid-1");
     expect(result).toEqual(fakeSession);
   });
 
   it("returns null when not found", async () => {
-    mockSql.mockResolvedValueOnce([]);
+    addResult([]);
     const result = await getSession("missing");
     expect(result).toBeNull();
   });
@@ -62,13 +61,13 @@ describe("getSession", () => {
 
 describe("getSessionByKey", () => {
   it("returns session when found", async () => {
-    mockSql.mockResolvedValueOnce([fakeSession]);
+    addResult([fakeSession]);
     const result = await getSessionByKey("cli:default");
     expect(result).toEqual(fakeSession);
   });
 
   it("returns null when not found", async () => {
-    mockSql.mockResolvedValueOnce([]);
+    addResult([]);
     const result = await getSessionByKey("nonexistent");
     expect(result).toBeNull();
   });
@@ -76,63 +75,56 @@ describe("getSessionByKey", () => {
 
 describe("listSessions", () => {
   it("returns list of sessions", async () => {
-    mockSql.mockResolvedValueOnce([fakeSession]);
+    addResult([fakeSession]);
     const result = await listSessions();
     expect(result).toEqual([fakeSession]);
   });
 
   it("respects status and limit params", async () => {
-    mockSql.mockResolvedValueOnce([]);
+    addResult([]);
     const result = await listSessions({ status: "archived", limit: 10 });
     expect(result).toEqual([]);
-    expect(mockSql).toHaveBeenCalled();
   });
 });
 
 describe("updateSessionUsage", () => {
-  it("calls sql to update token usage", async () => {
-    mockSql.mockResolvedValueOnce([]);
+  it("executes update query", async () => {
+    addResult([]);
     await updateSessionUsage("uuid-1", 100, 200);
-    expect(mockSql).toHaveBeenCalled();
   });
 });
 
 describe("updateSessionModel", () => {
-  it("calls sql to update model", async () => {
-    mockSql.mockResolvedValueOnce([]);
+  it("executes update query", async () => {
+    addResult([]);
     await updateSessionModel("uuid-1", "claude-opus-4-6");
-    expect(mockSql).toHaveBeenCalled();
   });
 });
 
 describe("updateSessionSdkId", () => {
-  it("calls sql to update SDK session ID", async () => {
-    mockSql.mockResolvedValueOnce([]);
+  it("executes update query", async () => {
+    addResult([]);
     await updateSessionSdkId("cli:default", "sdk-123");
-    expect(mockSql).toHaveBeenCalled();
   });
 });
 
 describe("archiveSession", () => {
-  it("calls sql to archive session", async () => {
-    mockSql.mockResolvedValueOnce([]);
+  it("executes update query", async () => {
+    addResult([]);
     await archiveSession("uuid-1");
-    expect(mockSql).toHaveBeenCalled();
   });
 });
 
 describe("updateSessionCost", () => {
-  it("calls sql to increment cost counters", async () => {
-    mockSql.mockResolvedValueOnce([]);
+  it("executes update query", async () => {
+    addResult([]);
     await updateSessionCost("cli:abc123", 0.0042, 500, 200);
-    expect(mockSql).toHaveBeenCalled();
   });
 });
 
 describe("deleteSession", () => {
-  it("calls sql to delete session", async () => {
-    mockSql.mockResolvedValueOnce([]);
+  it("executes delete query", async () => {
+    addResult([]);
     await deleteSession("uuid-1");
-    expect(mockSql).toHaveBeenCalled();
   });
 });

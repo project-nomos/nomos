@@ -26,7 +26,7 @@ export default function ProactivePage() {
   const [enabled, setEnabled] = useState(false);
   const [commitments, setCommitments] = useState<Commitment[]>([]);
   const [loading, setLoading] = useState(true);
-  const { showToast } = useToast();
+  const { addToast } = useToast();
 
   const fetchData = useCallback(async () => {
     try {
@@ -68,9 +68,9 @@ export default function ProactivePage() {
         }),
       });
       setEnabled(!enabled);
-      showToast(`Proactive features ${enabled ? "disabled" : "enabled"}`, "success");
+      addToast(`Proactive features ${enabled ? "disabled" : "enabled"}`, "success");
     } catch {
-      showToast("Failed to toggle", "error");
+      addToast("Failed to toggle", "error");
     }
   };
 

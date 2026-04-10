@@ -4,7 +4,8 @@
  * Style profiles capture the user's writing voice — globally and per contact.
  */
 
-import { getDb } from "./client.ts";
+import { sql, type SqlBool } from "kysely";
+import { getKysely } from "./client.ts";
 
 export interface StyleProfileRow {
   id: string;
@@ -35,33 +36,42 @@ export async function upsertStyleProfile(
   profile: StyleProfile,
   sampleCount: number,
 ): Promise<StyleProfileRow> {
-  const sql = getDb();
+  const db = getKysely();
   const profileJson = JSON.stringify(profile);
 
-  const [row] = await sql<StyleProfileRow[]>`
-    INSERT INTO style_profiles (contact_id, scope, profile, sample_count, last_updated)
-    VALUES (${contactId}, ${scope}, ${profileJson}::jsonb, ${sampleCount}, now())
-    ON CONFLICT (contact_id, scope)
-    DO UPDATE SET
-      profile = ${profileJson}::jsonb,
-      sample_count = ${sampleCount},
-      last_updated = now()
-    RETURNING *
-  `;
-  return row;
+  const row = await db
+    .insertInto("style_profiles")
+    .values({
+      contact_id: contactId,
+      scope,
+      profile: profileJson,
+      sample_count: sampleCount,
+      last_updated: sql`now()`,
+    })
+    .onConflict((oc) =>
+      oc.columns(["contact_id", "scope"]).doUpdateSet({
+        profile: sql`${profileJson}::jsonb`,
+        sample_count: sampleCount,
+        last_updated: sql`now()`,
+      }),
+    )
+    .returningAll()
+    .executeTakeFirstOrThrow();
+  return row as unknown as StyleProfileRow;
 }
 
 export async function getStyleProfile(
   contactId: string | null,
   scope: string = "global",
 ): Promise<StyleProfileRow | null> {
-  const sql = getDb();
-  const rows = await sql<StyleProfileRow[]>`
-    SELECT * FROM style_profiles
-    WHERE contact_id IS NOT DISTINCT FROM ${contactId}
-      AND scope = ${scope}
-  `;
-  return rows[0] ?? null;
+  const db = getKysely();
+  const row = await db
+    .selectFrom("style_profiles")
+    .selectAll()
+    .where(sql<SqlBool>`contact_id IS NOT DISTINCT FROM ${contactId}`)
+    .where("scope", "=", scope)
+    .executeTakeFirst();
+  return (row as unknown as StyleProfileRow) ?? null;
 }
 
 export async function getGlobalStyleProfile(): Promise<StyleProfileRow | null> {
@@ -69,14 +79,17 @@ export async function getGlobalStyleProfile(): Promise<StyleProfileRow | null> {
 }
 
 export async function listStyleProfiles(): Promise<StyleProfileRow[]> {
-  const sql = getDb();
-  return sql<StyleProfileRow[]>`
-    SELECT * FROM style_profiles
-    ORDER BY scope, contact_id NULLS FIRST
-  `;
+  const db = getKysely();
+  const rows = await db
+    .selectFrom("style_profiles")
+    .selectAll()
+    .orderBy("scope")
+    .orderBy(sql`contact_id NULLS FIRST`)
+    .execute();
+  return rows as unknown as StyleProfileRow[];
 }
 
 export async function deleteStyleProfile(id: string): Promise<void> {
-  const sql = getDb();
-  await sql`DELETE FROM style_profiles WHERE id = ${id}`;
+  const db = getKysely();
+  await db.deleteFrom("style_profiles").where("id", "=", id).execute();
 }

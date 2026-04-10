@@ -86,7 +86,7 @@ export default function IngestionPage() {
   const [jobs, setJobs] = useState<IngestJob[]>([]);
   const [stats, setStats] = useState<IngestStats | null>(null);
   const [loading, setLoading] = useState(true);
-  const { showToast } = useToast();
+  const { addToast } = useToast();
 
   const fetchData = useCallback(async () => {
     try {
@@ -96,11 +96,11 @@ export default function IngestionPage() {
       setJobs(data.jobs);
       setStats(data.stats);
     } catch (err) {
-      showToast(err instanceof Error ? err.message : "Failed to load ingestion data", "error");
+      addToast(err instanceof Error ? err.message : "Failed to load ingestion data", "error");
     } finally {
       setLoading(false);
     }
-  }, [showToast]);
+  }, [addToast]);
 
   useEffect(() => {
     fetchData();
@@ -116,9 +116,9 @@ export default function IngestionPage() {
         body: JSON.stringify({ platform, action: "toggle-delta" }),
       });
       await fetchData();
-      showToast("Delta sync toggled", "success");
+      addToast("Delta sync toggled", "success");
     } catch {
-      showToast("Failed to toggle delta sync", "error");
+      addToast("Failed to toggle delta sync", "error");
     }
   };
 

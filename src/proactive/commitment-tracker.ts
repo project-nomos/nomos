@@ -6,7 +6,8 @@
  * reminders via cron.
  */
 
-import { getDb } from "../db/client.ts";
+import { sql } from "kysely";
+import { getKysely } from "../db/client.ts";
 import { runForkedAgent } from "../sdk/forked-agent.ts";
 
 export interface CommitmentRow {
@@ -72,16 +73,20 @@ export async function storeCommitments(
 ): Promise<CommitmentRow[]> {
   if (commitments.length === 0) return [];
 
-  const sql = getDb();
+  const db = getKysely();
   const stored: CommitmentRow[] = [];
 
   for (const c of commitments) {
-    const [row] = await sql<CommitmentRow[]>`
-      INSERT INTO commitments (description, source_msg, deadline)
-      VALUES (${c.description}, ${sourceMsg ?? null}, ${c.deadline ? new Date(c.deadline) : null})
-      RETURNING *
-    `;
-    stored.push(row);
+    const row = await db
+      .insertInto("commitments")
+      .values({
+        description: c.description,
+        source_msg: sourceMsg ?? null,
+        deadline: c.deadline ? new Date(c.deadline) : null,
+      })
+      .returningAll()
+      .executeTakeFirstOrThrow();
+    stored.push(row as unknown as CommitmentRow);
   }
 
   return stored;
@@ -91,50 +96,49 @@ export async function storeCommitments(
  * Get pending commitments, optionally filtered by upcoming deadlines.
  */
 export async function getPendingCommitments(daysAhead?: number): Promise<CommitmentRow[]> {
-  const sql = getDb();
+  const db = getKysely();
+
+  let query = db.selectFrom("commitments").selectAll().where("status", "=", "pending");
 
   if (daysAhead !== undefined) {
-    return sql<CommitmentRow[]>`
-      SELECT * FROM commitments
-      WHERE status = 'pending'
-        AND deadline IS NOT NULL
-        AND deadline <= now() + interval '1 day' * ${daysAhead}
-      ORDER BY deadline ASC
-    `;
+    query = query
+      .where("deadline", "is not", null)
+      .where("deadline", "<=", sql<Date>`now() + interval '1 day' * ${daysAhead}`)
+      .orderBy("deadline", "asc");
+  } else {
+    query = query.orderBy(sql`deadline ASC NULLS LAST`).orderBy("created_at", "desc");
   }
 
-  return sql<CommitmentRow[]>`
-    SELECT * FROM commitments
-    WHERE status = 'pending'
-    ORDER BY deadline ASC NULLS LAST, created_at DESC
-  `;
+  return query.execute() as unknown as Promise<CommitmentRow[]>;
 }
 
 /**
  * Mark a commitment as completed.
  */
 export async function completeCommitment(id: string): Promise<void> {
-  const sql = getDb();
-  await sql`
-    UPDATE commitments
-    SET status = 'completed', updated_at = now()
-    WHERE id = ${id}
-  `;
+  const db = getKysely();
+  await db
+    .updateTable("commitments")
+    .set({ status: "completed", updated_at: sql`now()` })
+    .where("id", "=", id)
+    .execute();
 }
 
 /**
  * Get commitments due for reminders (deadline within 24h, not yet reminded).
  */
 export async function getCommitmentsForReminder(): Promise<CommitmentRow[]> {
-  const sql = getDb();
-  return sql<CommitmentRow[]>`
-    SELECT * FROM commitments
-    WHERE status = 'pending'
-      AND reminded = false
-      AND deadline IS NOT NULL
-      AND deadline <= now() + interval '24 hours'
-    ORDER BY deadline ASC
-  `;
+  const db = getKysely();
+  const rows = await db
+    .selectFrom("commitments")
+    .selectAll()
+    .where("status", "=", "pending")
+    .where("reminded", "=", false)
+    .where("deadline", "is not", null)
+    .where("deadline", "<=", sql<Date>`now() + interval '24 hours'`)
+    .orderBy("deadline", "asc")
+    .execute();
+  return rows as unknown as CommitmentRow[];
 }
 
 /**
@@ -142,25 +146,25 @@ export async function getCommitmentsForReminder(): Promise<CommitmentRow[]> {
  */
 export async function markReminded(ids: string[]): Promise<void> {
   if (ids.length === 0) return;
-  const sql = getDb();
-  await sql`
-    UPDATE commitments
-    SET reminded = true, updated_at = now()
-    WHERE id = ANY(${ids})
-  `;
+  const db = getKysely();
+  await db
+    .updateTable("commitments")
+    .set({ reminded: true, updated_at: sql`now()` })
+    .where("id", "in", ids)
+    .execute();
 }
 
 /**
  * Expire overdue commitments (past deadline by more than 7 days).
  */
 export async function expireOverdueCommitments(): Promise<number> {
-  const sql = getDb();
-  const result = await sql`
-    UPDATE commitments
-    SET status = 'expired', updated_at = now()
-    WHERE status = 'pending'
-      AND deadline IS NOT NULL
-      AND deadline < now() - interval '7 days'
-  `;
-  return result.count;
+  const db = getKysely();
+  const result = await db
+    .updateTable("commitments")
+    .set({ status: "expired", updated_at: sql`now()` })
+    .where("status", "=", "pending")
+    .where("deadline", "is not", null)
+    .where("deadline", "<", sql<Date>`now() - interval '7 days'`)
+    .executeTakeFirst();
+  return Number(result.numUpdatedRows ?? 0n);
 }

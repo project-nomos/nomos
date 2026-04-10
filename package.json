@@ -76,6 +76,8 @@
     "ink": "^6.7.0",
     "ink-spinner": "^5.0.0",
     "ink-text-input": "^6.0.0",
+    "kysely": "^0.28.15",
+    "kysely-postgres-js": "^3.0.0",
     "mailparser": "^3.9.6",
     "marked": "^15.0.12",
     "marked-terminal": "^7.3.0",

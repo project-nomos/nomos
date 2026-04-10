@@ -32,6 +32,9 @@ export interface IntegrationStatus {
   whatsapp: {
     configured: boolean;
   };
+  imessage: {
+    configured: boolean;
+  };
 }
 
 export interface EnvValues {
