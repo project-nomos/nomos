@@ -11,9 +11,6 @@ importers:
       '@anthropic-ai/claude-agent-sdk':
         specifier: ^0.2.45
         version: 0.2.45(zod@4.3.6)
-      '@cate-protocol/sdk':
-        specifier: file:../cate-protocol/packages/sdk
-        version: file:../cate-protocol/packages/sdk
       '@googleworkspace/cli':
         specifier: ^0.6.0
         version: 0.6.0
@@ -26,6 +23,9 @@ importers:
       '@hapi/boom':
         specifier: ^10.0.1
         version: 10.0.1
+      '@project-nomos/cate-sdk':
+        specifier: 0.0.1
+        version: 0.0.1
       '@slack/bolt':
         specifier: ^4.6.0
         version: 4.6.0(@types/express@5.0.6)
@@ -202,9 +202,6 @@ packages:
 
   '@cacheable/utils@2.3.4':
     resolution: {integrity: sha512-knwKUJEYgIfwShABS1BX6JyJJTglAFcEU7EXqzTdiGCXur4voqkiJkdgZIQtWNFhynzDWERcTYv/sETMu3uJWA==}
-
-  '@cate-protocol/sdk@file:../cate-protocol/packages/sdk':
-    resolution: {directory: ../cate-protocol/packages/sdk, type: directory}
 
   '@colors/colors@1.5.0':
     resolution: {integrity: sha512-ooWCrlZP11i8GImSjTHYHLkvFDP48nS4+204nGb1RiX/WXYHmJA2III9/e2DWVabCESdW7hBAEzHRqUn9OUVvQ==}
@@ -928,6 +925,9 @@ packages:
   '@pkgjs/parseargs@0.11.0':
     resolution: {integrity: sha512-+1VkjdD0QBLPodGrJUeqarH8VAIvQODIbwh9XpP5Syisf7YoQgsJKPNFoqqLQlu+VQ/tVSshMR6loPMn8U+dPg==}
     engines: {node: '>=14'}
+
+  '@project-nomos/cate-sdk@0.0.1':
+    resolution: {integrity: sha512-2yh4JwJgY7Pq70UfWMmP9oPUElJNDsTtWlDF8EPLxuei0Kg/xQFT1g2XTxTrkQWYMrzch7YVqiKGbHWPbIZuDg==, tarball: https://npm.pkg.github.com/download/@project-nomos/cate-sdk/0.0.1/0e8b5571bb661e945a4085bc647870e7f178ab22}
 
   '@protobufjs/aspromise@1.1.2':
     resolution: {integrity: sha512-j+gKExEuLmKwvz3OgROXtrJ2UG2x8Ch2YZUxahh+s1F2HZ+wAceUNLkvy6zKCPVRkU++ZWQrdxsUeQXmcg4uoQ==}
@@ -3221,12 +3221,6 @@ snapshots:
       hashery: 1.4.0
       keyv: 5.6.0
 
-  '@cate-protocol/sdk@file:../cate-protocol/packages/sdk':
-    dependencies:
-      '@noble/ed25519': 2.3.0
-      '@noble/hashes': 1.8.0
-      zod: 3.25.76
-
   '@colors/colors@1.5.0':
     optional: true
 
@@ -3728,6 +3722,12 @@ snapshots:
 
   '@pkgjs/parseargs@0.11.0':
     optional: true
+
+  '@project-nomos/cate-sdk@0.0.1':
+    dependencies:
+      '@noble/ed25519': 2.3.0
+      '@noble/hashes': 1.8.0
+      zod: 3.25.76
 
   '@protobufjs/aspromise@1.1.2': {}
 

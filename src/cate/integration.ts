@@ -6,9 +6,9 @@
  * and configures the policy engine from DB config.
  */
 
-import { CATEServer, createDIDKey, issueActsForVC, createAgentCard } from "@cate-protocol/sdk";
-import type { CATEEnvelope, AgentCard } from "@cate-protocol/sdk";
-import type { PolicyConfig } from "@cate-protocol/sdk/types";
+import { CATEServer, createDIDKey, issueActsForVC, createAgentCard } from "@project-nomos/cate-sdk";
+import type { CATEEnvelope, AgentCard } from "@project-nomos/cate-sdk";
+import type { PolicyConfig } from "@project-nomos/cate-sdk/types";
 import { NomosKeystore } from "./nomos-keystore.ts";
 import { NomosTransport } from "./nomos-transport.ts";
 import { getDb } from "../db/client.ts";

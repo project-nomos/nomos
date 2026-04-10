@@ -7,12 +7,12 @@
  * to receive CATE envelopes.
  */
 
-import { CATEEnvelopeSchema, type CATEEnvelope } from "@cate-protocol/sdk/types";
+import { CATEEnvelopeSchema, type CATEEnvelope } from "@project-nomos/cate-sdk/types";
 import {
   Transport,
   type TransportOptions,
   type TransportEvents,
-} from "@cate-protocol/sdk/transport";
+} from "@project-nomos/cate-sdk/transport";
 
 export class NomosTransport extends Transport {
   private server?: { close: () => void };

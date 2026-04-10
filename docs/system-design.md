@@ -613,7 +613,7 @@ Four proactive features, all registered as cron jobs via `ProactiveScheduler`:
 
 ### CATE Protocol Integration
 
-CATE (Consumer Agent Trust Envelope) enables secure agent-to-agent communication. The `@cate-protocol/sdk` library (separate repo at `cate-protocol/`) provides:
+CATE (Consumer Agent Trust Envelope) enables secure agent-to-agent communication. The `@project-nomos/cate-sdk` library (separate repo at `cate-protocol/`) provides:
 
 - DID-based identity (`did:key`, `did:web`)
 - Verifiable Credentials ("acts-for" delegation)

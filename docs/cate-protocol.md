@@ -4,7 +4,7 @@ Nomos integrates the CATE (Consumer Agent Trust Envelope) protocol for secure, t
 
 ## Overview
 
-CATE is a transport-agnostic envelope format that wraps any agent-to-agent message with identity verification (DIDs + Verifiable Credentials), policy enforcement, rate limiting, and optional stamps (proof-of-work or micropayment). Nomos is the first consumer of the `@cate-protocol/sdk`.
+CATE is a transport-agnostic envelope format that wraps any agent-to-agent message with identity verification (DIDs + Verifiable Credentials), policy enforcement, rate limiting, and optional stamps (proof-of-work or micropayment). Nomos is the first consumer of the `@project-nomos/cate-sdk`.
 
 ## Architecture
 
@@ -29,7 +29,7 @@ External Agent                    Nomos Daemon
 
 ### NomosKeystore (`src/cate/nomos-keystore.ts`)
 
-Implements the `@cate-protocol/sdk` Keystore interface using Node.js native `crypto` module for Ed25519 operations. Keys are stored encrypted in the `integrations` table via AES-256-GCM.
+Implements the `@project-nomos/cate-sdk` Keystore interface using Node.js native `crypto` module for Ed25519 operations. Keys are stored encrypted in the `integrations` table via AES-256-GCM.
 
 - Key IDs: `nomos-agent` (agent's DID key), `nomos-user` (user's DID key for VC issuance)
 - DER encoding with hardcoded PKCS8/SPKI headers for Ed25519
@@ -83,15 +83,15 @@ The agent's DID is logged at startup:
 
 ## CATE Protocol SDK
 
-The standalone library lives at `@cate-protocol/sdk` with subpath exports:
+The standalone library lives at `@project-nomos/cate-sdk` with subpath exports:
 
-- `@cate-protocol/sdk` — Client, Server, main exports
-- `@cate-protocol/sdk/types` — Zod schemas for envelope, DID, stamps, policy
-- `@cate-protocol/sdk/identity` — DID resolution, VC issuance, Agent Cards, Keystore
-- `@cate-protocol/sdk/stamps` — PoW and micropayment stamps
-- `@cate-protocol/sdk/policy` — Policy engine, intent classifier, consent, rate limiter
-- `@cate-protocol/sdk/transport` — Abstract transport + HTTP reference implementation
-- `@cate-protocol/sdk/adapters` — A2A and MCP bridge adapters
+- `@project-nomos/cate-sdk` — Client, Server, main exports
+- `@project-nomos/cate-sdk/types` — Zod schemas for envelope, DID, stamps, policy
+- `@project-nomos/cate-sdk/identity` — DID resolution, VC issuance, Agent Cards, Keystore
+- `@project-nomos/cate-sdk/stamps` — PoW and micropayment stamps
+- `@project-nomos/cate-sdk/policy` — Policy engine, intent classifier, consent, rate limiter
+- `@project-nomos/cate-sdk/transport` — Abstract transport + HTTP reference implementation
+- `@project-nomos/cate-sdk/adapters` — A2A and MCP bridge adapters
 
 ## Testing
 

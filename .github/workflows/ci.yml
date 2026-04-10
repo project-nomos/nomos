@@ -21,15 +21,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6.0.1
 
-      - name: Checkout cate-protocol
-        uses: actions/checkout@v6.0.1
-        with:
-          repository: project-nomos/cate-protocol
-          path: ../cate-protocol
-
-      - name: Build cate-protocol SDK
-        run: cd ../cate-protocol/packages/sdk && npm install --ignore-scripts && npx tsc
-
       - name: Setup pnpm
         uses: pnpm/action-setup@v4.2.0
 
@@ -53,15 +44,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6.0.1
-
-      - name: Checkout cate-protocol
-        uses: actions/checkout@v6.0.1
-        with:
-          repository: project-nomos/cate-protocol
-          path: ../cate-protocol
-
-      - name: Build cate-protocol SDK
-        run: cd ../cate-protocol/packages/sdk && npm install --ignore-scripts && npx tsc
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4.2.0
@@ -87,15 +69,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6.0.1
 
-      - name: Checkout cate-protocol
-        uses: actions/checkout@v6.0.1
-        with:
-          repository: project-nomos/cate-protocol
-          path: ../cate-protocol
-
-      - name: Build cate-protocol SDK
-        run: cd ../cate-protocol/packages/sdk && npm install --ignore-scripts && npx tsc
-
       - name: Setup pnpm
         uses: pnpm/action-setup@v4.2.0
 
@@ -119,15 +92,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6.0.1
-
-      - name: Checkout cate-protocol
-        uses: actions/checkout@v6.0.1
-        with:
-          repository: project-nomos/cate-protocol
-          path: ../cate-protocol
-
-      - name: Build cate-protocol SDK
-        run: cd ../cate-protocol/packages/sdk && npm install --ignore-scripts && npx tsc
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4.2.0
@@ -153,15 +117,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6.0.1
-
-      - name: Checkout cate-protocol
-        uses: actions/checkout@v6.0.1
-        with:
-          repository: project-nomos/cate-protocol
-          path: ../cate-protocol
-
-      - name: Build cate-protocol SDK
-        run: cd ../cate-protocol/packages/sdk && npm install --ignore-scripts && npx tsc
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4.2.0

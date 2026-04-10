@@ -1,5 +1,5 @@
 /**
- * Nomos CATE keystore — implements @cate-protocol/sdk Keystore
+ * Nomos CATE keystore — implements @project-nomos/cate-sdk Keystore
  * using Nomos's existing encryption infrastructure.
  *
  * Keys are stored in the database (integrations table) with
@@ -9,7 +9,7 @@
 
 import { generateKeyPairSync, sign, verify, createPublicKey, createPrivateKey } from "node:crypto";
 import { sql } from "kysely";
-import type { Keystore, KeyPair } from "@cate-protocol/sdk/identity";
+import type { Keystore, KeyPair } from "@project-nomos/cate-sdk/identity";
 import { getKysely } from "../db/client.ts";
 import { encrypt, decrypt } from "../db/encryption.ts";
 

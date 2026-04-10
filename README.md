@@ -425,7 +425,7 @@ See [docs/contacts.md](docs/contacts.md) for full details.
 <details>
 <summary><strong>CATE Protocol (Agent-to-Agent Trust)</strong></summary>
 
-Secure agent-to-agent communication via the Consumer Agent Trust Envelope protocol. Built on `@cate-protocol/sdk` — a standalone, open-source library.
+Secure agent-to-agent communication via the Consumer Agent Trust Envelope protocol. Built on `@project-nomos/cate-sdk` — a standalone, open-source library.
 
 - **DID-based identity** — Ed25519 key pairs with `did:key` identifiers
 - **Verifiable Credentials** — "Acts-for" VCs prove the agent acts on behalf of the user
