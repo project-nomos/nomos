@@ -5,6 +5,9 @@ RUN corepack enable && corepack prepare pnpm@10.23.0 --activate
 
 WORKDIR /app
 
+# Copy cate-protocol SDK (file: dependency referenced as ../cate-protocol/packages/sdk)
+COPY --from=cate-protocol packages/sdk /cate-protocol/packages/sdk
+
 # Install dependencies
 COPY package.json pnpm-lock.yaml ./
 RUN pnpm install --frozen-lockfile --ignore-scripts
@@ -20,6 +23,7 @@ RUN corepack enable && corepack prepare pnpm@10.23.0 --activate
 
 WORKDIR /app
 
+COPY --from=cate-protocol packages/sdk /cate-protocol/packages/sdk
 COPY package.json pnpm-lock.yaml ./
 RUN pnpm install --frozen-lockfile --prod --ignore-scripts
 
