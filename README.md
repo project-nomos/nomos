@@ -44,7 +44,7 @@
 
 Most AI assistants are stateless chatbots that forget you the moment a conversation ends. Nomos is building toward something different: an **AI digital clone** that knows you deeply, acts on your behalf, and gets smarter with every interaction.
 
-- **Ingests your history** — Import years of Slack, Gmail, Messages.app, and WhatsApp messages. Your clone starts with deep context from day one, not a blank slate. Continuous delta sync keeps it current.
+- **Ingests your history** — Import years of Slack, Gmail, Messages.app, Discord, Telegram, and WhatsApp messages. Your clone starts with deep context from day one, not a blank slate. Channels auto-sync when first connected; continuous delta sync keeps them current.
 - **Learns your voice** — Per-contact communication style model analyzes how you write — formality, length, emoji, greetings — and drafts messages in your authentic voice. Different tone for your manager vs. your friends.
 - **Compiles knowledge** — A Karpathy-style knowledge wiki transforms raw messages into structured articles about your contacts, projects, and topics. The clone reads compiled knowledge first, RAG second.
 - **Unified identity graph** — Links contacts across Slack, email, Messages.app, Discord, Telegram, and WhatsApp. One person, one profile, regardless of which platform they message you on.
@@ -185,27 +185,27 @@ The setup wizard handles this automatically when you run `nomos chat` for the fi
 
 ## What You Get
 
-|                           | Feature                                     | What it does                                                                                |
-| ------------------------- | ------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| :dna:                     | [**Data Ingestion**](#digital-clone)        | Import years of Slack, Gmail, Messages.app, and WhatsApp history. Continuous delta sync.    |
-| :pen:                     | [**Voice Modeling**](#digital-clone)        | Per-contact style analysis — formality, length, emoji, greetings. Drafts in your voice.     |
-| :books:                   | [**Knowledge Wiki**](#digital-clone)        | LLM-compiled articles about your contacts, projects, and topics. Structured knowledge.      |
-| :link:                    | [**Identity Graph**](#digital-clone)        | Unified contacts across all platforms. One person, one profile.                             |
-| :shield:                  | [**CATE Protocol**](#digital-clone)         | Agent-to-agent trust with DIDs, verifiable credentials, policy, and anti-spam stamps.       |
-| :brain:                   | [**Persistent Memory**](#features-in-depth) | Every conversation auto-indexed into pgvector. Recall anything from any session or channel. |
-| :speech_balloon:          | [**7 Channels**](#channel-integrations)     | Slack, Discord, Telegram, WhatsApp, Messages.app, Email — thin adapters, one agent runtime. |
-| :busts_in_silhouette:     | [**Multi-Agent Teams**](#features-in-depth) | Coordinator + parallel workers. Hand off complex tasks, get synthesized results.            |
-| :zap:                     | [**Smart Routing**](#features-in-depth)     | Route by complexity across any provider — cloud, local, or hybrid.                          |
-| :art:                     | [**Image & Video Gen**](#features-in-depth) | Gemini image + Veo video generation, conversational — just ask.                             |
-| :desktop_computer:        | [**Web Dashboard**](#features-in-depth)     | Next.js settings UI with setup wizard. No YAML editing.                                     |
-| :jigsaw:                  | [**60+ Skills**](#skills-system)            | Three-tier loading: bundled, personal, project. Create your own in minutes.                 |
-| :lock:                    | [**Encrypted Secrets**](#features-in-depth) | AES-256-GCM for all API keys and tokens. Auto-key on first run.                             |
-| :globe_with_meridians:    | [**5 API Providers**](#features-in-depth)   | Anthropic, Vertex AI, OpenRouter, Ollama, or any compatible endpoint.                       |
-| :arrows_counterclockwise: | [**Self-Improvement**](#features-in-depth)  | Nomos can analyze its own code, implement fixes, and open PRs to itself.                    |
-| :sleeping:                | [**Sleep & Resume**](#features-in-depth)    | Agents pause and wake with a prompt — for polling, monitoring, and async waits.             |
-| :anchor:                  | [**Event Hooks**](#features-in-depth)       | Command, HTTP, or prompt hooks on tool use, lifecycle, and compaction.                      |
-| :crescent_moon:           | [**Auto-Dream**](#features-in-depth)        | Background memory consolidation with 4-phase cleanup.                                       |
-| :moneybag:                | [**Cost Tracking**](#features-in-depth)     | Per-model pricing, session costs, usage breakdown in CLI and web dashboard.                 |
+|                           | Feature                                     | What it does                                                                                                                       |
+| ------------------------- | ------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| :dna:                     | [**Data Ingestion**](#digital-clone)        | Import years of Slack, Gmail, Messages.app, Discord, Telegram, and WhatsApp history. Auto-sync on connect + continuous delta sync. |
+| :pen:                     | [**Voice Modeling**](#digital-clone)        | Per-contact style analysis — formality, length, emoji, greetings. Drafts in your voice.                                            |
+| :books:                   | [**Knowledge Wiki**](#digital-clone)        | LLM-compiled articles about your contacts, projects, and topics. Structured knowledge.                                             |
+| :link:                    | [**Identity Graph**](#digital-clone)        | Unified contacts across all platforms. One person, one profile.                                                                    |
+| :shield:                  | [**CATE Protocol**](#digital-clone)         | Agent-to-agent trust with DIDs, verifiable credentials, policy, and anti-spam stamps.                                              |
+| :brain:                   | [**Persistent Memory**](#features-in-depth) | Every conversation auto-indexed into pgvector. Recall anything from any session or channel.                                        |
+| :speech_balloon:          | [**7 Channels**](#channel-integrations)     | Slack, Discord, Telegram, WhatsApp, Messages.app, Email — thin adapters, one agent runtime.                                        |
+| :busts_in_silhouette:     | [**Multi-Agent Teams**](#features-in-depth) | Coordinator + parallel workers. Hand off complex tasks, get synthesized results.                                                   |
+| :zap:                     | [**Smart Routing**](#features-in-depth)     | Route by complexity across any provider — cloud, local, or hybrid.                                                                 |
+| :art:                     | [**Image & Video Gen**](#features-in-depth) | Gemini image + Veo video generation, conversational — just ask.                                                                    |
+| :desktop_computer:        | [**Web Dashboard**](#features-in-depth)     | Next.js settings UI with setup wizard. No YAML editing.                                                                            |
+| :jigsaw:                  | [**60+ Skills**](#skills-system)            | Three-tier loading: bundled, personal, project. Create your own in minutes.                                                        |
+| :lock:                    | [**Encrypted Secrets**](#features-in-depth) | AES-256-GCM for all API keys and tokens. Auto-key on first run.                                                                    |
+| :globe_with_meridians:    | [**5 API Providers**](#features-in-depth)   | Anthropic, Vertex AI, OpenRouter, Ollama, or any compatible endpoint.                                                              |
+| :arrows_counterclockwise: | [**Self-Improvement**](#features-in-depth)  | Nomos can analyze its own code, implement fixes, and open PRs to itself.                                                           |
+| :sleeping:                | [**Sleep & Resume**](#features-in-depth)    | Agents pause and wake with a prompt — for polling, monitoring, and async waits.                                                    |
+| :anchor:                  | [**Event Hooks**](#features-in-depth)       | Command, HTTP, or prompt hooks on tool use, lifecycle, and compaction.                                                             |
+| :crescent_moon:           | [**Auto-Dream**](#features-in-depth)        | Background memory consolidation with 4-phase cleanup.                                                                              |
+| :moneybag:                | [**Cost Tracking**](#features-in-depth)     | Per-model pricing, session costs, usage breakdown in CLI and web dashboard.                                                        |
 
 ---
 
@@ -213,7 +213,7 @@ The setup wizard handles this automatically when you run `nomos chat` for the fi
 
 | Platform         | Mode            | Transport                                                    |
 | ---------------- | --------------- | ------------------------------------------------------------ |
-| **Slack**        | Bot + User Mode | Socket Mode + OAuth (multi-workspace, draft-before-send)     |
+| **Slack**        | Bot + User Mode | Web API polling + OAuth (multi-workspace, draft-before-send) |
 | **Discord**      | Bot             | Gateway                                                      |
 | **Telegram**     | Bot             | grammY                                                       |
 | **WhatsApp**     | Bridge          | Baileys (no Meta Business API needed)                        |
@@ -353,15 +353,18 @@ The digital clone features transform Nomos from a stateless chatbot into a persi
 <details>
 <summary><strong>Historical Data Ingestion</strong></summary>
 
-Import years of communication history from Slack, Gmail, Messages.app, and WhatsApp. The ingestion pipeline deduplicates, chunks, embeds, and stores messages in pgvector-backed memory. Continuous delta sync keeps knowledge current — every 6 hours for Slack/Gmail, every hour for Messages.app.
+Import years of communication history from Slack, Gmail, Messages.app, Discord, Telegram, and WhatsApp. The ingestion pipeline deduplicates, chunks, embeds, and stores messages in pgvector-backed memory. When you connect a new channel, historical ingestion starts automatically as a background subprocess. Continuous delta sync keeps knowledge current.
 
 ```bash
 nomos ingest imessage --since 2024-01-01              # Import Messages.app history
 nomos ingest slack --since 2024-06-01                 # Import Slack (sent only)
+nomos ingest gmail --since 2024-01-01                 # Import Gmail (sent only)
+nomos ingest discord --since 2024-01-01               # Import Discord (sent only)
+nomos ingest telegram                                  # Import Telegram (sent only)
 nomos ingest status                                    # Check sync status
 ```
 
-Smart filtering: Slack and Gmail ingest only sent messages. Messages.app and WhatsApp ingest both directions for context, but style modeling uses sent messages exclusively.
+Smart filtering: Slack, Gmail, Discord, and Telegram ingest only sent messages. Messages.app and WhatsApp ingest both directions for context, but style modeling uses sent messages exclusively.
 
 See [docs/ingestion.md](docs/ingestion.md) for full details.
 

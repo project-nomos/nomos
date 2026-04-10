@@ -42,7 +42,7 @@ Tests are colocated with source as `*.test.ts`.
 - **Linting/formatting**: Oxlint + Oxfmt (not ESLint/Prettier).
 - **TypeScript**: Strict mode, ESM-only (`"type": "module"`), target ESNext, `moduleResolution: "NodeNext"`, `jsx: "react-jsx"`, `allowImportingTsExtensions: true`.
 - **UI framework**: Ink (React for CLI) — the REPL (`src/ui/repl.tsx`) uses JSX with React 19.
-- **Testing**: Vitest with 30s test timeout. Imports (`describe`, `it`, `expect`, `vi`, etc.) must be explicit from `"vitest"` — globals are NOT auto-imported. DB-dependent tests mock the client with `vi.mock("./client.ts", () => ({ getDb: () => mockSql }))`. Tests are colocated as `*.test.ts` next to their source files.
+- **Testing**: Vitest with 30s test timeout. Imports (`describe`, `it`, `expect`, `vi`, etc.) must be explicit from `"vitest"` — globals are NOT auto-imported. DB-dependent tests mock the Kysely client using `vi.mock("./client.ts")` with a `DummyDriver` (see `src/db/test-helpers.ts`). Tests are colocated as `*.test.ts` next to their source files.
 - **Pre-commit hooks**: Husky runs three checks sequentially: `lint-staged` (oxfmt + oxlint on staged `.ts`/`.tsx`/`.md`/`.json` files), then `typecheck`, then `test`. All three must pass.
 - **Postinstall**: Automatically installs Playwright Chromium and `uvx` (Python package runner via `uv`).
 
@@ -200,5 +200,5 @@ Tables: `config` (key-value store), `sessions` (SDK session ID, model, tokens, c
 - Use Ink (React JSX) for any terminal UI components
 - Use `chalk` for colors in non-Ink code; Catppuccin Mocha palette in `src/ui/theme.ts`
 - DB schema changes must be idempotent (`CREATE TABLE IF NOT EXISTS`, `DO $$ BEGIN ... END $$` blocks)
-- Use `postgres` (not `pg`) as the PostgreSQL client — tagged template literals for queries
+- Use **Kysely** for type-safe SQL queries via `getKysely()` from `src/db/client.ts`. Database types are in `src/db/types.ts`. Raw `postgres` (via `getDb()`) is only used in `migrate.ts`, `routing/store.ts`, and `sessions/identity.ts`
 - Validation with `zod` (v4)
