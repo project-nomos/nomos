@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { MessageSquare, Globe, MessageCircle, Send, Phone } from "lucide-react";
+import { MessageSquare, Globe, MessageCircle, Send, Phone, Smartphone } from "lucide-react";
 import { IntegrationCard } from "@/components/integration-card";
 import type { IntegrationStatus } from "@/lib/types";
 
@@ -30,6 +30,7 @@ export default function IntegrationsPage() {
   const discord = status?.discord;
   const telegram = status?.telegram;
   const whatsapp = status?.whatsapp;
+  const imessage = status?.imessage;
 
   return (
     <div>
@@ -88,6 +89,15 @@ export default function IntegrationsPage() {
           href="/integrations/whatsapp"
           status={whatsapp?.configured ? "connected" : "not_configured"}
           statusLabel={whatsapp?.configured ? "Enabled" : undefined}
+        />
+
+        <IntegrationCard
+          title="Messages.app"
+          description="Local chat.db or BlueBubbles server"
+          icon={Smartphone}
+          href="/integrations/imessage"
+          status={imessage?.configured ? "connected" : "not_configured"}
+          statusLabel={imessage?.configured ? "Enabled" : undefined}
         />
       </div>
     </div>

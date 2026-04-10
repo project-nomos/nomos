@@ -11,7 +11,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { getDb } from "../db/client.ts";
+import { getKysely } from "../db/client.ts";
 import { parseFrontmatter } from "../skills/frontmatter.ts";
 
 interface AutonomousLoop {
@@ -133,29 +133,26 @@ export function loadAllLoops(): AutonomousLoop[] {
  * Safe to call on every daemon start.
  */
 export async function seedAutonomousLoops(): Promise<void> {
-  const sql = getDb();
+  const db = getKysely();
   const loops = loadAllLoops();
   let seeded = 0;
 
   for (const loop of loops) {
-    const result = await sql`
-      INSERT INTO cron_jobs (
-        name, schedule, schedule_type, session_target, delivery_mode,
-        prompt, enabled, error_count
-      )
-      VALUES (
-        ${loop.name},
-        ${loop.schedule},
-        ${loop.scheduleType},
-        ${loop.sessionTarget},
-        ${loop.deliveryMode},
-        ${loop.prompt},
-        ${loop.enabled},
-        ${0}
-      )
-      ON CONFLICT (name) DO NOTHING
-      RETURNING id
-    `;
+    const result = await db
+      .insertInto("cron_jobs")
+      .values({
+        name: loop.name,
+        schedule: loop.schedule,
+        schedule_type: loop.scheduleType,
+        session_target: loop.sessionTarget,
+        delivery_mode: loop.deliveryMode,
+        prompt: loop.prompt,
+        enabled: loop.enabled,
+        error_count: 0,
+      })
+      .onConflict((oc) => oc.column("name").doNothing())
+      .returning("id")
+      .execute();
     if (result.length > 0) {
       seeded++;
     }

@@ -4,8 +4,9 @@ import crypto from "node:crypto";
 import type { Command } from "commander";
 import chalk from "chalk";
 import { runMigrations } from "../db/migrate.ts";
+import { sql } from "kysely";
 import { storeMemoryChunk, deleteMemoryBySource, deleteMemoryByPath } from "../db/memory.ts";
-import { getDb, closeDb } from "../db/client.ts";
+import { getKysely, closeDb } from "../db/client.ts";
 import { chunkText } from "../memory/chunker.ts";
 import { generateEmbedding, generateEmbeddings } from "../memory/embeddings.ts";
 import { hybridSearch } from "../memory/search.ts";
@@ -174,17 +175,18 @@ export function registerMemoryCommand(program: Command): void {
     .action(async () => {
       try {
         await runMigrations();
-        const sql = getDb();
+        const db = getKysely();
 
-        const rows = await sql<Array<{ source: string; path_count: string; chunk_count: string }>>`
-          SELECT
-            source,
-            COUNT(DISTINCT path) as path_count,
-            COUNT(*) as chunk_count
-          FROM memory_chunks
-          GROUP BY source
-          ORDER BY source
-        `;
+        const rows = await db
+          .selectFrom("memory_chunks")
+          .select([
+            "source",
+            sql<string>`COUNT(DISTINCT path)`.as("path_count"),
+            sql<string>`COUNT(*)`.as("chunk_count"),
+          ])
+          .groupBy("source")
+          .orderBy("source")
+          .execute();
 
         if (rows.length === 0) {
           console.log(chalk.dim("No memory chunks stored."));
@@ -220,9 +222,9 @@ export function registerMemoryCommand(program: Command): void {
           count = await deleteMemoryByPath(resolvedPath);
           console.log(chalk.green(`Deleted ${count} chunk(s) from path "${resolvedPath}"`));
         } else {
-          const sql = getDb();
-          const result = await sql`DELETE FROM memory_chunks`;
-          count = result.count;
+          const db = getKysely();
+          const result = await db.deleteFrom("memory_chunks").executeTakeFirst();
+          count = Number(result.numDeletedRows ?? 0n);
           console.log(chalk.green(`Deleted all ${count} memory chunk(s)`));
         }
       } finally {

@@ -1,4 +1,3 @@
-import type postgres from "postgres";
 import { CronStore } from "./store.ts";
 import { CronScheduler, type CronCallback } from "./scheduler.ts";
 import type { CronJob } from "./types.ts";
@@ -18,8 +17,8 @@ export interface CronSystem {
 /**
  * Create a complete cron system with store and scheduler
  */
-export function createCronSystem(db: postgres.Sql, onTrigger: CronCallback): CronSystem {
-  const store = new CronStore(db);
+export function createCronSystem(onTrigger: CronCallback): CronSystem {
+  const store = new CronStore();
   let jobs: CronJob[] = [];
   const scheduler = new CronScheduler(jobs, onTrigger);
 

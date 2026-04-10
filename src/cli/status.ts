@@ -10,7 +10,7 @@ import path from "node:path";
 import os from "node:os";
 import { execSync } from "node:child_process";
 import type { Command } from "commander";
-import { isDaemonRunning, getLogFilePath, getPidFilePath } from "../daemon/lifecycle.ts";
+import { isDaemonRunning, getLogFilePath } from "../daemon/lifecycle.ts";
 
 // Check both brew services and legacy custom plist
 const BREW_PLIST_LABEL = "homebrew.mxcl.nomos";

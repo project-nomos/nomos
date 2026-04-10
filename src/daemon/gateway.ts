@@ -28,6 +28,16 @@ import { StreamingResponder } from "./streaming-responder.ts";
 import { indexConversationTurn } from "./memory-indexer.ts";
 import { closeBrowser } from "../sdk/browser.ts";
 import { sendProactiveMessage } from "./proactive-sender.ts";
+import { registerDeltaSyncJobs } from "../ingest/delta-sync.ts";
+import { getIngestJobByPlatform } from "../ingest/pipeline.ts";
+import { EmailAdapter } from "./channels/email.ts";
+import { observeMessage } from "./observer.ts";
+import { registerProactiveJobs } from "../proactive/scheduler.ts";
+import {
+  initCATEIntegration,
+  stopCATEIntegration,
+  type CATEIntegration,
+} from "../cate/integration.ts";
 import type { IncomingMessage, AgentEvent } from "./types.ts";
 import type { DraftRow } from "../db/drafts.ts";
 
@@ -55,6 +65,8 @@ export class Gateway {
   private cronEngine: CronEngine;
   private draftManager: DraftManager;
   private settingsProcess: ChildProcess | null = null;
+  private cateIntegration: CATEIntegration | null = null;
+  private ingestQueue: Promise<void> = Promise.resolve();
   private options: GatewayOptions;
 
   constructor(options: GatewayOptions = {}) {
@@ -149,6 +161,16 @@ export class Gateway {
       await this.channelManager.start();
     }
 
+    // Auto-ingest Gmail when Google Workspace is configured
+    try {
+      const { isGoogleWorkspaceConfiguredAsync } = await import("../sdk/google-workspace-mcp.ts");
+      if (await isGoogleWorkspaceConfiguredAsync()) {
+        this.triggerInitialIngest("gmail", "history", "gmail");
+      }
+    } catch {
+      // Google Workspace not available
+    }
+
     // Start cron engine
     if (!this.options.skipCron) {
       try {
@@ -156,6 +178,44 @@ export class Gateway {
       } catch (err) {
         console.warn("[gateway] Cron engine failed to start:", err);
       }
+    }
+
+    // Register delta sync cron jobs for ingestion
+    try {
+      await registerDeltaSyncJobs();
+    } catch (err) {
+      console.warn("[gateway] Delta sync registration failed:", err);
+    }
+
+    // Register proactive feature cron jobs
+    try {
+      await registerProactiveJobs();
+    } catch (err) {
+      console.warn("[gateway] Proactive jobs registration failed:", err);
+    }
+
+    // Start CATE protocol server (agent-to-agent trust layer)
+    try {
+      this.cateIntegration = await initCATEIntegration({
+        port: 8801,
+        onMessage: async (envelope) => {
+          // Route incoming CATE envelopes to the message queue
+          const payload = envelope.payload ?? "";
+          const msg: IncomingMessage = {
+            id: envelope.header.msg_id,
+            platform: "cate",
+            channelId: envelope.header.thread_id,
+            threadId: envelope.header.thread_id,
+            userId: envelope.parties.from.did,
+            content: payload,
+            timestamp: new Date(envelope.header.timestamp),
+          };
+          const sessionKey = `cate:${envelope.header.thread_id}`;
+          this.messageQueue.enqueue(sessionKey, msg, () => {});
+        },
+      });
+    } catch (err) {
+      console.warn("[gateway] CATE integration failed to start:", err);
     }
 
     // Listen for proactive send events from agent tools
@@ -200,6 +260,9 @@ export class Gateway {
     console.log("[gateway] Stopping daemon...");
 
     // Stop in reverse order
+    if (this.cateIntegration) {
+      await stopCATEIntegration(this.cateIntegration);
+    }
     this.stopSettingsServer();
     this.cronEngine.stop();
     await this.channelManager.stop();
@@ -281,43 +344,34 @@ export class Gateway {
       const platform = `slack-user:${ws.team_id}`;
       const existing = this.channelManager.hasAdapter(platform);
 
-      if (ws.access_token.startsWith("xoxc-") || ws.cookie_d) {
-        const adapter = new SlackPollingAdapter({
-          token: ws.access_token,
-          cookie: ws.cookie_d,
-          teamId: ws.team_id,
-          onMessage: enqueue,
-          draftManager: this.draftManager,
-          onAuthError: (teamId, teamName) => {
-            const event = {
-              type: "system" as const,
-              subtype: "auth_error",
-              message: `Slack session expired for ${teamName} (${teamId}) — run \`nomos slack auth\` to reconnect`,
-              data: { platform: `slack-user:${teamId}`, teamId, teamName },
-            };
-            this.wsServer.broadcast(event);
-            this.grpcServer.broadcast(event);
-          },
-        });
-        await this.channelManager.registerAndStart(adapter);
-        this.draftManager.registerSendFn(adapter.platform, (channelId, text, threadId) =>
-          adapter.sendAsUser(channelId, text, threadId),
-        );
-        changes.push(`${existing ? "refreshed" : "added"} ${ws.team_name} (${ws.team_id})`);
-      } else if (process.env.SLACK_APP_TOKEN) {
-        const adapter = new SlackUserAdapter({
-          userToken: ws.access_token,
-          appToken: process.env.SLACK_APP_TOKEN,
-          teamId: ws.team_id,
-          onMessage: enqueue,
-          draftManager: this.draftManager,
-        });
-        await this.channelManager.registerAndStart(adapter);
-        this.draftManager.registerSendFn(adapter.platform, (channelId, text, threadId) =>
-          adapter.sendAsUser(channelId, text, threadId),
-        );
-        changes.push(`${existing ? "refreshed" : "added"} ${ws.team_name} (${ws.team_id})`);
+      const adapter = new SlackPollingAdapter({
+        token: ws.access_token,
+        cookie: ws.cookie_d,
+        teamId: ws.team_id,
+        onMessage: enqueue,
+        draftManager: this.draftManager,
+        onAuthError: (teamId, teamName) => {
+          const event = {
+            type: "system" as const,
+            subtype: "auth_error",
+            message: `Slack session expired for ${teamName} (${teamId}) — run \`nomos slack auth\` to reconnect`,
+            data: { platform: `slack-user:${teamId}`, teamId, teamName },
+          };
+          this.wsServer.broadcast(event);
+          this.grpcServer.broadcast(event);
+        },
+      });
+      await this.channelManager.registerAndStart(adapter);
+      this.draftManager.registerSendFn(adapter.platform, (channelId, text, threadId) =>
+        adapter.sendAsUser(channelId, text, threadId),
+      );
+
+      // Auto-ingest on first add (skips if already completed)
+      if (!existing) {
+        this.triggerInitialIngest(`slack:${ws.team_id}`, "history", "slack");
       }
+
+      changes.push(`${existing ? "refreshed" : "added"} ${ws.team_name} (${ws.team_id})`);
     }
 
     // Refresh agent runtime's workspace MCP servers
@@ -503,8 +557,17 @@ export class Gateway {
       this.channelManager
         .transformIncoming(rawMsg)
         .then((msg) => {
-          const sessionKey = `${msg.platform}:${msg.channelId}`;
           const adapter = this.channelManager.getAdapter(msg.platform);
+
+          // Observe mode: index without agent response
+          if (adapter?.mode === "observe") {
+            observeMessage(msg).catch((err) =>
+              console.error("[gateway] Observe indexing failed:", err),
+            );
+            return;
+          }
+
+          const sessionKey = `${msg.platform}:${msg.channelId}`;
 
           // Create streaming responder if adapter supports progressive updates
           let responder: StreamingResponder | null = null;
@@ -565,47 +628,41 @@ export class Gateway {
 
       if (workspaces.length > 0) {
         for (const ws of workspaces) {
-          if (ws.access_token.startsWith("xoxc-") || ws.cookie_d) {
-            // Browser-extracted session token → use polling adapter (no Slack app needed)
-            const adapter = new SlackPollingAdapter({
-              token: ws.access_token,
-              cookie: ws.cookie_d,
-              teamId: ws.team_id,
-              onMessage: enqueue,
-              draftManager: this.draftManager,
-              onAuthError: (teamId, teamName) => {
-                const event = {
-                  type: "system" as const,
-                  subtype: "auth_error",
-                  message: `Slack session expired for ${teamName} (${teamId}) — run \`nomos slack auth\` to reconnect`,
-                  data: { platform: `slack-user:${teamId}`, teamId, teamName },
-                };
-                this.wsServer.broadcast(event);
-                this.grpcServer.broadcast(event);
-              },
-            });
-            this.channelManager.register(adapter);
-            this.draftManager.registerSendFn(adapter.platform, (channelId, text, threadId) =>
-              adapter.sendAsUser(channelId, text, threadId),
-            );
-          } else if (process.env.SLACK_APP_TOKEN) {
-            // OAuth xoxp- token → use Socket Mode adapter (requires Slack app)
-            const adapter = new SlackUserAdapter({
-              userToken: ws.access_token,
-              appToken: process.env.SLACK_APP_TOKEN,
-              teamId: ws.team_id,
-              onMessage: enqueue,
-              draftManager: this.draftManager,
-            });
-            this.channelManager.register(adapter);
-            this.draftManager.registerSendFn(adapter.platform, (channelId, text, threadId) =>
-              adapter.sendAsUser(channelId, text, threadId),
-            );
-          } else {
-            console.warn(
-              `[gateway] Skipping workspace ${ws.team_name} (${ws.team_id}): xoxp- token requires SLACK_APP_TOKEN`,
-            );
-          }
+          // Use polling adapter for all user tokens (browser-extracted or OAuth)
+          // Socket Mode requires an app-level token (xapp-) which isn't needed for user mode
+          const adapter = new SlackPollingAdapter({
+            token: ws.access_token,
+            cookie: ws.cookie_d,
+            teamId: ws.team_id,
+            onMessage: enqueue,
+            draftManager: this.draftManager,
+            onAuthError: (teamId, teamName) => {
+              const event = {
+                type: "system" as const,
+                subtype: "auth_error",
+                message: `Slack session expired for ${teamName} (${teamId}) — run \`nomos slack auth\` to reconnect`,
+                data: { platform: `slack-user:${teamId}`, teamId, teamName },
+              };
+              this.wsServer.broadcast(event);
+              this.grpcServer.broadcast(event);
+            },
+          });
+          this.channelManager.register(adapter);
+          this.draftManager.registerSendFn(adapter.platform, (channelId, text, threadId) =>
+            adapter.sendAsUser(channelId, text, threadId),
+          );
+        }
+
+        // Auto-ingest historical Slack messages once (command handles all workspaces)
+        // Only trigger if at least one workspace hasn't been ingested yet
+        const needsIngest = await Promise.all(
+          workspaces.map(async (ws) => {
+            const job = await getIngestJobByPlatform(`slack:${ws.team_id}`, "history");
+            return !job || (job.status !== "completed" && job.status !== "running");
+          }),
+        );
+        if (needsIngest.some(Boolean)) {
+          this.spawnIngestSubprocess("slack");
         }
       } else if (process.env.SLACK_USER_TOKEN && process.env.SLACK_APP_TOKEN) {
         // Backwards compat: single env var, no DB rows
@@ -624,22 +681,173 @@ export class Gateway {
     }
 
     if (process.env.DISCORD_BOT_TOKEN) {
-      this.channelManager.register(new DiscordAdapter(enqueue));
+      const adapter = new DiscordAdapter(enqueue);
+      this.channelManager.register(adapter);
+      this.draftManager.registerSendFn("discord", (channelId, text, threadId) =>
+        adapter.send({ inReplyTo: "", platform: "discord", channelId, threadId, content: text }),
+      );
+      this.triggerInitialIngest("discord", "history", "discord");
     }
 
     if (process.env.TELEGRAM_BOT_TOKEN) {
-      this.channelManager.register(new TelegramAdapter(enqueue));
+      const adapter = new TelegramAdapter(enqueue);
+      this.channelManager.register(adapter);
+      this.draftManager.registerSendFn("telegram", (channelId, text, threadId) =>
+        adapter.send({ inReplyTo: "", platform: "telegram", channelId, threadId, content: text }),
+      );
+      this.triggerInitialIngest("telegram", "history", "telegram");
     }
 
     // WhatsApp is always available (uses QR code auth)
     if (process.env.WHATSAPP_ENABLED === "true") {
-      this.channelManager.register(new WhatsAppAdapter(enqueue));
+      const adapter = new WhatsAppAdapter(enqueue);
+      this.channelManager.register(adapter);
+      this.draftManager.registerSendFn("whatsapp", (channelId, text, threadId) =>
+        adapter.send({ inReplyTo: "", platform: "whatsapp", channelId, threadId, content: text }),
+      );
     }
 
-    // iMessage (macOS only — reads chat.db, sends via AppleScript)
-    if (process.env.IMESSAGE_ENABLED === "true" && process.platform === "darwin") {
-      this.channelManager.register(new IMessageAdapter(enqueue));
+    // iMessage / Messages.app (macOS only — reads chat.db, sends via AppleScript)
+    let imessageEnabled = process.env.IMESSAGE_ENABLED === "true";
+    if (!imessageEnabled) {
+      try {
+        const { getIntegration } = await import("../db/integrations.ts");
+        const imessageIntegration = await getIntegration("imessage");
+        if (imessageIntegration?.enabled) {
+          const cfg = imessageIntegration.config as Record<string, unknown>;
+          imessageEnabled = cfg.enabled === "true";
+        }
+      } catch {
+        // DB not available
+      }
     }
+    if (imessageEnabled && process.platform === "darwin") {
+      const adapter = new IMessageAdapter(enqueue);
+      this.channelManager.register(adapter);
+      this.draftManager.registerSendFn("imessage", (channelId, text, threadId) =>
+        adapter.send({ inReplyTo: "", platform: "imessage", channelId, threadId, content: text }),
+      );
+
+      // Auto-ingest historical iMessages on first connection
+      this.triggerInitialIngest("imessage", "history", "imessage");
+    }
+
+    // Email adapter (IMAP/SMTP from integrations table)
+    try {
+      const { getIntegration } = await import("../db/integrations.ts");
+      const emailIntegration = await getIntegration("email");
+      if (emailIntegration?.enabled) {
+        const config = emailIntegration.config as Record<string, unknown>;
+        const secrets = emailIntegration.secrets as Record<string, string>;
+        const adapter = new EmailAdapter({
+          imap: {
+            host: (config.imap_host as string) ?? "",
+            port: (config.imap_port as number) ?? 993,
+            secure: true,
+            auth: { user: secrets.username ?? "", pass: secrets.password },
+          },
+          smtp: {
+            host: (config.smtp_host as string) ?? "",
+            port: (config.smtp_port as number) ?? 587,
+            secure: false,
+            auth: { user: secrets.username ?? "", pass: secrets.password },
+            from: secrets.username ?? "",
+          },
+          userEmail: secrets.username ?? "",
+          onMessage: enqueue,
+          draftManager: this.draftManager,
+        });
+        this.channelManager.register(adapter);
+
+        // Auto-ingest historical emails on first connection
+        this.triggerInitialIngest("gmail", "history", "gmail");
+      }
+    } catch {
+      // Email not configured — skip
+    }
+  }
+
+  /**
+   * Trigger initial historical ingestion for a newly added channel.
+   * Checks if the platform already has a completed/running ingest job,
+   * then queues a subprocess spawn if needed. All tasks serialized to
+   * avoid API rate limits.
+   */
+  private triggerInitialIngest(platform: string, sourceType: string, subcommand: string): void {
+    this.ingestQueue = this.ingestQueue
+      .then(async () => {
+        const existing = await getIngestJobByPlatform(platform, sourceType);
+        if (existing && (existing.status === "completed" || existing.status === "running")) {
+          return;
+        }
+        await this.runIngestSubprocess(subcommand, platform);
+      })
+      .catch((err) => {
+        console.error(`[gateway] Failed to trigger ingestion for ${platform}:`, err);
+      });
+  }
+
+  /**
+   * Queue an ingest subprocess without checking for existing jobs.
+   * Used when the caller has already verified ingestion is needed.
+   */
+  private spawnIngestSubprocess(subcommand: string): void {
+    this.ingestQueue = this.ingestQueue
+      .then(() => this.runIngestSubprocess(subcommand, subcommand))
+      .catch((err) => {
+        console.error(`[gateway] Ingestion subprocess failed for ${subcommand}:`, err);
+      });
+  }
+
+  /**
+   * Spawn `nomos ingest <subcommand>` as a child process.
+   * Returns a promise that resolves when the subprocess exits.
+   */
+  private runIngestSubprocess(subcommand: string, label: string): Promise<void> {
+    return new Promise<void>((resolve) => {
+      const entryScript = process.argv[1];
+      if (!entryScript) {
+        console.warn(`[gateway] Cannot determine entry script for ingestion subprocess`);
+        resolve();
+        return;
+      }
+
+      console.log(`[gateway] Starting ingestion for ${label} (subprocess)...`);
+
+      const child = spawn(process.execPath, [entryScript, "ingest", subcommand], {
+        stdio: ["ignore", "pipe", "pipe"],
+        env: { ...process.env, FORCE_COLOR: "0" },
+        detached: false,
+      });
+
+      child.stdout?.on("data", (data: Buffer) => {
+        for (const line of data.toString().split("\n")) {
+          const trimmed = line.trim();
+          if (trimmed) console.log(`[ingest:${subcommand}] ${trimmed}`);
+        }
+      });
+
+      child.stderr?.on("data", (data: Buffer) => {
+        for (const line of data.toString().split("\n")) {
+          const trimmed = line.trim();
+          if (trimmed) console.error(`[ingest:${subcommand}] ${trimmed}`);
+        }
+      });
+
+      child.on("exit", (code) => {
+        if (code === 0) {
+          console.log(`[gateway] Ingestion complete for ${label}`);
+        } else {
+          console.error(`[gateway] Ingestion for ${label} exited with code ${code}`);
+        }
+        resolve();
+      });
+
+      child.on("error", (err) => {
+        console.error(`[gateway] Failed to spawn ingestion for ${label}:`, err.message);
+        resolve();
+      });
+    });
   }
 
   /** Send a Slack bot DM to the user with Block Kit approval buttons. */

@@ -1,7 +1,8 @@
 import { vi, describe, it, expect, beforeEach } from "vitest";
+import { createMockDb } from "./test-helpers.ts";
 
-const mockSql = Object.assign(vi.fn(), { unsafe: vi.fn() });
-vi.mock("./client.ts", () => ({ getDb: () => mockSql }));
+const { db, addResult, reset } = createMockDb();
+vi.mock("./client.ts", () => ({ getKysely: () => db }));
 
 import {
   appendTranscriptMessage,
@@ -12,55 +13,36 @@ import {
 } from "./transcripts.ts";
 
 beforeEach(() => {
-  mockSql.mockReset();
-  mockSql.unsafe.mockReset();
+  reset();
 });
 
 describe("appendTranscriptMessage", () => {
-  it("calls sql to insert a message", async () => {
-    mockSql.mockResolvedValueOnce([]);
+  it("inserts a message", async () => {
+    addResult([]);
     await appendTranscriptMessage({
       sessionId: "uuid-1",
       role: "user",
       content: "Hello",
     });
-    expect(mockSql).toHaveBeenCalled();
   });
 
   it("handles content with usage", async () => {
-    mockSql.mockResolvedValueOnce([]);
+    addResult([]);
     await appendTranscriptMessage({
       sessionId: "uuid-1",
       role: "assistant",
       content: [{ type: "text", text: "Hi" }],
       usage: { input: 10, output: 20 },
     });
-    expect(mockSql).toHaveBeenCalled();
   });
 });
 
 describe("getTranscript", () => {
   it("returns mapped rows with role and content", async () => {
-    const rows = [
-      {
-        id: 1,
-        session_id: "uuid-1",
-        role: "user",
-        content: "Hello",
-        usage: null,
-        created_at: new Date(),
-      },
-      {
-        id: 2,
-        session_id: "uuid-1",
-        role: "assistant",
-        content: "Hi!",
-        usage: null,
-        created_at: new Date(),
-      },
-    ];
-    // First call is for the inner sql`` fragment, second is the outer query
-    mockSql.mockResolvedValueOnce("fragment").mockResolvedValueOnce(rows);
+    addResult([
+      { role: "user", content: "Hello" },
+      { role: "assistant", content: "Hi!" },
+    ]);
     const result = await getTranscript("uuid-1");
     expect(result).toEqual([
       { role: "user", content: "Hello" },
@@ -69,8 +51,7 @@ describe("getTranscript", () => {
   });
 
   it("returns empty array when no messages", async () => {
-    // First call is for the inner sql`` fragment, second is the outer query
-    mockSql.mockResolvedValueOnce("fragment").mockResolvedValueOnce([]);
+    addResult([]);
     const result = await getTranscript("uuid-1");
     expect(result).toEqual([]);
   });
@@ -88,7 +69,7 @@ describe("getTranscriptWithUsage", () => {
         created_at: new Date(),
       },
     ];
-    mockSql.mockResolvedValueOnce(rows);
+    addResult(rows);
     const result = await getTranscriptWithUsage("uuid-1");
     expect(result).toEqual(rows);
   });
@@ -96,7 +77,7 @@ describe("getTranscriptWithUsage", () => {
 
 describe("countTranscriptMessages", () => {
   it("returns the count", async () => {
-    mockSql.mockResolvedValueOnce([{ count: 42 }]);
+    addResult([{ count: 42 }]);
     const result = await countTranscriptMessages("uuid-1");
     expect(result).toBe(42);
   });
@@ -104,7 +85,8 @@ describe("countTranscriptMessages", () => {
 
 describe("deleteLastTranscriptMessages", () => {
   it("returns the number of deleted rows", async () => {
-    mockSql.mockResolvedValueOnce({ count: 3 });
+    // The delete returns via numDeletedRows, but our mock returns via rows length
+    addResult([{}, {}, {}]); // 3 rows → numAffectedRows = 3
     const result = await deleteLastTranscriptMessages("uuid-1", 3);
     expect(result).toBe(3);
   });

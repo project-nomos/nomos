@@ -6,7 +6,6 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { getDb } from "../db/client.ts";
 import { createCronSystem, type CronSystem, type CronJob } from "../cron/index.ts";
 import type { MessageQueue } from "./message-queue.ts";
 import type { ChannelManager } from "./channel-manager.ts";
@@ -30,9 +29,7 @@ export class CronEngine {
 
   /** Initialize and start the cron system. */
   async start(): Promise<void> {
-    const db = getDb();
-
-    this.cronSystem = createCronSystem(db, async (job: CronJob) => {
+    this.cronSystem = createCronSystem(async (job: CronJob) => {
       await this.handleCronJob(job);
     });
 

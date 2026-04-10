@@ -5,6 +5,7 @@ import { DatabaseStep } from "./steps/database";
 import { ApiKeyStep } from "./steps/api-key";
 import { PersonalityStep } from "./steps/personality";
 import { ChannelsStep } from "./steps/channels";
+import { DataSyncStep } from "./steps/data-sync";
 import { ReadyStep } from "./steps/ready";
 
 const STEPS = [
@@ -12,7 +13,8 @@ const STEPS = [
   { label: "API", number: 2 },
   { label: "Identity", number: 3 },
   { label: "Channels", number: 4 },
-  { label: "Ready", number: 5 },
+  { label: "Data Sync", number: 5 },
+  { label: "Ready", number: 6 },
 ];
 
 export default function SetupWizardPage() {
@@ -34,7 +36,7 @@ export default function SetupWizardPage() {
         setChecks(data.checks);
 
         if (data.complete) {
-          setStep(5);
+          setStep(6);
         } else if (data.step > 0) {
           setStep(data.step);
         }
@@ -53,7 +55,7 @@ export default function SetupWizardPage() {
     if (step === 1) setChecks((c) => ({ ...c, database: true }));
     if (step === 2) setChecks((c) => ({ ...c, apiKey: true }));
     if (step === 3) setChecks((c) => ({ ...c, agentName: true }));
-    setStep(Math.min(next, 5));
+    setStep(Math.min(next, 6));
   };
 
   if (loading) {
@@ -69,14 +71,14 @@ export default function SetupWizardPage() {
       {/* Header */}
       <div className="text-center mb-8">
         <h1 className="text-2xl font-bold text-text mb-1">Set up Nomos</h1>
-        <p className="text-sm text-overlay0">{step < 5 ? `Step ${step} of 4` : "Setup complete"}</p>
+        <p className="text-sm text-overlay0">{step < 6 ? `Step ${step} of 5` : "Setup complete"}</p>
       </div>
 
       {/* Progress Bar */}
-      {step < 5 && (
+      {step < 6 && (
         <div className="mb-8">
           <div className="flex items-center justify-between mb-2">
-            {STEPS.slice(0, 4).map((s) => (
+            {STEPS.slice(0, 5).map((s) => (
               <div key={s.number} className="flex flex-col items-center gap-1">
                 <div
                   className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold transition-colors ${
@@ -96,7 +98,7 @@ export default function SetupWizardPage() {
             ))}
           </div>
           <div className="flex gap-1 mt-2">
-            {STEPS.slice(0, 4).map((s) => (
+            {STEPS.slice(0, 5).map((s) => (
               <div
                 key={s.number}
                 className={`h-1 flex-1 rounded-full transition-colors ${
@@ -114,11 +116,12 @@ export default function SetupWizardPage() {
         {step === 2 && <ApiKeyStep onComplete={advance} />}
         {step === 3 && <PersonalityStep onComplete={advance} />}
         {step === 4 && <ChannelsStep onComplete={advance} />}
-        {step === 5 && <ReadyStep checks={checks} />}
+        {step === 5 && <DataSyncStep onComplete={advance} />}
+        {step === 6 && <ReadyStep checks={checks} />}
       </div>
 
       {/* Back button (for steps 2-4) */}
-      {step > 1 && step < 5 && (
+      {step > 1 && step < 6 && (
         <div className="mt-4 text-center">
           <button
             type="button"

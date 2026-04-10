@@ -2,7 +2,7 @@
 
 ## 1. Overview
 
-A TypeScript CLI and multi-channel AI agent built on the `@anthropic-ai/claude-agent-sdk`. It wraps Claude Code as its agent runtime, inheriting the full tool suite (Bash, Read, Write, Edit, Glob, Grep, WebSearch, sub-agents, context compaction) and adds persistent sessions, vector memory with automatic conversation indexing and adaptive knowledge extraction, a daemon gateway with channel integrations, multi-agent team orchestration, smart model routing, custom API endpoint support, scheduled tasks, and a skills system.
+A TypeScript CLI and multi-channel AI agent built on the `@anthropic-ai/claude-agent-sdk`. It wraps Claude Code as its agent runtime, inheriting the full tool suite (Bash, Read, Write, Edit, Glob, Grep, WebSearch, sub-agents, context compaction) and adds persistent sessions, vector memory with automatic conversation indexing and adaptive knowledge extraction, a daemon gateway with channel integrations, multi-agent team orchestration, smart model routing, custom API endpoint support, scheduled tasks, a skills system, and **digital clone** capabilities — historical data ingestion, communication style modeling, a compiled knowledge wiki, cross-channel identity graph, proactive agency, and CATE protocol integration for agent-to-agent trust.
 
 ### Design Principles
 
@@ -18,8 +18,13 @@ A TypeScript CLI and multi-channel AI agent built on the `@anthropic-ai/claude-a
 |  Channels                                                       |
 |  +-------+ +---------+ +----------+ +----------+ +----------+  |
 |  | Slack | | Discord | | Telegram | | WhatsApp | | Terminal |  |
-|  |Adapter| | Adapter | | Adapter  | | Adapter  | | (WS CLI) |  |
+|  |Adapter| | Adapter | | Adapter  | | Adapter  | | (gRPC)   |  |
 |  +---+---+ +----+----+ +----+-----+ +----+-----+ +----+-----+  |
+|  +----------+ +----------+                                      |
+|  | iMessage | |  Email   |                                      |
+|  | (chatdb/ | | (IMAP/  |                                      |
+|  | BlueBub) | |  SMTP)  |                                      |
+|  +----+-----+ +----+----+                                      |
 |      +----------+-----------+-----------+----------+            |
 |                             |                                   |
 +-----------------------------------------------------------------+
@@ -40,6 +45,12 @@ A TypeScript CLI and multi-channel AI agent built on the `@anthropic-ai/claude-a
 |  | (SDK    | | (progressive| | (auto    | | (codes, allow-  |  |
 |  |  query) | |  updates)   | |  index)  | |  lists, DM pol) |  |
 |  +---------+ +-------------+ +----------+ +-----------------+  |
+|                                                                 |
+|  +---------------+ +---------------+ +------------------------+ |
+|  | Observer      | | Knowledge     | | IngestPipeline         | |
+|  | (passive      | | Compiler      | | (historical data       | |
+|  |  observation) | | (wiki build)  | |  + delta sync)         | |
+|  +---------------+ +---------------+ +------------------------+ |
 +-----------------------------------------------------------------+
                               v
 +-----------------------------------------------------------------+
@@ -81,6 +92,12 @@ A TypeScript CLI and multi-channel AI agent built on the `@anthropic-ai/claude-a
 |  - channel_allowlists  (per-platform user allowlists)           |
 |  - draft_messages      (Slack User Mode approve-before-send)    |
 |  - slack_user_tokens   (multi-workspace OAuth tokens)           |
+|  - ingest_jobs         (ingestion pipeline tracking + delta)    |
+|  - style_profiles      (per-contact communication style)        |
+|  - wiki_articles       (compiled knowledge wiki articles)       |
+|  - contacts            (cross-channel identity graph)           |
+|  - contact_identities  (platform identity → contact linkage)    |
+|  - commitments         (tracked promises/follow-ups)            |
 +-----------------------------------------------------------------+
 ```
 
@@ -101,6 +118,8 @@ src/
 │   ├── db.ts                 Database operations (migrate, reset)
 │   ├── memory.ts             Memory indexing commands
 │   ├── mcp-config.ts         MCP server config loader
+│   ├── ingest.ts             Data ingestion CLI (nomos ingest <platform>)
+│   ├── contacts.ts           Contact management CLI (nomos contacts list|link|merge)
 │   └── program.ts            Commander.js program builder
 ├── sdk/                      Claude Agent SDK wrapper
 │   ├── session.ts            SDK query() wrapper, V2 session API
@@ -110,6 +129,34 @@ src/
 │   ├── telegram-mcp.ts       In-process Telegram MCP tools
 │   ├── google-workspace-mcp.ts  In-process Google Workspace MCP tools
 │   └── browser.ts            Browser fetch utility
+├── ingest/                   Historical data ingestion pipeline
+│   ├── types.ts              IngestSource interface, IngestMessage, IngestProgress
+│   ├── pipeline.ts           Orchestrator: dedup → chunk → embed → store
+│   ├── dedup.ts              SHA-256 hash deduplication against memory_chunks
+│   ├── delta-sync.ts         Continuous delta ingestion via CronEngine
+│   ├── index.ts              Public API
+│   └── sources/              Per-platform ingestion sources
+│       ├── slack.ts           Slack conversations.history (sent messages only)
+│       ├── gmail.ts           Gmail API (sent folder only)
+│       ├── imessage.ts        chat.db bulk query (both directions)
+│       └── whatsapp.ts        WhatsApp .txt export parser
+├── identity/                 Cross-channel identity graph
+│   ├── contacts.ts           Contact CRUD (create, search, resolve)
+│   ├── identities.ts         Platform identity linking/unlinking
+│   ├── auto-linker.ts        Heuristic auto-linking (fuzzy name, email match)
+│   ├── relationship.ts       Relationship metadata (role, frequency, topics)
+│   └── index.ts              Public API
+├── proactive/                Proactive agency features
+│   ├── commitment-tracker.ts Extract commitments from conversations, remind on deadline
+│   ├── meeting-briefer.ts    Pre-meeting context from calendar + identity graph
+│   ├── priority-triage.ts    Cross-channel priority ranking and digest
+│   ├── scheduler.ts          Register proactive cron jobs via CronEngine
+│   └── index.ts              Public API
+├── cate/                     CATE protocol integration (agent-to-agent trust)
+│   ├── integration.ts        Nomos-specific CATE setup (DID, VC, policy)
+│   ├── nomos-keystore.ts     Keystore interface using src/db/encryption.ts
+│   ├── nomos-transport.ts    CATE transport via Nomos gRPC/WebSocket
+│   └── index.ts              Public API
 ├── daemon/                   Long-running daemon subsystem
 │   ├── gateway.ts            Orchestrator (boots subsystems, signal handlers)
 │   ├── agent-runtime.ts      Centralized agent with cached config
@@ -121,6 +168,7 @@ src/
 │   ├── cron-engine.ts        DB-backed scheduled tasks
 │   ├── streaming-responder.ts Progressive message updates
 │   ├── memory-indexer.ts     Auto-indexes conversation turns
+│   ├── observer.ts           Passive observation pipeline (read without responding)
 │   ├── lifecycle.ts          PID file, signal handlers
 │   ├── types.ts              Shared daemon types
 │   ├── index.ts              Daemon entry point
@@ -130,7 +178,14 @@ src/
 │       ├── discord.ts         Discord (discord.js)
 │       ├── telegram.ts        Telegram (grammY, long polling)
 │       ├── whatsapp.ts        WhatsApp (Baileys, QR code auth)
-│       └── imessage.ts        iMessage (macOS only, chat.db + AppleScript)
+│       ├── imessage.ts        iMessage (dual mode: chat.db or BlueBubbles)
+│       ├── imessage-bluebubbles.ts  BlueBubbles REST + webhook adapter
+│       ├── imessage-receiver.ts     chat.db SQLite polling + WAL watcher
+│       ├── imessage-sender.ts       AppleScript send for chat.db mode
+│       ├── imessage-db.ts           chat.db SQLite query helpers
+│       ├── email.ts           Email (IMAP IDLE + SMTP, draft-and-approve)
+│       ├── email-imap.ts      IMAP connection management and IDLE loop
+│       └── email-smtp.ts      SMTP send via nodemailer
 ├── db/                       PostgreSQL persistence
 │   ├── client.ts             Connection pool (postgres.js)
 │   ├── schema.sql            Schema (10 tables)
@@ -141,13 +196,20 @@ src/
 │   ├── user-model.ts         User model CRUD (accumulated preferences/facts)
 │   ├── config.ts             Config key-value CRUD
 │   ├── drafts.ts             Draft message CRUD
-│   └── slack-workspaces.ts   Slack workspace token CRUD
+│   ├── slack-workspaces.ts   Slack workspace token CRUD
+│   ├── style-profiles.ts     Style profile CRUD (per-contact communication style)
+│   └── wiki.ts               Wiki article CRUD (compiled knowledge articles)
 ├── memory/                   Vector memory system
 │   ├── embeddings.ts         Vertex AI gemini-embedding-001 (768 dims)
 │   ├── chunker.ts            Overlap chunking
 │   ├── search.ts             Hybrid RRF: vector cosine + full-text search
 │   ├── extractor.ts          Knowledge extraction from conversations via LLM
-│   └── user-model.ts         User model aggregation logic
+│   ├── user-model.ts         User model aggregation logic
+│   ├── style-model.ts        Communication style analysis (global + per-contact)
+│   ├── style-prompt.ts       Convert StyleProfile → natural-language prompt
+│   ├── knowledge-compiler.ts Karpathy-style wiki compilation from ingested data
+│   ├── wiki-reader.ts        Read wiki articles for agent context injection
+│   └── wiki-sync.ts          Sync wiki_articles table ↔ ~/.nomos/wiki/ disk
 ├── config/                   Configuration
 │   ├── env.ts                Env var loader
 │   ├── profile.ts            User profile + agent identity + system prompt
@@ -205,27 +267,33 @@ Provider switching is handled entirely by the SDK based on which environment var
 
 ### 4.2 Persistence Layer (PostgreSQL + pgvector)
 
-All state lives in PostgreSQL. Schema defined in `src/db/schema.sql` with inline fallback in `src/db/migrate.ts` for bundled builds.
+All state lives in PostgreSQL. Schema defined in `src/db/schema.sql` (17 tables) with inline fallback in `src/db/migrate.ts` for bundled builds.
 
 #### Tables
 
-| Table                 | Purpose                                          | Key Columns                                                              |
-| --------------------- | ------------------------------------------------ | ------------------------------------------------------------------------ |
-| `config`              | Key-value settings store                         | `key` (PK), `value` (JSONB)                                              |
-| `sessions`            | Session metadata and SDK session IDs             | `session_key` (unique), `agent_id`, `model`, `metadata` (JSONB)          |
-| `transcript_messages` | Conversation messages                            | `session_id` (FK), `role`, `content` (JSONB)                             |
-| `memory_chunks`       | Text chunks with vector embeddings + metadata    | `source`, `text`, `embedding` (vector(768)), `hash`, `metadata` (JSONB)  |
-| `memory_files`        | Source file tracking for incremental re-indexing | `path` (PK), `source`, `hash`, `mtime`                                   |
-| `user_model`          | Accumulated user preferences and facts           | `category` + `key` (unique), `value` (JSONB), `confidence`, `source_ids` |
-| `cron_jobs`           | Scheduled task definitions                       | `schedule`, `schedule_type`, `prompt`, `enabled`                         |
-| `pairing_requests`    | Channel pairing codes with TTL                   | `code` (unique), `status`, `expires_at`                                  |
-| `channel_allowlists`  | Per-platform user allowlists                     | `platform` + `user_id` (unique)                                          |
-| `draft_messages`      | Slack User Mode approve-before-send drafts       | `platform`, `channel_id`, `content`, `status`                            |
-| `slack_user_tokens`   | Multi-workspace Slack OAuth tokens               | `team_id` (unique), `access_token`, `team_name`                          |
+| Table                 | Purpose                                          | Key Columns                                                                        |
+| --------------------- | ------------------------------------------------ | ---------------------------------------------------------------------------------- |
+| `config`              | Key-value settings store                         | `key` (PK), `value` (JSONB)                                                        |
+| `sessions`            | Session metadata and SDK session IDs             | `session_key` (unique), `agent_id`, `model`, `metadata` (JSONB)                    |
+| `transcript_messages` | Conversation messages                            | `session_id` (FK), `role`, `content` (JSONB)                                       |
+| `memory_chunks`       | Text chunks with vector embeddings + metadata    | `source`, `text`, `embedding` (vector(768)), `hash`, `metadata` (JSONB)            |
+| `memory_files`        | Source file tracking for incremental re-indexing | `path` (PK), `source`, `hash`, `mtime`                                             |
+| `user_model`          | Accumulated user preferences and facts           | `category` + `key` (unique), `value` (JSONB), `confidence`, `source_ids`           |
+| `cron_jobs`           | Scheduled task definitions                       | `schedule`, `schedule_type`, `prompt`, `enabled`                                   |
+| `pairing_requests`    | Channel pairing codes with TTL                   | `code` (unique), `status`, `expires_at`                                            |
+| `channel_allowlists`  | Per-platform user allowlists                     | `platform` + `user_id` (unique)                                                    |
+| `draft_messages`      | Slack User Mode approve-before-send drafts       | `platform`, `channel_id`, `content`, `status`                                      |
+| `slack_user_tokens`   | Multi-workspace Slack OAuth tokens               | `team_id` (unique), `access_token`, `team_name`                                    |
+| `ingest_jobs`         | Ingestion pipeline tracking and delta sync       | `platform`, `status`, `messages_processed`, `last_cursor`, `delta_schedule`        |
+| `style_profiles`      | Per-contact communication style models           | `contact_id` (FK, nullable for global), `scope`, `profile` (JSONB), `sample_count` |
+| `wiki_articles`       | Compiled knowledge wiki articles (DB-primary)    | `path` (unique), `title`, `content`, `category`, `backlinks` (TEXT[])              |
+| `contacts`            | Cross-channel unified contact records            | `display_name`, `role`, `autonomy` (auto/draft/silent), `data_consent`             |
+| `contact_identities`  | Platform identity → contact linkage              | `contact_id` (FK), `platform` + `platform_user_id` (unique), `email`               |
+| `commitments`         | Tracked promises and follow-ups                  | `contact_id` (FK), `description`, `deadline`, `status` (pending/completed/expired) |
 
 #### Indexes
 
-- **IVFFlat** on `memory_chunks.embedding` (cosine similarity, created manually after data load)
+- **HNSW** on `memory_chunks.embedding` (cosine similarity, better recall than IVFFlat)
 - **GIN** on `memory_chunks.text` (full-text search via `tsvector`)
 - **GIN** on `memory_chunks.metadata` (JSONB category filtering)
 - Standard B-tree indexes on foreign keys, status columns, and lookup fields
@@ -276,14 +344,21 @@ What we add via MCP and the daemon:
 - Persistent memory across sessions and channels (`memory_search`, `user_model_recall`)
 - Automatic conversation indexing into vector memory
 - Adaptive memory: structured knowledge extraction and user model accumulation
-- Multi-channel message routing (Slack, Discord, Telegram, WhatsApp, iMessage)
+- Multi-channel message routing (Slack, Discord, Telegram, WhatsApp, iMessage, Email)
 - Multi-agent team orchestration (`TeamRuntime` -- coordinator/worker pattern with parallel `query()` calls)
 - Smart model routing (complexity-based tier selection: simple → Haiku, moderate → Sonnet, complex → Opus)
 - Custom API endpoint passthrough (`ANTHROPIC_BASE_URL`)
 - Scheduled task execution (cron)
 - Streaming progressive updates to channel platforms
-- Approve-before-send draft workflow (Slack User Mode)
+- Approve-before-send draft workflow (Slack User Mode, extensible to all channels)
 - Multi-workspace Slack support with OAuth
+- Historical data ingestion with delta sync (Slack, Gmail, iMessage, WhatsApp)
+- Communication style modeling (global + per-contact voice profiles)
+- Compiled knowledge wiki (Karpathy-style LLM knowledge base)
+- Cross-channel identity graph with auto-linking
+- Passive observation mode (read and learn without responding)
+- Proactive agency (commitment tracking, meeting briefs, priority triage)
+- CATE protocol for agent-to-agent trust and secure communication
 
 ### 4.5 Skills System
 
@@ -361,7 +436,31 @@ Daemon Process (Gateway)
 |     +-- DiscordAdapter       (discord.js)
 |     +-- TelegramAdapter      (grammY, long polling)
 |     +-- WhatsAppAdapter      (Baileys, QR code auth)
-|     +-- IMessageAdapter      (macOS only, chat.db + AppleScript)
+|     +-- IMessageAdapter      (dual: chat.db + AppleScript / BlueBubbles REST)
+|     +-- EmailAdapter         (IMAP IDLE + SMTP, draft-and-approve)
+|
++-- ObservationPipeline
+|     Passive observation mode for channels (read without responding).
+|     Routes messages through MemoryIndexer + style extractor only.
+|     Configured per-adapter via mode: "respond" | "observe".
+|
++-- IngestPipeline
+|     Historical data ingestion: Slack, Gmail, iMessage, WhatsApp.
+|     Dedup → chunk → embed → store. Cursor-based delta sync via CronEngine.
+|     Auto-triggers on channel connect. Sent-only filtering for Slack/Gmail.
+|
++-- KnowledgeCompiler
+|     Karpathy-style wiki compilation from ingested messages.
+|     Compiles topic/contact/style articles into wiki_articles table.
+|     Syncs to ~/.nomos/wiki/ on disk. Runs via cron (default: every 2h).
+|
++-- StyleModel
+|     Analyzes sent messages to extract communication style profiles.
+|     Global profile + per-contact overrides. Injected into agent system prompt.
+|
++-- ProactiveScheduler
+|     Commitment tracking, pre-meeting briefs, cross-channel triage.
+|     Registers cron jobs for periodic checks and reminders.
 |
 +-- CronEngine
       DB-backed scheduled jobs (cron expressions, at/every schedules).
@@ -389,14 +488,15 @@ interface ChannelAdapter {
 
 Adapters are intentionally thin (50-100 lines each). They handle only platform authentication, inbound event parsing, and outbound message formatting. All agent logic lives in the shared `AgentRuntime`.
 
-| Adapter      | Platform Name          | Required Config                                     |
-| ------------ | ---------------------- | --------------------------------------------------- |
-| Slack (bot)  | `slack`                | `SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN`                |
-| Slack (user) | `slack-user:<team_id>` | DB token + `SLACK_APP_TOKEN`, or `SLACK_USER_TOKEN` |
-| Discord      | `discord`              | `DISCORD_BOT_TOKEN`                                 |
-| Telegram     | `telegram`             | `TELEGRAM_BOT_TOKEN`                                |
-| WhatsApp     | `whatsapp`             | `WHATSAPP_ENABLED=true`                             |
-| iMessage     | `imessage`             | `IMESSAGE_ENABLED=true` (macOS only)                |
+| Adapter      | Platform Name          | Required Config                                                |
+| ------------ | ---------------------- | -------------------------------------------------------------- |
+| Slack (bot)  | `slack`                | `SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN`                           |
+| Slack (user) | `slack-user:<team_id>` | DB token + `SLACK_APP_TOKEN`, or `SLACK_USER_TOKEN`            |
+| Discord      | `discord`              | `DISCORD_BOT_TOKEN`                                            |
+| Telegram     | `telegram`             | `TELEGRAM_BOT_TOKEN`                                           |
+| WhatsApp     | `whatsapp`             | `WHATSAPP_ENABLED=true`                                        |
+| iMessage     | `imessage`             | `IMESSAGE_ENABLED=true` + `IMESSAGE_MODE` (chatdb/bluebubbles) |
+| Email        | `email`                | IMAP/SMTP config in `integrations` table                       |
 
 ### Slack User Mode (Multi-Workspace)
 
@@ -441,6 +541,87 @@ The `MemoryIndexer` (`src/daemon/memory-indexer.ts`) runs after each completed a
 5. **(Adaptive memory)** When `NOMOS_ADAPTIVE_MEMORY=true`, runs knowledge extraction and user model accumulation (see below)
 
 This runs fire-and-forget so it never delays message delivery. The result is that all conversations -- across all channels -- become searchable via `memory_search`, enabling cross-session and cross-channel recall.
+
+### iMessage Dual-Mode
+
+The iMessage adapter supports two connection modes, selected via `IMESSAGE_MODE`:
+
+- **`chatdb`** (default): macOS-only. Reads incoming messages by polling `~/Library/Messages/chat.db` (SQLite + WAL file watcher for ~200ms detection). Sends via AppleScript. Zero external dependencies.
+- **`bluebubbles`**: Connects to a BlueBubbles macOS server via REST API + webhooks. The daemon can run on any platform while a Mac relays iMessages. Supports reactions, typing indicators, read receipts, attachments (up to 8MB), group management, and message effects.
+
+A keep-alive LaunchAgent (`scripts/bluebubbles/install-keepalive.sh`) ensures Messages.app stays running for BlueBubbles. The Settings UI at `/integrations/imessage` provides mode selection, BlueBubbles server configuration, and connection testing.
+
+### Historical Data Ingestion
+
+The `IngestPipeline` (`src/ingest/pipeline.ts`) imports years of communication history into vector memory:
+
+```
+Source (Slack/Gmail/iMessage/WhatsApp)
+  → AsyncGenerator<IngestMessage>
+  → Dedup (SHA-256 hash check against memory_chunks)
+  → Chunk (overlap chunking via existing chunker)
+  → Embed (batch embeddings, MAX_BATCH_SIZE=250)
+  → Store (memory_chunks with metadata: source, platform, direction, contact)
+```
+
+**Filtering strategy**: Slack and Gmail ingest sent messages only (your words). iMessage and WhatsApp ingest both directions for conversation context, but the style model trains exclusively on sent messages.
+
+**Delta sync**: After initial ingestion, the pipeline registers a cron job for continuous delta sync using cursor-based pagination (Slack cursor, Gmail historyId, iMessage ROWID). Default interval: 6 hours for API-based sources, 1 hour for local sources.
+
+**Auto-trigger**: When a channel integration is saved (via Settings UI or onboarding), the gateway auto-triggers a background ingestion job if no prior ingest exists for that platform.
+
+### Communication Style Model
+
+The `StyleModel` (`src/memory/style-model.ts`) analyzes the user's sent messages to learn their writing voice:
+
+1. Queries `memory_chunks` where `metadata->>'source' = 'ingest' AND metadata->>'direction' = 'sent'`
+2. Batches by contact, uses `runForkedAgent()` (Haiku) to extract: formality (1-5), avg length, vocabulary, emoji usage, punctuation, greeting/signoff patterns
+3. Produces `StyleProfile` stored as JSONB in `style_profiles` table
+4. Global profile (`contact_id=NULL`) + per-contact overrides
+5. `StylePrompt` converts profiles to natural-language instructions injected into the agent system prompt
+
+### Personal Knowledge Wiki
+
+Follows the Karpathy "LLM Knowledge Base" pattern — a structured markdown wiki compiled by an LLM from raw ingested messages.
+
+**Hybrid architecture**:
+
+1. **Layer 1: Raw ingestion → pgvector** — chunked messages stored with embeddings for fuzzy search
+2. **Layer 2: Compiled wiki → `wiki_articles` table + `~/.nomos/wiki/`** — LLM-compiled markdown articles by topic
+3. **Layer 3: Knowledge graph → `contacts` + `contact_identities`** — structured relationship data
+
+The `KnowledgeCompiler` (`src/memory/knowledge-compiler.ts`) runs periodically via cron (default: every 2h). It reads recent ingested messages, compiles/updates topic articles (`contacts/sarah.md`, `topics/kubernetes.md`, `style/global-voice.md`), and maintains `_index.md` files with summaries and backlinks.
+
+Storage is DB-primary: `wiki_articles` table is source of truth, synced to `~/.nomos/wiki/` as a readable cache. The agent reads wiki articles first (cheap, structured), then falls back to RAG for details.
+
+### Cross-Channel Identity Graph
+
+The `contacts` and `contact_identities` tables provide a unified view of people across platforms:
+
+- **Auto-linking** (`src/identity/auto-linker.ts`): Heuristic matching by display name (fuzzy), email, or user confirmation
+- **Autonomy levels**: Per-contact `autonomy` field (`auto`/`draft`/`silent`) controls whether the agent auto-sends, creates drafts, or stays silent
+- **Privacy**: `data_consent` field (inferred/explicit/withdrawn) tracks consent status
+
+### Proactive Agency
+
+Four proactive features, all registered as cron jobs via `ProactiveScheduler`:
+
+- **Commitment tracker**: Extracts promises/follow-ups from conversations, stores in `commitments` table, triggers reminders before deadlines
+- **Meeting briefer**: Pre-meeting context from Google Calendar events + identity graph + recent conversations
+- **Priority triage**: Cross-channel unread aggregation, ranked by sender importance and urgency
+- **Scheduler**: Registers all proactive cron jobs with the existing `CronEngine`
+
+### CATE Protocol Integration
+
+CATE (Consumer Agent Trust Envelope) enables secure agent-to-agent communication. The `@project-nomos/cate-sdk` library (separate repo at `cate-protocol/`) provides:
+
+- DID-based identity (`did:key`, `did:web`)
+- Verifiable Credentials ("acts-for" delegation)
+- Signed + encrypted envelopes with intent classification
+- Stamps (micropayment or proof-of-work) for spam prevention
+- Policy engine for rate limiting and consent
+
+Nomos consumes the SDK via three integration modules: `NomosKeystore` (wraps `src/db/encryption.ts`), `NomosTransport` (hooks into gRPC/WebSocket), and `CATEIntegration` (DID creation, VC issuance, policy config from DB).
 
 ### Adaptive Memory & User Model
 
@@ -555,7 +736,10 @@ The `tool-approval.ts` module detects dangerous operations (destructive shell co
 | `DISCORD_BOT_TOKEN`      | No          | Discord integration                            |
 | `TELEGRAM_BOT_TOKEN`     | No          | Telegram integration                           |
 | `WHATSAPP_ENABLED`       | No          | WhatsApp integration                           |
-| `IMESSAGE_ENABLED`       | No          | iMessage integration (macOS only)              |
+| `IMESSAGE_ENABLED`       | No          | iMessage integration                           |
+| `IMESSAGE_MODE`          | No          | `chatdb` (default) or `bluebubbles`            |
+| `BLUEBUBBLES_SERVER_URL` | No          | BlueBubbles server URL (BlueBubbles mode)      |
+| `BLUEBUBBLES_PASSWORD`   | No          | BlueBubbles API password (BlueBubbles mode)    |
 
 See `.env.example` for the full set of optional variables.
 
@@ -577,24 +761,31 @@ Searched in order: project-local `.nomos/mcp.json`, then global `~/.nomos/mcp.js
 
 ## 8. CLI Commands
 
-| Command                    | Description                              |
-| -------------------------- | ---------------------------------------- |
-| `nomos chat`               | Start interactive REPL (default command) |
-| `nomos daemon start`       | Start daemon in background               |
-| `nomos daemon stop`        | Stop running daemon                      |
-| `nomos daemon restart`     | Restart daemon                           |
-| `nomos daemon status`      | Show daemon status                       |
-| `nomos daemon logs`        | Tail daemon logs                         |
-| `nomos daemon run`         | Run daemon in foreground                 |
-| `nomos slack auth`         | Connect a Slack workspace (OAuth)        |
-| `nomos slack auth --token` | Connect with manual token                |
-| `nomos slack workspaces`   | List connected workspaces                |
-| `nomos slack remove <id>`  | Disconnect a workspace                   |
-| `nomos db migrate`         | Run database migrations                  |
-| `nomos config get/set`     | Manage runtime config                    |
-| `nomos session list`       | List sessions                            |
-| `nomos memory index`       | Index files into memory                  |
-| `nomos send`               | Send a proactive message                 |
+| Command                    | Description                                            |
+| -------------------------- | ------------------------------------------------------ |
+| `nomos chat`               | Start interactive REPL (default command)               |
+| `nomos daemon start`       | Start daemon in background                             |
+| `nomos daemon stop`        | Stop running daemon                                    |
+| `nomos daemon restart`     | Restart daemon                                         |
+| `nomos daemon status`      | Show daemon status                                     |
+| `nomos daemon logs`        | Tail daemon logs                                       |
+| `nomos daemon run`         | Run daemon in foreground                               |
+| `nomos slack auth`         | Connect a Slack workspace (OAuth)                      |
+| `nomos slack auth --token` | Connect with manual token                              |
+| `nomos slack workspaces`   | List connected workspaces                              |
+| `nomos slack remove <id>`  | Disconnect a workspace                                 |
+| `nomos db migrate`         | Run database migrations                                |
+| `nomos config get/set`     | Manage runtime config                                  |
+| `nomos session list`       | List sessions                                          |
+| `nomos memory index`       | Index files into memory                                |
+| `nomos send`               | Send a proactive message                               |
+| `nomos ingest <platform>`  | Ingest historical data (slack/gmail/imessage/whatsapp) |
+| `nomos ingest status`      | Show ingestion job status                              |
+| `nomos contacts list`      | List unified contacts                                  |
+| `nomos contacts link`      | Link a platform identity to a contact                  |
+| `nomos contacts unlink`    | Unlink a platform identity                             |
+| `nomos contacts merge`     | Merge two contacts                                     |
+| `nomos contacts show`      | Show contact details with linked identities            |
 
 ### Slash Commands (in REPL)
 

@@ -1,4 +1,5 @@
-import { getDb } from "../db/client.ts";
+import { sql } from "kysely";
+import { getKysely } from "../db/client.ts";
 import type { PairingRequest } from "./types.ts";
 import { AllowlistStore } from "./allowlist.ts";
 
@@ -31,79 +32,76 @@ export class PairingStore {
     code: string,
     ttlMinutes: number = 60,
   ): Promise<PairingRequest> {
-    const sql = getDb();
+    const db = getKysely();
     const expiresAt = new Date(Date.now() + ttlMinutes * 60 * 1000);
 
-    const [row] = await sql<PairingRequest[]>`
-      INSERT INTO pairing_requests (channel, platform, user_id, code, expires_at)
-      VALUES (${channel}, ${platform}, ${userId}, ${code}, ${expiresAt})
-      RETURNING *
-    `;
-    return row;
+    const row = await db
+      .insertInto("pairing_requests")
+      .values({ channel, platform, user_id: userId, code, expires_at: expiresAt })
+      .returningAll()
+      .executeTakeFirstOrThrow();
+    return row as unknown as PairingRequest;
   }
 
   /**
    * Approve a pairing request and add the user to the allowlist
    */
   async approveRequest(code: string): Promise<PairingRequest | null> {
-    const sql = getDb();
+    const db = getKysely();
 
     // Find pending request
-    const [request] = await sql<PairingRequest[]>`
-      SELECT * FROM pairing_requests
-      WHERE code = ${code}
-        AND status = 'pending'
-        AND expires_at > now()
-    `;
+    const request = await db
+      .selectFrom("pairing_requests")
+      .selectAll()
+      .where("code", "=", code)
+      .where("status", "=", "pending")
+      .where("expires_at", ">", sql<Date>`now()`)
+      .executeTakeFirst();
 
-    if (!request) {
-      return null;
-    }
+    if (!request) return null;
 
     // Update request status
-    const [updated] = await sql<PairingRequest[]>`
-      UPDATE pairing_requests
-      SET status = 'approved', approved_at = now()
-      WHERE id = ${request.id}
-      RETURNING *
-    `;
+    const updated = await db
+      .updateTable("pairing_requests")
+      .set({ status: "approved", approved_at: sql`now()` })
+      .where("id", "=", request.id)
+      .returningAll()
+      .executeTakeFirst();
 
     // Add to allowlist
     await this.allowlistStore.addUser(request.platform, request.user_id);
 
-    return updated;
+    return (updated as unknown as PairingRequest) ?? null;
   }
 
   /**
    * Reject a pairing request
    */
   async rejectRequest(code: string): Promise<PairingRequest | null> {
-    const sql = getDb();
+    const db = getKysely();
 
-    const [updated] = await sql<PairingRequest[]>`
-      UPDATE pairing_requests
-      SET status = 'rejected'
-      WHERE code = ${code}
-        AND status = 'pending'
-        AND expires_at > now()
-      RETURNING *
-    `;
+    const updated = await db
+      .updateTable("pairing_requests")
+      .set({ status: "rejected" })
+      .where("code", "=", code)
+      .where("status", "=", "pending")
+      .where("expires_at", ">", sql<Date>`now()`)
+      .returningAll()
+      .executeTakeFirst();
 
-    return updated ?? null;
+    return (updated as unknown as PairingRequest) ?? null;
   }
 
   /**
    * Clean up expired pairing requests
    */
   async cleanExpired(): Promise<number> {
-    const sql = getDb();
-
-    const result = await sql`
-      DELETE FROM pairing_requests
-      WHERE expires_at < now()
-    `;
-
-    return result.count ?? 0;
+    const db = getKysely();
+    const result = await db
+      .deleteFrom("pairing_requests")
+      .where("expires_at", "<", sql<Date>`now()`)
+      .executeTakeFirst();
+    return Number(result.numDeletedRows ?? 0n);
   }
 
   /**
@@ -117,37 +115,31 @@ export class PairingStore {
    * Get a pairing request by code
    */
   async getRequest(code: string): Promise<PairingRequest | null> {
-    const sql = getDb();
-
-    const [row] = await sql<PairingRequest[]>`
-      SELECT * FROM pairing_requests
-      WHERE code = ${code}
-    `;
-
-    return row ?? null;
+    const db = getKysely();
+    const row = await db
+      .selectFrom("pairing_requests")
+      .selectAll()
+      .where("code", "=", code)
+      .executeTakeFirst();
+    return (row as unknown as PairingRequest) ?? null;
   }
 
   /**
    * List all pending requests for a platform
    */
   async listPendingRequests(platform?: string): Promise<PairingRequest[]> {
-    const sql = getDb();
+    const db = getKysely();
+    let query = db
+      .selectFrom("pairing_requests")
+      .selectAll()
+      .where("status", "=", "pending")
+      .where("expires_at", ">", sql<Date>`now()`)
+      .orderBy("created_at", "desc");
 
     if (platform) {
-      return sql<PairingRequest[]>`
-        SELECT * FROM pairing_requests
-        WHERE platform = ${platform}
-          AND status = 'pending'
-          AND expires_at > now()
-        ORDER BY created_at DESC
-      `;
+      query = query.where("platform", "=", platform);
     }
 
-    return sql<PairingRequest[]>`
-      SELECT * FROM pairing_requests
-      WHERE status = 'pending'
-        AND expires_at > now()
-      ORDER BY created_at DESC
-    `;
+    return query.execute() as unknown as Promise<PairingRequest[]>;
   }
 }

@@ -541,7 +541,6 @@ export function createMemoryMcpServer(): McpSdkServerConfigWithInstance {
     },
     async (args) => {
       try {
-        const { getDb } = await import("../db/client.ts");
         const { CronStore } = await import("../cron/store.ts");
 
         // Resolve platform/channelId from default notification channel if not provided
@@ -557,7 +556,7 @@ export function createMemoryMcpServer(): McpSdkServerConfigWithInstance {
           }
         }
 
-        const store = new CronStore(getDb());
+        const store = new CronStore();
         const id = await store.createJob({
           name: args.name,
           prompt: args.prompt,
@@ -619,10 +618,9 @@ export function createMemoryMcpServer(): McpSdkServerConfigWithInstance {
     },
     async (args) => {
       try {
-        const { getDb } = await import("../db/client.ts");
         const { CronStore } = await import("../cron/store.ts");
 
-        const store = new CronStore(getDb());
+        const store = new CronStore();
         const jobs = await store.listJobs(args.include_disabled ? undefined : { enabled: true });
 
         if (jobs.length === 0) {
@@ -685,10 +683,9 @@ export function createMemoryMcpServer(): McpSdkServerConfigWithInstance {
           };
         }
 
-        const { getDb } = await import("../db/client.ts");
         const { CronStore } = await import("../cron/store.ts");
 
-        const store = new CronStore(getDb());
+        const store = new CronStore();
         let job = null;
 
         if (args.name) {

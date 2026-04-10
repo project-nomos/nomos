@@ -42,6 +42,13 @@ const ALLOWED_KEYS = [
   "NOMOS_API_PROVIDER",
   "OPENROUTER_API_KEY",
   "NOMOS_BROWSER_AUTH",
+  "IMESSAGE_ENABLED",
+  "IMESSAGE_MODE",
+  "IMESSAGE_ALLOWED_CHATS",
+  "BLUEBUBBLES_SERVER_URL",
+  "BLUEBUBBLES_PASSWORD",
+  "BLUEBUBBLES_WEBHOOK_PORT",
+  "BLUEBUBBLES_READ_RECEIPTS",
 ];
 
 /** Keys that contain secrets and should be masked in GET responses. */
@@ -56,6 +63,7 @@ const SECRET_KEYS = new Set([
   "DISCORD_BOT_TOKEN",
   "TELEGRAM_BOT_TOKEN",
   "OPENROUTER_API_KEY",
+  "BLUEBUBBLES_PASSWORD",
 ]);
 
 /** Keys that are writable via PUT. */
@@ -94,6 +102,13 @@ const WRITABLE_KEYS = new Set([
   "NOMOS_EXTRACTION_MODEL",
   "NOMOS_API_PROVIDER",
   "OPENROUTER_API_KEY",
+  "IMESSAGE_ENABLED",
+  "IMESSAGE_MODE",
+  "IMESSAGE_ALLOWED_CHATS",
+  "BLUEBUBBLES_SERVER_URL",
+  "BLUEBUBBLES_PASSWORD",
+  "BLUEBUBBLES_WEBHOOK_PORT",
+  "BLUEBUBBLES_READ_RECEIPTS",
 ]);
 
 /**
@@ -185,6 +200,18 @@ const ENV_TO_DB: Record<string, DbMapping> = {
   },
   NOMOS_VIDEO_GENERATION: { table: "config", dbKey: "app.videoGeneration" },
   NOMOS_VIDEO_GENERATION_MODEL: { table: "config", dbKey: "app.videoGenerationModel" },
+  IMESSAGE_ENABLED: { table: "integrations", dbKey: "imessage", field: "enabled" },
+  IMESSAGE_MODE: { table: "integrations", dbKey: "imessage", field: "mode" },
+  IMESSAGE_ALLOWED_CHATS: { table: "integrations", dbKey: "imessage", field: "allowed_chats" },
+  BLUEBUBBLES_SERVER_URL: { table: "integrations", dbKey: "imessage", field: "server_url" },
+  BLUEBUBBLES_PASSWORD: {
+    table: "integrations",
+    dbKey: "imessage",
+    field: "password",
+    isSecret: true,
+  },
+  BLUEBUBBLES_WEBHOOK_PORT: { table: "integrations", dbKey: "imessage", field: "webhook_port" },
+  BLUEBUBBLES_READ_RECEIPTS: { table: "integrations", dbKey: "imessage", field: "read_receipts" },
 };
 
 /** Simple decrypt: if the value looks encrypted (three dot-separated hex segments), try to decrypt. */

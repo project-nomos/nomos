@@ -1,4 +1,5 @@
-import { getDb } from "./client.ts";
+import { sql } from "kysely";
+import { getKysely } from "./client.ts";
 
 export interface TranscriptMessageRow {
   id: number;
@@ -15,51 +16,59 @@ export async function appendTranscriptMessage(params: {
   content: string | unknown[];
   usage?: { input: number; output: number };
 }): Promise<void> {
-  const sql = getDb();
-  await sql`
-    INSERT INTO transcript_messages (session_id, role, content, usage)
-    VALUES (
-      ${params.sessionId},
-      ${params.role},
-      ${JSON.stringify(params.content)},
-      ${params.usage ? JSON.stringify(params.usage) : null}
-    )
-  `;
+  const db = getKysely();
+  await db
+    .insertInto("transcript_messages")
+    .values({
+      session_id: params.sessionId,
+      role: params.role,
+      content: JSON.stringify(params.content),
+      usage: params.usage ? JSON.stringify(params.usage) : null,
+    })
+    .execute();
 }
 
 export async function getTranscript(
   sessionId: string,
   limit?: number,
 ): Promise<Array<{ role: string; content: string | unknown[] }>> {
-  const sql = getDb();
-  const rows = await sql<TranscriptMessageRow[]>`
-    SELECT role, content FROM transcript_messages
-    WHERE session_id = ${sessionId}
-    ORDER BY id ASC
-    ${limit ? sql`LIMIT ${limit}` : sql``}
-  `;
+  const db = getKysely();
+  let query = db
+    .selectFrom("transcript_messages")
+    .select(["role", "content"])
+    .where("session_id", "=", sessionId)
+    .orderBy("id", "asc");
 
+  if (limit) {
+    query = query.limit(limit);
+  }
+
+  const rows = await query.execute();
   return rows.map((row) => ({
     role: row.role,
-    content: row.content,
+    content: row.content as string | unknown[],
   }));
 }
 
 export async function getTranscriptWithUsage(sessionId: string): Promise<TranscriptMessageRow[]> {
-  const sql = getDb();
-  return sql<TranscriptMessageRow[]>`
-    SELECT * FROM transcript_messages
-    WHERE session_id = ${sessionId}
-    ORDER BY id ASC
-  `;
+  const db = getKysely();
+  const rows = await db
+    .selectFrom("transcript_messages")
+    .selectAll()
+    .where("session_id", "=", sessionId)
+    .orderBy("id", "asc")
+    .execute();
+
+  return rows as unknown as TranscriptMessageRow[];
 }
 
 export async function countTranscriptMessages(sessionId: string): Promise<number> {
-  const sql = getDb();
-  const [row] = await sql<[{ count: number }]>`
-    SELECT count(*)::int as count FROM transcript_messages
-    WHERE session_id = ${sessionId}
-  `;
+  const db = getKysely();
+  const row = await db
+    .selectFrom("transcript_messages")
+    .select(sql<number>`count(*)::int`.as("count"))
+    .where("session_id", "=", sessionId)
+    .executeTakeFirstOrThrow();
   return row.count;
 }
 
@@ -67,15 +76,19 @@ export async function deleteLastTranscriptMessages(
   sessionId: string,
   count: number,
 ): Promise<number> {
-  const sql = getDb();
-  const result = await sql`
-    DELETE FROM transcript_messages
-    WHERE id IN (
-      SELECT id FROM transcript_messages
-      WHERE session_id = ${sessionId}
-      ORDER BY id DESC
-      LIMIT ${count}
+  const db = getKysely();
+  const result = await db
+    .deleteFrom("transcript_messages")
+    .where(
+      "id",
+      "in",
+      db
+        .selectFrom("transcript_messages")
+        .select("id")
+        .where("session_id", "=", sessionId)
+        .orderBy("id", "desc")
+        .limit(count),
     )
-  `;
-  return result.count;
+    .executeTakeFirst();
+  return Number(result.numDeletedRows ?? 0n);
 }

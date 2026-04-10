@@ -13,6 +13,7 @@ import {
 } from "../db/drafts.ts";
 import type { DraftRow } from "../db/drafts.ts";
 import type { OutgoingMessage, AgentEvent } from "./types.ts";
+import { findContactByIdentity } from "../identity/identities.ts";
 
 export interface DraftManagerOptions {
   /** Broadcast a system event to all WebSocket clients */
@@ -43,13 +44,34 @@ export class DraftManager {
 
   /**
    * Create a draft from an outgoing message.
-   * Called by SlackUserAdapter.send() instead of sending directly.
+   * Checks the recipient contact's autonomy level:
+   * - "auto": send immediately without drafting
+   * - "silent": discard the message silently
+   * - "draft" (default): create a draft for approval
    */
   async createDraft(
     message: OutgoingMessage,
     userId: string,
     context: Record<string, unknown> = {},
-  ): Promise<DraftRow> {
+  ): Promise<DraftRow | null> {
+    // Check contact autonomy level
+    const autonomy = await this.resolveAutonomy(message.platform, message.channelId);
+
+    if (autonomy === "auto") {
+      // Send directly without drafting
+      const sendFn = this.sendFns.get(message.platform);
+      if (sendFn) {
+        await sendFn(message.channelId, message.content, message.threadId);
+        console.log(`[draft-manager] Auto-sent to ${message.channelId} (autonomy: auto)`);
+      }
+      return null;
+    }
+
+    if (autonomy === "silent") {
+      console.log(`[draft-manager] Discarded message to ${message.channelId} (autonomy: silent)`);
+      return null;
+    }
+
     const draft = await dbCreateDraft({
       platform: message.platform,
       channelId: message.channelId,
@@ -140,5 +162,24 @@ export class DraftManager {
 
     console.log(`[draft-manager] Draft rejected: ${draft.id.slice(0, 8)}`);
     return { success: true };
+  }
+
+  /**
+   * Look up the autonomy level for a contact based on platform + channel/user ID.
+   * Falls back to "draft" if no contact is found.
+   */
+  private async resolveAutonomy(
+    platform: string,
+    channelId: string,
+  ): Promise<"auto" | "draft" | "silent"> {
+    try {
+      const contact = await findContactByIdentity(platform, channelId);
+      if (contact) {
+        return contact.autonomy;
+      }
+    } catch {
+      // Identity graph not available or DB error — fall back to draft
+    }
+    return "draft";
   }
 }

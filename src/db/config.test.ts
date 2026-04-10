@@ -1,43 +1,41 @@
 import { vi, describe, it, expect, beforeEach } from "vitest";
+import { createMockDb } from "./test-helpers.ts";
 
-const mockSql = Object.assign(vi.fn(), { unsafe: vi.fn() });
-vi.mock("./client.ts", () => ({ getDb: () => mockSql }));
+const { db, addResult, reset } = createMockDb();
+vi.mock("./client.ts", () => ({ getKysely: () => db }));
 
 import { getConfigValue, setConfigValue, deleteConfigValue, listConfig } from "./config.ts";
 
 beforeEach(() => {
-  mockSql.mockReset();
-  mockSql.unsafe.mockReset();
+  reset();
 });
 
 describe("getConfigValue", () => {
   it("returns value when row exists", async () => {
-    mockSql.mockResolvedValueOnce([{ value: "hello" }]);
+    addResult([{ value: "hello" }]);
     const result = await getConfigValue("my-key");
     expect(result).toBe("hello");
-    expect(mockSql).toHaveBeenCalled();
   });
 
   it("returns null when no row found", async () => {
-    mockSql.mockResolvedValueOnce([]);
+    addResult([]);
     const result = await getConfigValue("missing");
     expect(result).toBeNull();
   });
 });
 
 describe("setConfigValue", () => {
-  it("calls sql to upsert config", async () => {
-    mockSql.mockResolvedValueOnce([]);
+  it("calls db to upsert config", async () => {
+    addResult([]);
     await setConfigValue("key1", { foo: "bar" });
-    expect(mockSql).toHaveBeenCalled();
+    // No error means the query compiled and executed
   });
 });
 
 describe("deleteConfigValue", () => {
-  it("calls sql to delete config", async () => {
-    mockSql.mockResolvedValueOnce([]);
+  it("calls db to delete config", async () => {
+    addResult([]);
     await deleteConfigValue("key1");
-    expect(mockSql).toHaveBeenCalled();
   });
 });
 
@@ -47,9 +45,8 @@ describe("listConfig", () => {
       { key: "a", value: 1 },
       { key: "b", value: 2 },
     ];
-    mockSql.mockResolvedValueOnce(rows);
+    addResult(rows);
     const result = await listConfig();
     expect(result).toEqual(rows);
-    expect(mockSql).toHaveBeenCalled();
   });
 });

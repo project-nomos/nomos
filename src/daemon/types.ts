@@ -73,6 +73,9 @@ export interface ChannelAdapter {
   /** Platform name (e.g., "slack", "discord") */
   readonly platform: string;
 
+  /** Adapter mode: "respond" (default) processes messages through agent, "observe" passively indexes */
+  readonly mode?: "respond" | "observe";
+
   /** Start the adapter (connect to platform API) */
   start(): Promise<void>;
 

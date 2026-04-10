@@ -248,6 +248,20 @@ export class AgentRuntime {
       // Config table may not exist yet
     }
 
+    // Check iMessage/Messages.app integration from DB
+    if (process.platform === "darwin" && !this.imessageEnabled) {
+      try {
+        const { getIntegration } = await import("../db/integrations.ts");
+        const imsg = await getIntegration("imessage");
+        if (imsg?.enabled) {
+          const cfg = imsg.config as Record<string, unknown>;
+          this.imessageEnabled = cfg.enabled === "true";
+        }
+      } catch {
+        // DB not available
+      }
+    }
+
     // Build system prompt (after MCP servers so integrations summary is accurate)
     this.systemPromptAppend = buildSystemPromptAppend({
       profile: this.profile,
@@ -345,9 +359,11 @@ export class AgentRuntime {
     if (process.env.WHATSAPP_ENABLED === "true") {
       parts.push("- **WhatsApp**: Receive and respond to messages via WhatsApp");
     }
-    // Check for iMessage (macOS only)
-    if (process.env.IMESSAGE_ENABLED === "true" && process.platform === "darwin") {
-      parts.push("- **iMessage**: Receive and respond to messages via iMessage");
+    // Check for Messages.app (macOS only)
+    if (this.isImessageEnabled()) {
+      parts.push(
+        "- **Messages.app (iMessage)**: Receive and respond to messages via Messages.app. You have access to the user's iMessage conversations.",
+      );
     }
 
     // Notification default
@@ -367,13 +383,21 @@ export class AgentRuntime {
     }
 
     return [
-      "The following integrations are loaded and available via MCP tools:",
+      "The following integrations are **active, authenticated, and ready to use right now**. You DO have access to these — do not tell the user they need to configure them:",
       ...parts,
       "",
-      "Use these integrations proactively when they can help fulfill the user's request.",
+      "Use these integrations proactively when they can help fulfill the user's request. You are the user's digital clone — act on their behalf across all connected channels.",
       "**Proactive mode**: Use `proactive_send` to notify the user about important events without being asked — urgent emails, build failures, monitoring alerts, or time-sensitive information.",
       "Use `schedule_task` to create recurring or timed background tasks. With `announce: true`, results are delivered to the default notification channel automatically.",
     ].join("\n");
+  }
+
+  /** Check if Messages.app (iMessage) is enabled via env var or DB integration. */
+  private imessageEnabled: boolean | null = null;
+  private isImessageEnabled(): boolean {
+    if (process.platform !== "darwin") return false;
+    if (process.env.IMESSAGE_ENABLED === "true") return true;
+    return this.imessageEnabled ?? false;
   }
 
   /**

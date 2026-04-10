@@ -1,4 +1,5 @@
-import { getDb } from "./client.ts";
+import { sql } from "kysely";
+import { getKysely } from "./client.ts";
 
 export interface UserModelEntry {
   id: string;
@@ -10,61 +11,49 @@ export interface UserModelEntry {
   updatedAt: Date;
 }
 
-interface UserModelRow {
-  id: string;
-  category: string;
-  key: string;
-  value: unknown;
-  source_ids: string[];
-  confidence: number;
-  updated_at: Date;
-}
-
 export async function upsertUserModel(
   entry: Omit<UserModelEntry, "id" | "updatedAt">,
 ): Promise<void> {
-  const sql = getDb();
+  const db = getKysely();
   const valueJson = JSON.stringify(entry.value);
 
-  await sql`
-    INSERT INTO user_model (category, key, value, source_ids, confidence)
-    VALUES (
-      ${entry.category},
-      ${entry.key},
-      ${valueJson}::jsonb,
-      ${entry.sourceIds},
-      ${entry.confidence}
+  await db
+    .insertInto("user_model")
+    .values({
+      category: entry.category,
+      key: entry.key,
+      value: valueJson,
+      source_ids: entry.sourceIds,
+      confidence: entry.confidence,
+    })
+    .onConflict((oc) =>
+      oc.columns(["category", "key"]).doUpdateSet({
+        value: sql`${valueJson}::jsonb`,
+        source_ids: sql`(
+          SELECT array_agg(DISTINCT s)
+          FROM unnest(user_model.source_ids || ${entry.sourceIds}::text[]) AS s
+        )`,
+        confidence: entry.confidence,
+        updated_at: sql`now()`,
+      }),
     )
-    ON CONFLICT (category, key) DO UPDATE SET
-      value = ${valueJson}::jsonb,
-      source_ids = (
-        SELECT array_agg(DISTINCT s)
-        FROM unnest(user_model.source_ids || ${entry.sourceIds}::text[]) AS s
-      ),
-      confidence = ${entry.confidence},
-      updated_at = now()
-  `;
+    .execute();
 }
 
 export async function getUserModel(category?: string): Promise<UserModelEntry[]> {
-  const sql = getDb();
+  const db = getKysely();
 
-  let rows: UserModelRow[];
+  let query = db
+    .selectFrom("user_model")
+    .select(["id", "category", "key", "value", "source_ids", "confidence", "updated_at"])
+    .orderBy("confidence", "desc")
+    .orderBy("updated_at", "desc");
+
   if (category) {
-    rows = await sql<UserModelRow[]>`
-      SELECT id, category, key, value, source_ids, confidence, updated_at
-      FROM user_model
-      WHERE category = ${category}
-      ORDER BY confidence DESC, updated_at DESC
-    `;
-  } else {
-    rows = await sql<UserModelRow[]>`
-      SELECT id, category, key, value, source_ids, confidence, updated_at
-      FROM user_model
-      ORDER BY confidence DESC, updated_at DESC
-    `;
+    query = query.where("category", "=", category);
   }
 
+  const rows = await query.execute();
   return rows.map((row) => ({
     id: row.id,
     category: row.category,
@@ -77,9 +66,11 @@ export async function getUserModel(category?: string): Promise<UserModelEntry[]>
 }
 
 export async function deleteUserModelEntry(category: string, key: string): Promise<boolean> {
-  const sql = getDb();
-  const result = await sql`
-    DELETE FROM user_model WHERE category = ${category} AND key = ${key}
-  `;
-  return result.count > 0;
+  const db = getKysely();
+  const result = await db
+    .deleteFrom("user_model")
+    .where("category", "=", category)
+    .where("key", "=", key)
+    .executeTakeFirst();
+  return (result.numDeletedRows ?? 0n) > 0n;
 }

@@ -81,6 +81,9 @@ export async function GET() {
     whatsapp: {
       configured: env.WHATSAPP_ENABLED === "true" || env.WHATSAPP_ENABLED === "1",
     },
+    imessage: {
+      configured: env.IMESSAGE_ENABLED === "true" || env.IMESSAGE_ENABLED === "1",
+    },
   };
 
   return NextResponse.json(status);

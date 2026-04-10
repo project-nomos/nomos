@@ -1,4 +1,6 @@
-import { getDb } from "./client.ts";
+import { sql } from "kysely";
+import { getKysely } from "./client.ts";
+import { cosineDistance, cosineSimilarity, ftsMatch, ftsRank } from "./sql-helpers.ts";
 
 export interface MemoryChunk {
   id: string;
@@ -25,32 +27,35 @@ export interface MemorySearchResult {
 }
 
 export async function storeMemoryChunk(chunk: MemoryChunk): Promise<void> {
-  const sql = getDb();
+  const db = getKysely();
   const embeddingStr = chunk.embedding ? `[${chunk.embedding.join(",")}]` : null;
   const metadataJson = JSON.stringify(chunk.metadata ?? {});
 
-  await sql`
-    INSERT INTO memory_chunks (id, source, path, text, embedding, start_line, end_line, hash, model, metadata)
-    VALUES (
-      ${chunk.id},
-      ${chunk.source},
-      ${chunk.path ?? null},
-      ${chunk.text},
-      ${embeddingStr ? sql`${embeddingStr}::vector` : null},
-      ${chunk.startLine ?? null},
-      ${chunk.endLine ?? null},
-      ${chunk.hash ?? null},
-      ${chunk.model ?? null},
-      ${metadataJson}::jsonb
+  await db
+    .insertInto("memory_chunks")
+    .values({
+      id: chunk.id,
+      source: chunk.source,
+      path: chunk.path ?? null,
+      text: chunk.text,
+      embedding: embeddingStr ? sql`${embeddingStr}::vector` : null,
+      start_line: chunk.startLine ?? null,
+      end_line: chunk.endLine ?? null,
+      hash: chunk.hash ?? null,
+      model: chunk.model ?? null,
+      metadata: metadataJson,
+    })
+    .onConflict((oc) =>
+      oc.column("id").doUpdateSet({
+        text: sql`EXCLUDED.text`,
+        embedding: sql`EXCLUDED.embedding`,
+        hash: sql`EXCLUDED.hash`,
+        model: sql`EXCLUDED.model`,
+        metadata: sql`EXCLUDED.metadata`,
+        updated_at: sql`now()`,
+      }),
     )
-    ON CONFLICT (id) DO UPDATE SET
-      text = EXCLUDED.text,
-      embedding = EXCLUDED.embedding,
-      hash = EXCLUDED.hash,
-      model = EXCLUDED.model,
-      metadata = EXCLUDED.metadata,
-      updated_at = now()
-  `;
+    .execute();
 }
 
 export async function searchMemoryByVector(
@@ -58,33 +63,29 @@ export async function searchMemoryByVector(
   limit: number = 10,
   category?: string,
 ): Promise<MemorySearchResult[]> {
-  const sql = getDb();
-  const embeddingStr = `[${embedding.join(",")}]`;
+  const db = getKysely();
+
+  let query = db
+    .selectFrom("memory_chunks")
+    .select([
+      "id",
+      "text",
+      "path",
+      "source",
+      cosineSimilarity("embedding", embedding).as("score"),
+      "created_at",
+      "access_count",
+      "metadata",
+    ])
+    .where("embedding", "is not", null)
+    .orderBy(cosineDistance("embedding", embedding))
+    .limit(limit);
 
   if (category) {
-    return sql<MemorySearchResult[]>`
-      SELECT
-        id, text, path, source,
-        1 - (embedding <=> ${embeddingStr}::vector) as score,
-        created_at, access_count, metadata
-      FROM memory_chunks
-      WHERE embedding IS NOT NULL
-        AND metadata->>'category' = ${category}
-      ORDER BY embedding <=> ${embeddingStr}::vector
-      LIMIT ${limit}
-    `;
+    query = query.where(sql`metadata->>'category'`, "=", category);
   }
 
-  return sql<MemorySearchResult[]>`
-    SELECT
-      id, text, path, source,
-      1 - (embedding <=> ${embeddingStr}::vector) as score,
-      created_at, access_count, metadata
-    FROM memory_chunks
-    WHERE embedding IS NOT NULL
-    ORDER BY embedding <=> ${embeddingStr}::vector
-    LIMIT ${limit}
-  `;
+  return query.execute() as unknown as Promise<MemorySearchResult[]>;
 }
 
 export async function searchMemoryByText(
@@ -92,65 +93,71 @@ export async function searchMemoryByText(
   limit: number = 10,
   category?: string,
 ): Promise<MemorySearchResult[]> {
-  const sql = getDb();
+  const db = getKysely();
+
+  let q = db
+    .selectFrom("memory_chunks")
+    .select([
+      "id",
+      "text",
+      "path",
+      "source",
+      ftsRank("text", query).as("score"),
+      "created_at",
+      "access_count",
+      "metadata",
+    ])
+    .where(ftsMatch("text", query))
+    .orderBy("score", "desc")
+    .limit(limit);
 
   if (category) {
-    return sql<MemorySearchResult[]>`
-      SELECT
-        id, text, path, source,
-        ts_rank(to_tsvector('english', text), plainto_tsquery('english', ${query})) as score,
-        created_at, access_count, metadata
-      FROM memory_chunks
-      WHERE to_tsvector('english', text) @@ plainto_tsquery('english', ${query})
-        AND metadata->>'category' = ${category}
-      ORDER BY score DESC
-      LIMIT ${limit}
-    `;
+    q = q.where(sql`metadata->>'category'`, "=", category);
   }
 
-  return sql<MemorySearchResult[]>`
-    SELECT
-      id, text, path, source,
-      ts_rank(to_tsvector('english', text), plainto_tsquery('english', ${query})) as score,
-      created_at, access_count, metadata
-    FROM memory_chunks
-    WHERE to_tsvector('english', text) @@ plainto_tsquery('english', ${query})
-    ORDER BY score DESC
-    LIMIT ${limit}
-  `;
+  return q.execute() as unknown as Promise<MemorySearchResult[]>;
 }
 
 export async function searchMemoryByCategory(
   category: string,
   limit: number = 10,
 ): Promise<MemorySearchResult[]> {
-  const sql = getDb();
+  const db = getKysely();
 
-  return sql<MemorySearchResult[]>`
-    SELECT
-      id, text, path, source,
-      1.0 as score,
-      created_at, access_count, metadata
-    FROM memory_chunks
-    WHERE metadata->>'category' = ${category}
-    ORDER BY created_at DESC
-    LIMIT ${limit}
-  `;
+  const rows = await db
+    .selectFrom("memory_chunks")
+    .select([
+      "id",
+      "text",
+      "path",
+      "source",
+      sql<number>`1.0`.as("score"),
+      "created_at",
+      "access_count",
+      "metadata",
+    ])
+    .where(sql`metadata->>'category'`, "=", category)
+    .orderBy("created_at", "desc")
+    .limit(limit)
+    .execute();
+  return rows as unknown as MemorySearchResult[];
 }
 
 export async function updateMemoryMetadata(
   id: string,
   metadata: Record<string, unknown>,
 ): Promise<void> {
-  const sql = getDb();
+  const db = getKysely();
   const metadataJson = JSON.stringify(metadata);
 
-  await sql`
-    UPDATE memory_chunks
-    SET metadata = metadata || ${metadataJson}::jsonb,
-        updated_at = now()
-    WHERE id = ${id}
-  `;
+  await db
+    .updateTable("memory_chunks")
+    .set({
+      metadata: sql`metadata || ${metadataJson}::jsonb`,
+      updated_at: sql`now()`,
+    })
+    .where("id", "=", id)
+    .execute();
 }
 
 /**
@@ -159,27 +166,28 @@ export async function updateMemoryMetadata(
  */
 export async function recordMemoryAccess(ids: string[]): Promise<void> {
   if (ids.length === 0) return;
-  const sql = getDb();
-  await sql`
-    UPDATE memory_chunks
-    SET access_count = access_count + 1,
-        last_accessed_at = now()
-    WHERE id = ANY(${ids})
-  `;
+  const db = getKysely();
+  await db
+    .updateTable("memory_chunks")
+    .set({
+      access_count: sql`access_count + 1`,
+      last_accessed_at: sql`now()`,
+    })
+    .where("id", "in", ids)
+    .execute();
 }
 
 export async function deleteMemoryBySource(source: string): Promise<number> {
-  const sql = getDb();
-  const result = await sql`
-    DELETE FROM memory_chunks WHERE source = ${source}
-  `;
-  return result.count;
+  const db = getKysely();
+  const result = await db
+    .deleteFrom("memory_chunks")
+    .where("source", "=", source)
+    .executeTakeFirst();
+  return Number(result.numDeletedRows ?? 0n);
 }
 
 export async function deleteMemoryByPath(path: string): Promise<number> {
-  const sql = getDb();
-  const result = await sql`
-    DELETE FROM memory_chunks WHERE path = ${path}
-  `;
-  return result.count;
+  const db = getKysely();
+  const result = await db.deleteFrom("memory_chunks").where("path", "=", path).executeTakeFirst();
+  return Number(result.numDeletedRows ?? 0n);
 }

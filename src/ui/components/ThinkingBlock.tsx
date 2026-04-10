@@ -20,7 +20,7 @@ interface ThinkingBlockProps {
 function ThinkingBlockInner({ content, live, expanded }: ThinkingBlockProps): React.ReactElement {
   if (live) {
     // Live: show streaming preview
-    const displayContent = content.replace(/\n/g, " ").trim().slice(-80);
+    const displayContent = content.trim();
     return (
       <Box flexDirection="column" marginTop={1}>
         <Box>

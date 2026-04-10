@@ -1,18 +1,7 @@
-import type postgres from "postgres";
+import { sql } from "kysely";
 import { randomUUID } from "node:crypto";
+import { getKysely } from "../db/client.ts";
 import type { CronJob, CronJobUpdate, CronJobFilter, CronRun, CronRunFilter } from "./types.ts";
-
-interface CronRunRow {
-  id: string;
-  job_id: string;
-  job_name: string;
-  started_at: Date;
-  finished_at: Date | null;
-  success: boolean;
-  error: string | null;
-  duration_ms: number | null;
-  session_key: string | null;
-}
 
 interface CronJobRow {
   id: string;
@@ -32,8 +21,6 @@ interface CronJobRow {
 }
 
 export class CronStore {
-  constructor(private sql: postgres.Sql) {}
-
   private rowToJob(row: CronJobRow): CronJob {
     return {
       id: row.id,
@@ -54,175 +41,138 @@ export class CronStore {
   }
 
   async createJob(job: Omit<CronJob, "id" | "createdAt">): Promise<string> {
+    const db = getKysely();
     const id = randomUUID();
-    const [row] = await this.sql<CronJobRow[]>`
-      INSERT INTO cron_jobs (
-        id, name, schedule, schedule_type, session_target, delivery_mode,
-        prompt, platform, channel_id, enabled, error_count
-      )
-      VALUES (
-        ${id},
-        ${job.name},
-        ${job.schedule},
-        ${job.scheduleType},
-        ${job.sessionTarget},
-        ${job.deliveryMode},
-        ${job.prompt},
-        ${job.platform ?? null},
-        ${job.channelId ?? null},
-        ${job.enabled},
-        ${job.errorCount}
-      )
-      RETURNING *
-    `;
-    return row.id;
+    await db
+      .insertInto("cron_jobs")
+      .values({
+        id,
+        name: job.name,
+        schedule: job.schedule,
+        schedule_type: job.scheduleType,
+        session_target: job.sessionTarget,
+        delivery_mode: job.deliveryMode,
+        prompt: job.prompt,
+        platform: job.platform ?? null,
+        channel_id: job.channelId ?? null,
+        enabled: job.enabled,
+        error_count: job.errorCount,
+      })
+      .execute();
+    return id;
   }
 
   async updateJob(id: string, updates: CronJobUpdate): Promise<void> {
-    const updateFields: string[] = [];
-    const values: (string | number | boolean | Date | null)[] = [];
+    const db = getKysely();
 
-    if (updates.name !== undefined) {
-      updateFields.push(`name = $${values.length + 1}`);
-      values.push(updates.name);
-    }
-    if (updates.schedule !== undefined) {
-      updateFields.push(`schedule = $${values.length + 1}`);
-      values.push(updates.schedule);
-    }
-    if (updates.scheduleType !== undefined) {
-      updateFields.push(`schedule_type = $${values.length + 1}`);
-      values.push(updates.scheduleType);
-    }
-    if (updates.sessionTarget !== undefined) {
-      updateFields.push(`session_target = $${values.length + 1}`);
-      values.push(updates.sessionTarget);
-    }
-    if (updates.deliveryMode !== undefined) {
-      updateFields.push(`delivery_mode = $${values.length + 1}`);
-      values.push(updates.deliveryMode);
-    }
-    if (updates.prompt !== undefined) {
-      updateFields.push(`prompt = $${values.length + 1}`);
-      values.push(updates.prompt);
-    }
-    if (updates.platform !== undefined) {
-      updateFields.push(`platform = $${values.length + 1}`);
-      values.push(updates.platform);
-    }
-    if (updates.channelId !== undefined) {
-      updateFields.push(`channel_id = $${values.length + 1}`);
-      values.push(updates.channelId);
-    }
-    if (updates.enabled !== undefined) {
-      updateFields.push(`enabled = $${values.length + 1}`);
-      values.push(updates.enabled);
-    }
-    if (updates.errorCount !== undefined) {
-      updateFields.push(`error_count = $${values.length + 1}`);
-      values.push(updates.errorCount);
-    }
-    if (updates.lastRun !== undefined) {
-      updateFields.push(`last_run = $${values.length + 1}`);
-      values.push(updates.lastRun);
-    }
-    if (updates.lastError !== undefined) {
-      updateFields.push(`last_error = $${values.length + 1}`);
-      values.push(updates.lastError);
-    }
+    const setValues: Record<string, unknown> = {};
+    if (updates.name !== undefined) setValues.name = updates.name;
+    if (updates.schedule !== undefined) setValues.schedule = updates.schedule;
+    if (updates.scheduleType !== undefined) setValues.schedule_type = updates.scheduleType;
+    if (updates.sessionTarget !== undefined) setValues.session_target = updates.sessionTarget;
+    if (updates.deliveryMode !== undefined) setValues.delivery_mode = updates.deliveryMode;
+    if (updates.prompt !== undefined) setValues.prompt = updates.prompt;
+    if (updates.platform !== undefined) setValues.platform = updates.platform;
+    if (updates.channelId !== undefined) setValues.channel_id = updates.channelId;
+    if (updates.enabled !== undefined) setValues.enabled = updates.enabled;
+    if (updates.errorCount !== undefined) setValues.error_count = updates.errorCount;
+    if (updates.lastRun !== undefined) setValues.last_run = updates.lastRun;
+    if (updates.lastError !== undefined) setValues.last_error = updates.lastError;
 
-    if (updateFields.length === 0) {
-      return;
-    }
+    if (Object.keys(setValues).length === 0) return;
 
-    values.push(id);
-    await this.sql.unsafe(
-      `UPDATE cron_jobs SET ${updateFields.join(", ")} WHERE id = $${values.length}`,
-      values,
-    );
+    await db.updateTable("cron_jobs").set(setValues).where("id", "=", id).execute();
   }
 
   async deleteJob(id: string): Promise<void> {
-    await this.sql`DELETE FROM cron_jobs WHERE id = ${id}`;
+    const db = getKysely();
+    await db.deleteFrom("cron_jobs").where("id", "=", id).execute();
   }
 
   async getJob(id: string): Promise<CronJob | null> {
-    const [row] = await this.sql<CronJobRow[]>`
-      SELECT * FROM cron_jobs WHERE id = ${id}
-    `;
-    return row ? this.rowToJob(row) : null;
+    const db = getKysely();
+    const row = await db
+      .selectFrom("cron_jobs")
+      .selectAll()
+      .where("id", "=", id)
+      .executeTakeFirst();
+    return row ? this.rowToJob(row as unknown as CronJobRow) : null;
   }
 
   async getJobByName(name: string): Promise<CronJob | null> {
-    const [row] = await this.sql<CronJobRow[]>`
-      SELECT * FROM cron_jobs WHERE name = ${name}
-    `;
-    return row ? this.rowToJob(row) : null;
+    const db = getKysely();
+    const row = await db
+      .selectFrom("cron_jobs")
+      .selectAll()
+      .where("name", "=", name)
+      .executeTakeFirst();
+    return row ? this.rowToJob(row as unknown as CronJobRow) : null;
   }
 
   async listJobs(filter?: CronJobFilter): Promise<CronJob[]> {
-    let query = this.sql<CronJobRow[]>`SELECT * FROM cron_jobs WHERE true`;
+    const db = getKysely();
+    let query = db.selectFrom("cron_jobs").selectAll();
 
     if (filter?.enabled !== undefined) {
-      query = this.sql<CronJobRow[]>`
-        SELECT * FROM cron_jobs WHERE enabled = ${filter.enabled}
-      `;
+      query = query.where("enabled", "=", filter.enabled);
     }
-
     if (filter?.platform !== undefined) {
-      query = this.sql<CronJobRow[]>`
-        SELECT * FROM cron_jobs WHERE enabled = ${filter.enabled ?? true} AND platform = ${filter.platform}
-      `;
+      query = query.where("platform", "=", filter.platform);
     }
-
     if (filter?.sessionTarget !== undefined) {
-      query = this.sql<CronJobRow[]>`
-        SELECT * FROM cron_jobs
-        WHERE enabled = ${filter.enabled ?? true}
-        AND session_target = ${filter.sessionTarget}
-        ${filter.platform ? this.sql`AND platform = ${filter.platform}` : this.sql``}
-      `;
+      query = query.where("session_target", "=", filter.sessionTarget);
     }
 
-    const rows = await query;
-    return rows.map((row) => this.rowToJob(row));
+    const rows = await query.execute();
+    return rows.map((row) => this.rowToJob(row as unknown as CronJobRow));
   }
 
   async markRun(id: string, success: boolean, error?: string): Promise<void> {
+    const db = getKysely();
     if (success) {
-      await this.sql`
-        UPDATE cron_jobs SET
-          last_run = now(),
-          error_count = 0,
-          last_error = null
-        WHERE id = ${id}
-      `;
+      await db
+        .updateTable("cron_jobs")
+        .set({ last_run: sql`now()`, error_count: 0, last_error: null })
+        .where("id", "=", id)
+        .execute();
     } else {
-      await this.sql`
-        UPDATE cron_jobs SET
-          last_run = now(),
-          error_count = error_count + 1,
-          last_error = ${error ?? null}
-        WHERE id = ${id}
-      `;
+      await db
+        .updateTable("cron_jobs")
+        .set({
+          last_run: sql`now()`,
+          error_count: sql`error_count + 1`,
+          last_error: error ?? null,
+        })
+        .where("id", "=", id)
+        .execute();
     }
   }
 
   async disableOnErrors(id: string, maxErrors: number = 3): Promise<void> {
-    await this.sql`
-      UPDATE cron_jobs SET enabled = false
-      WHERE id = ${id} AND error_count >= ${maxErrors}
-    `;
+    const db = getKysely();
+    await db
+      .updateTable("cron_jobs")
+      .set({ enabled: false })
+      .where("id", "=", id)
+      .where("error_count", ">=", maxErrors)
+      .execute();
   }
 
   // --- Cron run history ---
 
   async recordRunStart(jobId: string, jobName: string, sessionKey: string): Promise<string> {
+    const db = getKysely();
     const id = randomUUID();
-    await this.sql`
-      INSERT INTO cron_runs (id, job_id, job_name, started_at, success, session_key)
-      VALUES (${id}, ${jobId}, ${jobName}, now(), false, ${sessionKey})
-    `;
+    await db
+      .insertInto("cron_runs")
+      .values({
+        id,
+        job_id: jobId,
+        job_name: jobName,
+        success: false,
+        session_key: sessionKey,
+      })
+      .execute();
     return id;
   }
 
@@ -232,46 +182,34 @@ export class CronStore {
     durationMs: number,
     error?: string,
   ): Promise<void> {
-    await this.sql`
-      UPDATE cron_runs SET
-        finished_at = now(),
-        success = ${success},
-        duration_ms = ${durationMs},
-        error = ${error ?? null}
-      WHERE id = ${runId}
-    `;
+    const db = getKysely();
+    await db
+      .updateTable("cron_runs")
+      .set({
+        finished_at: sql`now()`,
+        success,
+        duration_ms: durationMs,
+        error: error ?? null,
+      })
+      .where("id", "=", runId)
+      .execute();
   }
 
   async listRuns(filter?: CronRunFilter): Promise<CronRun[]> {
+    const db = getKysely();
     const limit = filter?.limit ?? 50;
 
-    let rows: CronRunRow[];
-    if (filter?.jobId && filter?.success !== undefined) {
-      rows = await this.sql<CronRunRow[]>`
-        SELECT * FROM cron_runs
-        WHERE job_id = ${filter.jobId} AND success = ${filter.success}
-        ORDER BY started_at DESC LIMIT ${limit}
-      `;
-    } else if (filter?.jobId) {
-      rows = await this.sql<CronRunRow[]>`
-        SELECT * FROM cron_runs
-        WHERE job_id = ${filter.jobId}
-        ORDER BY started_at DESC LIMIT ${limit}
-      `;
-    } else if (filter?.success !== undefined) {
-      rows = await this.sql<CronRunRow[]>`
-        SELECT * FROM cron_runs
-        WHERE success = ${filter.success}
-        ORDER BY started_at DESC LIMIT ${limit}
-      `;
-    } else {
-      rows = await this.sql<CronRunRow[]>`
-        SELECT * FROM cron_runs
-        ORDER BY started_at DESC LIMIT ${limit}
-      `;
+    let query = db.selectFrom("cron_runs").selectAll();
+
+    if (filter?.jobId) {
+      query = query.where("job_id", "=", filter.jobId);
+    }
+    if (filter?.success !== undefined) {
+      query = query.where("success", "=", filter.success);
     }
 
-    return rows.map((row) => this.rowToRun(row));
+    const rows = await query.orderBy("started_at", "desc").limit(limit).execute();
+    return rows.map((row) => this.rowToRun(row as unknown as CronRunRow));
   }
 
   async getRunStats(jobId: string): Promise<{
@@ -281,24 +219,22 @@ export class CronStore {
     avgDurationMs: number | null;
     lastRun: Date | null;
   }> {
-    const [row] = await this.sql<
-      {
-        total: number;
-        successes: number;
-        failures: number;
-        avg_duration: number | null;
-        last_run: Date | null;
-      }[]
-    >`
-      SELECT
-        count(*)::int AS total,
-        count(*) FILTER (WHERE success = true)::int AS successes,
-        count(*) FILTER (WHERE success = false AND finished_at IS NOT NULL)::int AS failures,
-        avg(duration_ms) FILTER (WHERE duration_ms IS NOT NULL)::int AS avg_duration,
-        max(started_at) AS last_run
-      FROM cron_runs
-      WHERE job_id = ${jobId}
-    `;
+    const db = getKysely();
+    const row = await db
+      .selectFrom("cron_runs")
+      .select([
+        sql<number>`count(*)::int`.as("total"),
+        sql<number>`count(*) FILTER (WHERE success = true)::int`.as("successes"),
+        sql<number>`count(*) FILTER (WHERE success = false AND finished_at IS NOT NULL)::int`.as(
+          "failures",
+        ),
+        sql<number | null>`avg(duration_ms) FILTER (WHERE duration_ms IS NOT NULL)::int`.as(
+          "avg_duration",
+        ),
+        sql<Date | null>`max(started_at)`.as("last_run"),
+      ])
+      .where("job_id", "=", jobId)
+      .executeTakeFirstOrThrow();
 
     return {
       totalRuns: row.total,
@@ -310,11 +246,12 @@ export class CronStore {
   }
 
   async pruneOldRuns(retentionDays: number = 30): Promise<number> {
-    const result = await this.sql`
-      DELETE FROM cron_runs
-      WHERE started_at < now() - interval '1 day' * ${retentionDays}
-    `;
-    return result.count;
+    const db = getKysely();
+    const result = await db
+      .deleteFrom("cron_runs")
+      .where("started_at", "<", sql<Date>`now() - interval '1 day' * ${retentionDays}`)
+      .executeTakeFirst();
+    return Number(result.numDeletedRows ?? 0n);
   }
 
   private rowToRun(row: CronRunRow): CronRun {
@@ -330,4 +267,16 @@ export class CronStore {
       sessionKey: row.session_key ?? undefined,
     };
   }
+}
+
+interface CronRunRow {
+  id: string;
+  job_id: string;
+  job_name: string;
+  started_at: Date;
+  finished_at: Date | null;
+  success: boolean;
+  error: string | null;
+  duration_ms: number | null;
+  session_key: string | null;
 }

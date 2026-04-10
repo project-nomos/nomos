@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from "react";
 import { RefreshCw, ExternalLink } from "lucide-react";
 import { TokenInput } from "@/components/token-input";
 import { StatusBadge } from "@/components/status-badge";
+import { SyncProgress } from "@/components/sync-progress";
 import { DirtyIndicator } from "@/components/dirty-indicator";
 import { useToast } from "@/contexts/toast-context";
 import { useUnsavedChanges } from "@/hooks/use-unsaved-changes";
@@ -197,6 +198,9 @@ export default function DiscordSettingsPage() {
           </div>
         </div>
       </section>
+
+      {/* Sync Progress */}
+      {hasBotToken && <SyncProgress platform="discord" />}
 
       {/* Save */}
       <button

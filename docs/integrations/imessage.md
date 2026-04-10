@@ -1,45 +1,192 @@
 # iMessage Integration
 
-Connect Nomos to iMessage on macOS. The adapter reads incoming messages from the local Messages database and sends replies via AppleScript, enabling two-way conversations with individuals and group chats.
+Connect Nomos to iMessage with two connection modes: **local chat.db** (zero setup, macOS-only) or **BlueBubbles** (full bidirectional, cross-platform via a Mac relay).
 
-> **macOS only.** This integration relies on the Messages app and its local SQLite database, which are only available on macOS.
+> **macOS required** for both modes — either as the daemon host (chat.db mode) or as a BlueBubbles relay server.
 
-## Prerequisites
+## Choose Your Mode
+
+|                        | Local chat.db                | BlueBubbles          |
+| ---------------------- | ---------------------------- | -------------------- |
+| **Read messages**      | SQLite polling + WAL watcher | Webhooks (real-time) |
+| **Send messages**      | AppleScript                  | REST API             |
+| **Reactions/tapbacks** | No                           | Yes                  |
+| **Typing indicators**  | No                           | Yes                  |
+| **Read receipts**      | No                           | Yes                  |
+| **Attachments**        | No                           | Yes (up to 8MB)      |
+| **Group management**   | No                           | Yes                  |
+| **Daemon platform**    | macOS only                   | Any (Mac is relay)   |
+| **Setup complexity**   | Minimal                      | Moderate             |
+
+**Recommendation:** Start with chat.db for the simplest setup. Switch to BlueBubbles when you need sending capabilities, reactions, or want the daemon running on a non-Mac machine.
+
+Configure the mode via Settings UI at `/integrations/imessage` or with the `IMESSAGE_MODE` env var.
+
+---
+
+## Mode 1: Local chat.db (Default)
+
+### Prerequisites
 
 - macOS with Messages.app signed into iMessage
-- Messages.app running (it must stay open)
-- **Full Disk Access** granted to your terminal app (for reading `~/Library/Messages/chat.db`)
+- Messages.app running (must stay open)
+- **Full Disk Access** granted to your terminal app
 - **Automation** permission for `osascript` to control Messages.app
-- The Nomos daemon running (`pnpm daemon:dev` or `nomos daemon start`)
+- Nomos daemon running
 
-## Step 1: Grant Permissions
+### Step 1: Grant Permissions
 
-### Full Disk Access
-
-The adapter reads `~/Library/Messages/chat.db` to detect incoming messages. macOS restricts access to this file.
+#### Full Disk Access
 
 1. Open **System Settings** > **Privacy & Security** > **Full Disk Access**
-2. Click the **+** button
-3. Add your terminal application (e.g., Terminal.app, iTerm2, Alacritty, VS Code)
-4. Restart the terminal after granting access
+2. Click **+** and add your terminal application
+3. Restart the terminal after granting access
 
-### Automation Permission
+#### Automation Permission
 
-The adapter sends messages via AppleScript (`osascript`). The first time a message is sent, macOS will prompt you to allow your terminal to control Messages.app. Click **OK** to grant the permission.
+The first time a message is sent, macOS will prompt to allow your terminal to control Messages.app. Click **OK**.
 
-You can verify or change this at **System Settings** > **Privacy & Security** > **Automation**.
+### Step 2: Enable iMessage
 
-## Step 2: Enable iMessage
+**Via Settings UI:** Go to `/integrations/imessage`, enable iMessage, select "Local chat.db" mode.
 
-Add this to your `.env` file:
+**Via environment:**
 
 ```bash
 IMESSAGE_ENABLED=true
+IMESSAGE_MODE=chatdb          # default, can be omitted
 ```
 
-### Optional: Restrict to Specific Contacts or Groups
+### Step 3: Start the Daemon
 
-Limit the bot to certain contacts or group chats:
+```bash
+nomos daemon run
+```
+
+You should see:
+
+```
+[imessage-receiver] Opened chat.db, starting from ROWID 12345
+[imessage-adapter] Started in chat.db mode — watching for incoming messages
+```
+
+### How chat.db Mode Works
+
+1. On startup, records the current highest message ROWID as a high-water mark
+2. A chokidar file watcher monitors the WAL file for near-instant detection (~200ms)
+3. A fallback poll runs every 5 seconds in case file-system events are missed
+4. New messages (ROWID > high-water mark) are queried, filtered to incoming-only, and dispatched
+5. Replies are sent via AppleScript (`osascript`)
+
+---
+
+## Mode 2: BlueBubbles
+
+BlueBubbles is a macOS server that exposes iMessage via REST API + webhooks. The daemon connects to it over HTTP, enabling full bidirectional iMessage support from any platform.
+
+### Prerequisites
+
+- A Mac running BlueBubbles server (can be a Mac Mini, cloud Mac, etc.)
+- BlueBubbles installed and configured with web API enabled
+- Network connectivity between the daemon and the BlueBubbles Mac
+- Nomos daemon running (on any platform)
+
+### Step 1: Install BlueBubbles
+
+1. Download and install from [bluebubbles.app](https://bluebubbles.app)
+2. Follow the setup wizard — sign into iCloud, enable web API
+3. In BlueBubbles settings:
+   - Enable the **REST API**
+   - Note the **server URL** (e.g., `http://192.168.1.100:1234`)
+   - Note the **password** (found in Settings > API/Web Settings)
+
+### Step 2: Install the Keep-Alive Script
+
+BlueBubbles needs Messages.app running. Install the keep-alive LaunchAgent to ensure it stays open:
+
+```bash
+cd scripts/bluebubbles
+./install-keepalive.sh
+```
+
+This installs:
+
+- `~/Scripts/poke-messages.scpt` — AppleScript that pokes Messages.app
+- `~/Library/LaunchAgents/com.nomos.poke-messages.plist` — Runs every 5 minutes
+
+To uninstall:
+
+```bash
+launchctl unload ~/Library/LaunchAgents/com.nomos.poke-messages.plist
+rm ~/Library/LaunchAgents/com.nomos.poke-messages.plist
+rm ~/Scripts/poke-messages.scpt
+```
+
+### Step 3: Configure Nomos
+
+**Via Settings UI:** Go to `/integrations/imessage`, enable iMessage, select "BlueBubbles Server" mode, enter your server URL and password. Use the "Test Connection" button to verify.
+
+**Via environment:**
+
+```bash
+IMESSAGE_ENABLED=true
+IMESSAGE_MODE=bluebubbles
+BLUEBUBBLES_SERVER_URL=http://192.168.1.100:1234
+BLUEBUBBLES_PASSWORD=your-bluebubbles-password
+```
+
+### Step 4: Configure Webhooks in BlueBubbles
+
+Point BlueBubbles webhooks to your Nomos daemon:
+
+1. In BlueBubbles, go to **Settings > Webhooks**
+2. Add a new webhook URL:
+   ```
+   http://your-nomos-host:8803/bluebubbles-webhook?password=your-bluebubbles-password
+   ```
+3. Enable the **New Message** event
+4. Save
+
+### Step 5: Start the Daemon
+
+```bash
+nomos daemon run
+```
+
+You should see:
+
+```
+[bluebubbles] Webhook listening on port 8803
+[imessage-adapter] Started in BlueBubbles mode — server: http://192.168.1.100:1234
+```
+
+### BlueBubbles Environment Variables
+
+| Variable                       | Required | Default            | Description                        |
+| ------------------------------ | -------- | ------------------ | ---------------------------------- |
+| `BLUEBUBBLES_SERVER_URL`       | Yes      | --                 | BlueBubbles server URL             |
+| `BLUEBUBBLES_PASSWORD`         | Yes      | --                 | Server API password                |
+| `BLUEBUBBLES_WEBHOOK_PORT`     | No       | `8803`             | Port for receiving webhooks        |
+| `BLUEBUBBLES_WEBHOOK_PASSWORD` | No       | (same as password) | Separate webhook auth password     |
+| `BLUEBUBBLES_READ_RECEIPTS`    | No       | `false`            | Send read receipts when processing |
+
+### BlueBubbles Capabilities
+
+Beyond basic messaging, BlueBubbles enables:
+
+- **Reactions/tapbacks** — React to messages programmatically
+- **Typing indicators** — Show typing status to contacts
+- **Read receipts** — Mark messages as read
+- **Attachments** — Send and receive files (up to 8MB)
+- **Group management** — Create groups, add/remove participants, rename
+- **Message effects** — iMessage effects like "slam" and "loud"
+- **Edit/unsend** — Edit or unsend sent messages
+
+---
+
+## Common Settings (Both Modes)
+
+### Restrict to Specific Contacts or Groups
 
 ```bash
 IMESSAGE_ALLOWED_CHATS=+15551234567,user@example.com,chat123456789
@@ -48,81 +195,44 @@ IMESSAGE_ALLOWED_CHATS=+15551234567,user@example.com,chat123456789
 Comma-separated list. Accepts:
 
 - **Phone numbers**: `+15551234567` (international format with `+`)
-- **Email addresses**: `user@example.com` (for contacts using an Apple ID email)
+- **Email addresses**: `user@example.com`
 - **Chat identifiers**: `chat123456789` (for group chats)
 
 If not set, the bot responds to all incoming messages.
 
-## Step 3: Start the Daemon
+### Session Keys
 
-```bash
-# Development mode (foreground)
-pnpm daemon:dev
-```
+Each conversation gets a stable session key:
 
-You should see:
-
-```
-[imessage-receiver] Opened chat.db, starting from ROWID 12345
-[imessage-adapter] Started — watching for incoming messages
-[gateway]   Channels: imessage
-```
-
-## Usage
-
-### Individual Chats
-
-Send a message from any device (iPhone, iPad, another Mac) to the iMessage account on the Mac running the daemon. The bot responds to all incoming messages in 1:1 chats.
-
-### Group Chats
-
-The bot responds to all messages in allowed group chats. Add the group's chat identifier to `IMESSAGE_ALLOWED_CHATS` to enable it (or leave the variable unset to allow all).
+- 1:1 chats: `imessage:+15551234567` or `imessage:user@example.com`
+- Group chats: `imessage:chat123456789`
 
 ### Message Limits
 
 Long responses are automatically split into chunks at 4,000 characters, breaking at natural points (newlines, then spaces).
 
-## How It Works
+---
 
-The adapter has three components:
+## All Environment Variables
 
-### Receiving Messages
+| Variable                       | Required         | Default            | Description                 |
+| ------------------------------ | ---------------- | ------------------ | --------------------------- |
+| `IMESSAGE_ENABLED`             | Yes              | --                 | Set to `"true"` to enable   |
+| `IMESSAGE_MODE`                | No               | `chatdb`           | `chatdb` or `bluebubbles`   |
+| `IMESSAGE_ALLOWED_CHATS`       | No               | (all chats)        | Comma-separated identifiers |
+| `BLUEBUBBLES_SERVER_URL`       | BlueBubbles only | --                 | Server URL                  |
+| `BLUEBUBBLES_PASSWORD`         | BlueBubbles only | --                 | API password                |
+| `BLUEBUBBLES_WEBHOOK_PORT`     | No               | `8803`             | Webhook listener port       |
+| `BLUEBUBBLES_WEBHOOK_PASSWORD` | No               | (same as password) | Webhook auth password       |
+| `BLUEBUBBLES_READ_RECEIPTS`    | No               | `false`            | Send read receipts          |
 
-Messages are detected by watching `~/Library/Messages/chat.db`, the SQLite database that Messages.app uses to store all conversations:
-
-1. On startup, the adapter records the current highest message ROWID as a high-water mark
-2. A [chokidar](https://github.com/paulmillr/chokidar) file watcher monitors the WAL (Write-Ahead Log) file for changes, triggering near-instant message detection
-3. A fallback poll runs every 5 seconds in case file-system events are missed
-4. New messages (ROWID > high-water mark) are queried, filtered to incoming-only, and dispatched to the agent
-
-### Sending Messages
-
-Replies are sent via AppleScript using `osascript`:
-
-- **1:1 chats**: Targets the recipient's handle (phone number or email) via `participant` of the iMessage service
-- **Group chats**: Targets the chat by its GUID (e.g., `iMessage;+;chat123456`)
-
-### Session Keys
-
-Each conversation gets a stable session key for the daemon's session management:
-
-- 1:1 chats: `imessage:+15551234567` or `imessage:user@example.com`
-- Group chats: `imessage:chat123456789`
-
-These are derived from the `chat_identifier` column in Messages.app's database and persist across restarts.
-
-## Environment Variables
-
-| Variable                 | Required | Default     | Description                                        |
-| ------------------------ | -------- | ----------- | -------------------------------------------------- |
-| `IMESSAGE_ENABLED`       | Yes      | —           | Set to `"true"` to enable the adapter              |
-| `IMESSAGE_ALLOWED_CHATS` | No       | (all chats) | Comma-separated phone numbers, emails, or chat IDs |
+---
 
 ## Troubleshooting
 
-### "iMessage adapter requires macOS" error
+### "iMessage chat.db mode requires macOS"
 
-This adapter only works on macOS. It cannot run on Linux or Windows.
+Switch to BlueBubbles mode (`IMESSAGE_MODE=bluebubbles`) to run the daemon on non-Mac platforms.
 
 ### chat.db permission denied
 
@@ -132,93 +242,46 @@ Your terminal does not have Full Disk Access:
 2. Add your terminal app
 3. Restart the terminal and the daemon
 
-### Messages not being received
+### Messages not being received (chat.db)
 
 - Verify Messages.app is open and signed into iMessage
-- Check that the sender is not blocked in Messages.app
+- Check that the sender is not blocked
 - If `IMESSAGE_ALLOWED_CHATS` is set, confirm the sender's identifier is listed
-- Check daemon logs for `[imessage-receiver] Poll error:` messages — this may indicate a database lock issue (usually transient)
+- Check daemon logs for `[imessage-receiver] Poll error:` messages
 
-### Messages not being sent
+### Messages not being received (BlueBubbles)
 
-- Verify the Automation permission: **System Settings** > **Privacy & Security** > **Automation** — your terminal should be allowed to control Messages.app
+- Verify the BlueBubbles server is running and reachable
+- Check that webhooks are configured correctly in BlueBubbles settings
+- Verify the webhook URL includes the correct password
+- Check daemon logs for `[bluebubbles] Webhook parse error:` messages
+
+### Messages not being sent (chat.db)
+
+- Verify Automation permission: **System Settings** > **Privacy & Security** > **Automation**
 - Check that Messages.app is running and signed in
 - Look for `[imessage-adapter] Send failed:` in daemon logs
-- For group chats, ensure the Mac's iMessage account is a member of the group
+
+### Messages not being sent (BlueBubbles)
+
+- Test the connection via Settings UI or: `curl "http://your-server:1234/api/v1/ping?password=your-password"`
+- Check that the BlueBubbles server has iMessage active
+- Look for `[imessage-adapter] BlueBubbles send failed:` in daemon logs
+
+### "No cached metadata" warning
+
+Occurs if the daemon tries to reply to a conversation it hasn't seen an incoming message for. Send a message to the bot first to populate the cache.
+
+### BlueBubbles server goes offline
+
+The keep-alive script (`install-keepalive.sh`) ensures Messages.app stays running. If the BlueBubbles server itself crashes, restart it manually or configure it as a login item.
 
 ### Finding chat identifiers for groups
 
-To discover a group chat's identifier:
+Start the daemon with `IMESSAGE_ALLOWED_CHATS` unset, send a test message in the group, then check daemon logs for the `channelId`.
 
-1. Start the daemon with `IMESSAGE_ALLOWED_CHATS` unset (allows all chats)
-2. Send a test message in the group from another device
-3. Look for the `channelId` in daemon logs — that is the chat identifier
-4. Add it to `IMESSAGE_ALLOWED_CHATS`
-
-Alternatively, you can query the database directly:
+Or query directly (chat.db mode):
 
 ```bash
 sqlite3 ~/Library/Messages/chat.db "SELECT chat_identifier, display_name FROM chat WHERE style = 45;"
 ```
-
-(Style 45 = group chats, style 43 = 1:1 chats.)
-
-### Delayed message detection
-
-Messages are typically detected within 200ms via the WAL file watcher. If detection is slow:
-
-- Ensure your terminal has Full Disk Access (the watcher may silently fail without it)
-- The fallback poll runs every 5 seconds, so messages should appear within that window at most
-
-### "No cached metadata" warning when sending
-
-This occurs if the daemon tries to reply to a conversation it hasn't seen an incoming message for (e.g., after a restart). Send a message to the bot first to populate the metadata cache, then it can reply.
-
-## Cross-Platform Alternatives (Future)
-
-The current adapter requires the daemon to run directly on macOS. This section documents researched alternatives for running the daemon on Linux or other platforms while still bridging to iMessage.
-
-### Why No-Mac iMessage Doesn't Work
-
-Every project that attempted iMessage without any Mac has been blocked by Apple or abandoned:
-
-- **pypush** ([github.com/JJTech0130/pypush](https://github.com/JJTech0130/pypush)) — Python library that reverse-engineered Apple's APNs protocol. Currently mid-rewrite with the iMessage, IDS, and authentication modules empty. The old working branch is unmaintained. Licensed under SSPL (restrictive, owned by Beeper).
-- **Beeper Mini** — Launched late 2023, enabling iMessage on Android via reverse-engineered protocol. Apple blocked it within days and repeatedly after workarounds. The [beeper/imessage](https://github.com/beeper/imessage) repo was archived April 2024. Beeper was acquired by Automattic and pivoted away.
-
-Apple actively detects and blocks unauthorized iMessage clients, and users risk Apple ID suspension. This approach is not viable for sustained use.
-
-### Mac-as-Relay Architecture
-
-A Mac can serve as a remote iMessage relay while the daemon runs on any platform. Two actively maintained options:
-
-#### BlueBubbles
-
-[github.com/BlueBubblesApp/bluebubbles-server](https://github.com/BlueBubblesApp/bluebubbles-server) — TypeScript Electron app that runs on a Mac and exposes iMessage via REST API + Socket.IO.
-
-- **License**: Apache-2.0
-- **Status**: Actively maintained (last pushed Jan 2026)
-- **Features**: Send, receive, group chats, attachments, reactions, typing indicators, read receipts, scheduled messages
-- **API docs**: [Postman collection](https://documenter.getpostman.com/view/765844/UV5RnfwM)
-- **Validated by**: mautrix-imessage's BlueBubbles connector
-
-A daemon adapter could connect to a BlueBubbles instance over HTTP/Socket.IO, making the daemon itself platform-independent. Any Mac (even a Mac Mini or cloud Mac via MacStadium) can serve as the relay.
-
-#### @photon-ai/advanced-imessage-kit
-
-[npmjs.com/package/@photon-ai/advanced-imessage-kit](https://www.npmjs.com/package/@photon-ai/advanced-imessage-kit) — Native TypeScript SDK with a companion macOS server (`@photon-ai/advanced-imessage-http-proxy`).
-
-- **License**: MIT
-- **Status**: Actively maintained
-- **Features**: Send, receive, replies, tapbacks, edit, unsend, typing indicators, attachments, stickers, polls, Find My, contacts, group management, FaceTime
-- **Integration**: Native TypeScript SDK connecting via Socket.IO + HTTP — designed for AI agent use cases
-
-#### Comparison
-
-| Approach                    | Mac Required      | Daemon Platform | TS Integration           | Risk                         |
-| --------------------------- | ----------------- | --------------- | ------------------------ | ---------------------------- |
-| Current adapter (local)     | Yes (daemon host) | macOS only      | Native                   | Low                          |
-| BlueBubbles relay           | Yes (server only) | Any             | REST + Socket.IO         | Low                          |
-| photon-ai relay             | Yes (server only) | Any             | Native TS SDK            | Low                          |
-| Reverse-engineered (pypush) | No                | Any             | Poor (Python subprocess) | High — Apple blocks actively |
-
-Neither relay approach has been implemented yet. The current adapter covers the macOS-local use case.

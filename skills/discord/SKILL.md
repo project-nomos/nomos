@@ -1,6 +1,6 @@
 ---
 name: discord
-description: "Interact with Discord — send messages, embeds, react, manage threads, pins, search, and look up members. Use when the user asks to send a Discord message, react, read channels, create threads, or manage Discord content. Requires DISCORD_BOT_TOKEN to be configured in .env."
+description: "Interact with Discord — send messages, embeds, react, manage threads, pins, search, and look up members. Use when the user asks to send a Discord message, react, read channels, create threads, or manage Discord content."
 emoji: "🎮"
 ---
 
