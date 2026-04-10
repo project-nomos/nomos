@@ -10,7 +10,6 @@ import { randomUUID } from "node:crypto";
 import type { IncomingMessage } from "../types.ts";
 
 const MAX_LENGTH = 4000;
-const DEFAULT_PORT = 1234;
 
 export interface BlueBubblesConfig {
   serverUrl: string;

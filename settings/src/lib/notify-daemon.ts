@@ -9,8 +9,6 @@ import path from "node:path";
 
 export function notifyDaemonReload(): void {
   const rootDir = path.resolve(process.cwd(), "..");
-  const entryPoint = path.resolve(rootDir, "src", "index.ts");
-
   // Fire-and-forget: use the daemon's gRPC endpoint via a quick node script
   const script = `
     const grpc = require("@grpc/grpc-js");

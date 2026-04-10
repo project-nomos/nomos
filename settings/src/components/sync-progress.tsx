@@ -62,7 +62,7 @@ export function SyncProgress({ platform }: SyncProgressProps) {
     const hasRunning = jobs.some((j) => j.status === "running");
     const interval = setInterval(fetchJobs, hasRunning ? 2000 : 10000);
     return () => clearInterval(interval);
-  }, [fetchJobs, jobs.length > 0 && jobs.some((j) => j.status === "running")]);
+  }, [fetchJobs, jobs.some((j) => j.status === "running")]);
 
   if (loading) return null;
   if (jobs.length === 0) return null;
