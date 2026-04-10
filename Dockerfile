@@ -3,10 +3,11 @@ FROM node:22-slim AS base
 RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates && rm -rf /var/lib/apt/lists/*
 RUN corepack enable && corepack prepare pnpm@10.23.0 --activate
 
-WORKDIR /app
-
-# Copy cate-protocol SDK (file: dependency referenced as ../cate-protocol/packages/sdk)
+# Build cate-protocol SDK (file: dependency at ../cate-protocol/packages/sdk)
 COPY --from=cate-protocol packages/sdk /cate-protocol/packages/sdk
+RUN cd /cate-protocol/packages/sdk && npm install --ignore-scripts && npx tsc
+
+WORKDIR /app
 
 # Install dependencies
 COPY package.json pnpm-lock.yaml ./
@@ -23,7 +24,7 @@ RUN corepack enable && corepack prepare pnpm@10.23.0 --activate
 
 WORKDIR /app
 
-COPY --from=cate-protocol packages/sdk /cate-protocol/packages/sdk
+COPY --from=base /cate-protocol /cate-protocol
 COPY package.json pnpm-lock.yaml ./
 RUN pnpm install --frozen-lockfile --prod --ignore-scripts
 

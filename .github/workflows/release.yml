@@ -31,6 +31,9 @@ jobs:
           repository: project-nomos/cate-protocol
           path: ../cate-protocol
 
+      - name: Build cate-protocol SDK
+        run: cd ../cate-protocol/packages/sdk && npm install --ignore-scripts && npx tsc
+
       - name: Create and push tag (dispatch only)
         if: github.event_name == 'workflow_dispatch'
         run: |

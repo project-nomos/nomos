@@ -27,6 +27,9 @@ jobs:
           repository: project-nomos/cate-protocol
           path: ../cate-protocol
 
+      - name: Build cate-protocol SDK
+        run: cd ../cate-protocol/packages/sdk && npm install --ignore-scripts && npx tsc
+
       - name: Setup pnpm
         uses: pnpm/action-setup@v4.2.0
 
@@ -56,6 +59,9 @@ jobs:
         with:
           repository: project-nomos/cate-protocol
           path: ../cate-protocol
+
+      - name: Build cate-protocol SDK
+        run: cd ../cate-protocol/packages/sdk && npm install --ignore-scripts && npx tsc
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4.2.0
@@ -87,6 +93,9 @@ jobs:
           repository: project-nomos/cate-protocol
           path: ../cate-protocol
 
+      - name: Build cate-protocol SDK
+        run: cd ../cate-protocol/packages/sdk && npm install --ignore-scripts && npx tsc
+
       - name: Setup pnpm
         uses: pnpm/action-setup@v4.2.0
 
@@ -116,6 +125,9 @@ jobs:
         with:
           repository: project-nomos/cate-protocol
           path: ../cate-protocol
+
+      - name: Build cate-protocol SDK
+        run: cd ../cate-protocol/packages/sdk && npm install --ignore-scripts && npx tsc
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4.2.0
@@ -147,6 +159,9 @@ jobs:
         with:
           repository: project-nomos/cate-protocol
           path: ../cate-protocol
+
+      - name: Build cate-protocol SDK
+        run: cd ../cate-protocol/packages/sdk && npm install --ignore-scripts && npx tsc
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4.2.0
