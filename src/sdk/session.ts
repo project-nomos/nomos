@@ -5,9 +5,10 @@ import {
   type McpServerConfig,
   type SDKMessage,
   type SDKResultMessage,
+  type SdkPluginConfig,
 } from "@anthropic-ai/claude-agent-sdk";
 
-export type { Query, SDKMessage, SDKResultMessage, McpServerConfig };
+export type { Query, SDKMessage, SDKResultMessage, McpServerConfig, SdkPluginConfig };
 
 export interface RunSessionParams {
   /** The user prompt to send */
@@ -50,6 +51,8 @@ export interface RunSessionParams {
   stderr?: (data: string) => void;
   /** Working directory for the agent (e.g., git worktree path) */
   cwd?: string;
+  /** Plugins to load into the SDK session */
+  plugins?: SdkPluginConfig[];
 }
 
 /**
@@ -105,6 +108,7 @@ export function runSession(params: RunSessionParams): Query {
       betas: params.betas,
       debug: params.debug,
       stderr: params.stderr,
+      plugins: params.plugins,
       env,
       ...(params.cwd ? { cwd: params.cwd } : {}),
     },

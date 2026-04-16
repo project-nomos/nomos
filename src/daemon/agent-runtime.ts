@@ -6,7 +6,14 @@
  * Manages SDK session IDs backed by the DB sessions table.
  */
 
-import { runSession, type McpServerConfig, type SDKMessage } from "../sdk/session.ts";
+import {
+  runSession,
+  type McpServerConfig,
+  type SDKMessage,
+  type SdkPluginConfig,
+} from "../sdk/session.ts";
+import { loadInstalledPlugins, toSdkPluginConfigs } from "../plugins/loader.ts";
+import { ensureDefaultPlugins } from "../plugins/installer.ts";
 import { createMemoryMcpServer } from "../sdk/tools.ts";
 import { TeamRuntime, stripTeamPrefix } from "./team-runtime.ts";
 import { isSlackMcpConfiguredAsync, createSlackMcpConfigsAsync } from "../sdk/nomos-slack-mcp.ts";
@@ -46,6 +53,7 @@ import type { IncomingMessage, OutgoingMessage, AgentEvent } from "./types.ts";
 
 export class AgentRuntime {
   // Cached at startup
+  private plugins: SdkPluginConfig[] = [];
   private config!: NomosConfig;
   private profile!: UserProfile;
   private identity!: AgentIdentity;
@@ -137,6 +145,16 @@ export class AgentRuntime {
     // Load skills
     const skills = loadSkills();
     const skillsPrompt = formatSkillsForPrompt(skills);
+
+    // Load plugins (ensure defaults are installed on first run)
+    const newlyInstalled = await ensureDefaultPlugins();
+    if (newlyInstalled.length > 0) {
+      console.log(
+        `[agent-runtime] Pre-installed ${newlyInstalled.length} default plugin(s): ${newlyInstalled.join(", ")}`,
+      );
+    }
+    const loadedPlugins = await loadInstalledPlugins();
+    this.plugins = toSdkPluginConfigs(loadedPlugins);
 
     // Load personality (file > DB > bundled default)
     const soulPrompt = loadSoulFile() ?? (await loadSoulFromDb()) ?? DEFAULT_SOUL;
@@ -303,6 +321,10 @@ export class AgentRuntime {
     }
     console.log(`[agent-runtime]   Identity: ${this.identity.emoji ?? ""} ${this.identity.name}`);
     console.log(`[agent-runtime]   MCP servers: ${Object.keys(this.mcpServers).join(", ")}`);
+    if (this.plugins.length > 0) {
+      const pluginNames = this.plugins.map((p) => p.path.split("/").pop()).join(", ");
+      console.log(`[agent-runtime]   Plugins: ${pluginNames}`);
+    }
   }
 
   /** Get the loaded config. */
@@ -474,6 +496,7 @@ export class AgentRuntime {
             allowedTools: Object.keys(this.mcpServers).map((name) => `mcp__${name}`),
             // Use smart-routed model (or default) — not the base config which may be haiku
             model,
+            plugins: this.plugins,
           },
           (event) => {
             emit({
@@ -638,6 +661,7 @@ export class AgentRuntime {
       resume: resumeId,
       maxTurns: 50,
       anthropicBaseUrl: this.config.anthropicBaseUrl,
+      plugins: this.plugins,
     });
 
     let fullText = "";
