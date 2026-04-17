@@ -30,10 +30,29 @@ export interface ExtractedCorrection {
   confidence: number;
 }
 
+export interface ExtractedDecisionPattern {
+  principle: string;
+  evidence: string[];
+  context: string;
+  weight: number;
+  exceptions: string[];
+  confidence: number;
+}
+
+export interface ExtractedValue {
+  value: string;
+  description: string;
+  context: string;
+  evidence: string[];
+  confidence: number;
+}
+
 export interface ExtractedKnowledge {
   facts: ExtractedFact[];
   preferences: ExtractedPreference[];
   corrections: ExtractedCorrection[];
+  decisionPatterns: ExtractedDecisionPattern[];
+  values: ExtractedValue[];
 }
 
 const EXTRACTION_PROMPT = `You are a knowledge extraction system. Extract structured knowledge from this conversation exchange. Return ONLY valid JSON, no other text.
@@ -45,12 +64,16 @@ Extract:
 - facts: things the user stated about themselves, their projects, tech stack, environment
 - preferences: user's expressed preferences for coding style, communication, tools, workflows
 - corrections: cases where the user corrected the assistant's output or assumptions
+- decisionPatterns: HOW the user thinks -- decision heuristics revealed when they choose between options, override suggestions, explain reasoning, or express priorities. Look for trade-off language ("more important than"), risk tolerance, prioritization patterns, and correction rationale. Each pattern should capture the underlying principle, not just the specific instance.
+- values: WHAT the user values -- core principles revealed through their choices, rejections, and explanations. Look for statements about quality, speed, simplicity, thoroughness, autonomy, collaboration, etc.
 
-Return: {"facts": [...], "preferences": [...], "corrections": [...]}
+Return: {"facts": [...], "preferences": [...], "corrections": [...], "decisionPatterns": [...], "values": [...]}
 Each fact: {"text": "...", "entities": ["..."], "confidence": 0.0-1.0}
 Each preference: {"key": "...", "value": "...", "confidence": 0.0-1.0}
 Each correction: {"original": "...", "corrected": "...", "confidence": 0.0-1.0}
-Return empty arrays if nothing to extract. Only extract clear, explicit statements.`;
+Each decisionPattern: {"principle": "concise heuristic", "evidence": ["what the user said/did"], "context": "when this applies", "weight": 0.0-1.0, "exceptions": [], "confidence": 0.0-1.0}
+Each value: {"value": "short label", "description": "what this means to the user", "context": "domain where observed", "evidence": ["supporting observations"], "confidence": 0.0-1.0}
+Return empty arrays if nothing to extract. Only extract clear, explicit statements. Decision patterns and values require strong signals -- do not infer from weak evidence.`;
 
 /**
  * Extract structured knowledge from a conversation turn.
@@ -60,7 +83,13 @@ export async function extractKnowledge(
   userMessage: string,
   agentResponse: string,
 ): Promise<ExtractedKnowledge> {
-  const empty: ExtractedKnowledge = { facts: [], preferences: [], corrections: [] };
+  const empty: ExtractedKnowledge = {
+    facts: [],
+    preferences: [],
+    corrections: [],
+    decisionPatterns: [],
+    values: [],
+  };
 
   // Skip short messages (greetings, commands, etc.)
   if (userMessage.length < 50) return empty;
@@ -113,6 +142,8 @@ export async function extractKnowledge(
       facts: Array.isArray(parsed.facts) ? parsed.facts : [],
       preferences: Array.isArray(parsed.preferences) ? parsed.preferences : [],
       corrections: Array.isArray(parsed.corrections) ? parsed.corrections : [],
+      decisionPatterns: Array.isArray(parsed.decisionPatterns) ? parsed.decisionPatterns : [],
+      values: Array.isArray(parsed.values) ? parsed.values : [],
     };
   } catch (err) {
     console.debug("[extractor] Knowledge extraction failed:", err);
@@ -218,6 +249,75 @@ export async function extractAndStoreKnowledge(
       metadata: {
         category: "correction",
         confidence: corr.confidence,
+      },
+    });
+    chunkIds.push(id);
+  }
+
+  // Store extracted decision patterns
+  for (const pattern of knowledge.decisionPatterns) {
+    const text = `Decision pattern: ${pattern.principle} (context: ${pattern.context})`;
+    const hash = createHash("sha256").update(pattern.principle).digest("hex").slice(0, 16);
+    const id = `dp:${hash}`;
+
+    let embedding: number[] | undefined;
+    if (isEmbeddingAvailable()) {
+      try {
+        embedding = await generateEmbedding(text);
+      } catch {
+        // Continue without embedding
+      }
+    }
+
+    await storeMemoryChunk({
+      id,
+      source: "conversation",
+      path: sessionKey,
+      text,
+      embedding,
+      model: embedding ? embeddingModel : undefined,
+      metadata: {
+        category: "decision_pattern",
+        principle: pattern.principle,
+        evidence: pattern.evidence,
+        context: pattern.context,
+        weight: pattern.weight,
+        exceptions: pattern.exceptions,
+        confidence: pattern.confidence,
+      },
+    });
+    chunkIds.push(id);
+  }
+
+  // Store extracted values
+  for (const val of knowledge.values) {
+    const text = `Value: ${val.value} -- ${val.description}`;
+    const hash = createHash("sha256").update(val.value).digest("hex").slice(0, 16);
+    const id = `val:${hash}`;
+
+    let embedding: number[] | undefined;
+    if (isEmbeddingAvailable()) {
+      try {
+        embedding = await generateEmbedding(text);
+      } catch {
+        // Continue without embedding
+      }
+    }
+
+    await storeMemoryChunk({
+      id,
+      source: "conversation",
+      path: sessionKey,
+      text,
+      embedding,
+      model: embedding ? embeddingModel : undefined,
+      metadata: {
+        category: "value",
+        value: val.value,
+        description: val.description,
+        context: val.context,
+        evidence: val.evidence,
+        confidence: val.confidence,
       },
     });
     chunkIds.push(id);

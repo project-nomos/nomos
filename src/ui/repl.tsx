@@ -103,6 +103,31 @@ export async function startRepl(options: ReplOptions): Promise<void> {
     // Permissions table may not exist yet — skip
   }
 
+  // Load user model and exemplars for adaptive behavior (CLI in-process mode)
+  let userModel: import("../db/user-model.ts").UserModelEntry[] | undefined;
+  let exemplars: import("../config/profile.ts").ExemplarEntry[] | undefined;
+  if (options.config.adaptiveMemory) {
+    try {
+      const { getUserModel } = await import("../db/user-model.ts");
+      userModel = await getUserModel();
+    } catch {
+      // Table may not exist yet
+    }
+    try {
+      const { retrieveExemplars } = await import("../memory/exemplars.ts");
+      const stored = await retrieveExemplars("general conversation", undefined, 3);
+      if (stored.length > 0) {
+        exemplars = stored.map((e) => ({
+          text: e.text,
+          context: e.context,
+          platform: e.platform,
+        }));
+      }
+    } catch {
+      // Exemplar table may not exist yet
+    }
+  }
+
   // Build dynamic system prompt
   const systemPromptAppend = buildSystemPromptAppend({
     profile,
@@ -113,6 +138,8 @@ export async function startRepl(options: ReplOptions): Promise<void> {
     runtimeInfo,
     agentPrompt: activeAgent.systemPrompt || undefined,
     permissions: permissionsSummary,
+    userModel,
+    exemplars,
   });
 
   // Await upgrade check (should be resolved by now since it ran in parallel)

@@ -175,6 +175,19 @@ Review existing memory for:
 - Stale entries (mark for review if >30 days old and not recently accessed)
 - Entries that have been superseded by newer information
 
+### Phase 5: Reflect (Value Re-evaluation)
+Review the user's decision patterns and values in light of recent conversations:
+- Are any decision patterns contradicted by recent behavior? (decrease their weight)
+- Are any values reinforced by new evidence? (increase their confidence)
+- Did the user reveal new values or heuristics not yet captured?
+- Are any patterns too narrow or too broad? Suggest refinements.
+
+For value re-ranking, output:
+- values_to_boost: [{key, reason}] -- values reinforced by recent evidence
+- values_to_decrease: [{key, reason}] -- values contradicted by recent behavior
+- new_values: [{value, description, context, evidence}] -- newly discovered values
+- pattern_refinements: [{key, refinement}] -- decision patterns that need updating
+
 Output a structured JSON result with your findings.`;
 
 /**
@@ -237,4 +250,115 @@ export async function autoDream(
  */
 export async function getConsolidationState(): Promise<ConsolidationState> {
   return loadState();
+}
+
+/**
+ * Post-consolidation value re-ranking.
+ *
+ * Adjusts confidence scores on values and weights on decision patterns
+ * based on the reflection phase output from consolidation.
+ */
+export async function reRankValues(reflection: {
+  values_to_boost?: { key: string; reason: string }[];
+  values_to_decrease?: { key: string; reason: string }[];
+  new_values?: { value: string; description: string; context: string; evidence: string[] }[];
+  pattern_refinements?: { key: string; refinement: string }[];
+}): Promise<{ boosted: number; decreased: number; added: number; refined: number }> {
+  const { getUserModel, upsertUserModel } = await import("../db/user-model.ts");
+  const result = { boosted: 0, decreased: 0, added: 0, refined: 0 };
+
+  // Boost values reinforced by evidence
+  if (reflection.values_to_boost) {
+    const values = await getUserModel("value");
+    for (const boost of reflection.values_to_boost) {
+      const entry = values.find((e) => e.key === boost.key);
+      if (entry) {
+        const newConfidence = Math.min((entry.confidence + 0.1) * 1.05, 0.95);
+        await upsertUserModel({
+          category: "value",
+          key: entry.key,
+          value: entry.value,
+          sourceIds: entry.sourceIds,
+          confidence: Math.round(newConfidence * 100) / 100,
+        });
+        result.boosted++;
+      }
+    }
+  }
+
+  // Decrease values contradicted by behavior
+  if (reflection.values_to_decrease) {
+    const values = await getUserModel("value");
+    for (const dec of reflection.values_to_decrease) {
+      const entry = values.find((e) => e.key === dec.key);
+      if (entry) {
+        const newConfidence = Math.max(entry.confidence * 0.85 - 0.05, 0.1);
+        await upsertUserModel({
+          category: "value",
+          key: entry.key,
+          value: entry.value,
+          sourceIds: entry.sourceIds,
+          confidence: Math.round(newConfidence * 100) / 100,
+        });
+        result.decreased++;
+      }
+    }
+  }
+
+  // Add newly discovered values
+  if (reflection.new_values) {
+    for (const nv of reflection.new_values) {
+      const key = nv.value
+        .slice(0, 60)
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "_")
+        .replace(/^_|_$/g, "");
+
+      await upsertUserModel({
+        category: "value",
+        key,
+        value: {
+          value: nv.value,
+          description: nv.description,
+          context: nv.context,
+          evidence: nv.evidence,
+        },
+        sourceIds: [],
+        confidence: 0.6, // Moderate confidence -- inferred from behavior, not explicit
+      });
+      result.added++;
+    }
+  }
+
+  // Refine decision patterns
+  if (reflection.pattern_refinements) {
+    const patterns = await getUserModel("decision_pattern");
+    for (const ref of reflection.pattern_refinements) {
+      const entry = patterns.find((e) => e.key === ref.key);
+      if (entry) {
+        const val = entry.value as Record<string, unknown>;
+        const evidence = (val.evidence as string[]) ?? [];
+        await upsertUserModel({
+          category: "decision_pattern",
+          key: entry.key,
+          value: {
+            ...val,
+            principle: ref.refinement,
+            evidence: [...evidence, `Refined during auto-dream consolidation`].slice(0, 10),
+          },
+          sourceIds: entry.sourceIds,
+          confidence: entry.confidence,
+        });
+        result.refined++;
+      }
+    }
+  }
+
+  if (result.boosted + result.decreased + result.added + result.refined > 0) {
+    console.log(
+      `[auto-dream] Value re-ranking: ${result.boosted} boosted, ${result.decreased} decreased, ${result.added} new, ${result.refined} refined`,
+    );
+  }
+
+  return result;
 }
