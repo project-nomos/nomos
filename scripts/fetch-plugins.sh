@@ -107,29 +107,25 @@ install_plugin() {
   # Add to manifest JSON (will be written at the end)
   local timestamp
   timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-  EXISTING_JSON=$(echo "$EXISTING_JSON" | python3 -c "
-import sys, json
-data = json.load(sys.stdin)
-name = '$name'
-entry = {
-    'name': name,
-    'version': 'fetched',
-    'marketplace': 'claude-plugins-official',
-    'source': '$subdir',
-    'installedAt': '$timestamp'
-}
-# Replace or append
-plugins = data.get('plugins', [])
-found = False
-for i, p in enumerate(plugins):
-    if p['name'] == name:
-        plugins[i] = entry
-        found = True
-        break
-if not found:
-    plugins.append(entry)
-data['plugins'] = plugins
-json.dump(data, sys.stdout, indent=2)
+  EXISTING_JSON=$(echo "$EXISTING_JSON" | node -e "
+const chunks = [];
+process.stdin.on('data', c => chunks.push(c));
+process.stdin.on('end', () => {
+  const data = JSON.parse(chunks.join(''));
+  const entry = {
+    name: '$name',
+    version: 'fetched',
+    marketplace: 'claude-plugins-official',
+    source: '$subdir',
+    installedAt: '$timestamp'
+  };
+  const plugins = data.plugins || [];
+  const idx = plugins.findIndex(p => p.name === '$name');
+  if (idx >= 0) plugins[idx] = entry;
+  else plugins.push(entry);
+  data.plugins = plugins;
+  process.stdout.write(JSON.stringify(data, null, 2));
+});
 ")
 }
 
