@@ -14,6 +14,7 @@
   <a href="#digital-clone">Digital Clone</a> &middot;
   <a href="#channel-integrations">Channels</a> &middot;
   <a href="#skills-system">Skills</a> &middot;
+  <a href="#plugins">Plugins</a> &middot;
   <a href="#daemon-mode">Daemon</a> &middot;
   <a href="CONTRIBUTING.md">Contributing</a>
 </p>
@@ -205,6 +206,7 @@ The setup wizard handles this automatically when you run `nomos chat` for the fi
 | :sleeping:                | [**Sleep & Resume**](#features-in-depth)    | Agents pause and wake with a prompt — for polling, monitoring, and async waits.                                                    |
 | :anchor:                  | [**Event Hooks**](#features-in-depth)       | Command, HTTP, or prompt hooks on tool use, lifecycle, and compaction.                                                             |
 | :crescent_moon:           | [**Auto-Dream**](#features-in-depth)        | Background memory consolidation with 4-phase cleanup.                                                                              |
+| :package:                 | [**Plugins**](#plugins)                     | 21 pre-installed plugins from the Claude marketplace — PR review, code review, GitHub, Linear, Playwright, and more.               |
 | :moneybag:                | [**Cost Tracking**](#features-in-depth)     | Per-model pricing, session costs, usage breakdown in CLI and web dashboard.                                                        |
 
 ---
@@ -289,6 +291,27 @@ EOF
 ```
 
 The bundled `skill-creator` skill can also generate skills on your behalf via conversation.
+
+---
+
+## Plugins
+
+Nomos supports plugins from the Claude Code ecosystem — extending the agent with additional skills, agents, hooks, and MCP servers. 21 plugins are pre-installed at build time; browse and install more from the Claude marketplace via CLI.
+
+```bash
+nomos plugin list                   # Show installed plugins (21 pre-installed)
+nomos plugin available              # Browse all marketplace plugins
+nomos plugin install <name>         # Install a plugin
+nomos plugin remove <name>          # Remove a plugin
+```
+
+### Pre-installed plugins (21)
+
+**14 first-party** — agent-sdk-dev, code-review, code-simplifier, commit-commands, feature-dev, frontend-design, hookify, learning-output-style, math-olympiad, mcp-server-dev, plugin-dev, pr-review-toolkit, security-guidance, skill-creator
+
+**7 community** — discord, github, imessage, linear, playwright, telegram, terraform
+
+Plugins are fetched at install time from `github.com/anthropics/claude-plugins-official` (Apache 2.0) — not bundled in the repo. They're loaded into every SDK session — CLI, daemon, and team workers. See [docs/plugins.md](docs/plugins.md) for the full list and architecture details.
 
 ---
 
@@ -658,6 +681,7 @@ See `.env.example` for the complete list of all configuration options.
 | `/config set <key> <value>`   | Change a setting                                            |
 | `/tools`                      | List available tools                                        |
 | `/mcp`                        | List MCP servers                                            |
+| `/plugins`                    | List loaded plugins                                         |
 | `/quit`                       | Exit Nomos                                                  |
 
 </details>

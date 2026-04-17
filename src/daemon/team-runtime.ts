@@ -21,7 +21,7 @@ import { promisify } from "node:util";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { runSession, type McpServerConfig } from "../sdk/session.ts";
+import { runSession, type McpServerConfig, type SdkPluginConfig } from "../sdk/session.ts";
 import { getTeamMailbox } from "./team-mailbox.ts";
 import { getTaskManager } from "./task-manager.ts";
 
@@ -59,6 +59,8 @@ export interface TeamTask {
   allowedTools?: string[];
   /** Override model for this team run (e.g. from smart routing) */
   model?: string;
+  /** Plugins to load into worker SDK sessions */
+  plugins?: SdkPluginConfig[];
 }
 
 interface Subtask {
@@ -326,6 +328,7 @@ export class TeamRuntime {
         model: task.model ?? this.config.coordinatorModel,
         permissionMode: task.permissionMode,
         maxTurns: 2,
+        plugins: task.plugins,
       });
       console.log(
         `[team-runtime] Coordinator output (${output.length} chars): ${output.slice(0, 300)}`,
@@ -537,6 +540,7 @@ Execute this subtask thoroughly and provide your output.`;
             maxTurns: this.config.workerMaxTurns,
             maxBudgetUsd: this.config.workerBudgetUsd,
             cwd: worktreePath,
+            plugins: task.plugins,
           },
           workerEmit,
         );
@@ -634,10 +638,9 @@ Verify the workers' changes are correct. Run builds, tests, linters, and adversa
         model: task.model ?? this.config.coordinatorModel,
         systemPromptAppend: task.systemPromptAppend,
         mcpServers: task.mcpServers,
-        // bypassPermissions so verification agent can read files and run tests.
-        // The verification prompt itself strictly prohibits modifications.
         permissionMode: "bypassPermissions",
         maxTurns: 30,
+        plugins: task.plugins,
       });
 
       console.log(
@@ -710,6 +713,7 @@ Verify the workers' changes are correct. Run builds, tests, linters, and adversa
         model: task.model ?? this.config.coordinatorModel,
         permissionMode: task.permissionMode,
         maxTurns: 10,
+        plugins: task.plugins,
       });
     } catch (err) {
       console.error("[team-runtime] Synthesis agent failed, returning raw results:", err);
@@ -735,6 +739,7 @@ Verify the workers' changes are correct. Run builds, tests, linters, and adversa
       maxTurns?: number;
       maxBudgetUsd?: number;
       cwd?: string;
+      plugins?: SdkPluginConfig[];
     },
     emit?: (event: { type: string; message: string }) => void,
   ): Promise<string> {
@@ -753,6 +758,7 @@ Verify the workers' changes are correct. Run builds, tests, linters, and adversa
       allowedTools: options.allowedTools,
       maxTurns: options.maxTurns ?? 20,
       maxBudgetUsd: options.maxBudgetUsd,
+      plugins: options.plugins,
       stderr: (line: string) => {
         const trimmed = line.trim();
         if (trimmed) {

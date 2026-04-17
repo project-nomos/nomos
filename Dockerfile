@@ -13,7 +13,7 @@ RUN --mount=type=secret,id=NODE_AUTH_TOKEN \
 
 # Copy source and build
 COPY . .
-RUN bash scripts/fetch-anthropic-skills.sh && pnpm build
+RUN bash scripts/fetch-anthropic-skills.sh && bash scripts/fetch-plugins.sh && pnpm build
 
 # ── Production image ─────────────────────────────────────────────
 FROM node:22-slim AS production

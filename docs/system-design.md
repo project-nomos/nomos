@@ -229,6 +229,10 @@ src/
 │   ├── loader.ts             Three-tier: bundled → personal → project
 │   ├── frontmatter.ts        YAML frontmatter parser
 │   └── installer.ts          Dependency installer
+├── plugins/                  Plugin system (Claude marketplace integration)
+│   ├── types.ts              Plugin types + default plugin list
+│   ├── loader.ts             Reads installed.json, loads plugin metadata
+│   └── installer.ts          Marketplace browsing, install, remove, defaults
 ├── security/                 Access control
 │   ├── tool-approval.ts      Dangerous operation detection
 │   ├── pairing.ts            8-char pairing codes
@@ -371,6 +375,21 @@ Three-tier loading order:
 3. **Project** -- `./skills/<name>/SKILL.md`
 
 Skills support metadata for binary/OS dependencies (`requires`), installation commands (`install`), and display emoji. The bundled `skill-creator` skill enables the agent to author new SKILL.md files via conversation.
+
+### Plugins
+
+Plugins extend the agent with packages of skills, agents, hooks, and MCP servers from the Claude Code ecosystem. Nomos browses the Claude marketplace (a local clone at `~/.claude/plugins/marketplaces/`) and installs plugins to `~/.nomos/plugins/`.
+
+**Loading flow:**
+
+1. `ensureDefaultPlugins()` installs default plugins on first boot (pr-review-toolkit, skill-creator, code-review, code-simplifier)
+2. `loadInstalledPlugins()` reads `~/.nomos/plugins/installed.json` and validates each plugin directory
+3. `toSdkPluginConfigs()` maps to `SdkPluginConfig[]` (`{ type: 'local', path }`)
+4. Passed to every `runSession({ plugins })` call — CLI, daemon, and team workers
+
+Plugin skills are namespaced by the SDK as `plugin-name:skill-name`. CLI management via `nomos plugin list|available|install|remove|info`.
+
+See [docs/plugins.md](plugins.md) for full details.
 
 ## 5. Daemon / Gateway Architecture
 
