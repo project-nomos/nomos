@@ -8,7 +8,7 @@
 
 import { getUserModel, upsertUserModel } from "../db/user-model.ts";
 import { updateMemoryMetadata } from "../db/memory.ts";
-import type { ExtractedKnowledge } from "./extractor.ts";
+import type { ExtractedKnowledge, ExtractedDecisionPattern, ExtractedValue } from "./extractor.ts";
 
 /** Maximum confidence — never reach 1.0 to allow for change. */
 const MAX_CONFIDENCE = 0.95;
@@ -119,6 +119,129 @@ export async function updateUserModel(
       value: { text: corr.corrected, original: corr.original },
       sourceIds: sourceChunkIds,
       confidence: corr.confidence,
+    });
+  }
+
+  // Process decision patterns
+  for (const pattern of extracted.decisionPatterns) {
+    await upsertDecisionPattern(pattern, sourceChunkIds);
+  }
+
+  // Process values
+  for (const val of extracted.values) {
+    await upsertValue(val, sourceChunkIds);
+  }
+}
+
+/**
+ * Merge a decision pattern into the user model.
+ * If a similar principle already exists, merge evidence and update weight.
+ */
+async function upsertDecisionPattern(
+  pattern: ExtractedDecisionPattern,
+  sourceChunkIds: string[],
+): Promise<void> {
+  const key = pattern.principle
+    .slice(0, 80)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_|_$/g, "");
+
+  const existing = await getUserModel("decision_pattern");
+  const match = existing.find((e) => e.key === key);
+
+  if (match) {
+    // Merge: accumulate evidence, update weight via running average
+    const prev = match.value as {
+      principle: string;
+      evidence: string[];
+      context: string;
+      weight: number;
+      exceptions: string[];
+    };
+    const mergedEvidence = [...new Set([...prev.evidence, ...pattern.evidence])].slice(0, 10);
+    const mergedExceptions = [...new Set([...prev.exceptions, ...pattern.exceptions])].slice(0, 5);
+    const mergedWeight = prev.weight * 0.7 + pattern.weight * 0.3;
+    const confidence = mergeConfidence(match.confidence, pattern.confidence);
+
+    await upsertUserModel({
+      category: "decision_pattern",
+      key,
+      value: {
+        principle: pattern.principle,
+        evidence: mergedEvidence,
+        context: pattern.context || prev.context,
+        weight: Math.round(mergedWeight * 100) / 100,
+        exceptions: mergedExceptions,
+      },
+      sourceIds: sourceChunkIds,
+      confidence,
+    });
+  } else {
+    await upsertUserModel({
+      category: "decision_pattern",
+      key,
+      value: {
+        principle: pattern.principle,
+        evidence: pattern.evidence,
+        context: pattern.context,
+        weight: pattern.weight,
+        exceptions: pattern.exceptions,
+      },
+      sourceIds: sourceChunkIds,
+      confidence: pattern.confidence,
+    });
+  }
+}
+
+/**
+ * Merge a value into the user model.
+ * If the same value label exists, accumulate evidence and update description.
+ */
+async function upsertValue(val: ExtractedValue, sourceChunkIds: string[]): Promise<void> {
+  const key = val.value
+    .slice(0, 60)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_|_$/g, "");
+
+  const existing = await getUserModel("value");
+  const match = existing.find((e) => e.key === key);
+
+  if (match) {
+    const prev = match.value as {
+      value: string;
+      description: string;
+      context: string;
+      evidence: string[];
+    };
+    const mergedEvidence = [...new Set([...prev.evidence, ...val.evidence])].slice(0, 10);
+    const confidence = mergeConfidence(match.confidence, val.confidence);
+
+    await upsertUserModel({
+      category: "value",
+      key,
+      value: {
+        value: val.value,
+        description: val.description || prev.description,
+        context: val.context || prev.context,
+        evidence: mergedEvidence,
+      },
+      sourceIds: sourceChunkIds,
+      confidence,
+    });
+  } else {
+    await upsertUserModel({
+      category: "value",
+      key,
+      value: {
+        value: val.value,
+        description: val.description,
+        context: val.context,
+        evidence: val.evidence,
+      },
+      sourceIds: sourceChunkIds,
+      confidence: val.confidence,
     });
   }
 }

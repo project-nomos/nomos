@@ -66,6 +66,8 @@ export interface NomosConfig {
   adaptiveMemory: boolean;
   /** Model for knowledge extraction (default: haiku) */
   extractionModel?: string;
+  /** Enable passive behavioral observation (shadow mode) (default: false) */
+  shadowMode: boolean;
   /** Enable alternate screen buffer for full-screen TUI experience (default: false) */
   alternateBuffer: boolean;
   /** Enable image generation via Gemini (default: false) */
@@ -136,6 +138,7 @@ export function loadEnvConfig(): NomosConfig {
     openrouterApiKey: process.env.OPENROUTER_API_KEY,
     adaptiveMemory: process.env.NOMOS_ADAPTIVE_MEMORY !== "false",
     extractionModel: process.env.NOMOS_EXTRACTION_MODEL,
+    shadowMode: process.env.NOMOS_SHADOW_MODE === "true",
     alternateBuffer: process.env.NOMOS_ALTERNATE_BUFFER === "true",
     imageGeneration: process.env.NOMOS_IMAGE_GENERATION === "true",
     geminiApiKey: process.env.GEMINI_API_KEY,

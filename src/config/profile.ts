@@ -64,6 +64,12 @@ export function buildRuntimeInfo(): string {
   return parts.join("\n");
 }
 
+export interface ExemplarEntry {
+  text: string;
+  context: string;
+  platform: string;
+}
+
 export function buildSystemPromptAppend(params: {
   profile: UserProfile;
   identity: AgentIdentity;
@@ -75,6 +81,9 @@ export function buildSystemPromptAppend(params: {
   integrations?: string;
   permissions?: string;
   userModel?: UserModelEntry[];
+  exemplars?: ExemplarEntry[];
+  /** Transient per-message user mental state (from Theory of Mind tracker). */
+  userState?: string;
 }): string {
   const sections: string[] = [];
 
@@ -139,14 +148,74 @@ export function buildSystemPromptAppend(params: {
   // User model (learned preferences and facts)
   if (params.userModel && params.userModel.length > 0) {
     const highConfidence = params.userModel.filter((e) => e.confidence >= 0.6);
-    if (highConfidence.length > 0) {
-      const modelLines = highConfidence
+
+    // Separate decision patterns, values, and other entries
+    const decisionPatterns = highConfidence.filter((e) => e.category === "decision_pattern");
+    const values = highConfidence.filter((e) => e.category === "value");
+    const otherEntries = highConfidence.filter(
+      (e) => e.category !== "decision_pattern" && e.category !== "value",
+    );
+
+    // Decision Genome: "How You Think" section
+    if (decisionPatterns.length > 0) {
+      const sorted = [...decisionPatterns].sort((a, b) => {
+        const aWeight = (a.value as { weight?: number })?.weight ?? 0;
+        const bWeight = (b.value as { weight?: number })?.weight ?? 0;
+        return bWeight - aWeight;
+      });
+      const lines = sorted.slice(0, 20).map((e) => {
+        const v = e.value as {
+          principle: string;
+          context: string;
+          weight: number;
+          exceptions: string[];
+        };
+        const ctx = v.context ? ` (context: ${v.context})` : "";
+        const exc = v.exceptions?.length ? ` Exceptions: ${v.exceptions.join("; ")}` : "";
+        return `- ${v.principle}${ctx}${exc}`;
+      });
+      sections.push(
+        `## How You Think\nThese are the user's decision-making heuristics, ranked by weight. Apply these when making judgment calls, prioritizing options, or anticipating what the user would choose.\n\n${lines.join("\n")}`,
+      );
+    }
+
+    // Value Hierarchy: "Your Guiding Principles" section
+    if (values.length > 0) {
+      const sorted = [...values].sort((a, b) => b.confidence - a.confidence);
+      const lines = sorted.slice(0, 15).map((e, i) => {
+        const v = e.value as { value: string; description: string };
+        return `${i + 1}. **${v.value}**: ${v.description}`;
+      });
+      sections.push(
+        `## Your Guiding Principles\nThese are the user's core values, ranked by confidence. When principles conflict, defer to higher-ranked ones.\n\n${lines.join("\n")}`,
+      );
+    }
+
+    // Standard user model entries (facts, preferences, etc.)
+    if (otherEntries.length > 0) {
+      const modelLines = otherEntries
         .map((e) => `- ${e.key}: ${JSON.stringify(e.value)}`)
         .join("\n");
       sections.push(
         `## What I Know About You\n${modelLines}\n\nUse this context to personalize responses. These are learned from our past conversations.`,
       );
     }
+  }
+
+  // Exemplar Library: few-shot personality priming from real user messages
+  if (params.exemplars && params.exemplars.length > 0) {
+    const exemplarLines = params.exemplars.map((e) => {
+      const ctx = e.context !== "general" ? ` [${e.context}]` : "";
+      return `> ${e.text}\n> -- ${e.platform}${ctx}`;
+    });
+    sections.push(
+      `## Voice Examples\nThese are real messages from the user. Study their tone, word choice, sentence structure, and personality. When responding on their behalf, match this voice naturally.\n\n${exemplarLines.join("\n\n")}`,
+    );
+  }
+
+  // Transient user mental state (per-message, from Theory of Mind tracker)
+  if (params.userState) {
+    sections.push(params.userState);
   }
 
   // Memory instructions

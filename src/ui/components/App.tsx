@@ -25,6 +25,7 @@ import { CopyModeIndicator } from "./CopyModeIndicator.tsx";
 import { ScrollableView } from "./ScrollableView.tsx";
 import { stripUnsafeCharacters } from "../text-utils.ts";
 import { useAlternateBuffer } from "../hooks/useAlternateBuffer.ts";
+import { TheoryOfMindTracker } from "../../memory/theory-of-mind.ts";
 
 /** A finalized item displayed in the Static section. */
 interface UIItem {
@@ -131,6 +132,7 @@ export function App({
     permissionMode: config.permissionMode,
   });
   const systemPromptAppendRef = useRef(systemPromptAppend);
+  const tomTrackerRef = useRef(new TheoryOfMindTracker());
   const bootstrapChecked = useRef(false);
   // SDK session ID for multi-turn resume (enables auto-compaction).
   // Initialized from DB if resuming an existing session.
@@ -366,6 +368,20 @@ export function App({
       activeToolRef.current = null;
       thinkingBufferRef.current = "";
       needsTextSeparatorRef.current = false;
+
+      // Update Theory of Mind tracker and inject transient state into system prompt
+      tomTrackerRef.current.update(input);
+      const tomState = tomTrackerRef.current.formatForPrompt();
+      // Strip any previous ToM section and append fresh state
+      const tomMarker = "## Current User State";
+      const basePrompt = systemPromptAppendRef.current.includes(tomMarker)
+        ? systemPromptAppendRef.current
+            .slice(0, systemPromptAppendRef.current.indexOf(tomMarker))
+            .trimEnd()
+        : systemPromptAppendRef.current;
+      if (tomState) {
+        systemPromptAppendRef.current = basePrompt + "\n\n" + tomState;
+      }
 
       // Daemon mode: send via gRPC or WebSocket and return
       if (daemonClient) {

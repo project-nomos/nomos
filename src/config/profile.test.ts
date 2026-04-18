@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { buildSystemPromptAppend, type UserProfile, type AgentIdentity } from "./profile.ts";
+import {
+  buildSystemPromptAppend,
+  type UserProfile,
+  type AgentIdentity,
+  type ExemplarEntry,
+} from "./profile.ts";
 
 describe("buildSystemPromptAppend", () => {
   const defaultIdentity: AgentIdentity = { name: "Nomos" };
@@ -154,5 +159,164 @@ describe("buildSystemPromptAppend", () => {
     });
 
     expect(result).not.toContain("## Purpose");
+  });
+
+  it("includes decision patterns as 'How You Think' section", () => {
+    const result = buildSystemPromptAppend({
+      profile: {},
+      identity: defaultIdentity,
+      userModel: [
+        {
+          id: "1",
+          category: "decision_pattern",
+          key: "prefer_simplicity",
+          value: {
+            principle: "Choose the simpler solution unless complexity is justified",
+            context: "architecture decisions",
+            weight: 0.9,
+            evidence: ["rejected microservices for a small project"],
+            exceptions: ["high-scale systems"],
+          },
+          sourceIds: [],
+          confidence: 0.8,
+          updatedAt: new Date(),
+        },
+      ],
+    });
+
+    expect(result).toContain("## How You Think");
+    expect(result).toContain("Choose the simpler solution");
+    expect(result).toContain("architecture decisions");
+    expect(result).toContain("high-scale systems");
+  });
+
+  it("includes values as 'Your Guiding Principles' section", () => {
+    const result = buildSystemPromptAppend({
+      profile: {},
+      identity: defaultIdentity,
+      userModel: [
+        {
+          id: "1",
+          category: "value",
+          key: "simplicity",
+          value: {
+            value: "Simplicity",
+            description: "Prefer simple, readable solutions over clever ones",
+          },
+          sourceIds: [],
+          confidence: 0.85,
+          updatedAt: new Date(),
+        },
+      ],
+    });
+
+    expect(result).toContain("## Your Guiding Principles");
+    expect(result).toContain("**Simplicity**");
+    expect(result).toContain("Prefer simple, readable solutions");
+  });
+
+  it("separates decision patterns and values from standard user model", () => {
+    const result = buildSystemPromptAppend({
+      profile: {},
+      identity: defaultIdentity,
+      userModel: [
+        {
+          id: "1",
+          category: "preference",
+          key: "editor",
+          value: "vscode",
+          sourceIds: [],
+          confidence: 0.7,
+          updatedAt: new Date(),
+        },
+        {
+          id: "2",
+          category: "decision_pattern",
+          key: "test_first",
+          value: {
+            principle: "Write tests before implementation",
+            context: "coding",
+            weight: 0.8,
+            evidence: [],
+            exceptions: [],
+          },
+          sourceIds: [],
+          confidence: 0.75,
+          updatedAt: new Date(),
+        },
+      ],
+    });
+
+    expect(result).toContain("## How You Think");
+    expect(result).toContain("## What I Know About You");
+    expect(result).toContain("editor");
+    // decision_pattern should NOT appear in the "What I Know" section
+    expect(result.indexOf("test_first")).toBeLessThan(result.indexOf("editor"));
+  });
+
+  it("includes exemplars as 'Voice Examples' section", () => {
+    const exemplars: ExemplarEntry[] = [
+      {
+        text: "Hey team, let's keep this PR small and focused -- we can iterate after.",
+        context: "slack_work",
+        platform: "slack",
+      },
+    ];
+
+    const result = buildSystemPromptAppend({
+      profile: {},
+      identity: defaultIdentity,
+      exemplars,
+    });
+
+    expect(result).toContain("## Voice Examples");
+    expect(result).toContain("let's keep this PR small");
+    expect(result).toContain("[slack_work]");
+  });
+
+  it("does not include exemplars section when empty", () => {
+    const result = buildSystemPromptAppend({
+      profile: {},
+      identity: defaultIdentity,
+      exemplars: [],
+    });
+
+    expect(result).not.toContain("## Voice Examples");
+  });
+
+  it("includes user state section when provided", () => {
+    const userState =
+      "## Current User State\nFocus: deep | Emotion: neutral | Cognitive load: high | Urgency: none | Energy: normal\nAssessment: In deep focus mode. Dealing with complex topic\n\n**Response guidance:** Match the user's depth -- provide thorough, detailed responses";
+    const result = buildSystemPromptAppend({
+      profile: {},
+      identity: defaultIdentity,
+      userState,
+    });
+
+    expect(result).toContain("## Current User State");
+    expect(result).toContain("Focus: deep");
+    expect(result).toContain("Response guidance");
+  });
+
+  it("does not include user state section when not provided", () => {
+    const result = buildSystemPromptAppend({
+      profile: {},
+      identity: defaultIdentity,
+    });
+
+    expect(result).not.toContain("## Current User State");
+  });
+
+  it("places user state before memory section", () => {
+    const userState = "## Current User State\nFocus: normal";
+    const result = buildSystemPromptAppend({
+      profile: {},
+      identity: defaultIdentity,
+      userState,
+    });
+
+    const stateIdx = result.indexOf("## Current User State");
+    const memoryIdx = result.indexOf("## Memory");
+    expect(stateIdx).toBeLessThan(memoryIdx);
   });
 });

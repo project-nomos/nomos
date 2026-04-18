@@ -50,6 +50,14 @@ import { loadMcpConfig } from "../cli/mcp-config.ts";
 import { createSession as createDbSession, getSessionByKey } from "../db/sessions.ts";
 import { runMigrations } from "../db/migrate.ts";
 import type { IncomingMessage, OutgoingMessage, AgentEvent } from "./types.ts";
+import { TheoryOfMindTracker } from "../memory/theory-of-mind.ts";
+import {
+  loadPersonas,
+  detectPersona,
+  buildPersonaPrompt,
+  type Persona,
+} from "../config/personas.ts";
+import { ShadowObserver } from "../memory/shadow-observer.ts";
 
 export class AgentRuntime {
   // Cached at startup
@@ -69,6 +77,15 @@ export class AgentRuntime {
 
   // Multi-agent team runtime (when teamMode is enabled)
   private teamRuntime?: TeamRuntime;
+
+  // Per-session Theory of Mind trackers (transient, session-scoped)
+  private tomTrackers = new Map<string, TheoryOfMindTracker>();
+
+  // Cached personas for contextual identity switching
+  private personas: Persona[] = [];
+
+  // Shadow Mode observer for passive behavioral learning
+  private shadowObserver?: ShadowObserver;
 
   // Google Workspace authorized accounts
   private gwsAccounts?: Array<{ email: string; isDefault: boolean }>;
@@ -248,13 +265,36 @@ export class AgentRuntime {
 
     // Load user model for adaptive behavior
     let userModel: import("../db/user-model.ts").UserModelEntry[] | undefined;
+    let exemplars: import("../config/profile.ts").ExemplarEntry[] | undefined;
     if (this.config.adaptiveMemory) {
       try {
         const { getUserModel } = await import("../db/user-model.ts");
         userModel = await getUserModel();
       } catch {
-        // Table may not exist yet — skip
+        // Table may not exist yet -- skip
       }
+
+      // Load exemplars for few-shot personality priming
+      try {
+        const { retrieveExemplars } = await import("../memory/exemplars.ts");
+        const stored = await retrieveExemplars("general conversation", undefined, 3);
+        if (stored.length > 0) {
+          exemplars = stored.map((e) => ({
+            text: e.text,
+            context: e.context,
+            platform: e.platform,
+          }));
+        }
+      } catch {
+        // Exemplar table may not exist yet -- skip
+      }
+    }
+
+    // Load personas for contextual identity switching
+    try {
+      this.personas = await loadPersonas();
+    } catch {
+      // Config table may not exist yet
     }
 
     // Load notification default for system prompt
@@ -292,6 +332,7 @@ export class AgentRuntime {
       integrations: this.buildIntegrationsSummary(),
       permissions: permissionsSummary,
       userModel,
+      exemplars,
     });
 
     // Initialize team runtime if team mode is enabled
@@ -301,6 +342,16 @@ export class AgentRuntime {
         workerBudgetUsd: this.config.workerBudgetUsd,
         coordinatorModel: this.config.model,
       });
+    }
+
+    // Initialize shadow observer for passive behavioral learning
+    if (this.config.shadowMode) {
+      this.shadowObserver = new ShadowObserver(true);
+      try {
+        await this.shadowObserver.loadFromDisk();
+      } catch {
+        // No prior observations -- start fresh
+      }
     }
 
     this.initialized = true;
@@ -316,6 +367,12 @@ export class AgentRuntime {
         `[agent-runtime]   Adaptive memory: enabled${userModel?.length ? ` (${userModel.length} model entries)` : ""}`,
       );
     }
+    if (this.config.shadowMode) {
+      const stats = this.shadowObserver!.getStats();
+      console.log(
+        `[agent-runtime]   Shadow mode: enabled (${stats.tools} tool obs, ${stats.corrections} corrections)`,
+      );
+    }
     if (this.config.anthropicBaseUrl) {
       console.log(`[agent-runtime]   API base URL: ${this.config.anthropicBaseUrl}`);
     }
@@ -324,6 +381,10 @@ export class AgentRuntime {
     if (this.plugins.length > 0) {
       const pluginNames = this.plugins.map((p) => p.path.split("/").pop()).join(", ");
       console.log(`[agent-runtime]   Plugins: ${pluginNames}`);
+    }
+    if (this.personas.length > 0) {
+      const personaNames = this.personas.filter((p) => p.enabled).map((p) => p.name);
+      console.log(`[agent-runtime]   Personas: ${personaNames.join(", ")}`);
     }
   }
 
@@ -565,6 +626,31 @@ export class AgentRuntime {
       }
     }
 
+    // Shadow mode: record turn for response cadence tracking
+    this.shadowObserver?.recordTurn();
+
+    // Update Theory of Mind tracker for this session
+    let tomTracker = this.tomTrackers.get(sessionKey);
+    if (!tomTracker) {
+      tomTracker = new TheoryOfMindTracker();
+      this.tomTrackers.set(sessionKey, tomTracker);
+    }
+    tomTracker.update(message.content);
+    const userState = tomTracker.formatForPrompt();
+
+    // Detect active persona for this message context
+    const personaMatches =
+      this.personas.length > 0
+        ? detectPersona(this.personas, {
+            platform: message.platform,
+            channelId: message.channelId,
+            userId: message.userId,
+            content: message.content,
+            timestamp: message.timestamp,
+          })
+        : [];
+    const personaPrompt = buildPersonaPrompt(personaMatches);
+
     emit({
       type: "system",
       subtype: "status",
@@ -572,7 +658,15 @@ export class AgentRuntime {
     });
 
     try {
-      const result = await this.runAgent(message.content, resumeId, emit, model, sessionKey);
+      const result = await this.runAgent(
+        message.content,
+        resumeId,
+        emit,
+        model,
+        sessionKey,
+        userState,
+        personaPrompt,
+      );
 
       // Cache the new SDK session ID
       if (result.sessionId) {
@@ -601,7 +695,15 @@ export class AgentRuntime {
         });
 
         try {
-          const result = await this.runAgent(message.content, undefined, emit, model, sessionKey);
+          const result = await this.runAgent(
+            message.content,
+            undefined,
+            emit,
+            model,
+            sessionKey,
+            userState,
+            personaPrompt,
+          );
 
           if (result.sessionId) {
             this.sdkSessionIds.set(sessionKey, result.sessionId);
@@ -634,6 +736,8 @@ export class AgentRuntime {
     emit: (event: AgentEvent) => void,
     model?: string,
     sessionKey?: string,
+    userState?: string,
+    personaPrompt?: string,
   ): Promise<{ text: string; sessionId?: string }> {
     // Auto-approve all tools from our MCP servers
     const allowedTools = Object.keys(this.mcpServers).map((name) => `mcp__${name}`);
@@ -644,9 +748,19 @@ export class AgentRuntime {
       const teamCtx = this.teamContext.get(sessionKey);
       if (teamCtx) {
         systemPromptAppend = systemPromptAppend + "\n\n" + teamCtx;
-        // Clear after one use — it's now part of the conversation via the SDK session
+        // Clear after one use -- it's now part of the conversation via the SDK session
         this.teamContext.delete(sessionKey);
       }
+    }
+
+    // Inject transient Theory of Mind state (per-message, not persisted)
+    if (userState) {
+      systemPromptAppend = systemPromptAppend + "\n\n" + userState;
+    }
+
+    // Inject active persona overrides (per-message, context-dependent)
+    if (personaPrompt) {
+      systemPromptAppend = systemPromptAppend + "\n\n" + personaPrompt;
     }
 
     const sdkQuery = runSession({
@@ -687,11 +801,24 @@ export class AgentRuntime {
         }
 
         case "tool_use_summary": {
+          const toolName = (msg as { tool_name?: string }).tool_name ?? "unknown";
           emit({
             type: "tool_use_summary",
-            tool_name: (msg as { tool_name?: string }).tool_name ?? "unknown",
+            tool_name: toolName,
             summary: msg.summary,
           });
+          // Shadow mode: record tool usage observation
+          if (this.shadowObserver?.isEnabled() && sessionKey) {
+            this.shadowObserver.recordToolUse(toolName, msg.summary, sessionKey);
+            // Record file access for Read/Edit/Write tools
+            if (["Read", "Edit", "Write"].includes(toolName) && typeof msg.summary === "string") {
+              const pathMatch = msg.summary.match(/(?:Read|Edit|Write)\s+(\S+)/);
+              if (pathMatch) {
+                const action = toolName.toLowerCase() as "read" | "edit" | "write";
+                this.shadowObserver.recordFileAccess(pathMatch[1]!, action);
+              }
+            }
+          }
           break;
         }
 

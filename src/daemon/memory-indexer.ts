@@ -78,11 +78,16 @@ export async function indexConversationTurn(
 
   console.debug(`[memory-indexer] Indexed ${chunks.length} chunk(s) from ${sessionKey}`);
 
-  // Adaptive memory: extract structured knowledge (fire-and-forget)
+  // Adaptive memory: extract structured knowledge and score exemplars (fire-and-forget)
   const config = loadEnvConfig();
   if (config.adaptiveMemory) {
     extractAndStoreKnowledgeFromTurn(incoming, outgoing, sessionKey).catch((err) => {
       console.debug("[memory-indexer] Knowledge extraction failed:", err);
+    });
+
+    // Score user message as a potential exemplar for few-shot personality priming
+    scoreExemplarFromTurn(incoming, sessionKey).catch((err) => {
+      console.debug("[memory-indexer] Exemplar scoring failed:", err);
     });
   }
 }
@@ -108,4 +113,15 @@ async function extractAndStoreKnowledgeFromTurn(
   if (chunkIds.length > 0) {
     await updateUserModel(knowledge, chunkIds);
   }
+}
+
+/**
+ * Score a user message as a potential exemplar for few-shot personality priming.
+ * Only scores messages long enough to be useful (>= 30 chars).
+ */
+async function scoreExemplarFromTurn(incoming: IncomingMessage, sessionKey: string): Promise<void> {
+  if (incoming.content.length < 30) return;
+
+  const { scoreAndStoreExemplar } = await import("../memory/exemplars.ts");
+  await scoreAndStoreExemplar(incoming.content, incoming.platform, sessionKey);
 }

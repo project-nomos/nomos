@@ -36,7 +36,16 @@ export function createMemoryMcpServer(): McpSdkServerConfigWithInstance {
         .optional()
         .describe("Maximum number of results (default: 5)"),
       category: z
-        .enum(["fact", "preference", "correction", "skill", "conversation"])
+        .enum([
+          "fact",
+          "preference",
+          "correction",
+          "decision_pattern",
+          "value",
+          "exemplar",
+          "skill",
+          "conversation",
+        ])
         .optional()
         .describe("Filter by memory category"),
     },
@@ -105,7 +114,10 @@ export function createMemoryMcpServer(): McpSdkServerConfigWithInstance {
     "user_model_recall",
     "Recall what you've learned about the user from past conversations. Returns accumulated preferences, facts, and patterns.",
     {
-      category: z.enum(["preference", "fact", "style"]).optional().describe("Filter by category"),
+      category: z
+        .enum(["preference", "fact", "style", "decision_pattern", "value"])
+        .optional()
+        .describe("Filter by category"),
     },
     async (args) => {
       try {
