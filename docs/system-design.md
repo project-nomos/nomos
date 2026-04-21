@@ -209,7 +209,8 @@ src/
 │   ├── style-prompt.ts       Convert StyleProfile → natural-language prompt
 │   ├── knowledge-compiler.ts Karpathy-style wiki compilation from ingested data
 │   ├── wiki-reader.ts        Read wiki articles for agent context injection
-│   └── wiki-sync.ts          Sync wiki_articles table ↔ ~/.nomos/wiki/ disk
+│   ├── wiki-sync.ts          Sync wiki_articles table ↔ ~/.nomos/wiki/ disk
+│   └── theory-of-mind.ts     Hybrid user mental state tracker (rule + LLM)
 ├── config/                   Configuration
 │   ├── env.ts                Env var loader
 │   ├── profile.ts            User profile + agent identity + system prompt
@@ -348,6 +349,7 @@ What we add via MCP and the daemon:
 - Persistent memory across sessions and channels (`memory_search`, `user_model_recall`)
 - Automatic conversation indexing into vector memory
 - Adaptive memory: structured knowledge extraction and user model accumulation
+- Theory of Mind: hybrid rule-based + LLM per-session user mental state tracking (emotion, focus, urgency, stuck detection, goal inference)
 - Multi-channel message routing (Slack, Discord, Telegram, WhatsApp, iMessage, Email)
 - Multi-agent team orchestration (`TeamRuntime` -- coordinator/worker pattern with parallel `query()` calls)
 - Smart model routing (complexity-based tier selection: simple → Haiku, moderate → Sonnet, complex → Opus)
@@ -560,6 +562,18 @@ The `MemoryIndexer` (`src/daemon/memory-indexer.ts`) runs after each completed a
 5. **(Adaptive memory)** When `NOMOS_ADAPTIVE_MEMORY=true`, runs knowledge extraction and user model accumulation (see below)
 
 This runs fire-and-forget so it never delays message delivery. The result is that all conversations -- across all channels -- become searchable via `memory_search`, enabling cross-session and cross-channel recall.
+
+### Theory of Mind Engine
+
+The ToM engine (`src/memory/theory-of-mind.ts`) maintains a real-time, per-session model of the user's mental state using a hybrid architecture:
+
+**Layer 1 -- Rule-based classifier (every turn, zero latency)**:
+Runs synchronously before each agent response. Analyzes surface signals from the user's messages: word count, explicit emotion markers, urgency patterns, correction frequency, code blocks, question rate, time of day, and session duration. Produces a `UserMentalState` with dimensions: focus (deep/normal/scattered), emotion (neutral/positive/frustrated/stressed/excited), cognitive load (low/moderate/high), urgency (none/mild/high/critical), energy (high/normal/low), and a `seemsStuck` flag.
+
+**Layer 2 -- LLM assessment (every 3 turns, background, zero added latency)**:
+Fires via `runForkedAgent` (Haiku) with the last 10 user messages. Catches what rules can't: sarcasm, passive aggression, implicit goal shifts, whether "this is fine" means acceptance or resignation, and whether the conversation is progressing or going in circles. Produces an `LlmAssessment` with: `inferredGoal` (what the user is actually trying to do), `emotionalSubtext` (undercurrent beyond surface), `conversationTrajectory` (progressing/stuck/diverging/wrapping_up), and `strategicGuidance` (what the agent should do differently). Results merge into the prompt on the next turn.
+
+The state is injected into the system prompt as a "Current User State" section (with optional "Deep Assessment" subsection when LLM results are available). Per-session trackers are maintained in `AgentRuntime.tomTrackers` (Map keyed by session key). State is transient -- never persisted to DB.
 
 ### iMessage Dual-Mode
 
