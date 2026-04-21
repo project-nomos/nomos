@@ -761,73 +761,59 @@ export function createMemoryMcpServer(): McpSdkServerConfigWithInstance {
 
   const switchGoogleAccountTool = tool(
     "switch_google_account",
-    "Switch the active Google Workspace account. Use this before making Google API calls (Gmail, Drive, Calendar, etc.) when the user wants to access a different account.",
+    "Re-authorize a Google Workspace account. In gws v0.22.5+, this triggers a new OAuth login for the specified account. Use when the user needs to switch which Google account is active.",
     {
-      email: z.string().email().describe("The email address of the account to switch to"),
+      email: z.string().email().describe("The email address of the account to authorize"),
     },
     async (args) => {
-      try {
-        const { execFile } = await import("node:child_process");
-        const { promisify } = await import("node:util");
-        const execFileAsync = promisify(execFile);
-
-        await execFileAsync("npx", ["gws", "auth", "default", args.email], { timeout: 10000 });
-
-        return {
-          content: [
-            {
-              type: "text",
-              text: `Switched default Google account to ${args.email}. Subsequent Google Workspace API calls will use this account.`,
-            },
-          ],
-        };
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        return {
-          content: [{ type: "text", text: `Failed to switch Google account: ${message}` }],
-          isError: true,
-        };
-      }
+      return {
+        content: [
+          {
+            type: "text",
+            text: `To switch to ${args.email}, the user needs to re-authorize via the Settings UI (Google > Authorize Account) or run \`npx gws auth login\` in the terminal. gws v0.22.5+ supports one active account at a time.`,
+          },
+        ],
+      };
     },
     {
       annotations: {
-        readOnly: false,
+        readOnly: true,
       },
     },
   );
 
   const listGoogleAccountsTool = tool(
     "list_google_accounts",
-    "List all authorized Google Workspace accounts. Shows which account is currently the default.",
+    "List authorized Google Workspace accounts and check auth status.",
     {},
     async () => {
       try {
-        const { execFile } = await import("node:child_process");
-        const { promisify } = await import("node:util");
-        const execFileAsync = promisify(execFile);
+        const { listGwsAccounts, getGwsAuthStatus } = await import("./google-workspace-mcp.ts");
+        const [accountData, authStatus] = await Promise.all([
+          listGwsAccounts(),
+          getGwsAuthStatus(),
+        ]);
 
-        const { stdout } = await execFileAsync("npx", ["gws", "auth", "list"], { timeout: 10000 });
-        const data = JSON.parse(stdout);
-
-        if (!data.accounts || data.accounts.length === 0) {
+        if (accountData.count === 0) {
           return {
-            content: [{ type: "text", text: "No Google accounts authorized." }],
+            content: [
+              {
+                type: "text",
+                text: `No Google accounts authorized.\nAuth status: ${authStatus.authMethod} (storage: ${authStatus.storage})\n\nUse Settings UI or run \`npx gws auth login\` to authorize.`,
+              },
+            ],
           };
         }
 
-        const formatted = data.accounts
-          .map((entry: string | { email: string }) => {
-            const email = typeof entry === "string" ? entry : entry.email;
-            const isDefault = email === data.default;
-            return `- ${email}${isDefault ? " (default/active)" : ""}`;
-          })
+        const formatted = accountData.accounts
+          .map((a) => `- ${a.email}${a.default ? " (active)" : ""}`)
           .join("\n");
 
         return {
           content: [
             {
               type: "text",
-              text: `Google Workspace accounts (${data.count}):\n${formatted}\n\nUse switch_google_account to change the active account.`,
+              text: `Google Workspace accounts:\n${formatted}\n\nAuth: ${authStatus.authMethod}, storage: ${authStatus.storage}, token valid: ${authStatus.authenticated}`,
             },
           ],
         };

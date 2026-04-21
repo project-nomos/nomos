@@ -29,7 +29,7 @@ import { indexConversationTurn } from "./memory-indexer.ts";
 import { closeBrowser } from "../sdk/browser.ts";
 import { sendProactiveMessage } from "./proactive-sender.ts";
 import { registerDeltaSyncJobs } from "../ingest/delta-sync.ts";
-import { getIngestJobByPlatform } from "../ingest/pipeline.ts";
+import { IngestScheduler } from "../ingest/scheduler.ts";
 import { EmailAdapter } from "./channels/email.ts";
 import { observeMessage } from "./observer.ts";
 import { registerProactiveJobs } from "../proactive/scheduler.ts";
@@ -66,7 +66,8 @@ export class Gateway {
   private draftManager: DraftManager;
   private settingsProcess: ChildProcess | null = null;
   private cateIntegration: CATEIntegration | null = null;
-  private ingestQueue: Promise<void> = Promise.resolve();
+  private ingestScheduler: IngestScheduler;
+  private pendingSlackIngest: { team_id: string }[] | null = null;
   private options: GatewayOptions;
 
   constructor(options: GatewayOptions = {}) {
@@ -112,6 +113,11 @@ export class Gateway {
       this.wsServer.broadcast(event);
       this.grpcServer.broadcast(event);
     });
+
+    // 7. Create ingest scheduler (subprocess spawning wired later in start())
+    this.ingestScheduler = new IngestScheduler((subcommand, extraArgs, label) =>
+      this.runIngestSubprocess(subcommand, label, extraArgs),
+    );
   }
 
   /** Start the daemon. */
@@ -144,7 +150,7 @@ export class Gateway {
     // Start gRPC server
     await this.grpcServer.start();
 
-    // Register command handler for hot-reload
+    // Register command handler for hot-reload and ingestion triggers
     this.grpcServer.onCommand(async (command) => {
       if (command === "reload-slack-workspaces") {
         const added = await this.reloadSlackWorkspaces();
@@ -152,6 +158,25 @@ export class Gateway {
           ? `Loaded ${added.length} workspace(s): ${added.join(", ")}`
           : "No new workspaces to load";
       }
+
+      // trigger-ingest:<platform> -- start full ingestion
+      if (command.startsWith("trigger-ingest:")) {
+        const platform = command.slice("trigger-ingest:".length);
+        const sub = IngestScheduler.platformToSubcommand(platform);
+        if (!sub) return `Unknown platform: ${platform}`;
+        this.ingestScheduler.triggerFull(platform, "history", sub);
+        return `Full ingestion triggered for ${platform}`;
+      }
+
+      // trigger-delta:<platform> -- start delta sync
+      if (command.startsWith("trigger-delta:")) {
+        const platform = command.slice("trigger-delta:".length);
+        const sub = IngestScheduler.platformToSubcommand(platform);
+        if (!sub) return `Unknown platform: ${platform}`;
+        this.ingestScheduler.triggerDelta(platform, "history", sub);
+        return `Delta sync triggered for ${platform}`;
+      }
+
       return `Unknown command: ${command}`;
     });
 
@@ -159,13 +184,25 @@ export class Gateway {
     if (!this.options.skipChannels) {
       await this.registerChannelAdapters();
       await this.channelManager.start();
+
+      // Trigger deferred Slack ingestion after a cooldown so poll timers
+      // have time to spread out and don't collide with ingestion API calls.
+      if (this.pendingSlackIngest) {
+        const workspaces = this.pendingSlackIngest;
+        this.pendingSlackIngest = null;
+        setTimeout(() => {
+          for (const ws of workspaces) {
+            this.ingestScheduler.triggerAuto(`slack:${ws.team_id}`, "history", "slack");
+          }
+        }, 60_000); // Wait 60s before starting ingestion
+      }
     }
 
     // Auto-ingest Gmail when Google Workspace is configured
     try {
       const { isGoogleWorkspaceConfiguredAsync } = await import("../sdk/google-workspace-mcp.ts");
       if (await isGoogleWorkspaceConfiguredAsync()) {
-        this.triggerInitialIngest("gmail", "history", "gmail");
+        this.ingestScheduler.triggerAuto("gmail", "history", "gmail");
       }
     } catch {
       // Google Workspace not available
@@ -211,12 +248,38 @@ export class Gateway {
             timestamp: new Date(envelope.header.timestamp),
           };
           const sessionKey = `cate:${envelope.header.thread_id}`;
+          this.broadcast({
+            type: "system",
+            subtype: "message_received",
+            message: `Agent-to-agent message from ${envelope.parties.from.did}`,
+            data: {
+              platform: "cate",
+              channelId: envelope.header.thread_id,
+              userId: envelope.parties.from.did,
+              preview: payload.slice(0, 120),
+              timestamp: envelope.header.timestamp,
+            },
+          });
           this.messageQueue.enqueue(sessionKey, msg, () => {});
         },
       });
     } catch (err) {
       console.warn("[gateway] CATE integration failed to start:", err);
     }
+
+    // Listen for ingest trigger events (from cron engine delta-sync)
+    process.on(
+      "ingest:trigger" as never,
+      ((event: { platform: string; runType: "full" | "delta" }) => {
+        const sub = IngestScheduler.platformToSubcommand(event.platform);
+        if (!sub) return;
+        if (event.runType === "delta") {
+          this.ingestScheduler.triggerDelta(event.platform, "history", sub);
+        } else {
+          this.ingestScheduler.triggerFull(event.platform, "history", sub);
+        }
+      }) as never,
+    );
 
     // Listen for proactive send events from agent tools
     process.on(
@@ -368,7 +431,7 @@ export class Gateway {
 
       // Auto-ingest on first add (skips if already completed)
       if (!existing) {
-        this.triggerInitialIngest(`slack:${ws.team_id}`, "history", "slack");
+        this.ingestScheduler.triggerAuto(`slack:${ws.team_id}`, "history", "slack");
       }
 
       changes.push(`${existing ? "refreshed" : "added"} ${ws.team_name} (${ws.team_id})`);
@@ -550,6 +613,12 @@ export class Gateway {
     }
   }
 
+  /** Broadcast a system event to all connected clients (gRPC + WebSocket). */
+  private broadcast(event: AgentEvent): void {
+    this.wsServer.broadcast(event);
+    this.grpcServer.broadcast(event);
+  }
+
   /** Register available channel adapters based on env vars. */
   private async registerChannelAdapters(): Promise<void> {
     const enqueue = (rawMsg: IncomingMessage) => {
@@ -558,6 +627,20 @@ export class Gateway {
         .transformIncoming(rawMsg)
         .then((msg) => {
           const adapter = this.channelManager.getAdapter(msg.platform);
+
+          // Notify connected clients about the incoming message
+          this.broadcast({
+            type: "system",
+            subtype: "message_received",
+            message: `New message on ${msg.platform} from ${msg.userId}`,
+            data: {
+              platform: msg.platform,
+              channelId: msg.channelId,
+              userId: msg.userId,
+              preview: msg.content.slice(0, 120),
+              timestamp: msg.timestamp.toISOString(),
+            },
+          });
 
           // Observe mode: index without agent response
           if (adapter?.mode === "observe") {
@@ -653,17 +736,9 @@ export class Gateway {
           );
         }
 
-        // Auto-ingest historical Slack messages once (command handles all workspaces)
-        // Only trigger if at least one workspace hasn't been ingested yet
-        const needsIngest = await Promise.all(
-          workspaces.map(async (ws) => {
-            const job = await getIngestJobByPlatform(`slack:${ws.team_id}`, "history");
-            return !job || (job.status !== "completed" && job.status !== "running");
-          }),
-        );
-        if (needsIngest.some(Boolean)) {
-          this.spawnIngestSubprocess("slack");
-        }
+        // Slack ingestion is deferred until after channelManager.start()
+        // to avoid competing for API rate limits during baseline setup.
+        this.pendingSlackIngest = workspaces;
       } else if (process.env.SLACK_USER_TOKEN && process.env.SLACK_APP_TOKEN) {
         // Backwards compat: single env var, no DB rows
         const adapter = new SlackUserAdapter({
@@ -686,7 +761,7 @@ export class Gateway {
       this.draftManager.registerSendFn("discord", (channelId, text, threadId) =>
         adapter.send({ inReplyTo: "", platform: "discord", channelId, threadId, content: text }),
       );
-      this.triggerInitialIngest("discord", "history", "discord");
+      this.ingestScheduler.triggerAuto("discord", "history", "discord");
     }
 
     if (process.env.TELEGRAM_BOT_TOKEN) {
@@ -695,7 +770,7 @@ export class Gateway {
       this.draftManager.registerSendFn("telegram", (channelId, text, threadId) =>
         adapter.send({ inReplyTo: "", platform: "telegram", channelId, threadId, content: text }),
       );
-      this.triggerInitialIngest("telegram", "history", "telegram");
+      this.ingestScheduler.triggerAuto("telegram", "history", "telegram");
     }
 
     // WhatsApp is always available (uses QR code auth)
@@ -722,14 +797,25 @@ export class Gateway {
       }
     }
     if (imessageEnabled && process.platform === "darwin") {
-      const adapter = new IMessageAdapter(enqueue);
+      const adapter = new IMessageAdapter({
+        onMessage: enqueue,
+        draftManager: this.draftManager,
+      });
       this.channelManager.register(adapter);
+      // Register direct send function so DraftManager can send approved drafts
+      // via iMessage (bypasses passive mode draft routing to avoid infinite loop)
       this.draftManager.registerSendFn("imessage", (channelId, text, threadId) =>
-        adapter.send({ inReplyTo: "", platform: "imessage", channelId, threadId, content: text }),
+        adapter.sendDirect({
+          inReplyTo: "",
+          platform: "imessage",
+          channelId,
+          threadId,
+          content: text,
+        }),
       );
 
       // Auto-ingest historical iMessages on first connection
-      this.triggerInitialIngest("imessage", "history", "imessage");
+      this.ingestScheduler.triggerAuto("imessage", "history", "imessage");
     }
 
     // Email adapter (IMAP/SMTP from integrations table)
@@ -760,7 +846,7 @@ export class Gateway {
         this.channelManager.register(adapter);
 
         // Auto-ingest historical emails on first connection
-        this.triggerInitialIngest("gmail", "history", "gmail");
+        this.ingestScheduler.triggerAuto("gmail", "history", "gmail");
       }
     } catch {
       // Email not configured — skip
@@ -768,53 +854,47 @@ export class Gateway {
   }
 
   /**
-   * Trigger initial historical ingestion for a newly added channel.
-   * Checks if the platform already has a completed/running ingest job,
-   * then queues a subprocess spawn if needed. All tasks serialized to
-   * avoid API rate limits.
-   */
-  private triggerInitialIngest(platform: string, sourceType: string, subcommand: string): void {
-    this.ingestQueue = this.ingestQueue
-      .then(async () => {
-        const existing = await getIngestJobByPlatform(platform, sourceType);
-        if (existing && (existing.status === "completed" || existing.status === "running")) {
-          return;
-        }
-        await this.runIngestSubprocess(subcommand, platform);
-      })
-      .catch((err) => {
-        console.error(`[gateway] Failed to trigger ingestion for ${platform}:`, err);
-      });
-  }
-
-  /**
-   * Queue an ingest subprocess without checking for existing jobs.
-   * Used when the caller has already verified ingestion is needed.
-   */
-  private spawnIngestSubprocess(subcommand: string): void {
-    this.ingestQueue = this.ingestQueue
-      .then(() => this.runIngestSubprocess(subcommand, subcommand))
-      .catch((err) => {
-        console.error(`[gateway] Ingestion subprocess failed for ${subcommand}:`, err);
-      });
-  }
-
-  /**
-   * Spawn `nomos ingest <subcommand>` as a child process.
+   * Spawn `nomos ingest <subcommand> [...extraArgs]` as a child process.
    * Returns a promise that resolves when the subprocess exits.
    */
-  private runIngestSubprocess(subcommand: string, label: string): Promise<void> {
+  private runIngestSubprocess(
+    subcommand: string,
+    label: string,
+    extraArgs: string[] = [],
+  ): Promise<void> {
     return new Promise<void>((resolve) => {
-      const entryScript = process.argv[1];
-      if (!entryScript) {
-        console.warn(`[gateway] Cannot determine entry script for ingestion subprocess`);
+      // Resolve the main CLI entry point (src/index.ts or dist/index.js),
+      // NOT process.argv[1] which may be src/daemon/index.ts (daemon-only,
+      // no Commander.js routing -- would boot a second daemon instead of
+      // running the ingest command).
+      const thisFile = fileURLToPath(import.meta.url);
+      const srcDir = path.dirname(thisFile); // src/daemon/
+      let entryScript = path.resolve(srcDir, "../index.ts");
+      if (!fs.existsSync(entryScript)) {
+        // Built mode: dist/index.js
+        entryScript = path.resolve(srcDir, "../index.js");
+      }
+      if (!fs.existsSync(entryScript)) {
+        console.warn(`[gateway] Cannot find CLI entry script for ingestion subprocess`);
         resolve();
         return;
       }
 
       console.log(`[gateway] Starting ingestion for ${label} (subprocess)...`);
+      this.broadcast({
+        type: "system",
+        subtype: "ingest_start",
+        message: `Ingestion started for ${label}`,
+        data: { platform: label, subcommand },
+      });
 
-      const child = spawn(process.execPath, [entryScript, "ingest", subcommand], {
+      // When running via tsx (dev mode), the entry script is .ts and plain
+      // node can't handle it.  Use --import tsx to register the loader.
+      const args = entryScript.endsWith(".ts")
+        ? ["--import", "tsx", entryScript, "ingest", subcommand, ...extraArgs]
+        : [entryScript, "ingest", subcommand, ...extraArgs];
+
+      const child = spawn(process.execPath, args, {
         stdio: ["ignore", "pipe", "pipe"],
         env: { ...process.env, FORCE_COLOR: "0" },
         detached: false,
@@ -837,14 +917,34 @@ export class Gateway {
       child.on("exit", (code) => {
         if (code === 0) {
           console.log(`[gateway] Ingestion complete for ${label}`);
+          this.broadcast({
+            type: "system",
+            subtype: "ingest_complete",
+            message: `Ingestion complete for ${label}`,
+            data: { platform: label, success: true },
+          });
+          // Re-register delta sync cron jobs in case a new full ingest completed
+          registerDeltaSyncJobs().catch(() => {});
         } else {
           console.error(`[gateway] Ingestion for ${label} exited with code ${code}`);
+          this.broadcast({
+            type: "system",
+            subtype: "ingest_complete",
+            message: `Ingestion failed for ${label} (exit code ${code})`,
+            data: { platform: label, success: false, exitCode: code },
+          });
         }
         resolve();
       });
 
       child.on("error", (err) => {
         console.error(`[gateway] Failed to spawn ingestion for ${label}:`, err.message);
+        this.broadcast({
+          type: "system",
+          subtype: "ingest_complete",
+          message: `Ingestion failed for ${label}: ${err.message}`,
+          data: { platform: label, success: false, error: err.message },
+        });
         resolve();
       });
     });

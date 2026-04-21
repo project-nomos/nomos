@@ -1140,18 +1140,16 @@ async function cmdIntegrations(ctx: CommandContext, args: string[]): Promise<str
       const version = stdout.trim();
 
       // Check for existing auth
-      const { stdout: authOut } = await execFileAsync("npx", ["gws", "auth", "list"], {
+      const { stdout: authOut } = await execFileAsync("npx", ["gws", "auth", "status"], {
         timeout: 10000,
       });
       const authData = JSON.parse(authOut);
 
-      if (authData.count > 0) {
-        const accounts = (authData.accounts ?? []).join(", ");
+      if (authData.auth_method !== "none" || authData.token_cache_exists) {
         return [
           chalk.bold("Google Workspace"),
           chalk.dim(`  gws: ${version}`),
-          chalk.dim(`  Accounts: ${accounts}`),
-          chalk.dim(`  Default: ${authData.default || "(none)"}`),
+          chalk.dim(`  Auth: ${authData.auth_method}, storage: ${authData.storage}`),
           "",
           chalk.dim("Already configured. Use settings UI to modify."),
         ].join("\n");

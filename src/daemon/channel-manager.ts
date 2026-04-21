@@ -37,14 +37,34 @@ export class ChannelManager {
       console.log(`[channel-manager] Loaded ${hookList.length} message hook(s)`);
     }
 
+    // Group adapters by rate-limit domain (platform prefix before ":").
+    // Adapters in the same group start sequentially to avoid rate limits;
+    // different groups start concurrently.
+    const groups = new Map<string, ChannelAdapter[]>();
+    for (const adapter of this.adapters.values()) {
+      const domain = adapter.platform.split(":")[0];
+      const list = groups.get(domain) ?? [];
+      list.push(adapter);
+      groups.set(domain, list);
+    }
+
+    // Stagger delay between sequential adapter starts within a group
+    // to avoid slamming shared rate limits (e.g. Slack Tier 3: 50 req/min).
+    const STAGGER_DELAY_MS = 5000;
+
     const results = await Promise.allSettled(
-      [...this.adapters.values()].map(async (adapter) => {
-        try {
-          await adapter.start();
-          console.log(`[channel-manager] Started: ${adapter.platform}`);
-        } catch (err) {
-          console.error(`[channel-manager] Failed to start ${adapter.platform}:`, err);
-          throw err;
+      [...groups.values()].map(async (adapters) => {
+        for (let i = 0; i < adapters.length; i++) {
+          const adapter = adapters[i];
+          if (i > 0) {
+            await new Promise((resolve) => setTimeout(resolve, STAGGER_DELAY_MS));
+          }
+          try {
+            await adapter.start();
+            console.log(`[channel-manager] Started: ${adapter.platform}`);
+          } catch (err) {
+            console.error(`[channel-manager] Failed to start ${adapter.platform}:`, err);
+          }
         }
       }),
     );
@@ -52,7 +72,7 @@ export class ChannelManager {
     const failures = results.filter((r) => r.status === "rejected");
     if (failures.length > 0) {
       console.warn(
-        `[channel-manager] ${failures.length}/${this.adapters.size} adapter(s) failed to start`,
+        `[channel-manager] ${failures.length}/${this.adapters.size} adapter group(s) failed to start`,
       );
     }
   }

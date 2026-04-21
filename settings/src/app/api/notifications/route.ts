@@ -8,7 +8,10 @@ export async function GET() {
   try {
     const sql = getDb();
     const [row] = await sql`SELECT value FROM config WHERE key = ${CONFIG_KEY}`;
-    return NextResponse.json(row?.value ?? null);
+    if (!row?.value) return NextResponse.json(null);
+    // Handle double-encoded JSON (old bug: JSON.stringify before insert into JSONB)
+    const val = typeof row.value === "string" ? JSON.parse(row.value) : row.value;
+    return NextResponse.json(val);
   } catch {
     return NextResponse.json(null);
   }
@@ -30,17 +33,17 @@ export async function PUT(request: Request) {
 
   try {
     const sql = getDb();
-    const value = JSON.stringify({
+    const value = {
       platform: body.platform,
       channelId: body.channelId,
       label: body.label,
-    });
+    };
 
     await sql`
       INSERT INTO config (key, value, updated_at)
-      VALUES (${CONFIG_KEY}, ${value}, now())
+      VALUES (${CONFIG_KEY}, ${sql.json(value)}, now())
       ON CONFLICT (key) DO UPDATE SET
-        value = ${value},
+        value = ${sql.json(value)},
         updated_at = now()
     `;
 

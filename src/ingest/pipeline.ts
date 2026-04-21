@@ -192,6 +192,17 @@ async function createIngestJob(
   options: IngestOptions,
 ): Promise<string> {
   const db = getKysely();
+
+  // Cancel any stale "running" jobs for this platform (e.g. from crashed processes)
+  await db
+    .updateTable("ingest_jobs")
+    .set({ status: "cancelled", finished_at: sql`now()` })
+    .where("platform", "=", platform)
+    .where("source_type", "=", sourceType)
+    .where("status", "=", "running")
+    .execute();
+
+  // Insert a new row per run (no upsert -- we keep history)
   const row = await db
     .insertInto("ingest_jobs")
     .values({
@@ -200,15 +211,8 @@ async function createIngestJob(
       status: "running",
       contact: options.contact ?? null,
       since_date: options.since ?? null,
+      run_type: options.runType ?? "full",
     })
-    .onConflict((oc) =>
-      oc.columns(["platform", "source_type", "contact"]).doUpdateSet({
-        status: "running",
-        started_at: sql`now()`,
-        error: null,
-        finished_at: null,
-      }),
-    )
     .returning("id")
     .executeTakeFirstOrThrow();
   return row.id;
@@ -292,8 +296,27 @@ export async function listIngestJobs(): Promise<IngestJobRow[]> {
     .execute() as unknown as Promise<IngestJobRow[]>;
 }
 
-/** Get a single ingest job by platform. */
+/** Get the most recent ingest job by platform, optionally filtered by run_type. */
 export async function getIngestJobByPlatform(
+  platform: string,
+  sourceType: string,
+  runType?: "full" | "delta",
+): Promise<IngestJobRow | null> {
+  const db = getKysely();
+  let query = db
+    .selectFrom("ingest_jobs")
+    .selectAll()
+    .where("platform", "=", platform)
+    .where("source_type", "=", sourceType);
+  if (runType) {
+    query = query.where("run_type", "=", runType);
+  }
+  const row = await query.orderBy("started_at", "desc").limit(1).executeTakeFirst();
+  return (row as unknown as IngestJobRow) ?? null;
+}
+
+/** Get the last successfully completed ingest job for a platform (any run_type). */
+export async function getLastCompletedJob(
   platform: string,
   sourceType: string,
 ): Promise<IngestJobRow | null> {
@@ -303,7 +326,8 @@ export async function getIngestJobByPlatform(
     .selectAll()
     .where("platform", "=", platform)
     .where("source_type", "=", sourceType)
-    .orderBy("started_at", "desc")
+    .where("status", "=", "completed")
+    .orderBy("last_successful_at", "desc")
     .limit(1)
     .executeTakeFirst();
   return (row as unknown as IngestJobRow) ?? null;

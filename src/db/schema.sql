@@ -276,6 +276,27 @@ CREATE TABLE IF NOT EXISTS ingest_jobs (
 CREATE INDEX IF NOT EXISTS idx_ingest_status ON ingest_jobs(status);
 CREATE INDEX IF NOT EXISTS idx_ingest_platform ON ingest_jobs(platform, source_type);
 
+-- Add run_type column for full vs delta tracking (multi-row per platform)
+DO $$ BEGIN
+  ALTER TABLE ingest_jobs ADD COLUMN run_type TEXT NOT NULL DEFAULT 'full';
+EXCEPTION WHEN duplicate_column THEN NULL;
+END $$;
+
+DO $$ BEGIN
+  ALTER TABLE ingest_jobs ADD CONSTRAINT ingest_jobs_run_type_check
+    CHECK (run_type IN ('full', 'delta'));
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+-- Drop the single-row-per-platform UNIQUE constraint to allow multiple run rows
+DO $$ BEGIN
+  ALTER TABLE ingest_jobs DROP CONSTRAINT IF EXISTS ingest_jobs_platform_source_type_contact_key;
+EXCEPTION WHEN undefined_object THEN NULL;
+END $$;
+
+CREATE INDEX IF NOT EXISTS idx_ingest_platform_runtype
+  ON ingest_jobs(platform, source_type, run_type, started_at DESC);
+
 -- Upgrade vector index from IVFFlat to HNSW (better recall, no tuning needed)
 DROP INDEX IF EXISTS idx_memory_vector;
 CREATE INDEX IF NOT EXISTS idx_memory_vector_hnsw ON memory_chunks

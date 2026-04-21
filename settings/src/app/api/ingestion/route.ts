@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
+import { notifyDaemonTriggerIngest, notifyDaemonTriggerDelta } from "@/lib/notify-daemon";
 
 export async function GET() {
   try {
@@ -10,7 +11,8 @@ export async function GET() {
         id, platform, source_type, status, contact,
         since_date, messages_processed, messages_skipped,
         last_cursor, error, started_at, finished_at,
-        last_successful_at, delta_schedule, delta_enabled
+        last_successful_at, delta_schedule, delta_enabled,
+        run_type
       FROM ingest_jobs
       ORDER BY started_at DESC
     `;
@@ -49,6 +51,16 @@ export async function POST(request: Request) {
         WHERE platform = ${platform}
       `;
       return NextResponse.json({ ok: true });
+    }
+
+    if (action === "trigger-ingest") {
+      notifyDaemonTriggerIngest(platform);
+      return NextResponse.json({ ok: true, message: `Full ingestion triggered for ${platform}` });
+    }
+
+    if (action === "trigger-delta") {
+      notifyDaemonTriggerDelta(platform);
+      return NextResponse.json({ ok: true, message: `Delta sync triggered for ${platform}` });
     }
 
     return NextResponse.json({ error: "Unknown action" }, { status: 400 });

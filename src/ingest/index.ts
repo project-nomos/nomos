@@ -1,4 +1,9 @@
-export { runIngestionPipeline, listIngestJobs, getIngestJobByPlatform } from "./pipeline.ts";
+export {
+  runIngestionPipeline,
+  listIngestJobs,
+  getIngestJobByPlatform,
+  getLastCompletedJob,
+} from "./pipeline.ts";
 export type {
   IngestSource,
   IngestMessage,
@@ -13,3 +18,4 @@ export { WhatsAppIngestSource } from "./sources/whatsapp.ts";
 export { DiscordIngestSource } from "./sources/discord.ts";
 export { TelegramIngestSource } from "./sources/telegram.ts";
 export { registerDeltaSyncJobs } from "./delta-sync.ts";
+export { IngestScheduler } from "./scheduler.ts";

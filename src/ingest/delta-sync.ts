@@ -1,112 +1,67 @@
 /**
  * Delta sync: registers cron jobs for continuous ingestion.
  *
- * After an initial ingest completes, a cron job is created to periodically
- * re-run the source with the saved cursor, picking up new messages.
+ * After an initial full ingest completes, a cron job is created to
+ * periodically trigger a delta (incremental) sync via the IngestScheduler.
+ * The cron job uses a `__delta_sync__:<platform>` sentinel prompt that
+ * the cron engine intercepts and routes to the gateway's ingest:trigger
+ * process event.
  */
 
-import { getDb } from "../db/client.ts";
-import { runIngestionPipeline } from "./pipeline.ts";
-import { createSlackIngestSources } from "./sources/slack.ts";
-import { IMessageIngestSource } from "./sources/imessage.ts";
-import { GmailIngestSource } from "./sources/gmail.ts";
-import { DiscordIngestSource } from "./sources/discord.ts";
-import { TelegramIngestSource } from "./sources/telegram.ts";
-import type { IngestJobRow } from "./types.ts";
+import { getKysely } from "../db/client.ts";
+import { CronStore } from "../cron/store.ts";
 
 /**
- * Register delta sync cron jobs for all platforms with completed initial ingests.
- * Called during daemon startup via gateway.ts.
+ * Register delta sync cron jobs for all platforms with completed full ingests.
+ * Called during daemon startup and after each successful ingest subprocess.
+ * Idempotent -- skips platforms that already have a cron job registered.
  */
 export async function registerDeltaSyncJobs(): Promise<void> {
-  const sql = getDb();
-  const jobs = await sql<IngestJobRow[]>`
-    SELECT * FROM ingest_jobs
-    WHERE status = 'completed'
-      AND delta_enabled = true
-  `;
+  const db = getKysely();
+
+  // Find all platforms with completed full ingests and delta enabled
+  const jobs = await db
+    .selectFrom("ingest_jobs")
+    .select(["platform", "source_type", "delta_schedule"])
+    .where("status", "=", "completed")
+    .where("run_type", "=", "full")
+    .where("delta_enabled", "=", true)
+    .execute();
+
+  if (jobs.length === 0) return;
+
+  const store = new CronStore();
 
   for (const job of jobs) {
-    const intervalMs = parseInterval(job.delta_schedule);
-    if (!intervalMs) continue;
+    const cronName = `delta-sync:${job.platform}`;
+    const existing = await store.getJobByName(cronName);
 
-    // Register with process event so CronEngine can pick it up
+    if (existing) {
+      // Update schedule if it changed
+      const schedule = job.delta_schedule || "6h";
+      if (existing.schedule !== schedule) {
+        await store.updateJob(existing.id, { schedule });
+        console.log(`[delta-sync] Updated schedule for ${cronName}: ${schedule}`);
+      }
+      continue;
+    }
+
+    await store.createJob({
+      name: cronName,
+      schedule: job.delta_schedule || "6h",
+      scheduleType: "every",
+      sessionTarget: "isolated",
+      deliveryMode: "none",
+      prompt: `__delta_sync__:${job.platform}`,
+      enabled: true,
+      errorCount: 0,
+    });
+
     console.log(
-      `[delta-sync] Registered delta sync for ${job.platform}/${job.source_type} every ${job.delta_schedule}`,
+      `[delta-sync] Registered cron job: ${cronName} every ${job.delta_schedule || "6h"}`,
     );
   }
-}
 
-/**
- * Run a delta sync for a specific platform.
- * Called by the cron engine or manually via CLI.
- */
-export async function runDeltaSync(platform: string): Promise<void> {
-  const source = await createSourceForPlatform(platform);
-  if (!source) {
-    console.error(`[delta-sync] No source available for platform: ${platform}`);
-    return;
-  }
-
-  console.log(`[delta-sync] Starting delta sync for ${platform}`);
-
-  const progress = await runIngestionPipeline(
-    source,
-    {},
-    {
-      onProgress: (p) => {
-        if (p.messagesProcessed > 0 && p.messagesProcessed % 100 === 0) {
-          console.log(
-            `[delta-sync] ${platform}: ${p.messagesProcessed} processed, ${p.messagesSkipped} skipped`,
-          );
-        }
-      },
-      onError: (err) => {
-        console.error(`[delta-sync] ${platform} error:`, err.message);
-      },
-    },
-  );
-
-  console.log(
-    `[delta-sync] ${platform} complete: ${progress.messagesProcessed} processed, ${progress.messagesSkipped} skipped`,
-  );
-}
-
-async function createSourceForPlatform(platform: string) {
-  if (platform.startsWith("slack:")) {
-    const sources = await createSlackIngestSources();
-    return sources.find((s) => s.platform === platform);
-  }
-  if (platform === "imessage") {
-    return new IMessageIngestSource();
-  }
-  if (platform === "gmail") {
-    return new GmailIngestSource();
-  }
-  if (platform === "discord") {
-    return new DiscordIngestSource();
-  }
-  if (platform === "telegram") {
-    return new TelegramIngestSource();
-  }
-  return null;
-}
-
-function parseInterval(schedule: string): number | null {
-  const match = /^(\d+)(h|m|s)$/.exec(schedule);
-  if (!match) return null;
-
-  const value = Number.parseInt(match[1], 10);
-  const unit = match[2];
-
-  switch (unit) {
-    case "h":
-      return value * 60 * 60 * 1000;
-    case "m":
-      return value * 60 * 1000;
-    case "s":
-      return value * 1000;
-    default:
-      return null;
-  }
+  // Signal the cron engine to reload jobs
+  process.emit("cron:refresh" as never);
 }

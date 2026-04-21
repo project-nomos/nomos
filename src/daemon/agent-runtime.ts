@@ -16,7 +16,6 @@ import { loadInstalledPlugins, toSdkPluginConfigs } from "../plugins/loader.ts";
 import { ensureDefaultPlugins } from "../plugins/installer.ts";
 import { createMemoryMcpServer } from "../sdk/tools.ts";
 import { TeamRuntime, stripTeamPrefix } from "./team-runtime.ts";
-import { isSlackMcpConfiguredAsync, createSlackMcpConfigsAsync } from "../sdk/nomos-slack-mcp.ts";
 import {
   isDiscordConfigured,
   createDiscordMcpServer,
@@ -194,11 +193,6 @@ export class AgentRuntime {
 
     // Pre-load DB-backed tokens for integrations that use sync getters
     await Promise.all([loadDiscordTokenFromDb(), loadTelegramTokenFromDb()]);
-
-    // Slack MCP server (external stdio via nomos-slack-mcp)
-    if (await isSlackMcpConfiguredAsync()) {
-      Object.assign(this.mcpServers, await createSlackMcpConfigsAsync());
-    }
 
     // Per-workspace Slack MCP servers (in-process, one per connected workspace)
     try {
@@ -402,9 +396,6 @@ export class AgentRuntime {
   private buildIntegrationsSummary(): string {
     const parts: string[] = [];
 
-    if (this.mcpServers["nomos-slack"]) {
-      parts.push("- **Slack**: Read/send messages, search, reactions, status via nomos-slack-mcp");
-    }
     if (this.slackWorkspaces && this.slackWorkspaces.length > 0) {
       const wsList = this.slackWorkspaces
         .map(
@@ -413,7 +404,12 @@ export class AgentRuntime {
         )
         .join("\n");
       parts.push(
-        `- **Slack Workspaces** (acting as the user — messages appear as them):\n${wsList}\n  Use \`slack_user_info\` to look up display names when the user refers to people by name.`,
+        [
+          `- **Slack** (user token mode — messages appear as the user, no bot/app token needed):`,
+          wsList,
+          `  Available tools per workspace: \`slack_send_message\`, \`slack_read_channel\`, \`slack_read_thread\`, \`slack_list_channels\`, \`slack_search\`, \`slack_user_info\`, \`slack_react\`, \`slack_edit_message\`, \`slack_delete_message\`, \`slack_pin_message\`, \`slack_unpin_message\`, \`slack_list_pins\`, \`slack_upload_file\`.`,
+          `  Use \`slack_user_info\` to look up display names when the user refers to people by name.`,
+        ].join("\n"),
       );
     }
     if (isDiscordConfigured()) {

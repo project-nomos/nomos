@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { RefreshCw, ExternalLink, CheckCircle, XCircle } from "lucide-react";
+import { RefreshCw, ExternalLink, CheckCircle, XCircle, Shield, Eye } from "lucide-react";
 import { StatusBadge } from "@/components/status-badge";
 import { SyncProgress } from "@/components/sync-progress";
 import { DirtyIndicator } from "@/components/dirty-indicator";
@@ -9,6 +9,7 @@ import { useToast } from "@/contexts/toast-context";
 import { useUnsavedChanges } from "@/hooks/use-unsaved-changes";
 
 type IMessageMode = "chatdb" | "bluebubbles";
+type AgentMode = "passive" | "agent";
 
 export default function IMessageSettingsPage() {
   const { addToast } = useToast();
@@ -16,8 +17,16 @@ export default function IMessageSettingsPage() {
   const [initialEnabled, setInitialEnabled] = useState(false);
   const [mode, setMode] = useState<IMessageMode>("chatdb");
   const [initialMode, setInitialMode] = useState<IMessageMode>("chatdb");
+  const [agentMode, setAgentMode] = useState<AgentMode>("passive");
+  const [initialAgentMode, setInitialAgentMode] = useState<AgentMode>("passive");
   const [allowedChats, setAllowedChats] = useState("");
   const [initialAllowedChats, setInitialAllowedChats] = useState("");
+
+  // Owner identity for agent mode
+  const [ownerPhone, setOwnerPhone] = useState("");
+  const [initialOwnerPhone, setInitialOwnerPhone] = useState("");
+  const [ownerAppleId, setOwnerAppleId] = useState("");
+  const [initialOwnerAppleId, setInitialOwnerAppleId] = useState("");
 
   // BlueBubbles-specific
   const [bbServerUrl, setBbServerUrl] = useState("");
@@ -37,7 +46,10 @@ export default function IMessageSettingsPage() {
   const isDirty =
     enabled !== initialEnabled ||
     mode !== initialMode ||
+    agentMode !== initialAgentMode ||
     allowedChats !== initialAllowedChats ||
+    ownerPhone !== initialOwnerPhone ||
+    ownerAppleId !== initialOwnerAppleId ||
     bbServerUrl !== initialBbServerUrl ||
     bbPassword !== initialBbPassword ||
     bbWebhookPort !== initialBbWebhookPort ||
@@ -58,9 +70,21 @@ export default function IMessageSettingsPage() {
       setMode(m);
       setInitialMode(m);
 
+      const am = (envData.IMESSAGE_AGENT_MODE as AgentMode) || "passive";
+      setAgentMode(am);
+      setInitialAgentMode(am);
+
       const chats = envData.IMESSAGE_ALLOWED_CHATS ?? "";
       setAllowedChats(chats);
       setInitialAllowedChats(chats);
+
+      const phone = envData.IMESSAGE_OWNER_PHONE ?? "";
+      setOwnerPhone(phone);
+      setInitialOwnerPhone(phone);
+
+      const appleId = envData.IMESSAGE_OWNER_APPLE_ID ?? "";
+      setOwnerAppleId(appleId);
+      setInitialOwnerAppleId(appleId);
 
       const url = envData.BLUEBUBBLES_SERVER_URL ?? "";
       setBbServerUrl(url);
@@ -115,13 +139,23 @@ export default function IMessageSettingsPage() {
 
   const save = async () => {
     if (!isDirty) return;
+
+    // Validate agent mode requires at least one owner identity
+    if (enabled && agentMode === "agent" && !ownerPhone && !ownerAppleId) {
+      addToast("Agent mode requires at least a phone number or Apple ID", "error");
+      return;
+    }
+
     setSaving(true);
     try {
       const updates: Record<string, string> = {};
 
       if (enabled !== initialEnabled) updates.IMESSAGE_ENABLED = enabled ? "true" : "";
       if (mode !== initialMode) updates.IMESSAGE_MODE = mode;
+      if (agentMode !== initialAgentMode) updates.IMESSAGE_AGENT_MODE = agentMode;
       if (allowedChats !== initialAllowedChats) updates.IMESSAGE_ALLOWED_CHATS = allowedChats;
+      if (ownerPhone !== initialOwnerPhone) updates.IMESSAGE_OWNER_PHONE = ownerPhone;
+      if (ownerAppleId !== initialOwnerAppleId) updates.IMESSAGE_OWNER_APPLE_ID = ownerAppleId;
       if (bbServerUrl !== initialBbServerUrl) updates.BLUEBUBBLES_SERVER_URL = bbServerUrl;
       if (bbPassword !== initialBbPassword) updates.BLUEBUBBLES_PASSWORD = bbPassword;
       if (bbWebhookPort !== initialBbWebhookPort) updates.BLUEBUBBLES_WEBHOOK_PORT = bbWebhookPort;
@@ -142,6 +176,12 @@ export default function IMessageSettingsPage() {
 
       addToast("Messages.app settings saved", "success");
       await loadData();
+      // Auto-trigger ingestion for iMessage
+      fetch("/api/ingestion", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ platform: "imessage", action: "trigger-ingest" }),
+      }).catch(() => {});
     } catch (err) {
       console.error("Failed to save iMessage settings:", err);
       addToast("Failed to save settings", "error");
@@ -187,7 +227,7 @@ export default function IMessageSettingsPage() {
             status={enabled ? "connected" : "not_configured"}
             label={
               enabled
-                ? `Enabled (${mode === "bluebubbles" ? "BlueBubbles" : "chat.db"})`
+                ? `Enabled (${mode === "bluebubbles" ? "BlueBubbles" : "chat.db"} / ${agentMode})`
                 : "Disabled"
             }
           />
@@ -215,7 +255,114 @@ export default function IMessageSettingsPage() {
         </label>
       </section>
 
-      {/* Mode Selector */}
+      {/* Agent Mode Selector */}
+      {enabled && (
+        <section className="mb-8 rounded-xl border border-surface0 bg-mantle p-5">
+          <h2 className="text-sm font-semibold text-subtext1 uppercase tracking-wider mb-4">
+            Agent Mode
+          </h2>
+          <div className="space-y-3">
+            <label
+              className={`flex items-start gap-3 cursor-pointer p-3 rounded-lg border transition-colors ${
+                agentMode === "passive"
+                  ? "border-mauve/50 bg-mauve/5"
+                  : "border-surface1 hover:border-mauve/50"
+              }`}
+            >
+              <input
+                type="radio"
+                name="agent-mode"
+                value="passive"
+                checked={agentMode === "passive"}
+                onChange={() => setAgentMode("passive")}
+                className="accent-mauve mt-0.5"
+              />
+              <div className="flex-1">
+                <div className="flex items-center gap-2">
+                  <Eye size={14} className="text-blue" />
+                  <span className="text-sm font-medium text-text">Passive</span>
+                </div>
+                <p className="text-xs text-overlay0 mt-1">
+                  Listens to all incoming messages, drafts responses, and suggests them in your
+                  default Slack channel for approval before sending. Safe for monitoring
+                  conversations without risking unintended replies.
+                </p>
+              </div>
+            </label>
+
+            <label
+              className={`flex items-start gap-3 cursor-pointer p-3 rounded-lg border transition-colors ${
+                agentMode === "agent"
+                  ? "border-mauve/50 bg-mauve/5"
+                  : "border-surface1 hover:border-mauve/50"
+              }`}
+            >
+              <input
+                type="radio"
+                name="agent-mode"
+                value="agent"
+                checked={agentMode === "agent"}
+                onChange={() => setAgentMode("agent")}
+                className="accent-mauve mt-0.5"
+              />
+              <div className="flex-1">
+                <div className="flex items-center gap-2">
+                  <Shield size={14} className="text-green" />
+                  <span className="text-sm font-medium text-text">Agent Client</span>
+                </div>
+                <p className="text-xs text-overlay0 mt-1">
+                  Chat directly with the agent via Messages.app. Only responds to messages from your
+                  phone number and Apple ID -- all other messages are ignored. Use this to interact
+                  with your agent from your iPhone.
+                </p>
+              </div>
+            </label>
+          </div>
+        </section>
+      )}
+
+      {/* Owner Identity (agent mode only) */}
+      {enabled && agentMode === "agent" && (
+        <section className="mb-8 rounded-xl border border-surface0 bg-mantle p-5">
+          <h2 className="text-sm font-semibold text-subtext1 uppercase tracking-wider mb-4">
+            Owner Identity
+          </h2>
+          <p className="text-xs text-overlay0 mb-4">
+            In agent mode, only messages from these identifiers will be processed. At least one is
+            required.
+          </p>
+          <div className="space-y-4">
+            <div className="space-y-1.5">
+              <label className="block text-sm font-medium text-subtext1">Phone Number</label>
+              <input
+                type="text"
+                value={ownerPhone}
+                onChange={(e) => setOwnerPhone(e.target.value)}
+                placeholder="+15551234567"
+                className="w-full rounded-lg border border-surface1 bg-surface0 px-3 py-2 text-sm text-text placeholder:text-overlay0 focus:outline-none focus:border-mauve focus:ring-1 focus:ring-mauve/30 font-mono"
+              />
+              <p className="text-xs text-overlay0">
+                Your phone number in international format (e.g., +1 for US).
+              </p>
+            </div>
+            <div className="space-y-1.5">
+              <label className="block text-sm font-medium text-subtext1">Apple ID</label>
+              <input
+                type="text"
+                value={ownerAppleId}
+                onChange={(e) => setOwnerAppleId(e.target.value)}
+                placeholder="you@icloud.com"
+                className="w-full rounded-lg border border-surface1 bg-surface0 px-3 py-2 text-sm text-text placeholder:text-overlay0 focus:outline-none focus:border-mauve focus:ring-1 focus:ring-mauve/30 font-mono"
+              />
+              <p className="text-xs text-overlay0">
+                Your Apple ID email address used for iMessage.
+              </p>
+            </div>
+          </div>
+        </section>
+      )}
+
+      {/* Connection Mode */}
       {enabled && (
         <section className="mb-8 rounded-xl border border-surface0 bg-mantle p-5">
           <h2 className="text-sm font-semibold text-subtext1 uppercase tracking-wider mb-4">
@@ -361,8 +508,8 @@ export default function IMessageSettingsPage() {
         </section>
       )}
 
-      {/* Access Control */}
-      {enabled && (
+      {/* Access Control (passive mode -- filter which chats to listen to) */}
+      {enabled && agentMode === "passive" && (
         <section className="mb-8 rounded-xl border border-surface0 bg-mantle p-5">
           <h2 className="text-sm font-semibold text-subtext1 uppercase tracking-wider mb-4">
             Access Control
@@ -377,7 +524,8 @@ export default function IMessageSettingsPage() {
               className="w-full rounded-lg border border-surface1 bg-surface0 px-3 py-2 text-sm text-text placeholder:text-overlay0 focus:outline-none focus:border-mauve focus:ring-1 focus:ring-mauve/30 font-mono"
             />
             <p className="text-xs text-overlay0">
-              Comma-separated phone numbers, emails, or chat identifiers. Leave empty to allow all.
+              Comma-separated phone numbers, emails, or chat identifiers. Leave empty to listen to
+              all conversations.
             </p>
           </div>
         </section>

@@ -6,6 +6,13 @@
  * a browser session token + cookie.
  *
  * Also works with xoxp- tokens (cookie not needed in that case).
+ *
+ * Rate limit strategy:
+ * - All adapter instances share a global mutex so only one workspace
+ *   polls at a time (Slack Tier 3: 50 req/min is per-app, not per-token).
+ * - Only "active" channels (recent messages) are polled every cycle.
+ * - A full scan of all channels runs every FULL_SCAN_EVERY polls.
+ * - Inter-call delay of 2s (~30 req/min) leaves headroom for MCP tool calls.
  */
 
 import { WebClient } from "@slack/web-api";
@@ -37,11 +44,31 @@ export class SlackPollingAdapter implements ChannelAdapter {
   private onAuthError?: (teamId: string, teamName: string) => void;
   private pollTimer: ReturnType<typeof setInterval> | null = null;
   private running = false;
+  private polling = false;
   private authErrorFired = false;
   private consecutiveErrors = 0;
 
   // Track last seen timestamp per channel to fetch only new messages
   private lastSeenTs = new Map<string, string>();
+
+  // Cached channel lists (refreshed every CHANNEL_REFRESH_INTERVAL_MS)
+  private cachedDMChannels: string[] = [];
+  private cachedMemberChannels: string[] = [];
+  private channelListLastFetched = 0;
+
+  // Default notification channel -- treated as a direct channel (no @mention required)
+  private defaultChannelId: string | null = null;
+  private static readonly CHANNEL_REFRESH_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
+  private static readonly INTER_CALL_DELAY_MS = 2000; // ~30 req/min, safe headroom for Tier 3
+
+  // Active channel tracking: only poll channels with recent messages
+  private activeChannels = new Set<string>();
+  private pollCount = 0;
+  private static readonly FULL_SCAN_EVERY = 10; // Full scan every 10th poll
+
+  // Global mutex: only one adapter instance polls at a time across all workspaces.
+  // Slack rate limits are per-app (OAuth client), shared across all tokens.
+  private static pollMutex: Promise<void> = Promise.resolve();
 
   // Cache for user/channel name lookups
   private userNameCache = new Map<string, string>();
@@ -55,7 +82,7 @@ export class SlackPollingAdapter implements ChannelAdapter {
     this.token = options.token;
     this.cookie = options.cookie;
     this.teamId = options.teamId;
-    this.pollIntervalMs = options.pollIntervalMs ?? 5000;
+    this.pollIntervalMs = options.pollIntervalMs ?? 60_000; // 60s default (was 30s)
     this.onMessage = options.onMessage;
     this.draftManager = options.draftManager;
     this.onAuthError = options.onAuthError;
@@ -82,6 +109,20 @@ export class SlackPollingAdapter implements ChannelAdapter {
 
     this.running = true;
 
+    // Load default notification channel -- messages there are treated like DMs
+    try {
+      const { getNotificationDefault } = await import("../../db/notification-defaults.ts");
+      const nd = await getNotificationDefault();
+      if (nd && nd.platform === this.platform) {
+        this.defaultChannelId = nd.channelId;
+        console.log(
+          `[slack-polling] Default channel: ${nd.channelId} (${nd.label ?? "unlabeled"})`,
+        );
+      }
+    } catch {
+      // notification defaults not available
+    }
+
     // Initial poll to set baselines (don't process old messages)
     await this.initializeBaselines();
 
@@ -103,6 +144,13 @@ export class SlackPollingAdapter implements ChannelAdapter {
 
   async send(message: OutgoingMessage): Promise<void> {
     if (!this.userId) return;
+
+    // Default channel: the user is chatting with the agent directly,
+    // so respond immediately instead of creating a draft for approval.
+    if (message.channelId === this.defaultChannelId) {
+      await this.sendAsUser(message.channelId, message.content, message.threadId);
+      return;
+    }
 
     const context: Record<string, unknown> = {
       channelId: message.channelId,
@@ -169,37 +217,48 @@ export class SlackPollingAdapter implements ChannelAdapter {
   /**
    * Set baseline timestamps for all DM conversations so we don't
    * process historical messages on first start.
+   *
+   * Uses the current time as baseline instead of fetching the latest
+   * message per channel -- avoids N conversations.history API calls
+   * that easily hit Slack's Tier 3 rate limit (50 req/min).
+   * Historical messages are handled by the ingestion pipeline.
    */
   private async initializeBaselines(): Promise<void> {
     if (!this.client) return;
 
     try {
       const dmChannels = await this.getDMChannels();
+      const memberChannels = await this.getMemberChannels();
+      // Use current epoch seconds as Slack timestamp baseline.
+      // Only messages arriving after this point will be processed.
+      const nowTs = `${(Date.now() / 1000).toFixed(6)}`;
       for (const channelId of dmChannels) {
-        try {
-          const history = await this.client.conversations.history({
-            channel: channelId,
-            limit: 1,
-          });
-          const latest = history.messages?.[0];
-          if (latest?.ts) {
-            this.lastSeenTs.set(channelId, latest.ts);
-          }
-        } catch {
-          // Channel might be inaccessible — skip
-        }
+        this.lastSeenTs.set(channelId, nowTs);
       }
-      console.log(`[slack-polling] Baseline set for ${this.lastSeenTs.size} DM channels`);
+      for (const channelId of memberChannels) {
+        this.lastSeenTs.set(channelId, nowTs);
+      }
+      console.log(
+        `[slack-polling] Baseline set for ${dmChannels.length} DMs + ${memberChannels.length} channels (using current time)`,
+      );
     } catch (err) {
       console.warn("[slack-polling] Failed to initialize baselines:", err);
     }
   }
 
   /**
-   * Get all DM channel IDs (im type).
+   * Get all DM channel IDs (im type). Cached and refreshed every 5 minutes.
    */
   private async getDMChannels(): Promise<string[]> {
     if (!this.client) return [];
+
+    const now = Date.now();
+    if (
+      this.cachedDMChannels.length > 0 &&
+      now - this.channelListLastFetched < SlackPollingAdapter.CHANNEL_REFRESH_INTERVAL_MS
+    ) {
+      return this.cachedDMChannels;
+    }
 
     const channels: string[] = [];
     let cursor: string | undefined;
@@ -217,23 +276,119 @@ export class SlackPollingAdapter implements ChannelAdapter {
       }
 
       cursor = result.response_metadata?.next_cursor || undefined;
+      if (cursor) await delay(SlackPollingAdapter.INTER_CALL_DELAY_MS);
     } while (cursor);
 
+    this.cachedDMChannels = channels;
+    this.channelListLastFetched = now;
+    return channels;
+  }
+
+  /**
+   * Get channels the user is a member of (public + private). Cached same as DMs.
+   * Only fetches on the same refresh cycle as getDMChannels.
+   */
+  private async getMemberChannels(): Promise<string[]> {
+    if (!this.client) return [];
+
+    // Use the same cache timing as DM channels (refreshed together)
+    const now = Date.now();
+    if (
+      this.cachedMemberChannels.length > 0 &&
+      now - this.channelListLastFetched < SlackPollingAdapter.CHANNEL_REFRESH_INTERVAL_MS
+    ) {
+      return this.cachedMemberChannels;
+    }
+
+    const channels: string[] = [];
+    let cursor: string | undefined;
+
+    do {
+      const result = await this.client.conversations.list({
+        types: "public_channel,private_channel",
+        limit: 200,
+        cursor,
+        exclude_archived: true,
+      });
+
+      for (const ch of result.channels ?? []) {
+        if (ch.id && ch.is_member) channels.push(ch.id);
+      }
+
+      cursor = result.response_metadata?.next_cursor || undefined;
+      if (cursor) await delay(SlackPollingAdapter.INTER_CALL_DELAY_MS);
+    } while (cursor);
+
+    this.cachedMemberChannels = channels;
     return channels;
   }
 
   /**
    * Main poll loop: check DMs and channel mentions for new messages.
+   *
+   * Uses a global mutex so only one adapter polls at a time (rate limits
+   * are shared across all tokens from the same OAuth app). On most cycles,
+   * only "active" channels (those that had recent messages) are polled.
+   * A full scan of all channels runs every FULL_SCAN_EVERY polls.
    */
   private async poll(): Promise<void> {
-    if (!this.running || !this.client) return;
+    if (!this.running || !this.client || this.polling) return;
+    this.polling = true;
+
+    // Acquire the global mutex -- wait for any other adapter to finish first
+    const release = await SlackPollingAdapter.acquireMutex();
 
     try {
-      // Poll DMs
+      this.pollCount++;
+      const isFullScan = this.pollCount % SlackPollingAdapter.FULL_SCAN_EVERY === 0;
+
       const dmChannels = await this.getDMChannels();
       this.consecutiveErrors = 0; // Reset on success
-      for (const channelId of dmChannels) {
-        await this.pollChannel(channelId, "dm");
+
+      // Determine which channels to poll this cycle
+      const channelsToPoll = isFullScan
+        ? dmChannels
+        : dmChannels.filter((ch) => this.activeChannels.has(ch));
+
+      if (isFullScan && dmChannels.length !== channelsToPoll.length) {
+        // Log full scans so we can see the cadence
+        console.log(
+          `[slack-polling] Full scan: ${dmChannels.length} channels (team ${this.teamId})`,
+        );
+      }
+
+      for (const channelId of channelsToPoll) {
+        if (!this.running) break;
+        const hadMessages = await this.pollChannel(channelId, "dm");
+        if (hadMessages) {
+          this.activeChannels.add(channelId);
+        }
+        await delay(SlackPollingAdapter.INTER_CALL_DELAY_MS);
+      }
+
+      // Poll member channels for @mentions (only active ones, full scan periodically)
+      // Default channel is ALWAYS polled (it's the user's primary chat channel)
+      const memberChannels = await this.getMemberChannels();
+      const mentionChannelsToPoll = isFullScan
+        ? memberChannels
+        : memberChannels.filter(
+            (ch) => this.activeChannels.has(ch) || ch === this.defaultChannelId,
+          );
+
+      for (const channelId of mentionChannelsToPoll) {
+        if (!this.running) break;
+        const hadMessages = await this.pollChannel(channelId, "channel");
+        if (hadMessages) {
+          this.activeChannels.add(channelId);
+        }
+        await delay(SlackPollingAdapter.INTER_CALL_DELAY_MS);
+      }
+
+      // Decay: remove channels from active set if they haven't produced
+      // messages in a while. We do this by letting the full scan re-add them.
+      if (isFullScan) {
+        this.activeChannels.clear();
+        // The full scan above will re-add any channels that have new messages.
       }
     } catch (err: unknown) {
       const errorCode = (err as { data?: { error?: string } })?.data?.error;
@@ -252,14 +407,33 @@ export class SlackPollingAdapter implements ChannelAdapter {
       } else {
         this.consecutiveErrors++;
       }
+    } finally {
+      this.polling = false;
+      release();
     }
   }
 
   /**
-   * Poll a single channel for new messages since last check.
+   * Acquire the global poll mutex. Returns a release function.
+   * Ensures only one adapter instance polls Slack at a time.
    */
-  private async pollChannel(channelId: string, type: "dm" | "channel"): Promise<void> {
-    if (!this.client || !this.userId) return;
+  private static async acquireMutex(): Promise<() => void> {
+    let release: () => void;
+    const next = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    // Wait for current holder to finish, then become the holder
+    await SlackPollingAdapter.pollMutex;
+    SlackPollingAdapter.pollMutex = next;
+    return release!;
+  }
+
+  /**
+   * Poll a single channel for new messages since last check.
+   * Returns true if new messages were found.
+   */
+  private async pollChannel(channelId: string, type: "dm" | "channel"): Promise<boolean> {
+    if (!this.client || !this.userId) return false;
 
     try {
       const oldest = this.lastSeenTs.get(channelId);
@@ -271,7 +445,11 @@ export class SlackPollingAdapter implements ChannelAdapter {
       });
 
       const messages = history.messages ?? [];
-      if (messages.length === 0) return;
+      if (messages.length === 0) return false;
+
+      if (channelId === this.defaultChannelId) {
+        console.log(`[slack-polling] Default channel has ${messages.length} new message(s)`);
+      }
 
       // Update last seen to newest message
       const newestTs = messages[0]?.ts;
@@ -280,14 +458,19 @@ export class SlackPollingAdapter implements ChannelAdapter {
       }
 
       // Process messages (oldest first)
+      let hadRelevantMessages = false;
+      const isDefaultChannel = channelId === this.defaultChannelId;
       for (const msg of messages.reverse()) {
-        // Skip own messages
-        if (msg.user === this.userId) continue;
+        // Skip own messages -- except in the default channel where the
+        // user chats directly with the agent via their own user token
+        if (msg.user === this.userId && !isDefaultChannel) continue;
         // Skip bot messages, system messages
         if (msg.subtype) continue;
         if (!msg.text || !msg.user || !msg.ts) continue;
 
-        if (type === "dm") {
+        hadRelevantMessages = true;
+
+        if (type === "dm" || isDefaultChannel) {
           await this.handleDM({
             text: msg.text,
             user: msg.user,
@@ -305,8 +488,15 @@ export class SlackPollingAdapter implements ChannelAdapter {
           });
         }
       }
-    } catch {
-      // Channel might have become inaccessible — skip silently
+
+      return hadRelevantMessages;
+    } catch (err) {
+      // Log errors for the default channel (important), skip others silently
+      if (channelId === this.defaultChannelId) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error(`[slack-polling] Error polling default channel ${channelId}: ${msg}`);
+      }
+      return false;
     }
   }
 
@@ -397,4 +587,8 @@ export class SlackPollingAdapter implements ChannelAdapter {
       return channelId;
     }
   }
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }

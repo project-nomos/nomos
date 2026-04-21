@@ -12,6 +12,7 @@ import {
   Send,
   Mail,
   Phone,
+  Smartphone,
   Database,
   Brain,
   DollarSign,
@@ -32,6 +33,7 @@ const channelItems = [
   { href: "/integrations/telegram", label: "Telegram", icon: Send },
   { href: "/integrations/google", label: "Google", icon: Mail },
   { href: "/integrations/whatsapp", label: "WhatsApp", icon: Phone },
+  { href: "/integrations/imessage", label: "Messages.app", icon: Smartphone },
 ];
 
 const advancedItems = [

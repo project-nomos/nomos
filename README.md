@@ -213,15 +213,15 @@ The setup wizard handles this automatically when you run `nomos chat` for the fi
 
 ## Channel Integrations
 
-| Platform         | Mode            | Transport                                                    |
-| ---------------- | --------------- | ------------------------------------------------------------ |
-| **Slack**        | Bot + User Mode | Web API polling + OAuth (multi-workspace, draft-before-send) |
-| **Discord**      | Bot             | Gateway                                                      |
-| **Telegram**     | Bot             | grammY                                                       |
-| **WhatsApp**     | Bridge          | Baileys (no Meta Business API needed)                        |
-| **Messages.app** | Dual mode       | Local chat.db (macOS) or BlueBubbles server (cross-platform) |
-| **Email**        | IMAP + SMTP     | IMAP IDLE for real-time push, SMTP for sending               |
-| **Web/gRPC**     | Client          | gRPC (8766) + WebSocket (8765)                               |
+| Platform         | Mode            | Transport                                                                                 |
+| ---------------- | --------------- | ----------------------------------------------------------------------------------------- |
+| **Slack**        | Bot + User Mode | Web API polling + OAuth (multi-workspace, draft-before-send)                              |
+| **Discord**      | Bot             | Gateway                                                                                   |
+| **Telegram**     | Bot             | grammY                                                                                    |
+| **WhatsApp**     | Bridge          | Baileys (no Meta Business API needed)                                                     |
+| **Messages.app** | Dual mode       | Local chat.db or BlueBubbles. Passive (draft & approve) or agent client (direct to owner) |
+| **Email**        | IMAP + SMTP     | IMAP IDLE for real-time push, SMTP for sending                                            |
+| **Web/gRPC**     | Client          | gRPC (8766) + WebSocket (8765)                                                            |
 
 Each adapter is ~50-100 LOC. All agent logic is centralized in `AgentRuntime`. See [docs/channels.md](docs/channels.md) for env vars and setup, or the [individual integration guides](docs/integrations/).
 
@@ -644,17 +644,20 @@ Configuration is loaded with the following precedence: **Database > environment 
 
 ### Channel integrations
 
-| Variable                 | Description                          | Default  |
-| ------------------------ | ------------------------------------ | -------- |
-| `SLACK_BOT_TOKEN`        | Slack Bot User OAuth Token           | --       |
-| `SLACK_APP_TOKEN`        | Slack App-Level Token (Socket Mode)  | --       |
-| `DISCORD_BOT_TOKEN`      | Discord bot token                    | --       |
-| `TELEGRAM_BOT_TOKEN`     | Telegram bot token from @BotFather   | --       |
-| `WHATSAPP_ENABLED`       | Set to `true` to enable WhatsApp     | --       |
-| `IMESSAGE_ENABLED`       | Set to `true` to enable Messages.app | --       |
-| `IMESSAGE_MODE`          | `chatdb` (macOS) or `bluebubbles`    | `chatdb` |
-| `BLUEBUBBLES_SERVER_URL` | BlueBubbles server URL               | --       |
-| `BLUEBUBBLES_PASSWORD`   | BlueBubbles API password             | --       |
+| Variable                  | Description                           | Default   |
+| ------------------------- | ------------------------------------- | --------- |
+| `SLACK_BOT_TOKEN`         | Slack Bot User OAuth Token            | --        |
+| `SLACK_APP_TOKEN`         | Slack App-Level Token (Socket Mode)   | --        |
+| `DISCORD_BOT_TOKEN`       | Discord bot token                     | --        |
+| `TELEGRAM_BOT_TOKEN`      | Telegram bot token from @BotFather    | --        |
+| `WHATSAPP_ENABLED`        | Set to `true` to enable WhatsApp      | --        |
+| `IMESSAGE_ENABLED`        | Set to `true` to enable Messages.app  | --        |
+| `IMESSAGE_MODE`           | `chatdb` (macOS) or `bluebubbles`     | `chatdb`  |
+| `IMESSAGE_AGENT_MODE`     | `passive` (draft) or `agent` (direct) | `passive` |
+| `IMESSAGE_OWNER_PHONE`    | Owner phone for agent mode            | --        |
+| `IMESSAGE_OWNER_APPLE_ID` | Owner Apple ID for agent mode         | --        |
+| `BLUEBUBBLES_SERVER_URL`  | BlueBubbles server URL                | --        |
+| `BLUEBUBBLES_PASSWORD`    | BlueBubbles API password              | --        |
 
 Email is configured via the Settings UI (`/integrations/email`) or the `integrations` table (IMAP/SMTP host, port, credentials).
 

@@ -63,12 +63,33 @@ export class DraftManager {
       if (sendFn) {
         await sendFn(message.channelId, message.content, message.threadId);
         console.log(`[draft-manager] Auto-sent to ${message.channelId} (autonomy: auto)`);
+        this.notifyWs?.({
+          type: "system",
+          subtype: "auto_sent",
+          message: `Message auto-sent on ${message.platform} to ${message.channelId}`,
+          data: {
+            platform: message.platform,
+            channelId: message.channelId,
+            autonomy: "auto",
+            preview: message.content.slice(0, 120),
+          },
+        });
       }
       return null;
     }
 
     if (autonomy === "silent") {
       console.log(`[draft-manager] Discarded message to ${message.channelId} (autonomy: silent)`);
+      this.notifyWs?.({
+        type: "system",
+        subtype: "message_silenced",
+        message: `Message to ${message.channelId} silenced (autonomy: silent)`,
+        data: {
+          platform: message.platform,
+          channelId: message.channelId,
+          autonomy: "silent",
+        },
+      });
       return null;
     }
 
