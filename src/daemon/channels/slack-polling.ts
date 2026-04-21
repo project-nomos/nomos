@@ -508,24 +508,32 @@ export class SlackPollingAdapter implements ChannelAdapter {
     channel: string;
   }): Promise<void> {
     const senderName = await this.lookupUserName(e.user);
-    const wrappedContent = [
-      `[Slack DM from ${senderName}]`,
-      "",
-      e.text,
-      "",
-      "---",
-      "Draft a response AS ME (the user). I will approve it before it's sent.",
-    ].join("\n");
+    const isDefaultChannel = e.channel === this.defaultChannelId;
+
+    // Default channel: the user is chatting directly with the agent.
+    // Pass the raw message -- no draft framing.
+    // Other DMs: wrap with draft instructions so the agent drafts a
+    // response on behalf of the user for approval.
+    const content = isDefaultChannel
+      ? e.text
+      : [
+          `[Slack DM from ${senderName}]`,
+          "",
+          e.text,
+          "",
+          "---",
+          "Draft a response AS ME (the user). I will approve it before it's sent.",
+        ].join("\n");
 
     this.onMessage({
       id: randomUUID(),
       platform: this.platform,
       channelId: e.channel,
       userId: e.user,
-      threadId: e.thread_ts ?? e.ts,
-      content: wrappedContent,
+      threadId: isDefaultChannel ? undefined : (e.thread_ts ?? e.ts),
+      content,
       timestamp: new Date(),
-      metadata: { senderName, messageType: "dm" },
+      metadata: { senderName, messageType: isDefaultChannel ? "direct" : "dm" },
     });
   }
 
