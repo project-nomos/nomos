@@ -112,13 +112,26 @@ export class SlackPollingAdapter implements ChannelAdapter {
 
     this.running = true;
 
-    // Create bot client for posting agent responses with distinct identity
-    const botToken = process.env.SLACK_BOT_TOKEN;
+    // Create bot client for posting agent responses with distinct identity.
+    // Check env first, then the integrations table (Settings UI stores it there).
+    let botToken = process.env.SLACK_BOT_TOKEN;
+    if (!botToken) {
+      try {
+        const { getIntegration } = await import("../../db/integrations.ts");
+        const slackIntegration = await getIntegration("slack");
+        if (slackIntegration?.secrets) {
+          botToken = (slackIntegration.secrets as Record<string, string>).bot_token;
+        }
+      } catch {
+        // integrations table not available
+      }
+    }
     if (botToken) {
       this.botClient = new WebClient(botToken);
       try {
         const botAuth = await this.botClient.auth.test();
         this.botUserId = (botAuth.user_id as string) ?? null;
+        console.log(`[slack-polling] Bot identity loaded (${this.botUserId})`);
       } catch {
         console.warn(`[slack-polling] Bot token auth failed -- agent will post as user`);
         this.botClient = null;
