@@ -112,16 +112,6 @@ export class SlackUserAdapter implements ChannelAdapter {
       // notification defaults not available
     }
 
-    // Log all incoming events for debugging Socket Mode connectivity
-    this.app.use(async (args) => {
-      const payload = args as unknown as Record<string, unknown>;
-      if (payload.event) {
-        const evt = payload.event as Record<string, unknown>;
-        console.log(`[slack-user-adapter] Event received: type=${evt.type} channel=${evt.channel}`);
-      }
-      await args.next();
-    });
-
     // Listen to all message events
     this.app.event("message", async ({ event }) => {
       const e = event as {
@@ -134,10 +124,6 @@ export class SlackUserAdapter implements ChannelAdapter {
         channel: string;
         subtype?: string;
       };
-
-      console.log(
-        `[slack-user-adapter] Message: user=${e.user} channel=${e.channel} type=${e.channel_type} subtype=${e.subtype ?? "none"} bot_id=${e.bot_id ?? "none"}`,
-      );
 
       // Skip subtypes (edits, joins, etc.) and messages without text/user
       if (e.subtype || !e.text || !e.user) return;
