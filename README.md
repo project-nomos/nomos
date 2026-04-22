@@ -437,6 +437,8 @@ A hybrid per-session engine that models the user's mental state in real time so 
 
 The combined state appears in the system prompt as "Current User State" with response guidance (e.g., "Be concise and action-oriented" when urgency is high, "Acknowledge the difficulty" when frustration is detected).
 
+Theory of Mind is one of 8 interconnected subsystems that make Nomos think like you, not just sound like you. See [docs/think-like-you.md](docs/think-like-you.md) for the full architecture: knowledge extraction, decision pattern learning, exemplar curation, shadow observation, calibration, personality DNA, and more.
+
 </details>
 
 <details>
