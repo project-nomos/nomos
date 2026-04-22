@@ -220,12 +220,43 @@ In daemon mode, responses go through draft approval before being sent.
 
 ### Receiving Messages
 
-Both modes trigger on two types of incoming messages:
+Both modes trigger on three types of incoming messages:
 
-- **Direct messages** to your Slack account — any DM from another user
-- **@mentions** of your Slack account in channels — when someone writes `@YourName` in a message
+- **Default channel** -- your designated chat channel with the agent. All messages are processed, no @mention needed. The agent responds directly using the bot identity.
+- **Direct messages** to your Slack account -- any DM from another user
+- **@mentions** of your Slack account in channels -- when someone writes `@YourName` in a message
 
-Your own messages are ignored (no echo loop).
+Your own messages are ignored (no echo loop), except in the default channel where you're chatting directly with the agent.
+
+### Default Channel (Chat with Your Agent)
+
+The default channel is a dedicated Slack channel where you talk directly to the agent -- like a personal chat room. It behaves differently from DMs and @mentions:
+
+|                       | Default Channel                  | DMs / @Mentions                                    |
+| --------------------- | -------------------------------- | -------------------------------------------------- |
+| **Who triggers**      | You (the owner)                  | Other people messaging you                         |
+| **@mention needed**   | No                               | @mentions required in channels, DMs always trigger |
+| **Agent responds as** | Bot identity (own name + avatar) | Your user token (appears as you)                   |
+| **Approval needed**   | No -- responds directly          | Yes -- creates draft for approval                  |
+| **Polled**            | Every cycle (~60s)               | Active DMs every cycle, full scan every ~10 min    |
+
+**Setup:**
+
+1. Create a Slack channel (e.g., `#my-agent` or `#nomos-mgmt`)
+2. Add the Slack bot app to the channel
+3. Set it as the notification default via Settings UI (**Integrations > Slack > Notification Defaults**) or CLI:
+   ```bash
+   nomos config set notifications.default '{"platform":"slack-user:YOUR_TEAM_ID","channelId":"CHANNEL_ID","label":"#my-agent"}'
+   ```
+4. Ensure `SLACK_BOT_TOKEN` is configured (via Settings UI or `.env`) -- this gives the agent its own identity in the channel
+
+**How it works:**
+
+- The polling adapter checks the default channel on every poll cycle (~60s)
+- Your messages are passed as raw text to the agent (no "draft a response AS ME" framing)
+- The agent responds using the bot token, so responses appear with the bot's name and avatar
+- Bot messages are filtered out to prevent echo loops (via `bot_id` field)
+- All other channels continue using the user token for drafts sent on your behalf
 
 ### Reviewing Drafts (daemon mode only)
 
