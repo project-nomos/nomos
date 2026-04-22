@@ -135,7 +135,13 @@ export async function extractKnowledge(
     const jsonMatch = fullText.match(/\{[\s\S]*\}/);
     if (!jsonMatch) return empty;
 
-    const parsed = JSON.parse(jsonMatch[0]) as ExtractedKnowledge;
+    let parsed: ExtractedKnowledge;
+    try {
+      parsed = JSON.parse(jsonMatch[0]) as ExtractedKnowledge;
+    } catch {
+      // LLM returned non-JSON text -- silently skip
+      return empty;
+    }
 
     // Validate structure
     return {
