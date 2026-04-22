@@ -37,6 +37,7 @@ export class SlackUserAdapter implements ChannelAdapter {
   private readonly teamId: string;
   private readonly userToken: string;
   private readonly appToken: string;
+  private readonly botTokenStr: string | undefined;
   private app: InstanceType<typeof App> | null = null;
   private userClient: WebClient | null = null;
   private botClient: WebClient | null = null;
@@ -59,6 +60,7 @@ export class SlackUserAdapter implements ChannelAdapter {
   constructor(options: SlackUserAdapterOptions) {
     this.userToken = options.userToken;
     this.appToken = options.appToken;
+    this.botTokenStr = options.botToken;
     this.teamId = options.teamId;
     this.onMessage = options.onMessage;
     this.draftManager = options.draftManager;
@@ -70,11 +72,14 @@ export class SlackUserAdapter implements ChannelAdapter {
   }
 
   async start(): Promise<void> {
-    // Bolt app using the user token for event subscriptions
-    this.app = new App({ token: this.userToken, appToken: this.appToken, socketMode: true });
+    // Bolt requires the BOT token for Socket Mode event delivery.
+    // User tokens don't receive Socket Mode events reliably.
+    // The user token is kept separately for API calls (posting as user).
+    const boltToken = this.botTokenStr ?? this.userToken;
+    this.app = new App({ token: boltToken, appToken: this.appToken, socketMode: true });
     this.userClient = new WebClient(this.userToken);
 
-    // Resolve own user ID
+    // Resolve own user ID (from user token)
     const auth = await this.userClient.auth.test();
     this.userId = auth.user_id ?? null;
     if (!this.userId) {
