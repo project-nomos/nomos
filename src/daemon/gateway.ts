@@ -690,12 +690,11 @@ export class Gateway {
         });
     };
 
-    // Only register adapters whose tokens are present
-    if (process.env.SLACK_BOT_TOKEN && process.env.SLACK_APP_TOKEN) {
-      this.channelManager.register(new SlackAdapter(enqueue, this.draftManager));
-    }
-
-    // Slack user mode: load workspaces from DB, fall back to env var
+    // Slack user mode: load workspaces from DB, fall back to env var.
+    // This block runs FIRST so we know whether Socket Mode is in use
+    // (which means the SlackAdapter bot mode should NOT start -- two
+    // Socket Mode connections on the same xapp- token compete for events).
+    let usingSocketMode = false;
     {
       const { listWorkspaces, syncSlackConfigToFile } = await import("../db/slack-workspaces.ts");
       const workspaces = await listWorkspaces();
@@ -748,6 +747,7 @@ export class Gateway {
           // Use Socket Mode (real-time) for the default channel workspace
           // when an xapp- token is available. Polling for everything else.
           if (isDefaultWorkspace && slackAppToken) {
+            usingSocketMode = true;
             console.log(
               `[gateway] Using Socket Mode for workspace ${ws.team_id} (default channel)`,
             );
@@ -805,6 +805,12 @@ export class Gateway {
           adapter.sendAsUser(channelId, text, threadId),
         );
       }
+    }
+
+    // Bot-mode SlackAdapter: only start if NOT using Socket Mode for user mode.
+    // Two Socket Mode connections on the same xapp- token compete for events.
+    if (process.env.SLACK_BOT_TOKEN && process.env.SLACK_APP_TOKEN && !usingSocketMode) {
+      this.channelManager.register(new SlackAdapter(enqueue, this.draftManager));
     }
 
     if (process.env.DISCORD_BOT_TOKEN) {
