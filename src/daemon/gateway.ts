@@ -710,30 +710,82 @@ export class Gateway {
       }
 
       if (workspaces.length > 0) {
+        // Check for app-level token (xapp-) for Socket Mode
+        let slackAppToken: string | undefined;
+        let slackBotToken: string | undefined;
+        try {
+          const { getIntegration } = await import("../db/integrations.ts");
+          const slackIntegration = await getIntegration("slack");
+          if (slackIntegration?.secrets) {
+            const secrets = slackIntegration.secrets as Record<string, string>;
+            if (secrets.app_token?.startsWith("xapp-")) slackAppToken = secrets.app_token;
+            if (secrets.bot_token?.startsWith("xoxb-")) slackBotToken = secrets.bot_token;
+          }
+        } catch {
+          // integrations not available
+        }
+        // Fall back to env
+        if (!slackAppToken && process.env.SLACK_APP_TOKEN?.startsWith("xapp-")) {
+          slackAppToken = process.env.SLACK_APP_TOKEN;
+        }
+        if (!slackBotToken) slackBotToken = process.env.SLACK_BOT_TOKEN;
+
+        // Determine which workspace has the default channel
+        let defaultChannelTeamId: string | null = null;
+        try {
+          const { getNotificationDefault } = await import("../db/notification-defaults.ts");
+          const nd = await getNotificationDefault();
+          if (nd?.platform.startsWith("slack-user:")) {
+            defaultChannelTeamId = nd.platform.replace("slack-user:", "");
+          }
+        } catch {
+          // not available
+        }
+
         for (const ws of workspaces) {
-          // Use polling adapter for all user tokens (browser-extracted or OAuth)
-          // Socket Mode requires an app-level token (xapp-) which isn't needed for user mode
-          const adapter = new SlackPollingAdapter({
-            token: ws.access_token,
-            cookie: ws.cookie_d,
-            teamId: ws.team_id,
-            onMessage: enqueue,
-            draftManager: this.draftManager,
-            onAuthError: (teamId, teamName) => {
-              const event = {
-                type: "system" as const,
-                subtype: "auth_error",
-                message: `Slack session expired for ${teamName} (${teamId}) — run \`nomos slack auth\` to reconnect`,
-                data: { platform: `slack-user:${teamId}`, teamId, teamName },
-              };
-              this.wsServer.broadcast(event);
-              this.grpcServer.broadcast(event);
-            },
-          });
-          this.channelManager.register(adapter);
-          this.draftManager.registerSendFn(adapter.platform, (channelId, text, threadId) =>
-            adapter.sendAsUser(channelId, text, threadId),
-          );
+          const isDefaultWorkspace = ws.team_id === defaultChannelTeamId;
+
+          // Use Socket Mode (real-time) for the default channel workspace
+          // when an xapp- token is available. Polling for everything else.
+          if (isDefaultWorkspace && slackAppToken) {
+            console.log(
+              `[gateway] Using Socket Mode for workspace ${ws.team_id} (default channel)`,
+            );
+            const adapter = new SlackUserAdapter({
+              userToken: ws.access_token,
+              appToken: slackAppToken,
+              botToken: slackBotToken,
+              teamId: ws.team_id,
+              onMessage: enqueue,
+              draftManager: this.draftManager,
+            });
+            this.channelManager.register(adapter);
+            this.draftManager.registerSendFn(adapter.platform, (channelId, text, threadId) =>
+              adapter.sendAsUser(channelId, text, threadId),
+            );
+          } else {
+            const adapter = new SlackPollingAdapter({
+              token: ws.access_token,
+              cookie: ws.cookie_d,
+              teamId: ws.team_id,
+              onMessage: enqueue,
+              draftManager: this.draftManager,
+              onAuthError: (teamId, teamName) => {
+                const event = {
+                  type: "system" as const,
+                  subtype: "auth_error",
+                  message: `Slack session expired for ${teamName} (${teamId}) — run \`nomos slack auth\` to reconnect`,
+                  data: { platform: `slack-user:${teamId}`, teamId, teamName },
+                };
+                this.wsServer.broadcast(event);
+                this.grpcServer.broadcast(event);
+              },
+            });
+            this.channelManager.register(adapter);
+            this.draftManager.registerSendFn(adapter.platform, (channelId, text, threadId) =>
+              adapter.sendAsUser(channelId, text, threadId),
+            );
+          }
         }
 
         // Slack ingestion is deferred until after channelManager.start()

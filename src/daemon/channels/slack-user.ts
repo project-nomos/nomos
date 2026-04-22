@@ -1,13 +1,13 @@
 /**
- * Slack User Mode adapter.
+ * Slack User Mode adapter (Socket Mode -- real-time).
  *
- * Listens to DMs and @mentions directed at the authenticated user,
- * generates agent responses, and queues them as drafts for approval.
- * On approval, messages are sent via the user's xoxp- token so they
- * appear as if the user typed them.
+ * Listens to DMs, @mentions, and the default channel via Slack's Socket
+ * Mode WebSocket connection. Events arrive in real-time (sub-second).
  *
- * Supports multiple workspaces — each adapter instance is constructed
- * with explicit tokens and a team ID.
+ * Behavior varies by context:
+ * - Default channel: own messages processed, agent responds as bot, no drafts
+ * - DMs from others: agent drafts response for approval, sends as user
+ * - @mentions in channels: same as DMs (draft + approve)
  */
 
 import SlackBolt from "@slack/bolt";
@@ -27,6 +27,7 @@ const { App } = slackBolt;
 export interface SlackUserAdapterOptions {
   userToken: string;
   appToken: string;
+  botToken?: string;
   teamId: string;
   onMessage: (msg: IncomingMessage) => void;
   draftManager: DraftManager;
@@ -38,9 +39,14 @@ export class SlackUserAdapter implements ChannelAdapter {
   private readonly appToken: string;
   private app: InstanceType<typeof App> | null = null;
   private userClient: WebClient | null = null;
+  private botClient: WebClient | null = null;
   private userId: string | null = null;
+  private botUserId: string | null = null;
   private onMessage: (msg: IncomingMessage) => void;
   private draftManager: DraftManager;
+
+  // Default channel -- the user's direct chat channel with the agent
+  private defaultChannelId: string | null = null;
 
   // Cache for user/channel name lookups
   private userNameCache = new Map<string, string>();
@@ -56,6 +62,11 @@ export class SlackUserAdapter implements ChannelAdapter {
     this.teamId = options.teamId;
     this.onMessage = options.onMessage;
     this.draftManager = options.draftManager;
+
+    // Bot client for posting agent responses with distinct identity
+    if (options.botToken) {
+      this.botClient = new WebClient(options.botToken);
+    }
   }
 
   async start(): Promise<void> {
@@ -70,12 +81,39 @@ export class SlackUserAdapter implements ChannelAdapter {
       throw new Error(`Could not resolve user ID from token for team ${this.teamId}`);
     }
 
+    // Resolve bot user ID (for echo loop prevention)
+    if (this.botClient) {
+      try {
+        const botAuth = await this.botClient.auth.test();
+        this.botUserId = (botAuth.user_id as string) ?? null;
+        console.log(`[slack-user-adapter] Bot identity loaded (${this.botUserId})`);
+      } catch {
+        console.warn(`[slack-user-adapter] Bot token auth failed -- agent will post as user`);
+        this.botClient = null;
+      }
+    }
+
+    // Load default notification channel
+    try {
+      const { getNotificationDefault } = await import("../../db/notification-defaults.ts");
+      const nd = await getNotificationDefault();
+      if (nd && nd.platform === this.platform) {
+        this.defaultChannelId = nd.channelId;
+        console.log(
+          `[slack-user-adapter] Default channel: ${nd.channelId} (${nd.label ?? "unlabeled"})`,
+        );
+      }
+    } catch {
+      // notification defaults not available
+    }
+
     // Listen to all message events
     this.app.event("message", async ({ event }) => {
       const e = event as {
         channel_type?: string;
         text?: string;
         user?: string;
+        bot_id?: string;
         ts: string;
         thread_ts?: string;
         channel: string;
@@ -84,14 +122,22 @@ export class SlackUserAdapter implements ChannelAdapter {
 
       // Skip subtypes (edits, joins, etc.) and messages without text/user
       if (e.subtype || !e.text || !e.user) return;
-      // Skip own messages
-      if (e.user === this.userId) return;
 
-      if (e.channel_type === "im") {
-        // Direct message to the user
+      // Skip ALL bot messages (prevents echo loops)
+      if (e.bot_id) return;
+      if (this.botUserId && e.user === this.botUserId) return;
+
+      const isDefaultChannel = e.channel === this.defaultChannelId;
+
+      // Skip own messages -- except in the default channel
+      if (e.user === this.userId && !isDefaultChannel) return;
+
+      if (isDefaultChannel) {
+        // Default channel: raw message, no draft framing
+        await this.handleDefaultChannel(e);
+      } else if (e.channel_type === "im") {
         await this.handleDM(e);
       } else if (e.channel_type === "channel" || e.channel_type === "group") {
-        // Channel/group message — check for @mention of the user
         if (e.text.includes(`<@${this.userId}>`)) {
           await this.handleMention(e);
         }
@@ -99,7 +145,9 @@ export class SlackUserAdapter implements ChannelAdapter {
     });
 
     await this.app.start();
-    console.log(`[slack-user-adapter] Running (user: ${this.userId}, team: ${this.teamId})`);
+    console.log(
+      `[slack-user-adapter] Running via Socket Mode (user: ${this.userId}, team: ${this.teamId})`,
+    );
   }
 
   async stop(): Promise<void> {
@@ -111,10 +159,17 @@ export class SlackUserAdapter implements ChannelAdapter {
   }
 
   /**
-   * Intercept outgoing messages and create drafts instead of sending.
+   * Route outgoing messages based on context.
+   * Default channel: respond directly as bot.
+   * Everything else: create draft for approval.
    */
   async send(message: OutgoingMessage): Promise<void> {
     if (!this.userId) return;
+
+    if (message.channelId === this.defaultChannelId) {
+      await this.sendAsAgent(message.channelId, message.content, message.threadId);
+      return;
+    }
 
     const context: Record<string, unknown> = {
       channelId: message.channelId,
@@ -136,7 +191,92 @@ export class SlackUserAdapter implements ChannelAdapter {
     });
   }
 
+  /**
+   * Send as the bot identity (for default channel).
+   * Falls back to user token if bot not configured.
+   */
+  async sendAsAgent(channelId: string, text: string, threadId?: string): Promise<void> {
+    const client = this.botClient ?? this.userClient;
+    if (!client) return;
+    await client.chat.postMessage({
+      channel: channelId,
+      text,
+      thread_ts: threadId,
+    });
+  }
+
+  /**
+   * Resolve the right client for a channel.
+   */
+  private clientFor(channelId: string): WebClient | null {
+    if (channelId === this.defaultChannelId && this.botClient) {
+      return this.botClient;
+    }
+    return this.userClient;
+  }
+
+  /**
+   * Post a message and return the timestamp (for streaming support).
+   */
+  async postMessage(
+    channelId: string,
+    text: string,
+    threadId?: string,
+  ): Promise<string | undefined> {
+    const client = this.clientFor(channelId);
+    if (!client) return undefined;
+    const result = await client.chat.postMessage({
+      channel: channelId,
+      text,
+      thread_ts: threadId,
+    });
+    return result.ts;
+  }
+
+  /**
+   * Update an existing message (for streaming support).
+   */
+  async updateMessage(channelId: string, messageId: string, text: string): Promise<void> {
+    const client = this.clientFor(channelId);
+    if (!client) return;
+    await client.chat.update({
+      channel: channelId,
+      ts: messageId,
+      text,
+    });
+  }
+
+  /**
+   * Delete a message.
+   */
+  async deleteMessage(channelId: string, messageId: string): Promise<void> {
+    const client = this.clientFor(channelId);
+    if (!client) return;
+    await client.chat.delete({
+      channel: channelId,
+      ts: messageId,
+    });
+  }
+
   // ── Private helpers ──
+
+  private async handleDefaultChannel(e: {
+    text?: string;
+    user?: string;
+    ts: string;
+    thread_ts?: string;
+    channel: string;
+  }): Promise<void> {
+    this.onMessage({
+      id: randomUUID(),
+      platform: this.platform,
+      channelId: e.channel,
+      userId: e.user!,
+      content: e.text!,
+      timestamp: new Date(),
+      metadata: { messageType: "direct" },
+    });
+  }
 
   private async handleDM(e: {
     text?: string;
@@ -177,10 +317,9 @@ export class SlackUserAdapter implements ChannelAdapter {
     const senderName = await this.lookupUserName(e.user!);
     const channelName = await this.lookupChannelName(e.channel);
     const cleanText = e.text!.replace(new RegExp(`<@${this.userId}>`, "g"), "").trim();
-    if (!cleanText) return;
 
     const wrappedContent = [
-      `[Slack mention from ${senderName} in #${channelName}]`,
+      `[Slack @mention in #${channelName} from ${senderName}]`,
       "",
       cleanText,
       "",
