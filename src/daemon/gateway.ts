@@ -741,6 +741,7 @@ export class Gateway {
           // not available
         }
 
+        let pollingAdapterIndex = 0;
         for (const ws of workspaces) {
           const isDefaultWorkspace = ws.team_id === defaultChannelTeamId;
 
@@ -764,10 +765,14 @@ export class Gateway {
               adapter.sendAsUser(channelId, text, threadId),
             );
           } else {
+            // Stagger polling adapters 2 min apart to avoid rate limit bursts
+            const staggerMs = pollingAdapterIndex * 2 * 60_000;
+            pollingAdapterIndex++;
             const adapter = new SlackPollingAdapter({
               token: ws.access_token,
               cookie: ws.cookie_d,
               teamId: ws.team_id,
+              startDelayMs: staggerMs,
               onMessage: enqueue,
               draftManager: this.draftManager,
               onAuthError: (teamId, teamName) => {

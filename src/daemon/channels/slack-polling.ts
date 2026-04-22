@@ -25,6 +25,8 @@ export interface SlackPollingAdapterOptions {
   cookie?: string;
   teamId: string;
   pollIntervalMs?: number;
+  /** Delay before the first poll (for staggering multiple workspaces). */
+  startDelayMs?: number;
   onMessage: (msg: IncomingMessage) => void;
   draftManager: DraftManager;
   /** Called when the token becomes invalid (expired session). */
@@ -81,11 +83,14 @@ export class SlackPollingAdapter implements ChannelAdapter {
     return `slack-user:${this.teamId}`;
   }
 
+  private readonly startDelayMs: number;
+
   constructor(options: SlackPollingAdapterOptions) {
     this.token = options.token;
     this.cookie = options.cookie;
     this.teamId = options.teamId;
-    this.pollIntervalMs = options.pollIntervalMs ?? 60_000; // 60s default (was 30s)
+    this.pollIntervalMs = options.pollIntervalMs ?? 5 * 60_000; // 5 min (was 60s)
+    this.startDelayMs = options.startDelayMs ?? 0;
     this.onMessage = options.onMessage;
     this.draftManager = options.draftManager;
     this.onAuthError = options.onAuthError;
@@ -155,12 +160,31 @@ export class SlackPollingAdapter implements ChannelAdapter {
     // Initial poll to set baselines (don't process old messages)
     await this.initializeBaselines();
 
-    // Start polling
-    this.pollTimer = setInterval(() => {
-      this.poll().catch((err) => {
-        console.error(`[slack-polling] Poll error (team ${this.teamId}):`, err);
-      });
-    }, this.pollIntervalMs);
+    // Start polling after optional stagger delay (prevents burst of API calls
+    // when multiple workspaces start simultaneously)
+    const startPolling = () => {
+      console.log(
+        `[slack-polling] Polling started for team ${this.teamId} (every ${Math.round(this.pollIntervalMs / 1000)}s)`,
+      );
+      // Run first poll immediately, then on interval
+      this.poll().catch((err) =>
+        console.error(`[slack-polling] Poll error (team ${this.teamId}):`, err),
+      );
+      this.pollTimer = setInterval(() => {
+        this.poll().catch((err) => {
+          console.error(`[slack-polling] Poll error (team ${this.teamId}):`, err);
+        });
+      }, this.pollIntervalMs);
+    };
+
+    if (this.startDelayMs > 0) {
+      console.log(
+        `[slack-polling] Delaying poll start by ${Math.round(this.startDelayMs / 1000)}s for team ${this.teamId}`,
+      );
+      setTimeout(startPolling, this.startDelayMs);
+    } else {
+      startPolling();
+    }
   }
 
   async stop(): Promise<void> {
