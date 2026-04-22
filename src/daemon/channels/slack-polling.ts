@@ -58,6 +58,8 @@ export class SlackPollingAdapter implements ChannelAdapter {
 
   // Default notification channel -- treated as a direct channel (no @mention required)
   private defaultChannelId: string | null = null;
+  // Bot client for posting agent responses with the bot identity (not as the user)
+  private botClient: WebClient | null = null;
   private static readonly CHANNEL_REFRESH_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
   private static readonly INTER_CALL_DELAY_MS = 2000; // ~30 req/min, safe headroom for Tier 3
 
@@ -109,6 +111,12 @@ export class SlackPollingAdapter implements ChannelAdapter {
 
     this.running = true;
 
+    // Create bot client for posting agent responses with distinct identity
+    const botToken = process.env.SLACK_BOT_TOKEN;
+    if (botToken) {
+      this.botClient = new WebClient(botToken);
+    }
+
     // Load default notification channel -- messages there are treated like DMs
     try {
       const { getNotificationDefault } = await import("../../db/notification-defaults.ts");
@@ -147,8 +155,9 @@ export class SlackPollingAdapter implements ChannelAdapter {
 
     // Default channel: the user is chatting with the agent directly,
     // so respond immediately instead of creating a draft for approval.
+    // Use bot token if available so the agent has its own identity.
     if (message.channelId === this.defaultChannelId) {
-      await this.sendAsUser(message.channelId, message.content, message.threadId);
+      await this.sendAsAgent(message.channelId, message.content, message.threadId);
       return;
     }
 
@@ -173,6 +182,31 @@ export class SlackPollingAdapter implements ChannelAdapter {
   }
 
   /**
+   * Send a message as the agent (bot identity).
+   * Falls back to user token if no bot token is configured.
+   */
+  async sendAsAgent(channelId: string, text: string, threadId?: string): Promise<void> {
+    const client = this.botClient ?? this.client;
+    if (!client) return;
+    await client.chat.postMessage({
+      channel: channelId,
+      text,
+      thread_ts: threadId,
+    });
+  }
+
+  /**
+   * Resolve the right client for a channel -- bot client for the default
+   * channel (so the agent has its own identity), user client for everything else.
+   */
+  private clientFor(channelId: string): WebClient | null {
+    if (channelId === this.defaultChannelId && this.botClient) {
+      return this.botClient;
+    }
+    return this.client;
+  }
+
+  /**
    * Post a message and return the timestamp (for streaming support).
    */
   async postMessage(
@@ -180,8 +214,9 @@ export class SlackPollingAdapter implements ChannelAdapter {
     text: string,
     threadId?: string,
   ): Promise<string | undefined> {
-    if (!this.client) return undefined;
-    const result = await this.client.chat.postMessage({
+    const client = this.clientFor(channelId);
+    if (!client) return undefined;
+    const result = await client.chat.postMessage({
       channel: channelId,
       text,
       thread_ts: threadId,
@@ -193,8 +228,9 @@ export class SlackPollingAdapter implements ChannelAdapter {
    * Update an existing message (for streaming support).
    */
   async updateMessage(channelId: string, messageId: string, text: string): Promise<void> {
-    if (!this.client) return;
-    await this.client.chat.update({
+    const client = this.clientFor(channelId);
+    if (!client) return;
+    await client.chat.update({
       channel: channelId,
       ts: messageId,
       text,
@@ -205,8 +241,9 @@ export class SlackPollingAdapter implements ChannelAdapter {
    * Delete a message.
    */
   async deleteMessage(channelId: string, messageId: string): Promise<void> {
-    if (!this.client) return;
-    await this.client.chat.delete({
+    const client = this.clientFor(channelId);
+    if (!client) return;
+    await client.chat.delete({
       channel: channelId,
       ts: messageId,
     });
