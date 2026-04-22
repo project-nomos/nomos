@@ -429,12 +429,22 @@ export async function PUT(request: Request) {
     // DB not available — will still write to .env
   }
 
-  // Write to .env as secondary sync
-  writeEnv(updates);
+  // Write non-secret config to .env as convenience (for bootstrap / CLI use).
+  // Secrets are ONLY stored in the DB (encrypted) to avoid duplication issues
+  // where .env tokens cause duplicate adapter registrations on daemon start.
+  const envUpdates: Record<string, string> = {};
+  for (const [key, value] of Object.entries(updates)) {
+    if (!SECRET_KEYS.has(key)) {
+      envUpdates[key] = value;
+    }
+  }
+  if (Object.keys(envUpdates).length > 0) {
+    writeEnv(envUpdates);
+  }
 
   return NextResponse.json({
     ok: true,
     updated: Object.keys(updates),
-    source: dbWritten ? "db+env" : "env",
+    source: dbWritten ? "db" : "env",
   });
 }
