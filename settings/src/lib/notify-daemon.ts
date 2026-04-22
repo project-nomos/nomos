@@ -7,7 +7,7 @@
 import { exec } from "node:child_process";
 import path from "node:path";
 
-export function notifyDaemonReload(): void {
+function sendDaemonCommand(command: string): void {
   const rootDir = path.resolve(process.cwd(), "..");
   // Fire-and-forget: use the daemon's gRPC endpoint via a quick node script
   const script = `
@@ -18,7 +18,7 @@ export function notifyDaemonReload(): void {
     const def = protoLoader.loadSync(proto, { keepCase: false, defaults: true });
     const desc = grpc.loadPackageDefinition(def);
     const client = new desc.nomos.NomosAgent("localhost:8766", grpc.credentials.createInsecure());
-    client.command({ command: "reload-slack-workspaces", sessionKey: "settings" }, (err, res) => {
+    client.command({ command: ${JSON.stringify(command)}, sessionKey: "settings" }, (err, res) => {
       process.exit(0);
     });
     setTimeout(() => process.exit(0), 3000);
@@ -34,4 +34,18 @@ export function notifyDaemonReload(): void {
       // Ignore errors — daemon may not be running
     },
   );
+}
+
+export function notifyDaemonReload(): void {
+  sendDaemonCommand("reload-slack-workspaces");
+}
+
+/** Trigger a full ingestion for the given platform. */
+export function notifyDaemonTriggerIngest(platform: string): void {
+  sendDaemonCommand(`trigger-ingest:${platform}`);
+}
+
+/** Trigger a delta sync for the given platform. */
+export function notifyDaemonTriggerDelta(platform: string): void {
+  sendDaemonCommand(`trigger-delta:${platform}`);
 }

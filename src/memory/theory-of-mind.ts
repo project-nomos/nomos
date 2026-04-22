@@ -1,14 +1,21 @@
 /**
  * Theory of Mind Engine -- real-time, per-session model of the user's mental state.
  *
- * Lightweight rule-based classifier (no LLM call) that updates after each turn.
- * Signals: message length, explicit emotion, time between messages, session
- * duration, time of day, upcoming commitments.
+ * Hybrid architecture:
+ *   1. Rule-based classifier runs synchronously on every turn (zero latency).
+ *      Detects surface signals: urgency markers, explicit emotion, message
+ *      patterns, time of day, session duration.
+ *   2. LLM assessment runs in the background every N turns via runForkedAgent.
+ *      Analyzes the conversation trajectory for nuanced signals: sarcasm,
+ *      implicit frustration, goal shifts, confusion patterns, unstated needs.
+ *      Results merge into the state on the NEXT turn (no added latency).
  *
  * The state is transient (session-scoped, never persisted) and injected into
  * the system prompt as a "Current User State" section so the agent can adapt
  * its response style.
  */
+
+import type { ForkedAgentResult } from "../sdk/forked-agent.ts";
 
 // ── Types ──
 
@@ -32,6 +39,22 @@ export interface UserMentalState {
   responseGuidance: string;
 }
 
+/** Richer assessment produced by the LLM on a background pass. */
+export interface LlmAssessment {
+  /** The LLM's read on what the user is really trying to accomplish. */
+  inferredGoal: string;
+  /** Emotional undercurrent the rules can't catch (sarcasm, resignation, etc.). */
+  emotionalSubtext: string;
+  /** Whether the conversation is progressing or going in circles. */
+  conversationTrajectory: "progressing" | "stuck" | "diverging" | "wrapping_up";
+  /** What the agent should do differently based on deeper analysis. */
+  strategicGuidance: string;
+  /** Confidence: how much context the LLM had to work with. */
+  confidence: "low" | "medium" | "high";
+  /** Turn number this assessment was generated at. */
+  assessedAtTurn: number;
+}
+
 interface TurnSignals {
   messageLength: number;
   wordCount: number;
@@ -45,6 +68,17 @@ interface TurnSignals {
   isLongExploration: boolean;
 }
 
+// ── Constants ──
+
+/** Run LLM assessment every N turns. */
+const LLM_ASSESSMENT_INTERVAL = 3;
+
+/** Minimum turns before first LLM assessment (need enough context). */
+const LLM_ASSESSMENT_MIN_TURNS = 3;
+
+/** Maximum recent messages to include in the LLM prompt. */
+const LLM_CONTEXT_WINDOW = 10;
+
 // ── Session Tracker ──
 
 export class TheoryOfMindTracker {
@@ -55,6 +89,15 @@ export class TheoryOfMindTracker {
   private consecutiveQuestions = 0;
   private correctionCount = 0;
 
+  /** Raw message history for LLM context (user messages only). */
+  private messageHistory: string[] = [];
+
+  /** Latest LLM assessment (merged on next rule-based update). */
+  private llmAssessment: LlmAssessment | null = null;
+
+  /** Whether an LLM assessment is currently in flight. */
+  private llmInFlight = false;
+
   constructor() {
     this.sessionStartedAt = Date.now();
   }
@@ -62,10 +105,15 @@ export class TheoryOfMindTracker {
   /**
    * Update the state model with a new user message.
    * Call this after each user turn, before generating a response.
+   *
+   * The rule-based state is returned synchronously. If enough turns
+   * have passed, an LLM assessment is kicked off in the background
+   * (its results will be available on the NEXT call).
    */
   update(userMessage: string): UserMentalState {
     const now = Date.now();
     this.turnTimestamps.push(now);
+    this.messageHistory.push(userMessage);
 
     const signals = this.analyzeMessage(userMessage);
     this.turnSignals.push(signals);
@@ -85,6 +133,16 @@ export class TheoryOfMindTracker {
 
     if (signals.isCorrection) {
       this.correctionCount++;
+    }
+
+    // Kick off background LLM assessment if due
+    const turnCount = this.turnSignals.length;
+    if (
+      turnCount >= LLM_ASSESSMENT_MIN_TURNS &&
+      turnCount % LLM_ASSESSMENT_INTERVAL === 0 &&
+      !this.llmInFlight
+    ) {
+      this.runLlmAssessment(turnCount);
     }
 
     return this.computeState();
@@ -113,10 +171,63 @@ export class TheoryOfMindTracker {
       `**Response guidance:** ${state.responseGuidance}`,
     ];
 
+    // Append LLM deep assessment if available
+    if (this.llmAssessment) {
+      const a = this.llmAssessment;
+      const staleness = this.turnSignals.length - a.assessedAtTurn;
+      const staleNote = staleness > 3 ? " (assessed a few turns ago)" : "";
+      lines.push("");
+      lines.push(`### Deep Assessment${staleNote}`);
+      lines.push(`Inferred goal: ${a.inferredGoal}`);
+      lines.push(`Emotional subtext: ${a.emotionalSubtext}`);
+      lines.push(`Trajectory: ${a.conversationTrajectory}`);
+      lines.push(`Strategic guidance: ${a.strategicGuidance}`);
+    }
+
     return lines.join("\n");
   }
 
-  // ── Private ──
+  // ── LLM Assessment ──
+
+  /**
+   * Fire-and-forget: run a background LLM assessment of the conversation.
+   * Results are stored and merged into the NEXT formatForPrompt() call.
+   */
+  private runLlmAssessment(turnCount: number): void {
+    this.llmInFlight = true;
+
+    const recentMessages = this.messageHistory.slice(-LLM_CONTEXT_WINDOW);
+    const ruleState = this.computeState();
+
+    const prompt = buildLlmAssessmentPrompt(recentMessages, ruleState, turnCount);
+
+    // Dynamic import to avoid circular deps at module load time
+    import("../sdk/forked-agent.ts")
+      .then(({ runForkedAgent }) =>
+        runForkedAgent({
+          prompt,
+          label: "tom-assessment",
+          maxTurns: 1,
+        }),
+      )
+      .then((result: ForkedAgentResult) => {
+        const parsed = parseLlmAssessment(result.text, turnCount);
+        if (parsed) {
+          this.llmAssessment = parsed;
+        }
+      })
+      .catch((err) => {
+        console.warn(
+          "[theory-of-mind] LLM assessment failed:",
+          err instanceof Error ? err.message : err,
+        );
+      })
+      .finally(() => {
+        this.llmInFlight = false;
+      });
+  }
+
+  // ── Rule-based Analysis ──
 
   private analyzeMessage(msg: string): TurnSignals {
     const lower = msg.toLowerCase();
@@ -326,6 +437,74 @@ export function getTheoryOfMindTracker(): TheoryOfMindTracker {
 
 export function resetTheoryOfMindTracker(): void {
   activeTracker = new TheoryOfMindTracker();
+}
+
+// ── LLM Prompt & Parsing ──
+
+function buildLlmAssessmentPrompt(
+  recentMessages: string[],
+  ruleState: UserMentalState,
+  turnCount: number,
+): string {
+  const transcript = recentMessages
+    .map((msg, i) => `[Turn ${turnCount - recentMessages.length + i + 1}] User: ${msg}`)
+    .join("\n\n");
+
+  return `You are an expert at reading between the lines of human communication. Analyze this conversation excerpt and assess the user's mental state -- what they're REALLY thinking and feeling, beyond what they explicitly say.
+
+## Current rule-based assessment (may be incomplete or wrong)
+Focus: ${ruleState.focus} | Emotion: ${ruleState.emotion} | Load: ${ruleState.cognitiveLoad} | Urgency: ${ruleState.urgency}
+${ruleState.summary}
+
+## Recent messages (user only, most recent last)
+${transcript}
+
+## Your task
+Provide a deeper assessment. The rule-based system catches explicit signals but misses:
+- Sarcasm, passive aggression, or masked frustration
+- When "this is fine" actually means "I'm giving up"
+- Implicit goal shifts (they started asking about X but actually need Y)
+- Whether the conversation is productive or going in circles
+- Unstated needs or assumptions
+
+Respond in EXACTLY this JSON format (no markdown, no explanation):
+{"inferredGoal":"what the user is actually trying to accomplish right now","emotionalSubtext":"the emotional undercurrent beyond surface signals","conversationTrajectory":"progressing|stuck|diverging|wrapping_up","strategicGuidance":"one sentence: what the agent should do differently","confidence":"low|medium|high"}`;
+}
+
+function parseLlmAssessment(text: string, turnCount: number): LlmAssessment | null {
+  try {
+    // Extract JSON from the response (may have surrounding text)
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) return null;
+
+    const raw = JSON.parse(jsonMatch[0]);
+
+    // Validate required fields
+    if (!raw.inferredGoal || !raw.emotionalSubtext || !raw.conversationTrajectory) {
+      return null;
+    }
+
+    const validTrajectories = ["progressing", "stuck", "diverging", "wrapping_up"] as const;
+    const trajectory = validTrajectories.includes(raw.conversationTrajectory)
+      ? (raw.conversationTrajectory as LlmAssessment["conversationTrajectory"])
+      : "progressing";
+
+    const validConfidence = ["low", "medium", "high"] as const;
+    const confidence = validConfidence.includes(raw.confidence)
+      ? (raw.confidence as LlmAssessment["confidence"])
+      : "medium";
+
+    return {
+      inferredGoal: String(raw.inferredGoal),
+      emotionalSubtext: String(raw.emotionalSubtext),
+      conversationTrajectory: trajectory,
+      strategicGuidance: String(raw.strategicGuidance ?? "No specific guidance"),
+      confidence,
+      assessedAtTurn: turnCount,
+    };
+  } catch {
+    return null;
+  }
 }
 
 // ── Pattern Libraries ──

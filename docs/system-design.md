@@ -209,7 +209,8 @@ src/
 │   ├── style-prompt.ts       Convert StyleProfile → natural-language prompt
 │   ├── knowledge-compiler.ts Karpathy-style wiki compilation from ingested data
 │   ├── wiki-reader.ts        Read wiki articles for agent context injection
-│   └── wiki-sync.ts          Sync wiki_articles table ↔ ~/.nomos/wiki/ disk
+│   ├── wiki-sync.ts          Sync wiki_articles table ↔ ~/.nomos/wiki/ disk
+│   └── theory-of-mind.ts     Hybrid user mental state tracker (rule + LLM)
 ├── config/                   Configuration
 │   ├── env.ts                Env var loader
 │   ├── profile.ts            User profile + agent identity + system prompt
@@ -348,6 +349,7 @@ What we add via MCP and the daemon:
 - Persistent memory across sessions and channels (`memory_search`, `user_model_recall`)
 - Automatic conversation indexing into vector memory
 - Adaptive memory: structured knowledge extraction and user model accumulation
+- Theory of Mind: hybrid rule-based + LLM per-session user mental state tracking (emotion, focus, urgency, stuck detection, goal inference)
 - Multi-channel message routing (Slack, Discord, Telegram, WhatsApp, iMessage, Email)
 - Multi-agent team orchestration (`TeamRuntime` -- coordinator/worker pattern with parallel `query()` calls)
 - Smart model routing (complexity-based tier selection: simple → Haiku, moderate → Sonnet, complex → Opus)
@@ -507,15 +509,15 @@ interface ChannelAdapter {
 
 Adapters are intentionally thin (50-100 lines each). They handle only platform authentication, inbound event parsing, and outbound message formatting. All agent logic lives in the shared `AgentRuntime`.
 
-| Adapter      | Platform Name          | Required Config                                                |
-| ------------ | ---------------------- | -------------------------------------------------------------- |
-| Slack (bot)  | `slack`                | `SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN`                           |
-| Slack (user) | `slack-user:<team_id>` | DB token + `SLACK_APP_TOKEN`, or `SLACK_USER_TOKEN`            |
-| Discord      | `discord`              | `DISCORD_BOT_TOKEN`                                            |
-| Telegram     | `telegram`             | `TELEGRAM_BOT_TOKEN`                                           |
-| WhatsApp     | `whatsapp`             | `WHATSAPP_ENABLED=true`                                        |
-| iMessage     | `imessage`             | `IMESSAGE_ENABLED=true` + `IMESSAGE_MODE` (chatdb/bluebubbles) |
-| Email        | `email`                | IMAP/SMTP config in `integrations` table                       |
+| Adapter      | Platform Name          | Required Config                                                                   |
+| ------------ | ---------------------- | --------------------------------------------------------------------------------- |
+| Slack (bot)  | `slack`                | `SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN`                                              |
+| Slack (user) | `slack-user:<team_id>` | DB token + `SLACK_APP_TOKEN`, or `SLACK_USER_TOKEN`                               |
+| Discord      | `discord`              | `DISCORD_BOT_TOKEN`                                                               |
+| Telegram     | `telegram`             | `TELEGRAM_BOT_TOKEN`                                                              |
+| WhatsApp     | `whatsapp`             | `WHATSAPP_ENABLED=true`                                                           |
+| iMessage     | `imessage`             | `IMESSAGE_ENABLED=true` + `IMESSAGE_MODE` + `IMESSAGE_AGENT_MODE` (passive/agent) |
+| Email        | `email`                | IMAP/SMTP config in `integrations` table                                          |
 
 ### Slack User Mode (Multi-Workspace)
 
@@ -561,6 +563,18 @@ The `MemoryIndexer` (`src/daemon/memory-indexer.ts`) runs after each completed a
 
 This runs fire-and-forget so it never delays message delivery. The result is that all conversations -- across all channels -- become searchable via `memory_search`, enabling cross-session and cross-channel recall.
 
+### Theory of Mind Engine
+
+The ToM engine (`src/memory/theory-of-mind.ts`) maintains a real-time, per-session model of the user's mental state using a hybrid architecture:
+
+**Layer 1 -- Rule-based classifier (every turn, zero latency)**:
+Runs synchronously before each agent response. Analyzes surface signals from the user's messages: word count, explicit emotion markers, urgency patterns, correction frequency, code blocks, question rate, time of day, and session duration. Produces a `UserMentalState` with dimensions: focus (deep/normal/scattered), emotion (neutral/positive/frustrated/stressed/excited), cognitive load (low/moderate/high), urgency (none/mild/high/critical), energy (high/normal/low), and a `seemsStuck` flag.
+
+**Layer 2 -- LLM assessment (every 3 turns, background, zero added latency)**:
+Fires via `runForkedAgent` (Haiku) with the last 10 user messages. Catches what rules can't: sarcasm, passive aggression, implicit goal shifts, whether "this is fine" means acceptance or resignation, and whether the conversation is progressing or going in circles. Produces an `LlmAssessment` with: `inferredGoal` (what the user is actually trying to do), `emotionalSubtext` (undercurrent beyond surface), `conversationTrajectory` (progressing/stuck/diverging/wrapping_up), and `strategicGuidance` (what the agent should do differently). Results merge into the prompt on the next turn.
+
+The state is injected into the system prompt as a "Current User State" section (with optional "Deep Assessment" subsection when LLM results are available). Per-session trackers are maintained in `AgentRuntime.tomTrackers` (Map keyed by session key). State is transient -- never persisted to DB.
+
 ### iMessage Dual-Mode
 
 The iMessage adapter supports two connection modes, selected via `IMESSAGE_MODE`:
@@ -568,7 +582,12 @@ The iMessage adapter supports two connection modes, selected via `IMESSAGE_MODE`
 - **`chatdb`** (default): macOS-only. Reads incoming messages by polling `~/Library/Messages/chat.db` (SQLite + WAL file watcher for ~200ms detection). Sends via AppleScript. Zero external dependencies.
 - **`bluebubbles`**: Connects to a BlueBubbles macOS server via REST API + webhooks. The daemon can run on any platform while a Mac relays iMessages. Supports reactions, typing indicators, read receipts, attachments (up to 8MB), group management, and message effects.
 
-A keep-alive LaunchAgent (`scripts/bluebubbles/install-keepalive.sh`) ensures Messages.app stays running for BlueBubbles. The Settings UI at `/integrations/imessage` provides mode selection, BlueBubbles server configuration, and connection testing.
+In addition, the adapter supports two agent modes via `IMESSAGE_AGENT_MODE`:
+
+- **`passive`** (default): Listens to all incoming messages (optionally filtered by `IMESSAGE_ALLOWED_CHATS`), processes them through the agent, and routes responses through the DraftManager for Slack-based approval before sending. The `sendDirect()` method bypasses draft routing for approved drafts.
+- **`agent`**: Only processes messages from the owner's phone number (`IMESSAGE_OWNER_PHONE`) or Apple ID (`IMESSAGE_OWNER_APPLE_ID`). Responds directly via iMessage. Acts as a personal agent client accessible from the user's iPhone.
+
+A keep-alive LaunchAgent (`scripts/bluebubbles/install-keepalive.sh`) ensures Messages.app stays running for BlueBubbles. The Settings UI at `/integrations/imessage` provides mode selection, agent mode configuration, owner identity settings, BlueBubbles server configuration, and connection testing.
 
 ### Historical Data Ingestion
 
@@ -730,35 +749,38 @@ The `tool-approval.ts` module detects dangerous operations (destructive shell co
 
 ### Environment Variables
 
-| Variable                 | Required    | Purpose                                        |
-| ------------------------ | ----------- | ---------------------------------------------- |
-| `DATABASE_URL`           | Yes         | PostgreSQL connection string                   |
-| `ANTHROPIC_API_KEY`      | One of      | Anthropic direct API key                       |
-| `CLAUDE_CODE_USE_VERTEX` | One of      | Enable Vertex AI provider                      |
-| `GOOGLE_CLOUD_PROJECT`   | With Vertex | GCP project ID                                 |
-| `CLOUD_ML_REGION`        | With Vertex | GCP region (e.g., `us-east5`)                  |
-| `NOMOS_MODEL`            | No          | Model override (default: `claude-sonnet-4-6`)  |
-| `NOMOS_SMART_ROUTING`    | No          | Enable complexity-based model routing          |
-| `NOMOS_MODEL_SIMPLE`     | No          | Model for simple queries (default: Haiku)      |
-| `NOMOS_MODEL_MODERATE`   | No          | Model for moderate queries (default: Sonnet)   |
-| `NOMOS_MODEL_COMPLEX`    | No          | Model for complex queries (default: Sonnet)    |
-| `NOMOS_TEAM_MODE`        | No          | Enable multi-agent team orchestration          |
-| `NOMOS_MAX_TEAM_WORKERS` | No          | Max parallel workers in team mode (default: 3) |
-| `ANTHROPIC_BASE_URL`     | No          | Custom Anthropic-compatible API endpoint       |
-| `NOMOS_ADAPTIVE_MEMORY`  | No          | Enable knowledge extraction + user model       |
-| `NOMOS_EXTRACTION_MODEL` | No          | Model for extraction (default: Haiku)          |
-| `SLACK_BOT_TOKEN`        | No          | Slack bot mode                                 |
-| `SLACK_APP_TOKEN`        | No          | Slack Socket Mode (bot + user mode)            |
-| `SLACK_CLIENT_ID`        | No          | Slack OAuth (multi-workspace user mode)        |
-| `SLACK_CLIENT_SECRET`    | No          | Slack OAuth (multi-workspace user mode)        |
-| `SLACK_USER_TOKEN`       | No          | Legacy single-workspace user mode              |
-| `DISCORD_BOT_TOKEN`      | No          | Discord integration                            |
-| `TELEGRAM_BOT_TOKEN`     | No          | Telegram integration                           |
-| `WHATSAPP_ENABLED`       | No          | WhatsApp integration                           |
-| `IMESSAGE_ENABLED`       | No          | iMessage integration                           |
-| `IMESSAGE_MODE`          | No          | `chatdb` (default) or `bluebubbles`            |
-| `BLUEBUBBLES_SERVER_URL` | No          | BlueBubbles server URL (BlueBubbles mode)      |
-| `BLUEBUBBLES_PASSWORD`   | No          | BlueBubbles API password (BlueBubbles mode)    |
+| Variable                  | Required    | Purpose                                         |
+| ------------------------- | ----------- | ----------------------------------------------- |
+| `DATABASE_URL`            | Yes         | PostgreSQL connection string                    |
+| `ANTHROPIC_API_KEY`       | One of      | Anthropic direct API key                        |
+| `CLAUDE_CODE_USE_VERTEX`  | One of      | Enable Vertex AI provider                       |
+| `GOOGLE_CLOUD_PROJECT`    | With Vertex | GCP project ID                                  |
+| `CLOUD_ML_REGION`         | With Vertex | GCP region (e.g., `us-east5`)                   |
+| `NOMOS_MODEL`             | No          | Model override (default: `claude-sonnet-4-6`)   |
+| `NOMOS_SMART_ROUTING`     | No          | Enable complexity-based model routing           |
+| `NOMOS_MODEL_SIMPLE`      | No          | Model for simple queries (default: Haiku)       |
+| `NOMOS_MODEL_MODERATE`    | No          | Model for moderate queries (default: Sonnet)    |
+| `NOMOS_MODEL_COMPLEX`     | No          | Model for complex queries (default: Sonnet)     |
+| `NOMOS_TEAM_MODE`         | No          | Enable multi-agent team orchestration           |
+| `NOMOS_MAX_TEAM_WORKERS`  | No          | Max parallel workers in team mode (default: 3)  |
+| `ANTHROPIC_BASE_URL`      | No          | Custom Anthropic-compatible API endpoint        |
+| `NOMOS_ADAPTIVE_MEMORY`   | No          | Enable knowledge extraction + user model        |
+| `NOMOS_EXTRACTION_MODEL`  | No          | Model for extraction (default: Haiku)           |
+| `SLACK_BOT_TOKEN`         | No          | Slack bot mode                                  |
+| `SLACK_APP_TOKEN`         | No          | Slack Socket Mode (bot + user mode)             |
+| `SLACK_CLIENT_ID`         | No          | Slack OAuth (multi-workspace user mode)         |
+| `SLACK_CLIENT_SECRET`     | No          | Slack OAuth (multi-workspace user mode)         |
+| `SLACK_USER_TOKEN`        | No          | Legacy single-workspace user mode               |
+| `DISCORD_BOT_TOKEN`       | No          | Discord integration                             |
+| `TELEGRAM_BOT_TOKEN`      | No          | Telegram integration                            |
+| `WHATSAPP_ENABLED`        | No          | WhatsApp integration                            |
+| `IMESSAGE_ENABLED`        | No          | iMessage integration                            |
+| `IMESSAGE_MODE`           | No          | `chatdb` (default) or `bluebubbles`             |
+| `IMESSAGE_AGENT_MODE`     | No          | `passive` (draft & approve) or `agent` (direct) |
+| `IMESSAGE_OWNER_PHONE`    | No          | Owner phone for agent mode (e.g., +15551234567) |
+| `IMESSAGE_OWNER_APPLE_ID` | No          | Owner Apple ID for agent mode                   |
+| `BLUEBUBBLES_SERVER_URL`  | No          | BlueBubbles server URL (BlueBubbles mode)       |
+| `BLUEBUBBLES_PASSWORD`    | No          | BlueBubbles API password (BlueBubbles mode)     |
 
 See `.env.example` for the full set of optional variables.
 

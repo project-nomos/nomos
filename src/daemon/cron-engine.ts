@@ -62,6 +62,15 @@ export class CronEngine {
   }
 
   private async handleCronJob(job: CronJob): Promise<void> {
+    // Intercept delta-sync sentinel prompts -- route to ingest scheduler
+    // instead of the agent message queue.
+    if (job.prompt.startsWith("__delta_sync__:")) {
+      const platform = job.prompt.slice("__delta_sync__:".length);
+      console.log(`[cron-engine] Firing delta sync for ${platform}`);
+      process.emit("ingest:trigger" as never, { platform, runType: "delta" } as never);
+      return;
+    }
+
     console.log(`[cron-engine] Triggering job: ${job.name} (${job.id})`);
 
     const sessionKey =

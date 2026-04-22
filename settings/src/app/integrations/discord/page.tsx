@@ -82,6 +82,12 @@ export default function DiscordSettingsPage() {
 
       addToast("Discord settings saved", "success");
       await loadData();
+      // Auto-trigger ingestion for Discord
+      fetch("/api/ingestion", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ platform: "discord", action: "trigger-ingest" }),
+      }).catch(() => {});
     } catch (err) {
       console.error("Failed to save Discord settings:", err);
       addToast("Failed to save settings", "error");
@@ -209,7 +215,7 @@ export default function DiscordSettingsPage() {
         className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-mauve text-crust text-sm font-medium hover:bg-mauve/90 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
       >
         {saving && <RefreshCw size={14} className="animate-spin" />}
-        Save to .env
+        Save
       </button>
     </div>
   );

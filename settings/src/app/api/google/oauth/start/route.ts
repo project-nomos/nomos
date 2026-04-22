@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { readEnv } from "@/lib/env";
+import { readConfig } from "@/lib/env";
+import { getDb } from "@/lib/db";
 import { syncGoogleAccountsToDb } from "@/lib/sync-google-accounts";
 import fs from "node:fs";
 import path from "node:path";
@@ -22,7 +23,16 @@ function cleanup() {
 }
 
 export async function POST() {
-  const env = readEnv();
+  let sql: ReturnType<typeof getDb> | undefined;
+  try {
+    sql = getDb();
+  } catch {
+    // DB not available
+  }
+  const env = await readConfig(
+    ["GOOGLE_OAUTH_CLIENT_ID", "GOOGLE_OAUTH_CLIENT_SECRET", "GWS_SERVICES"],
+    sql,
+  );
 
   const clientId = env.GOOGLE_OAUTH_CLIENT_ID;
   const clientSecret = env.GOOGLE_OAUTH_CLIENT_SECRET;

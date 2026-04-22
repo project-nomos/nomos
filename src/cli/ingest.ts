@@ -38,6 +38,7 @@ export function registerIngestCommand(program: Command): void {
     .command("slack")
     .description("Ingest sent messages from all Slack workspaces")
     .option("--since <date>", "Only ingest messages after this date")
+    .option("--run-type <type>", "Run type: full or delta", "full")
     .option("--dry-run", "Count messages without storing")
     .action(async (opts) => {
       getDb();
@@ -62,6 +63,7 @@ export function registerIngestCommand(program: Command): void {
     .command("imessage")
     .description("Ingest messages from iMessage (macOS only)")
     .option("--since <date>", "Only ingest messages after this date")
+    .option("--run-type <type>", "Run type: full or delta", "full")
     .option("--contact <name>", "Filter to specific contact")
     .option("--dry-run", "Count messages without storing")
     .option("--db-path <path>", "Custom path to chat.db")
@@ -81,6 +83,7 @@ export function registerIngestCommand(program: Command): void {
     .command("gmail")
     .description("Ingest sent emails from Gmail")
     .option("--since <date>", "Only ingest messages after this date")
+    .option("--run-type <type>", "Run type: full or delta", "full")
     .option("--contact <email>", "Filter to specific contact")
     .option("--dry-run", "Count messages without storing")
     .action(async (opts) => {
@@ -99,6 +102,7 @@ export function registerIngestCommand(program: Command): void {
     .command("discord")
     .description("Ingest sent messages from Discord")
     .option("--since <date>", "Only ingest messages after this date")
+    .option("--run-type <type>", "Run type: full or delta", "full")
     .option("--dry-run", "Count messages without storing")
     .action(async (opts) => {
       getDb();
@@ -116,6 +120,7 @@ export function registerIngestCommand(program: Command): void {
     .command("telegram")
     .description("Ingest sent messages from Telegram")
     .option("--since <date>", "Only ingest messages after this date")
+    .option("--run-type <type>", "Run type: full or delta", "full")
     .option("--dry-run", "Count messages without storing")
     .action(async (opts) => {
       getDb();
@@ -171,8 +176,11 @@ export function registerIngestCommand(program: Command): void {
                   ? chalk.red
                   : chalk.dim;
 
+          const runLabel = job.run_type === "delta" ? chalk.cyan("[delta]") : chalk.dim("[full]");
           console.log(
-            `  ${chalk.bold(job.platform)} (${job.source_type}) ` + statusColor(`[${job.status}]`),
+            `  ${chalk.bold(job.platform)} (${job.source_type}) ` +
+              statusColor(`[${job.status}]`) +
+              ` ${runLabel}`,
           );
           console.log(
             `    Messages: ${job.messages_processed} processed, ${job.messages_skipped} skipped`,
@@ -199,12 +207,13 @@ export function registerIngestCommand(program: Command): void {
 
 async function runSource(
   source: IngestSource,
-  opts: { since?: string; contact?: string; dryRun?: boolean },
+  opts: { since?: string; contact?: string; dryRun?: boolean; runType?: string },
 ): Promise<void> {
   const options: IngestOptions = {
     since: opts.since ? new Date(opts.since) : undefined,
     contact: opts.contact,
     dryRun: opts.dryRun,
+    runType: (opts.runType as "full" | "delta") ?? "full",
   };
 
   if (opts.dryRun) {

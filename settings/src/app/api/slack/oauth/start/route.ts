@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import crypto from "node:crypto";
 import https from "node:https";
 import { execSync } from "node:child_process";
-import { readEnv } from "@/lib/env";
+import { readConfig } from "@/lib/env";
 import { getDb } from "@/lib/db";
 import { syncSlackConfigToFile } from "@/lib/sync-slack-config";
 import { notifyDaemonReload } from "@/lib/notify-daemon";
@@ -43,7 +43,13 @@ function cleanup() {
 }
 
 export async function POST() {
-  const env = readEnv();
+  let sql: ReturnType<typeof getDb> | undefined;
+  try {
+    sql = getDb();
+  } catch {
+    // DB not available
+  }
+  const env = await readConfig(["SLACK_CLIENT_ID", "SLACK_CLIENT_SECRET"], sql);
 
   const clientId = env.SLACK_CLIENT_ID;
   const clientSecret = env.SLACK_CLIENT_SECRET;

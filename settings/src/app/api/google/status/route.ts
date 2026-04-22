@@ -1,12 +1,22 @@
 import { NextResponse } from "next/server";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { readEnv } from "@/lib/env";
+import { readConfig } from "@/lib/env";
+import { getDb } from "@/lib/db";
 
 const execFileAsync = promisify(execFile);
 
 export async function GET() {
-  const env = readEnv();
+  let sql: ReturnType<typeof getDb> | undefined;
+  try {
+    sql = getDb();
+  } catch {
+    // DB not available
+  }
+  const env = await readConfig(
+    ["GOOGLE_OAUTH_CLIENT_ID", "GOOGLE_OAUTH_CLIENT_SECRET", "GWS_SERVICES"],
+    sql,
+  );
 
   // Check gws binary availability
   let gwsInstalled = false;
@@ -22,36 +32,39 @@ export async function GET() {
     // gws not available
   }
 
-  // Get authenticated accounts from gws
+  // Get accounts from DB
   const accounts: Array<{ email: string; default: boolean }> = [];
   let hasValidToken = false;
-  if (gwsInstalled) {
-    // Try auth list first
+
+  if (sql) {
     try {
-      const { stdout } = await execFileAsync("npx", ["gws", "auth", "list"], { timeout: 10000 });
-      const data = JSON.parse(stdout);
-      const defaultAccount = data.default ?? "";
-      for (const entry of data.accounts ?? []) {
-        // gws auth list returns either strings or objects with { email, is_default, added }
-        const email = typeof entry === "string" ? entry : entry.email;
-        if (email) {
-          accounts.push({ email, default: email === defaultAccount });
-        }
+      const rows = await sql`
+        SELECT name, metadata FROM integrations
+        WHERE name LIKE 'google-ws:%' AND enabled = true
+        ORDER BY metadata->>'is_default' DESC, name
+      `;
+      for (const row of rows) {
+        const email = (row.name as string).replace(/^google-ws:/, "");
+        const meta = row.metadata as Record<string, unknown>;
+        accounts.push({ email, default: !!meta?.is_default });
       }
     } catch {
-      // No accounts or gws auth not set up
+      // integrations table may not exist
     }
+  }
 
-    // Also check auth status — credentials may exist without being listed
-    if (accounts.length === 0) {
-      try {
-        const { stdout } = await execFileAsync("npx", ["gws", "auth", "status"], {
-          timeout: 10000,
-        });
-        const status = JSON.parse(stdout);
-        if (status.has_refresh_token && status.token_valid) {
-          hasValidToken = true;
-          // Get the email by exchanging refresh token for access token and calling userinfo
+  // Check gws auth status for token validity
+  if (gwsInstalled) {
+    try {
+      const { stdout } = await execFileAsync("npx", ["gws", "auth", "status"], {
+        timeout: 10000,
+      });
+      const status = JSON.parse(stdout);
+      if (status.auth_method !== "none" || status.token_cache_exists || status.storage !== "none") {
+        hasValidToken = true;
+
+        // If no accounts in DB, try to resolve email from token
+        if (accounts.length === 0) {
           try {
             const { stdout: exportOut } = await execFileAsync(
               "npx",
@@ -60,7 +73,6 @@ export async function GET() {
             );
             const creds = JSON.parse(exportOut);
             if (creds.refresh_token && creds.client_id && creds.client_secret) {
-              // Exchange refresh token for access token
               const tokenRes = await fetch("https://oauth2.googleapis.com/token", {
                 method: "POST",
                 headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -73,64 +85,29 @@ export async function GET() {
               });
               if (tokenRes.ok) {
                 const tokenData = await tokenRes.json();
-                let email: string | null = null;
-
-                // Try userinfo (works if openid+email scopes were granted)
+                // Try userinfo
                 try {
                   const userRes = await fetch("https://www.googleapis.com/oauth2/v2/userinfo", {
                     headers: { Authorization: `Bearer ${tokenData.access_token}` },
                   });
                   if (userRes.ok) {
                     const info = await userRes.json();
-                    if (info.email) email = info.email;
+                    if (info.email) {
+                      accounts.push({ email: info.email, default: true });
+                    }
                   }
                 } catch {
                   // Scope not available
                 }
-
-                // Fallback: try tokeninfo (has email if openid scope present)
-                if (!email) {
-                  try {
-                    const tiRes = await fetch(
-                      `https://oauth2.googleapis.com/tokeninfo?access_token=${tokenData.access_token}`,
-                    );
-                    if (tiRes.ok) {
-                      const ti = await tiRes.json();
-                      if (ti.email) email = ti.email;
-                    }
-                  } catch {
-                    // Not available
-                  }
-                }
-
-                // Fallback: try Gmail profile (works if Gmail API is enabled)
-                if (!email) {
-                  try {
-                    const gmailRes = await fetch(
-                      "https://gmail.googleapis.com/gmail/v1/users/me/profile",
-                      { headers: { Authorization: `Bearer ${tokenData.access_token}` } },
-                    );
-                    if (gmailRes.ok) {
-                      const profile = await gmailRes.json();
-                      if (profile.emailAddress) email = profile.emailAddress;
-                    }
-                  } catch {
-                    // Gmail API not enabled
-                  }
-                }
-
-                if (email) {
-                  accounts.push({ email, default: true });
-                }
               }
             }
           } catch {
-            // Could not resolve email — hasValidToken is still true
+            // Could not resolve email
           }
         }
-      } catch {
-        // auth status not available
       }
+    } catch {
+      // auth status not available
     }
   }
 

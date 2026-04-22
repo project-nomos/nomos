@@ -2,9 +2,36 @@
 
 Connect Nomos to iMessage with two connection modes: **local chat.db** (zero setup, macOS-only) or **BlueBubbles** (full bidirectional, cross-platform via a Mac relay).
 
-> **macOS required** for both modes — either as the daemon host (chat.db mode) or as a BlueBubbles relay server.
+> **macOS required** for both modes -- either as the daemon host (chat.db mode) or as a BlueBubbles relay server.
 
-## Choose Your Mode
+## Agent Modes
+
+Messages.app supports two agent modes that control how Nomos interacts with incoming messages:
+
+|                  | Passive                                              | Agent Client                            |
+| ---------------- | ---------------------------------------------------- | --------------------------------------- |
+| **Listens to**   | All incoming messages (or filtered by allowed chats) | Only your phone number and Apple ID     |
+| **Responds via** | Drafts in Slack for approval before sending          | Directly via iMessage                   |
+| **Use case**     | Monitor conversations, review before replying        | Chat with your agent from your iPhone   |
+| **Risk level**   | Safe -- nothing sent without approval                | Active -- sends responses automatically |
+
+### Passive Mode (default)
+
+Nomos listens to incoming iMessages, processes them through the agent, and drafts responses in your default Slack channel. You review and approve/reject each response before it's sent. This is the safest option for monitoring conversations.
+
+### Agent Client Mode
+
+Nomos acts as a personal agent client -- only responding to messages from your phone number and/or Apple ID. All other messages are ignored. Use this to interact with your agent directly from your iPhone, like having a personal assistant in your Messages app.
+
+**Required**: At least one owner identity (phone number or Apple ID) must be set. Configure via Settings UI or environment variables:
+
+```bash
+IMESSAGE_AGENT_MODE=agent
+IMESSAGE_OWNER_PHONE=+15551234567
+IMESSAGE_OWNER_APPLE_ID=you@icloud.com
+```
+
+## Choose Your Connection Mode
 
 |                        | Local chat.db                | BlueBubbles          |
 | ---------------------- | ---------------------------- | -------------------- |
@@ -215,16 +242,19 @@ Long responses are automatically split into chunks at 4,000 characters, breaking
 
 ## All Environment Variables
 
-| Variable                       | Required         | Default            | Description                 |
-| ------------------------------ | ---------------- | ------------------ | --------------------------- |
-| `IMESSAGE_ENABLED`             | Yes              | --                 | Set to `"true"` to enable   |
-| `IMESSAGE_MODE`                | No               | `chatdb`           | `chatdb` or `bluebubbles`   |
-| `IMESSAGE_ALLOWED_CHATS`       | No               | (all chats)        | Comma-separated identifiers |
-| `BLUEBUBBLES_SERVER_URL`       | BlueBubbles only | --                 | Server URL                  |
-| `BLUEBUBBLES_PASSWORD`         | BlueBubbles only | --                 | API password                |
-| `BLUEBUBBLES_WEBHOOK_PORT`     | No               | `8803`             | Webhook listener port       |
-| `BLUEBUBBLES_WEBHOOK_PASSWORD` | No               | (same as password) | Webhook auth password       |
-| `BLUEBUBBLES_READ_RECEIPTS`    | No               | `false`            | Send read receipts          |
+| Variable                       | Required         | Default            | Description                                       |
+| ------------------------------ | ---------------- | ------------------ | ------------------------------------------------- |
+| `IMESSAGE_ENABLED`             | Yes              | --                 | Set to `"true"` to enable                         |
+| `IMESSAGE_MODE`                | No               | `chatdb`           | Connection mode: `chatdb` or `bluebubbles`        |
+| `IMESSAGE_AGENT_MODE`          | No               | `passive`          | Agent mode: `passive` (draft) or `agent` (direct) |
+| `IMESSAGE_OWNER_PHONE`         | Agent mode       | --                 | Owner phone number (e.g., `+15551234567`)         |
+| `IMESSAGE_OWNER_APPLE_ID`      | Agent mode       | --                 | Owner Apple ID email (e.g., `you@icloud.com`)     |
+| `IMESSAGE_ALLOWED_CHATS`       | No               | (all chats)        | Comma-separated identifiers (passive mode filter) |
+| `BLUEBUBBLES_SERVER_URL`       | BlueBubbles only | --                 | Server URL                                        |
+| `BLUEBUBBLES_PASSWORD`         | BlueBubbles only | --                 | API password                                      |
+| `BLUEBUBBLES_WEBHOOK_PORT`     | No               | `8803`             | Webhook listener port                             |
+| `BLUEBUBBLES_WEBHOOK_PASSWORD` | No               | (same as password) | Webhook auth password                             |
+| `BLUEBUBBLES_READ_RECEIPTS`    | No               | `false`            | Send read receipts                                |
 
 ---
 

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { readEnv } from "@/lib/env";
+import { readConfig } from "@/lib/env";
 import { getDb } from "@/lib/db";
 
 export interface SetupStatus {
@@ -14,42 +14,22 @@ export interface SetupStatus {
 }
 
 export async function GET() {
-  const env = readEnv();
   const checks = { database: false, apiKey: false, agentName: false };
 
   // 1. Check database connectivity
+  let sql: ReturnType<typeof getDb> | undefined;
   try {
-    const sql = getDb();
+    sql = getDb();
     await sql`SELECT 1`;
     checks.database = true;
   } catch {
     // DB not connected
   }
 
-  // 2. Check API key — from env or DB integrations
+  // 2. Check API key — from DB or .env
+  const env = await readConfig(["ANTHROPIC_API_KEY", "CLAUDE_CODE_USE_VERTEX"], sql);
   if (env.ANTHROPIC_API_KEY || env.CLAUDE_CODE_USE_VERTEX === "1") {
     checks.apiKey = true;
-  }
-  if (!checks.apiKey && checks.database) {
-    try {
-      const sql = getDb();
-      const [anthropic] = await sql`
-        SELECT secrets FROM integrations WHERE name = 'anthropic'
-      `;
-      if (anthropic?.secrets) checks.apiKey = true;
-
-      if (!checks.apiKey) {
-        const [vertex] = await sql`
-          SELECT config FROM integrations WHERE name = 'vertex-ai'
-        `;
-        if (vertex?.config) {
-          const cfg = vertex.config as Record<string, unknown>;
-          if (cfg.project_id) checks.apiKey = true;
-        }
-      }
-    } catch {
-      // integrations table may not exist yet
-    }
   }
 
   // 3. Check agent name — from DB config

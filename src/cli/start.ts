@@ -27,7 +27,8 @@ export async function startDaemonIfNeeded(): Promise<void> {
 
   // Re-invoke the same CLI binary with "daemon run"
   const scriptPath = process.argv[1]!;
-  const child = spawn(process.execPath, [scriptPath, "daemon", "run", "-p", port], {
+  const tsArgs = scriptPath.endsWith(".ts") ? ["--import", "tsx"] : [];
+  const child = spawn(process.execPath, [...tsArgs, scriptPath, "daemon", "run", "-p", port], {
     detached: true,
     stdio: ["ignore", logFd, logFd],
     env: { ...process.env },

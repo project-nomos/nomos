@@ -1,7 +1,17 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { RefreshCw, Trash2, Zap, Plus, ExternalLink, KeyRound, Globe, Bell } from "lucide-react";
+import {
+  RefreshCw,
+  Trash2,
+  Zap,
+  Plus,
+  ExternalLink,
+  KeyRound,
+  Globe,
+  Bell,
+  ChevronDown,
+} from "lucide-react";
 import { TokenInput } from "@/components/token-input";
 import { StatusBadge } from "@/components/status-badge";
 import { SyncProgress } from "@/components/sync-progress";
@@ -49,6 +59,12 @@ export default function SlackSettingsPage() {
     label?: string;
   } | null>(null);
   const [savingNotif, setSavingNotif] = useState(false);
+  const [notifWorkspace, setNotifWorkspace] = useState<string>("");
+  const [notifChannels, setNotifChannels] = useState<
+    { id: string; name: string; is_private: boolean; is_im: boolean }[]
+  >([]);
+  const [notifChannel, setNotifChannel] = useState<string>("");
+  const [loadingChannels, setLoadingChannels] = useState(false);
 
   const loadData = useCallback(async () => {
     try {
@@ -62,7 +78,8 @@ export default function SlackSettingsPage() {
       setNotifDefault(notifData);
       const envData = await envRes.json();
 
-      setWorkspaces(wsData.workspaces ?? []);
+      const wsList: SlackWorkspace[] = wsData.workspaces ?? [];
+      setWorkspaces(wsList);
       setHasAppToken(!!envData.SLACK_APP_TOKEN);
       setHasBotToken(!!envData.SLACK_BOT_TOKEN);
       setHasClientId(!!envData.SLACK_CLIENT_ID);
@@ -76,6 +93,25 @@ export default function SlackSettingsPage() {
       setBotTokenDirty(false);
       setClientIdDirty(false);
       setClientSecretDirty(false);
+
+      // Restore notification picker state from saved default
+      if (notifData?.platform) {
+        const savedTeamId = notifData.platform.replace(/^slack-user:/, "");
+        if (wsList.some((ws) => ws.team_id === savedTeamId)) {
+          setNotifWorkspace(savedTeamId);
+          // Load channels then restore selected channel
+          try {
+            const chRes = await fetch(`/api/slack/channels?teamId=${savedTeamId}`);
+            const chData = await chRes.json();
+            if (chData.channels) {
+              setNotifChannels(chData.channels);
+              setNotifChannel(notifData.channelId ?? "");
+            }
+          } catch {
+            // Channel list load failed -- picker will just be empty
+          }
+        }
+      }
     } catch (err) {
       console.error("Failed to load Slack data:", err);
       addToast("Failed to load Slack data", "error");
@@ -87,6 +123,34 @@ export default function SlackSettingsPage() {
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  const loadChannels = useCallback(
+    async (teamId: string) => {
+      if (!teamId) {
+        setNotifChannels([]);
+        setNotifChannel("");
+        return;
+      }
+      setLoadingChannels(true);
+      try {
+        const res = await fetch(`/api/slack/channels?teamId=${teamId}`);
+        const data = await res.json();
+        if (data.channels) {
+          setNotifChannels(data.channels);
+        } else {
+          addToast(data.error ?? "Failed to load channels", "error");
+          setNotifChannels([]);
+        }
+      } catch {
+        addToast("Failed to load channels", "error");
+        setNotifChannels([]);
+      } finally {
+        setLoadingChannels(false);
+        setNotifChannel("");
+      }
+    },
+    [addToast],
+  );
 
   const saveTokens = async () => {
     if (!isDirty) return;
@@ -337,220 +401,46 @@ export default function SlackSettingsPage() {
             />
           </div>
           <div className="flex items-center justify-between">
+            <span className="text-sm text-text">User Token (User Mode)</span>
+            <StatusBadge
+              status={workspaces.length > 0 ? "connected" : "not_configured"}
+              label={
+                workspaces.length > 0
+                  ? `${workspaces.length} workspace${workspaces.length > 1 ? "s" : ""}`
+                  : "Not set"
+              }
+            />
+          </div>
+          <div className="flex items-center justify-between">
             <span className="text-sm text-text">OAuth Credentials</span>
             <StatusBadge
               status={hasOAuthCreds ? "connected" : "not_configured"}
               label={hasOAuthCreds ? "Configured" : "Not set"}
             />
           </div>
-          <div className="flex items-center justify-between">
-            <span className="text-sm text-text">Connected Workspaces</span>
-            <StatusBadge
-              status={workspaces.length > 0 ? "connected" : "not_configured"}
-              label={workspaces.length > 0 ? `${workspaces.length} connected` : "None"}
-            />
-          </div>
         </div>
       </section>
 
-      {/* Default Notification Channel */}
-      {workspaces.length > 0 && (
-        <section className="mb-8 rounded-xl border border-surface0 bg-mantle p-5">
-          <h2 className="text-sm font-semibold text-subtext1 uppercase tracking-wider mb-4">
-            Default Notification Channel
-          </h2>
-          <p className="text-xs text-overlay0 mb-3">
-            Where the agent sends summaries, alerts, and scheduled task results. Defaults to DM with
-            the connected user.
-          </p>
-          {notifDefault ? (
-            <div className="flex items-center justify-between rounded-lg border border-surface0 bg-base p-3 mb-3">
-              <div className="flex items-center gap-2">
-                <Bell size={14} className="text-mauve shrink-0" />
-                <div>
-                  <p className="text-sm font-medium text-text">
-                    {notifDefault.label ?? notifDefault.channelId}
-                  </p>
-                  <p className="text-xs text-overlay0">
-                    {notifDefault.platform} / {notifDefault.channelId}
-                  </p>
-                </div>
-              </div>
-              <div className="flex gap-1.5">
-                <button
-                  onClick={async () => {
-                    try {
-                      await fetch("/api/notifications", { method: "DELETE" });
-                      setNotifDefault(null);
-                      addToast("Notification default cleared", "success");
-                    } catch {
-                      addToast("Failed to clear notification default", "error");
-                    }
-                  }}
-                  className="p-1.5 rounded-md text-overlay0 hover:text-red hover:bg-surface0 transition-colors"
-                  title="Clear default"
-                >
-                  <Trash2 size={14} />
-                </button>
-              </div>
-            </div>
-          ) : (
-            <p className="text-xs text-yellow mb-3">
-              No default set — the agent will auto-set this to your DM on next daemon start.
-            </p>
-          )}
-          {workspaces.length > 0 && !notifDefault && (
-            <button
-              disabled={savingNotif}
-              onClick={async () => {
-                setSavingNotif(true);
-                const ws = workspaces[0];
-                const nd = {
-                  platform: `slack-user:${ws.team_id}`,
-                  channelId: ws.user_id,
-                  label: `DM in ${ws.team_name}`,
-                };
-                try {
-                  const res = await fetch("/api/notifications", {
-                    method: "PUT",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify(nd),
-                  });
-                  if (res.ok) {
-                    setNotifDefault(nd);
-                    addToast("Notification default set to DM", "success");
-                  } else {
-                    addToast("Failed to set notification default", "error");
-                  }
-                } catch {
-                  addToast("Failed to set notification default", "error");
-                } finally {
-                  setSavingNotif(false);
-                }
-              }}
-              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-mauve text-crust text-sm font-medium hover:bg-mauve/90 transition-colors disabled:opacity-60"
-            >
-              <Bell size={14} />
-              Set to DM with me
-            </button>
-          )}
-        </section>
-      )}
-
-      {/* Connected Workspaces */}
-      <section className="mb-8 rounded-xl border border-surface0 bg-mantle p-5">
-        <h2 className="text-sm font-semibold text-subtext1 uppercase tracking-wider mb-4">
-          Connected Workspaces
-        </h2>
-        {workspaces.length > 0 ? (
-          <div className="space-y-2 mb-4">
-            {workspaces.map((ws) => (
-              <div
-                key={ws.team_id}
-                className="flex items-center justify-between rounded-lg border border-surface0 bg-base p-3"
-              >
-                <div className="flex items-center gap-2 min-w-0">
-                  <KeyRound size={14} className="text-green shrink-0" />
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium text-text">{ws.team_name}</p>
-                    <p className="text-xs text-overlay0">
-                      {ws.team_id} · User: {ws.user_id} · Connected:{" "}
-                      {new Date(ws.created_at).toLocaleDateString()}
-                    </p>
-                    {testResults[ws.team_id] && (
-                      <p
-                        className={`text-xs mt-1 ${
-                          testResults[ws.team_id].ok ? "text-green" : "text-red"
-                        }`}
-                      >
-                        {testResults[ws.team_id].message}
-                      </p>
-                    )}
-                  </div>
-                </div>
-                <div className="flex gap-1.5">
-                  <button
-                    onClick={() => testWorkspace(ws.team_id)}
-                    className="p-1.5 rounded-md text-overlay0 hover:text-blue hover:bg-surface0 transition-colors"
-                    title="Test connection"
-                  >
-                    <Zap size={14} />
-                  </button>
-                  <button
-                    onClick={() => setDisconnectTarget(ws.team_id)}
-                    className="p-1.5 rounded-md text-overlay0 hover:text-red hover:bg-surface0 transition-colors"
-                    title="Disconnect"
-                  >
-                    <Trash2 size={14} />
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <p className="text-sm text-overlay0 mb-4">
-            No workspaces connected yet. Use OAuth to authorize a workspace.
-          </p>
-        )}
-
-        {/* Authorize via OAuth (primary) */}
-        <div className="flex items-center gap-3 mb-3">
-          <button
-            onClick={startOAuth}
-            disabled={!hasOAuthCreds || authorizing}
-            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-mauve text-crust text-sm font-medium hover:bg-mauve/90 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
-          >
-            {authorizing ? <RefreshCw size={14} className="animate-spin" /> : <Plus size={14} />}
-            {authorizing ? "Waiting for authorization..." : "Authorize Workspace"}
-          </button>
-          {!hasOAuthCreds && (
-            <span className="text-xs text-overlay0">Requires OAuth credentials below</span>
-          )}
-        </div>
-        <p className="text-xs text-overlay0 mb-4">
-          Opens Slack OAuth in your browser. Requires Client ID &amp; Secret configured below.
-        </p>
-
-        {/* Sign in via Browser (experimental — enabled via NOMOS_BROWSER_AUTH) */}
-        {browserAuthEnabled && (
-          <>
-            <div className="flex items-center gap-3">
-              <button
-                onClick={startBrowserAuth}
-                disabled={browserAuth}
-                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-surface0 border border-surface1 text-sm text-subtext0 hover:text-text hover:border-surface2 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-              >
-                {browserAuth ? (
-                  <RefreshCw size={14} className="animate-spin" />
-                ) : (
-                  <Globe size={14} />
-                )}
-                {browserAuth ? "Waiting for sign-in..." : "Sign in via Browser"}
-              </button>
-            </div>
-            <p className="text-xs text-overlay0 mt-3">
-              Experimental: Opens a browser window to capture tokens automatically. No Slack app
-              required.
-            </p>
-          </>
-        )}
-      </section>
-
-      {/* Manual Token (collapsible alternative) */}
+      {/* Manual Token */}
       <section className="mb-8 rounded-xl border border-surface0 bg-mantle p-5">
         <h2 className="text-sm font-semibold text-subtext1 uppercase tracking-wider mb-4">
           Manual Token
         </h2>
         <p className="text-xs text-overlay0 mb-3">
-          Alternative to OAuth — paste a user token directly if you already have one.
+          Paste a user token directly to connect a workspace.
         </p>
         <div className="space-y-3">
           <TokenInput
             label="User Token"
             value={newToken}
             onChange={setNewToken}
-            placeholder="xoxp-..."
+            placeholder={
+              workspaces.length > 0
+                ? "Configured - enter new token to add another workspace"
+                : "xoxp-..."
+            }
             helperText="Slack user token (xoxp-) from OAuth & Permissions page"
+            configured={workspaces.length > 0}
           />
           <button
             onClick={connectWorkspace}
@@ -638,6 +528,292 @@ export default function SlackSettingsPage() {
             Save
           </button>
         </div>
+      </section>
+
+      {/* Default Notification Channel */}
+      {workspaces.length > 0 && (
+        <section className="mb-8 rounded-xl border border-surface0 bg-mantle p-5">
+          <h2 className="text-sm font-semibold text-subtext1 uppercase tracking-wider mb-4">
+            Default Notification Channel
+          </h2>
+          <p className="text-xs text-overlay0 mb-3">
+            Where the agent sends summaries, alerts, and scheduled task results. Defaults to DM with
+            the connected user.
+          </p>
+          {notifDefault ? (
+            <div className="flex items-center justify-between rounded-lg border border-surface0 bg-base p-3 mb-3">
+              <div className="flex items-center gap-2">
+                <Bell size={14} className="text-mauve shrink-0" />
+                <div>
+                  <p className="text-sm font-medium text-text">
+                    {notifDefault.label ?? notifDefault.channelId}
+                  </p>
+                  <p className="text-xs text-overlay0">
+                    {notifDefault.platform} / {notifDefault.channelId}
+                  </p>
+                </div>
+              </div>
+              <div className="flex gap-1.5">
+                <button
+                  onClick={async () => {
+                    try {
+                      await fetch("/api/notifications", { method: "DELETE" });
+                      setNotifDefault(null);
+                      addToast("Notification default cleared", "success");
+                    } catch {
+                      addToast("Failed to clear notification default", "error");
+                    }
+                  }}
+                  className="p-1.5 rounded-md text-overlay0 hover:text-red hover:bg-surface0 transition-colors"
+                  title="Clear default"
+                >
+                  <Trash2 size={14} />
+                </button>
+              </div>
+            </div>
+          ) : (
+            <p className="text-xs text-yellow mb-3">
+              No default set -- the agent will auto-set this to your DM on next daemon start.
+            </p>
+          )}
+
+          {/* Workspace + Channel picker */}
+          <div className="space-y-3">
+            <div className="relative">
+              <label className="block text-xs text-overlay0 mb-1">Workspace</label>
+              <div className="relative">
+                <select
+                  value={notifWorkspace}
+                  onChange={(e) => {
+                    setNotifWorkspace(e.target.value);
+                    loadChannels(e.target.value);
+                  }}
+                  className="w-full appearance-none rounded-lg border border-surface0 bg-base px-3 py-2 pr-8 text-sm text-text focus:outline-none focus:border-mauve"
+                >
+                  <option value="">Select workspace...</option>
+                  {workspaces.map((ws) => (
+                    <option key={ws.team_id} value={ws.team_id}>
+                      {ws.team_name}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown
+                  size={14}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-overlay0 pointer-events-none"
+                />
+              </div>
+            </div>
+
+            {notifWorkspace && (
+              <div className="relative">
+                <label className="block text-xs text-overlay0 mb-1">Channel</label>
+                <div className="relative">
+                  {loadingChannels ? (
+                    <div className="flex items-center gap-2 px-3 py-2 text-sm text-overlay0">
+                      <RefreshCw size={14} className="animate-spin" />
+                      Loading channels...
+                    </div>
+                  ) : (
+                    <select
+                      value={notifChannel}
+                      onChange={(e) => setNotifChannel(e.target.value)}
+                      className="w-full appearance-none rounded-lg border border-surface0 bg-base px-3 py-2 pr-8 text-sm text-text focus:outline-none focus:border-mauve"
+                    >
+                      <option value="">Select channel...</option>
+                      {notifChannels.map((ch) => (
+                        <option key={ch.id} value={ch.id}>
+                          {ch.is_private ? "🔒 " : "#"} {ch.name}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                  {!loadingChannels && (
+                    <ChevronDown
+                      size={14}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-overlay0 pointer-events-none"
+                    />
+                  )}
+                </div>
+              </div>
+            )}
+
+            <div className="flex items-center gap-2">
+              <button
+                disabled={savingNotif || (!notifChannel && !notifWorkspace)}
+                onClick={async () => {
+                  if (!notifWorkspace) return;
+                  setSavingNotif(true);
+                  const ws = workspaces.find((w) => w.team_id === notifWorkspace);
+                  const channelLabel = notifChannel
+                    ? notifChannels.find((c) => c.id === notifChannel)?.name
+                    : undefined;
+                  const nd = {
+                    platform: `slack-user:${notifWorkspace}`,
+                    channelId: notifChannel || ws?.user_id || "",
+                    label: channelLabel
+                      ? `#${channelLabel} in ${ws?.team_name}`
+                      : `DM in ${ws?.team_name}`,
+                  };
+                  try {
+                    const res = await fetch("/api/notifications", {
+                      method: "PUT",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify(nd),
+                    });
+                    if (res.ok) {
+                      setNotifDefault(nd);
+                      addToast("Notification default saved", "success");
+                    } else {
+                      addToast("Failed to set notification default", "error");
+                    }
+                  } catch {
+                    addToast("Failed to set notification default", "error");
+                  } finally {
+                    setSavingNotif(false);
+                  }
+                }}
+                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-mauve text-crust text-sm font-medium hover:bg-mauve/90 transition-colors disabled:opacity-60"
+              >
+                {savingNotif && <RefreshCw size={14} className="animate-spin" />}
+                <Bell size={14} />
+                Save
+              </button>
+              {workspaces.length > 0 && !notifDefault && (
+                <button
+                  disabled={savingNotif}
+                  onClick={async () => {
+                    setSavingNotif(true);
+                    const ws = workspaces[0];
+                    const nd = {
+                      platform: `slack-user:${ws.team_id}`,
+                      channelId: ws.user_id,
+                      label: `DM in ${ws.team_name}`,
+                    };
+                    try {
+                      const res = await fetch("/api/notifications", {
+                        method: "PUT",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify(nd),
+                      });
+                      if (res.ok) {
+                        setNotifDefault(nd);
+                        addToast("Notification default set to DM", "success");
+                      } else {
+                        addToast("Failed to set notification default", "error");
+                      }
+                    } catch {
+                      addToast("Failed to set notification default", "error");
+                    } finally {
+                      setSavingNotif(false);
+                    }
+                  }}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-surface0 border border-surface1 text-sm text-subtext0 hover:text-text hover:border-surface2 transition-colors disabled:opacity-60"
+                >
+                  Quick: Set to DM with me
+                </button>
+              )}
+            </div>
+          </div>
+        </section>
+      )}
+
+      {/* Connected Workspaces */}
+      <section className="mb-8 rounded-xl border border-surface0 bg-mantle p-5">
+        <h2 className="text-sm font-semibold text-subtext1 uppercase tracking-wider mb-4">
+          Connected Workspaces
+        </h2>
+        {workspaces.length > 0 ? (
+          <div className="space-y-2 mb-4">
+            {workspaces.map((ws) => (
+              <div
+                key={ws.team_id}
+                className="flex items-center justify-between rounded-lg border border-surface0 bg-base p-3"
+              >
+                <div className="flex items-center gap-2 min-w-0">
+                  <KeyRound size={14} className="text-green shrink-0" />
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-text">{ws.team_name}</p>
+                    <p className="text-xs text-overlay0">
+                      {ws.team_id} · User: {ws.user_id} · Connected:{" "}
+                      {new Date(ws.created_at).toLocaleDateString()}
+                    </p>
+                    {testResults[ws.team_id] && (
+                      <p
+                        className={`text-xs mt-1 ${
+                          testResults[ws.team_id].ok ? "text-green" : "text-red"
+                        }`}
+                      >
+                        {testResults[ws.team_id].message}
+                      </p>
+                    )}
+                  </div>
+                </div>
+                <div className="flex gap-1.5">
+                  <button
+                    onClick={() => testWorkspace(ws.team_id)}
+                    className="p-1.5 rounded-md text-overlay0 hover:text-blue hover:bg-surface0 transition-colors"
+                    title="Test connection"
+                  >
+                    <Zap size={14} />
+                  </button>
+                  <button
+                    onClick={() => setDisconnectTarget(ws.team_id)}
+                    className="p-1.5 rounded-md text-overlay0 hover:text-red hover:bg-surface0 transition-colors"
+                    title="Disconnect"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-sm text-overlay0 mb-4">
+            No workspaces connected yet. Use OAuth to authorize a workspace.
+          </p>
+        )}
+
+        {/* Authorize via OAuth (primary) */}
+        <div className="flex items-center gap-3 mb-3">
+          <button
+            onClick={startOAuth}
+            disabled={!hasOAuthCreds || authorizing}
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-mauve text-crust text-sm font-medium hover:bg-mauve/90 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+          >
+            {authorizing ? <RefreshCw size={14} className="animate-spin" /> : <Plus size={14} />}
+            {authorizing ? "Waiting for authorization..." : "Authorize Workspace"}
+          </button>
+          {!hasOAuthCreds && (
+            <span className="text-xs text-overlay0">Requires OAuth credentials above</span>
+          )}
+        </div>
+        <p className="text-xs text-overlay0 mb-4">
+          Opens Slack OAuth in your browser. Requires Client ID &amp; Secret configured above.
+        </p>
+
+        {/* Sign in via Browser (experimental) */}
+        {browserAuthEnabled && (
+          <>
+            <div className="flex items-center gap-3">
+              <button
+                onClick={startBrowserAuth}
+                disabled={browserAuth}
+                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-surface0 border border-surface1 text-sm text-subtext0 hover:text-text hover:border-surface2 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                {browserAuth ? (
+                  <RefreshCw size={14} className="animate-spin" />
+                ) : (
+                  <Globe size={14} />
+                )}
+                {browserAuth ? "Waiting for sign-in..." : "Sign in via Browser"}
+              </button>
+            </div>
+            <p className="text-xs text-overlay0 mt-3">
+              Experimental: Opens a browser window to capture tokens automatically. No Slack app
+              required.
+            </p>
+          </>
+        )}
       </section>
 
       {/* Sync Progress */}

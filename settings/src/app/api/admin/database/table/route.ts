@@ -15,17 +15,23 @@ export async function GET(request: NextRequest) {
   const validTables = [
     "agent_permissions",
     "channel_allowlists",
+    "commitments",
     "config",
+    "contact_identities",
+    "contacts",
     "cron_jobs",
+    "cron_runs",
     "draft_messages",
+    "ingest_jobs",
     "integrations",
     "memory_chunks",
-    "cron_runs",
     "pairing_requests",
     "sessions",
     "slack_user_tokens",
+    "style_profiles",
     "transcript_messages",
     "user_model",
+    "wiki_articles",
   ];
 
   if (!validTables.includes(tableName)) {

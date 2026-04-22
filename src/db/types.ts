@@ -186,6 +186,7 @@ export interface IngestJobsTable {
   last_successful_at: ColumnType<Date | null, Date | null, Date | null>;
   delta_schedule: ColumnType<string | null, string | null, string | null>;
   delta_enabled: Generated<boolean>;
+  run_type: Generated<string>; // 'full' | 'delta'
 }
 
 export interface StyleProfilesTable {

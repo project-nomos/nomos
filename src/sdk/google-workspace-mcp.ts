@@ -5,7 +5,7 @@
  * The `gws mcp` command starts an MCP server over stdio that
  * auto-generates tools from Google's Discovery API.
  *
- * Auth is managed by `gws auth login` — no env vars needed for
+ * Auth is managed by `gws auth login` -- no env vars needed for
  * the child process. Client credentials live in ~/.config/gws/.
  *
  * @see https://github.com/googleworkspace/cli
@@ -20,7 +20,7 @@ const execFileAsync = promisify(execFile);
 /**
  * Check if Google Workspace is configured (sync).
  *
- * Returns true if `gws` has authenticated accounts OR
+ * Returns true if `gws` has valid auth OR
  * if GOOGLE_OAUTH_CLIENT_ID is set (backwards compat for settings UI setup).
  */
 export function isGoogleWorkspaceConfigured(): boolean {
@@ -35,8 +35,8 @@ export function isGoogleWorkspaceConfigured(): boolean {
     const fs = require("node:fs");
     const path = require("node:path");
     const os = require("node:os");
-    const clientSecretPath = path.join(os.homedir(), ".config", "gws", "client_secret.json");
-    return fs.existsSync(clientSecretPath);
+    const configPath = path.join(os.homedir(), ".config", "gws", "client_secret.json");
+    return fs.existsSync(configPath);
   } catch {
     return false;
   }
@@ -52,7 +52,7 @@ export async function isGoogleWorkspaceConfiguredAsync(): Promise<boolean> {
     const accounts = await listGoogleAccounts();
     if (accounts.length > 0) return true;
   } catch {
-    // DB not available — fall through
+    // DB not available -- fall through
   }
   return isGoogleWorkspaceConfigured();
 }
@@ -60,7 +60,7 @@ export async function isGoogleWorkspaceConfiguredAsync(): Promise<boolean> {
 /**
  * Create the MCP server config for Google Workspace via `gws mcp`.
  *
- * Returns a single MCP config — gws handles multi-account internally.
+ * Returns a single MCP config.
  * Services are controlled by the GWS_SERVICES env var (default: "all").
  */
 const DEFAULT_GWS_SERVICES = "gmail,drive,calendar,sheets,docs,slides";
@@ -92,7 +92,7 @@ export async function createGoogleWorkspaceMcpConfigsAsync(): Promise<
       services = integration.config.services;
     }
   } catch {
-    // DB not available — use env
+    // DB not available -- use env
   }
 
   return {
@@ -121,22 +121,128 @@ export async function isGwsAvailable(): Promise<{ available: boolean; version?: 
 }
 
 /**
+ * Get gws auth status (v0.22.5+).
+ */
+export async function getGwsAuthStatus(): Promise<{
+  authenticated: boolean;
+  authMethod: string;
+  storage: string;
+  tokenCacheExists: boolean;
+  email?: string;
+}> {
+  try {
+    const { stdout } = await execFileAsync("npx", ["gws", "auth", "status"], { timeout: 10000 });
+    const status = JSON.parse(stdout);
+    const authenticated =
+      status.auth_method !== "none" ||
+      status.token_cache_exists === true ||
+      status.storage !== "none";
+
+    let email: string | undefined;
+
+    // Try to resolve email from credentials if authenticated
+    if (authenticated) {
+      try {
+        const { stdout: exportOut } = await execFileAsync(
+          "npx",
+          ["gws", "auth", "export", "--unmasked"],
+          { timeout: 10000 },
+        );
+        const creds = JSON.parse(exportOut) as Record<string, string>;
+        if (creds.refresh_token && creds.client_id && creds.client_secret) {
+          const tokenRes = await fetch("https://oauth2.googleapis.com/token", {
+            method: "POST",
+            headers: { "Content-Type": "application/x-www-form-urlencoded" },
+            body: new URLSearchParams({
+              client_id: creds.client_id,
+              client_secret: creds.client_secret,
+              refresh_token: creds.refresh_token,
+              grant_type: "refresh_token",
+            }),
+          });
+          if (tokenRes.ok) {
+            const tokenData = (await tokenRes.json()) as Record<string, string>;
+            // Try userinfo
+            try {
+              const userRes = await fetch("https://www.googleapis.com/oauth2/v2/userinfo", {
+                headers: { Authorization: `Bearer ${tokenData.access_token}` },
+              });
+              if (userRes.ok) {
+                const info = (await userRes.json()) as Record<string, string>;
+                if (info.email) email = info.email;
+              }
+            } catch {
+              // openid scope not available
+            }
+            // Fallback: Gmail profile
+            if (!email) {
+              try {
+                const gmailRes = await fetch(
+                  "https://gmail.googleapis.com/gmail/v1/users/me/profile",
+                  { headers: { Authorization: `Bearer ${tokenData.access_token}` } },
+                );
+                if (gmailRes.ok) {
+                  const profile = (await gmailRes.json()) as Record<string, string>;
+                  if (profile.emailAddress) email = profile.emailAddress;
+                }
+              } catch {
+                // Gmail not available
+              }
+            }
+          }
+        }
+      } catch {
+        // Could not export or resolve email
+      }
+    }
+
+    return {
+      authenticated,
+      authMethod: status.auth_method ?? "none",
+      storage: status.storage ?? "none",
+      tokenCacheExists: status.token_cache_exists ?? false,
+      email,
+    };
+  } catch {
+    return {
+      authenticated: false,
+      authMethod: "none",
+      storage: "none",
+      tokenCacheExists: false,
+    };
+  }
+}
+
+/**
  * List authenticated gws accounts.
+ * In gws v0.22.5+, there is at most one account (from auth status).
+ * Falls back to DB for account metadata.
  */
 export async function listGwsAccounts(): Promise<{
   accounts: Array<{ email: string; default: boolean }>;
   count: number;
 }> {
+  const status = await getGwsAuthStatus();
+
+  if (status.authenticated && status.email) {
+    return {
+      accounts: [{ email: status.email, default: true }],
+      count: 1,
+    };
+  }
+
+  // Fall back to DB for account listing
   try {
-    const { stdout } = await execFileAsync("npx", ["gws", "auth", "list"], { timeout: 10000 });
-    const data = JSON.parse(stdout);
-    const defaultAccount = data.default ?? "";
-    const accounts = (data.accounts ?? []).map((entry: string | { email: string }) => {
-      const email = typeof entry === "string" ? entry : entry.email;
-      return { email, default: email === defaultAccount };
-    });
-    return { accounts, count: data.count ?? accounts.length };
+    const { listGoogleAccounts } = await import("../db/google-accounts.ts");
+    const dbAccounts = await listGoogleAccounts();
+    return {
+      accounts: dbAccounts.map((a) => ({ email: a.email, default: a.is_default })),
+      count: dbAccounts.length,
+    };
   } catch {
+    if (status.authenticated) {
+      return { accounts: [{ email: "(authenticated)", default: true }], count: 1 };
+    }
     return { accounts: [], count: 0 };
   }
 }

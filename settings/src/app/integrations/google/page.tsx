@@ -191,6 +191,12 @@ export default function GoogleSettingsPage() {
             clearInterval(pollInterval);
             addToast("Google account authorized successfully", "success");
             await loadData();
+            // Auto-trigger Gmail ingestion for the newly authorized account
+            fetch("/api/ingestion", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ platform: "gmail", action: "trigger-ingest" }),
+            }).catch(() => {});
           }
         } catch {
           // Ignore polling errors
@@ -431,63 +437,6 @@ export default function GoogleSettingsPage() {
         )}
       </section>
 
-      {/* Authorized Accounts */}
-      <section className="mb-8 rounded-xl border border-surface0 bg-mantle p-5">
-        <h2 className="text-sm font-semibold text-subtext1 uppercase tracking-wider mb-4">
-          Authorized Accounts
-        </h2>
-        {accounts.length > 0 ? (
-          <div className="space-y-2 mb-4">
-            {accounts.map((account) => (
-              <div
-                key={account.email}
-                className="flex items-center justify-between rounded-lg border border-surface0 bg-base px-3 py-2"
-              >
-                <div className="flex items-center gap-2 min-w-0">
-                  <KeyRound size={14} className="text-green shrink-0" />
-                  <div className="min-w-0">
-                    <span className="text-sm text-text block truncate">{account.email}</span>
-                    {account.default && <span className="text-xs text-overlay0">default</span>}
-                  </div>
-                </div>
-                <button
-                  onClick={() => setRemoveTarget(account.email)}
-                  className="p-1 rounded text-overlay0 hover:text-red transition-colors shrink-0 ml-2"
-                >
-                  <Trash2 size={14} />
-                </button>
-              </div>
-            ))}
-          </div>
-        ) : hasValidToken ? (
-          <div className="flex items-center gap-2 rounded-lg border border-green/20 bg-green/5 px-3 py-2 mb-4">
-            <KeyRound size={14} className="text-green shrink-0" />
-            <span className="text-sm text-green">Google account authorized with valid token</span>
-          </div>
-        ) : (
-          <p className="text-sm text-overlay0 mb-4">
-            No Google accounts authorized yet. Configure OAuth credentials below, then click
-            Authorize.
-          </p>
-        )}
-        <div className="flex items-center gap-3">
-          <button
-            onClick={startOAuth}
-            disabled={!isConfigured || authorizing}
-            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-surface0 border border-surface1 text-sm text-subtext0 hover:text-text hover:border-surface2 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-          >
-            {authorizing ? <RefreshCw size={14} className="animate-spin" /> : <Plus size={14} />}
-            Authorize New Account
-          </button>
-          {!isConfigured && (
-            <span className="text-xs text-overlay0">Configure OAuth credentials first</span>
-          )}
-        </div>
-        <p className="text-xs text-overlay0 mt-3">
-          Opens Google consent screen in a new tab. Complete sign-in there to authorize access.
-        </p>
-      </section>
-
       {/* OAuth Credentials */}
       <section className="mb-8 rounded-xl border border-surface0 bg-mantle p-5">
         <div className="flex items-center justify-between mb-4">
@@ -531,6 +480,75 @@ export default function GoogleSettingsPage() {
             configured={hasClientSecret}
           />
         </div>
+      </section>
+
+      {/* Authorized Accounts */}
+      <section className="mb-8 rounded-xl border border-surface0 bg-mantle p-5">
+        <h2 className="text-sm font-semibold text-subtext1 uppercase tracking-wider mb-4">
+          Authorized Accounts
+        </h2>
+        {accounts.length > 0 ? (
+          <div className="space-y-2 mb-4">
+            {accounts.map((account) => (
+              <div
+                key={account.email}
+                className="flex items-center justify-between rounded-lg border border-surface0 bg-base px-3 py-2"
+              >
+                <div className="flex items-center gap-2 min-w-0">
+                  <KeyRound size={14} className="text-green shrink-0" />
+                  <div className="min-w-0">
+                    <span className="text-sm text-text block truncate">{account.email}</span>
+                    {account.default && <span className="text-xs text-overlay0">default</span>}
+                  </div>
+                </div>
+                <div className="flex gap-1.5 shrink-0 ml-2">
+                  <button
+                    onClick={startOAuth}
+                    disabled={!isConfigured || authorizing}
+                    className="p-1 rounded text-overlay0 hover:text-blue transition-colors disabled:opacity-40"
+                    title="Re-authorize"
+                  >
+                    <RefreshCw size={14} />
+                  </button>
+                  <button
+                    onClick={() => setRemoveTarget(account.email)}
+                    className="p-1 rounded text-overlay0 hover:text-red transition-colors"
+                    title="Remove"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : hasValidToken ? (
+          <div className="flex items-center gap-2 rounded-lg border border-green/20 bg-green/5 px-3 py-2 mb-4">
+            <KeyRound size={14} className="text-green shrink-0" />
+            <span className="text-sm text-green">Google account authorized with valid token</span>
+          </div>
+        ) : (
+          <p className="text-sm text-overlay0 mb-4">
+            No Google accounts authorized yet. Configure OAuth credentials above, then click
+            Authorize.
+          </p>
+        )}
+        <div className="flex items-center gap-3">
+          <button
+            onClick={startOAuth}
+            disabled={!isConfigured || authorizing}
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-surface0 border border-surface1 text-sm text-subtext0 hover:text-text hover:border-surface2 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            {authorizing ? <RefreshCw size={14} className="animate-spin" /> : <Plus size={14} />}
+            {accounts.length > 0 ? "Authorize Account" : "Authorize New Account"}
+          </button>
+          {!isConfigured && (
+            <span className="text-xs text-overlay0">Configure OAuth credentials above first</span>
+          )}
+        </div>
+        <p className="text-xs text-overlay0 mt-3">
+          Opens Google consent screen in a new tab. Use this to authorize a new account or
+          re-authorize an existing one if tokens have expired.
+        </p>
       </section>
 
       {/* Services Selector */}
@@ -601,7 +619,7 @@ export default function GoogleSettingsPage() {
           className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-mauve text-crust text-sm font-medium hover:bg-mauve/90 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
         >
           {saving && <RefreshCw size={14} className="animate-spin" />}
-          Save to .env
+          Save
         </button>
         <button
           onClick={testConnection}

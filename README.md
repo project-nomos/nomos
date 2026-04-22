@@ -51,6 +51,7 @@ Most AI assistants are stateless chatbots that forget you the moment a conversat
 - **Unified identity graph** — Links contacts across Slack, email, Messages.app, Discord, Telegram, and WhatsApp. One person, one profile, regardless of which platform they message you on.
 - **Acts on your behalf** — Drafts and sends emails, manages your calendar, preps meeting briefs, tracks commitments, follows up, triages across channels. Per-contact autonomy: auto-send, draft-for-approval, or silent.
 - **Remembers everything** — Every conversation is auto-indexed into vector memory. Ask "what did we decide about the API migration last week?" and it knows — across channels, across sessions.
+- **Reads you in real time** — A Theory of Mind engine tracks your mental state per session — focus level, emotional signals, urgency, whether you're stuck. Rule-based signals run every turn; a background LLM assessment catches sarcasm, implicit frustration, and goal shifts every few turns. The agent adapts its response style automatically.
 - **Represents you everywhere** — Slack, Discord, Telegram, WhatsApp, Messages.app, Email, terminal, web. Slack User Mode lets it draft and send messages as you. It's not a bot in your channel — it's you, augmented.
 - **Agent-to-agent trust** — CATE protocol (Consumer Agent Trust Envelope) enables secure communication between your clone and other agents with DID-based identity, verifiable credentials, policy enforcement, and anti-spam stamps.
 - **Multi-provider** — Anthropic, Vertex AI, OpenRouter, Ollama, or any compatible endpoint. Smart routing sends simple queries to fast models and complex ones to capable models — cutting costs 5-10x automatically.
@@ -194,6 +195,7 @@ The setup wizard handles this automatically when you run `nomos chat` for the fi
 | :link:                    | [**Identity Graph**](#digital-clone)        | Unified contacts across all platforms. One person, one profile.                                                                    |
 | :shield:                  | [**CATE Protocol**](#digital-clone)         | Agent-to-agent trust with DIDs, verifiable credentials, policy, and anti-spam stamps.                                              |
 | :brain:                   | [**Persistent Memory**](#features-in-depth) | Every conversation auto-indexed into pgvector. Recall anything from any session or channel.                                        |
+| :crystal_ball:            | [**Theory of Mind**](#features-in-depth)    | Hybrid rule + LLM per-session mental state tracking. Detects frustration, urgency, goal shifts, stuck patterns.                    |
 | :speech_balloon:          | [**7 Channels**](#channel-integrations)     | Slack, Discord, Telegram, WhatsApp, Messages.app, Email — thin adapters, one agent runtime.                                        |
 | :busts_in_silhouette:     | [**Multi-Agent Teams**](#features-in-depth) | Coordinator + parallel workers. Hand off complex tasks, get synthesized results.                                                   |
 | :zap:                     | [**Smart Routing**](#features-in-depth)     | Route by complexity across any provider — cloud, local, or hybrid.                                                                 |
@@ -213,15 +215,15 @@ The setup wizard handles this automatically when you run `nomos chat` for the fi
 
 ## Channel Integrations
 
-| Platform         | Mode            | Transport                                                    |
-| ---------------- | --------------- | ------------------------------------------------------------ |
-| **Slack**        | Bot + User Mode | Web API polling + OAuth (multi-workspace, draft-before-send) |
-| **Discord**      | Bot             | Gateway                                                      |
-| **Telegram**     | Bot             | grammY                                                       |
-| **WhatsApp**     | Bridge          | Baileys (no Meta Business API needed)                        |
-| **Messages.app** | Dual mode       | Local chat.db (macOS) or BlueBubbles server (cross-platform) |
-| **Email**        | IMAP + SMTP     | IMAP IDLE for real-time push, SMTP for sending               |
-| **Web/gRPC**     | Client          | gRPC (8766) + WebSocket (8765)                               |
+| Platform         | Mode            | Transport                                                                                 |
+| ---------------- | --------------- | ----------------------------------------------------------------------------------------- |
+| **Slack**        | Bot + User Mode | Web API polling + OAuth (multi-workspace, draft-before-send)                              |
+| **Discord**      | Bot             | Gateway                                                                                   |
+| **Telegram**     | Bot             | grammY                                                                                    |
+| **WhatsApp**     | Bridge          | Baileys (no Meta Business API needed)                                                     |
+| **Messages.app** | Dual mode       | Local chat.db or BlueBubbles. Passive (draft & approve) or agent client (direct to owner) |
+| **Email**        | IMAP + SMTP     | IMAP IDLE for real-time push, SMTP for sending                                            |
+| **Web/gRPC**     | Client          | gRPC (8766) + WebSocket (8765)                                                            |
 
 Each adapter is ~50-100 LOC. All agent logic is centralized in `AgentRuntime`. See [docs/channels.md](docs/channels.md) for env vars and setup, or the [individual integration guides](docs/integrations/).
 
@@ -421,6 +423,21 @@ A Karpathy-style compiled knowledge base. An LLM periodically compiles raw inges
 Articles stored in PostgreSQL (source of truth) and synced to disk as a browsable cache.
 
 See [docs/knowledge-wiki.md](docs/knowledge-wiki.md) for full details.
+
+</details>
+
+<details>
+<summary><strong>Theory of Mind</strong></summary>
+
+A hybrid per-session engine that models the user's mental state in real time so the agent can adapt its response style.
+
+**Layer 1 -- Rule-based (every turn, zero latency):** Detects surface signals from message patterns -- urgency markers ("asap", "blocking"), explicit emotions ("frustrated", "awesome"), correction frequency, question rate, session duration, time of day. Produces focus/emotion/load/urgency/energy dimensions.
+
+**Layer 2 -- LLM reasoning (every 3 turns, background):** A Haiku-powered background assessment analyzes the last 10 messages for what the rules miss -- sarcasm, passive aggression, implicit goal shifts, whether "this is fine" means acceptance or resignation, and whether the conversation is progressing or going in circles. Runs via `runForkedAgent` in parallel with the main response (zero added latency). Results merge into the system prompt on the next turn.
+
+The combined state appears in the system prompt as "Current User State" with response guidance (e.g., "Be concise and action-oriented" when urgency is high, "Acknowledge the difficulty" when frustration is detected).
+
+Theory of Mind is one of 8 interconnected subsystems that make Nomos think like you, not just sound like you. See [docs/think-like-you.md](docs/think-like-you.md) for the full architecture: knowledge extraction, decision pattern learning, exemplar curation, shadow observation, calibration, personality DNA, and more.
 
 </details>
 
@@ -644,17 +661,20 @@ Configuration is loaded with the following precedence: **Database > environment 
 
 ### Channel integrations
 
-| Variable                 | Description                          | Default  |
-| ------------------------ | ------------------------------------ | -------- |
-| `SLACK_BOT_TOKEN`        | Slack Bot User OAuth Token           | --       |
-| `SLACK_APP_TOKEN`        | Slack App-Level Token (Socket Mode)  | --       |
-| `DISCORD_BOT_TOKEN`      | Discord bot token                    | --       |
-| `TELEGRAM_BOT_TOKEN`     | Telegram bot token from @BotFather   | --       |
-| `WHATSAPP_ENABLED`       | Set to `true` to enable WhatsApp     | --       |
-| `IMESSAGE_ENABLED`       | Set to `true` to enable Messages.app | --       |
-| `IMESSAGE_MODE`          | `chatdb` (macOS) or `bluebubbles`    | `chatdb` |
-| `BLUEBUBBLES_SERVER_URL` | BlueBubbles server URL               | --       |
-| `BLUEBUBBLES_PASSWORD`   | BlueBubbles API password             | --       |
+| Variable                  | Description                           | Default   |
+| ------------------------- | ------------------------------------- | --------- |
+| `SLACK_BOT_TOKEN`         | Slack Bot User OAuth Token            | --        |
+| `SLACK_APP_TOKEN`         | Slack App-Level Token (Socket Mode)   | --        |
+| `DISCORD_BOT_TOKEN`       | Discord bot token                     | --        |
+| `TELEGRAM_BOT_TOKEN`      | Telegram bot token from @BotFather    | --        |
+| `WHATSAPP_ENABLED`        | Set to `true` to enable WhatsApp      | --        |
+| `IMESSAGE_ENABLED`        | Set to `true` to enable Messages.app  | --        |
+| `IMESSAGE_MODE`           | `chatdb` (macOS) or `bluebubbles`     | `chatdb`  |
+| `IMESSAGE_AGENT_MODE`     | `passive` (draft) or `agent` (direct) | `passive` |
+| `IMESSAGE_OWNER_PHONE`    | Owner phone for agent mode            | --        |
+| `IMESSAGE_OWNER_APPLE_ID` | Owner Apple ID for agent mode         | --        |
+| `BLUEBUBBLES_SERVER_URL`  | BlueBubbles server URL                | --        |
+| `BLUEBUBBLES_PASSWORD`    | BlueBubbles API password              | --        |
 
 Email is configured via the Settings UI (`/integrations/email`) or the `integrations` table (IMAP/SMTP host, port, credentials).
 

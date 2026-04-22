@@ -33,6 +33,8 @@ export interface IngestOptions {
   dryRun?: boolean;
   /** Batch size for embedding calls */
   embeddingBatchSize?: number;
+  /** Run type: full (initial) or delta (incremental) */
+  runType?: "full" | "delta";
 }
 
 export interface IngestProgress {
@@ -62,6 +64,7 @@ export interface IngestJobRow {
   last_successful_at: Date | null;
   delta_schedule: string;
   delta_enabled: boolean;
+  run_type: "full" | "delta";
 }
 
 /**

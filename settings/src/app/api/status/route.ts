@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { readEnv } from "@/lib/env";
+import { readConfig } from "@/lib/env";
 import { getDb } from "@/lib/db";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -8,7 +8,28 @@ import type { IntegrationStatus } from "@/lib/types";
 const execFileAsync = promisify(execFile);
 
 export async function GET() {
-  const env = readEnv();
+  let sql: ReturnType<typeof getDb> | undefined;
+  try {
+    sql = getDb();
+  } catch {
+    // DB not available -- will be created per-section below
+  }
+  const env = await readConfig(
+    [
+      "SLACK_APP_TOKEN",
+      "SLACK_BOT_TOKEN",
+      "GOOGLE_OAUTH_CLIENT_ID",
+      "GOOGLE_OAUTH_CLIENT_SECRET",
+      "GWS_SERVICES",
+      "DISCORD_BOT_TOKEN",
+      "TELEGRAM_BOT_TOKEN",
+      "WHATSAPP_ENABLED",
+      "IMESSAGE_ENABLED",
+      "IMESSAGE_MODE",
+      "IMESSAGE_AGENT_MODE",
+    ],
+    sql,
+  );
 
   // Slack status
   let slackWorkspaces: { teamId: string; teamName: string; userId: string }[] = [];
@@ -42,14 +63,27 @@ export async function GET() {
     }
   }
 
-  // Google status — check gws CLI for account count
+  // Google status -- check gws auth status + DB accounts
   let gwsAccountCount = 0;
   try {
-    const { stdout } = await execFileAsync("npx", ["gws", "auth", "list"], { timeout: 10000 });
-    const data = JSON.parse(stdout);
-    gwsAccountCount = data.count ?? (data.accounts ?? []).length;
+    const { stdout } = await execFileAsync("npx", ["gws", "auth", "status"], { timeout: 10000 });
+    const status = JSON.parse(stdout);
+    if (status.auth_method !== "none" || status.token_cache_exists || status.storage !== "none") {
+      gwsAccountCount = 1;
+    }
   } catch {
-    // gws not available
+    // gws not available -- fall back to DB
+  }
+  if (gwsAccountCount === 0 && sql) {
+    try {
+      const [row] = await sql`
+        SELECT COUNT(*)::int AS count FROM integrations
+        WHERE name LIKE 'google-ws:%' AND enabled = true
+      `;
+      gwsAccountCount = (row?.count as number) ?? 0;
+    } catch {
+      // integrations table may not exist
+    }
   }
 
   const gwsServices = env.GWS_SERVICES ?? "all";
@@ -83,6 +117,8 @@ export async function GET() {
     },
     imessage: {
       configured: env.IMESSAGE_ENABLED === "true" || env.IMESSAGE_ENABLED === "1",
+      mode: env.IMESSAGE_MODE ?? "chatdb",
+      agentMode: env.IMESSAGE_AGENT_MODE ?? "passive",
     },
   };
 

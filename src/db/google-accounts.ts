@@ -1,10 +1,11 @@
 /**
  * Google Workspace account persistence.
  *
- * Syncs account metadata from `gws auth list` into the integrations table
- * using "google-ws:{email}" naming. The actual OAuth tokens remain with
- * the `gws` CLI (~/.config/gws/); we only persist which accounts are
- * authorized so the agent can reference them.
+ * Stores account metadata in the integrations table using "google-ws:{email}"
+ * naming. The actual OAuth tokens remain with the `gws` CLI (~/.config/gws/).
+ *
+ * In gws v0.22.5+ there is at most one authenticated account.
+ * We persist which accounts have been authorized so the agent can reference them.
  */
 
 import {
@@ -46,49 +47,47 @@ export async function listGoogleAccounts(): Promise<GoogleAccountRow[]> {
 }
 
 /**
- * Sync accounts from `gws auth list` output into the DB.
- *
- * - Adds new accounts that appear in gws but not in DB
- * - Removes accounts from DB that are no longer in gws
- * - Updates default status
+ * Add or update a Google account in the DB.
+ */
+export async function upsertGoogleAccount(email: string, isDefault: boolean): Promise<void> {
+  await upsertIntegration(integrationName(email), {
+    metadata: { is_default: isDefault },
+  });
+}
+
+/**
+ * Remove a Google account from the DB.
+ */
+export async function removeGoogleAccount(email: string): Promise<void> {
+  await removeIntegration(integrationName(email));
+}
+
+/**
+ * Sync accounts from gws auth status into the DB.
+ * In v0.22.5+, gws supports one account at a time.
+ * We add it to the DB but don't remove old accounts (user may re-auth them later).
  */
 export async function syncGoogleAccountsFromGws(): Promise<GoogleAccountRow[]> {
-  const { execFile } = await import("node:child_process");
-  const { promisify } = await import("node:util");
-  const execFileAsync = promisify(execFile);
-
-  let gwsAccounts: Array<{ email: string; isDefault: boolean }> = [];
-
   try {
-    const { stdout } = await execFileAsync("npx", ["gws", "auth", "list"], { timeout: 10000 });
-    const data = JSON.parse(stdout);
-    const defaultAccount = data.default ?? "";
-    for (const entry of data.accounts ?? []) {
-      const email = typeof entry === "string" ? entry : entry.email;
-      if (email) {
-        gwsAccounts.push({ email, isDefault: email === defaultAccount });
+    const { getGwsAuthStatus } = await import("../sdk/google-workspace-mcp.ts");
+    const status = await getGwsAuthStatus();
+
+    if (status.authenticated && status.email) {
+      // Mark the current gws account as default, unmark others
+      const existing = await listGoogleAccounts();
+      for (const account of existing) {
+        if (account.is_default && account.email !== status.email) {
+          await upsertIntegration(integrationName(account.email), {
+            metadata: { is_default: false },
+          });
+        }
       }
+      await upsertIntegration(integrationName(status.email), {
+        metadata: { is_default: true },
+      });
     }
   } catch {
-    // gws not available — return current DB state
-    return listGoogleAccounts();
-  }
-
-  const gwsEmails = new Set(gwsAccounts.map((a) => a.email));
-
-  // Remove DB entries that are no longer in gws
-  const existing = await listGoogleAccounts();
-  for (const account of existing) {
-    if (!gwsEmails.has(account.email)) {
-      await removeIntegration(integrationName(account.email));
-    }
-  }
-
-  // Upsert all gws accounts
-  for (const account of gwsAccounts) {
-    await upsertIntegration(integrationName(account.email), {
-      metadata: { is_default: account.isDefault },
-    });
+    // gws not available -- return current DB state
   }
 
   return listGoogleAccounts();

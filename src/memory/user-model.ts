@@ -159,8 +159,13 @@ async function upsertDecisionPattern(
       weight: number;
       exceptions: string[];
     };
-    const mergedEvidence = [...new Set([...prev.evidence, ...pattern.evidence])].slice(0, 10);
-    const mergedExceptions = [...new Set([...prev.exceptions, ...pattern.exceptions])].slice(0, 5);
+    const mergedEvidence = [...new Set([...(prev.evidence ?? []), ...pattern.evidence])].slice(
+      0,
+      10,
+    );
+    const mergedExceptions = [
+      ...new Set([...(prev.exceptions ?? []), ...pattern.exceptions]),
+    ].slice(0, 5);
     const mergedWeight = prev.weight * 0.7 + pattern.weight * 0.3;
     const confidence = mergeConfidence(match.confidence, pattern.confidence);
 
@@ -215,7 +220,7 @@ async function upsertValue(val: ExtractedValue, sourceChunkIds: string[]): Promi
       context: string;
       evidence: string[];
     };
-    const mergedEvidence = [...new Set([...prev.evidence, ...val.evidence])].slice(0, 10);
+    const mergedEvidence = [...new Set([...(prev.evidence ?? []), ...val.evidence])].slice(0, 10);
     const confidence = mergeConfidence(match.confidence, val.confidence);
 
     await upsertUserModel({
