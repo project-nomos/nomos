@@ -114,19 +114,35 @@ export class IngestScheduler {
 
   /**
    * Trigger a full ingest, or delta if full already completed.
-   * Convenience method for "do the right thing" calls.
+   * Use for explicit user actions (Settings UI save, gRPC command).
+   * If no full ingest exists yet, runs a full. Otherwise runs a delta.
    */
   triggerAuto(platform: string, sourceType: string, subcommand: string): void {
     this.enqueue(async () => {
       const fullJob = await getIngestJobByPlatform(platform, sourceType, "full");
       if (fullJob?.status === "completed") {
-        // Full done -- run delta instead
         this.triggerDelta(platform, sourceType, subcommand);
       } else if (fullJob?.status === "running") {
         // Already running -- skip
       } else {
         this.triggerFull(platform, sourceType, subcommand);
       }
+    });
+  }
+
+  /**
+   * Startup sync: only run a delta if a full ingest has already completed.
+   * Never triggers a full ingest -- that only happens when the user explicitly
+   * adds an integration (via Settings UI or gRPC command).
+   */
+  triggerStartup(platform: string, sourceType: string, subcommand: string): void {
+    this.enqueue(async () => {
+      const fullJob = await getIngestJobByPlatform(platform, sourceType, "full");
+      if (fullJob?.status === "completed") {
+        this.triggerDelta(platform, sourceType, subcommand);
+      }
+      // No full ingest exists or it failed -- do nothing on startup.
+      // User must explicitly trigger via Settings UI or CLI.
     });
   }
 

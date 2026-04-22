@@ -192,7 +192,7 @@ export class Gateway {
         this.pendingSlackIngest = null;
         setTimeout(() => {
           for (const ws of workspaces) {
-            this.ingestScheduler.triggerAuto(`slack:${ws.team_id}`, "history", "slack");
+            this.ingestScheduler.triggerStartup(`slack:${ws.team_id}`, "history", "slack");
           }
         }, 60_000); // Wait 60s before starting ingestion
       }
@@ -202,7 +202,7 @@ export class Gateway {
     try {
       const { isGoogleWorkspaceConfiguredAsync } = await import("../sdk/google-workspace-mcp.ts");
       if (await isGoogleWorkspaceConfiguredAsync()) {
-        this.ingestScheduler.triggerAuto("gmail", "history", "gmail");
+        this.ingestScheduler.triggerStartup("gmail", "history", "gmail");
       }
     } catch {
       // Google Workspace not available
@@ -824,7 +824,7 @@ export class Gateway {
       this.draftManager.registerSendFn("discord", (channelId, text, threadId) =>
         adapter.send({ inReplyTo: "", platform: "discord", channelId, threadId, content: text }),
       );
-      this.ingestScheduler.triggerAuto("discord", "history", "discord");
+      this.ingestScheduler.triggerStartup("discord", "history", "discord");
     }
 
     if (process.env.TELEGRAM_BOT_TOKEN) {
@@ -833,7 +833,7 @@ export class Gateway {
       this.draftManager.registerSendFn("telegram", (channelId, text, threadId) =>
         adapter.send({ inReplyTo: "", platform: "telegram", channelId, threadId, content: text }),
       );
-      this.ingestScheduler.triggerAuto("telegram", "history", "telegram");
+      this.ingestScheduler.triggerStartup("telegram", "history", "telegram");
     }
 
     // WhatsApp is always available (uses QR code auth)
@@ -877,8 +877,8 @@ export class Gateway {
         }),
       );
 
-      // Auto-ingest historical iMessages on first connection
-      this.ingestScheduler.triggerAuto("imessage", "history", "imessage");
+      // Delta sync on startup (full ingest only triggered from Settings UI)
+      this.ingestScheduler.triggerStartup("imessage", "history", "imessage");
     }
 
     // Email adapter (IMAP/SMTP from integrations table)
@@ -908,8 +908,8 @@ export class Gateway {
         });
         this.channelManager.register(adapter);
 
-        // Auto-ingest historical emails on first connection
-        this.ingestScheduler.triggerAuto("gmail", "history", "gmail");
+        // Delta sync on startup (full ingest only triggered from Settings UI)
+        this.ingestScheduler.triggerStartup("gmail", "history", "gmail");
       }
     } catch {
       // Email not configured — skip
