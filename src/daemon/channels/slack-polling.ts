@@ -60,6 +60,7 @@ export class SlackPollingAdapter implements ChannelAdapter {
   private defaultChannelId: string | null = null;
   // Bot client for posting agent responses with the bot identity (not as the user)
   private botClient: WebClient | null = null;
+  private botUserId: string | null = null;
   private static readonly CHANNEL_REFRESH_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
   private static readonly INTER_CALL_DELAY_MS = 2000; // ~30 req/min, safe headroom for Tier 3
 
@@ -115,6 +116,13 @@ export class SlackPollingAdapter implements ChannelAdapter {
     const botToken = process.env.SLACK_BOT_TOKEN;
     if (botToken) {
       this.botClient = new WebClient(botToken);
+      try {
+        const botAuth = await this.botClient.auth.test();
+        this.botUserId = (botAuth.user_id as string) ?? null;
+      } catch {
+        console.warn(`[slack-polling] Bot token auth failed -- agent will post as user`);
+        this.botClient = null;
+      }
     }
 
     // Load default notification channel -- messages there are treated like DMs
@@ -505,6 +513,8 @@ export class SlackPollingAdapter implements ChannelAdapter {
         // Skip own messages -- except in the default channel where the
         // user chats directly with the agent via their own user token
         if (msg.user === this.userId && !isDefaultChannel) continue;
+        // Skip agent's own responses (bot user ID) to prevent echo loops
+        if (this.botUserId && msg.user === this.botUserId) continue;
         // Skip bot messages, system messages
         if (msg.subtype) continue;
         if (!msg.text || !msg.user || !msg.ts) continue;
