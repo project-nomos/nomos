@@ -526,9 +526,12 @@ export class SlackPollingAdapter implements ChannelAdapter {
         // Skip own messages -- except in the default channel where the
         // user chats directly with the agent via their own user token
         if (msg.user === this.userId && !isDefaultChannel) continue;
-        // Skip agent's own responses (bot user ID) to prevent echo loops
+        // Skip ALL bot messages to prevent echo loops. This catches:
+        // - Our own bot responses (bot_id set when posting via bot token)
+        // - Any other bot in the channel
+        // - Messages with bot subtypes
+        if ((msg as Record<string, unknown>).bot_id) continue;
         if (this.botUserId && msg.user === this.botUserId) continue;
-        // Skip bot messages, system messages
         if (msg.subtype) continue;
         if (!msg.text || !msg.user || !msg.ts) continue;
 
