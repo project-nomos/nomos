@@ -19,6 +19,7 @@ import { WebClient } from "@slack/web-api";
 import type { ChannelAdapter, IncomingMessage, OutgoingMessage } from "../types.ts";
 import type { DraftManager } from "../draft-manager.ts";
 import { randomUUID } from "node:crypto";
+import { markdownToSlackMrkdwn } from "./slack-mrkdwn.ts";
 
 export interface SlackPollingAdapterOptions {
   token: string;
@@ -221,7 +222,7 @@ export class SlackPollingAdapter implements ChannelAdapter {
     if (!this.client) return;
     await this.client.chat.postMessage({
       channel: channelId,
-      text,
+      text: markdownToSlackMrkdwn(text),
       thread_ts: threadId,
     });
   }
@@ -235,7 +236,7 @@ export class SlackPollingAdapter implements ChannelAdapter {
     if (!client) return;
     await client.chat.postMessage({
       channel: channelId,
-      text,
+      text: markdownToSlackMrkdwn(text),
       thread_ts: threadId,
     });
   }
@@ -263,7 +264,7 @@ export class SlackPollingAdapter implements ChannelAdapter {
     if (!client) return undefined;
     const result = await client.chat.postMessage({
       channel: channelId,
-      text,
+      text: markdownToSlackMrkdwn(text),
       thread_ts: threadId,
     });
     return result.ts;
@@ -278,7 +279,7 @@ export class SlackPollingAdapter implements ChannelAdapter {
     await client.chat.update({
       channel: channelId,
       ts: messageId,
-      text,
+      text: markdownToSlackMrkdwn(text),
     });
   }
 

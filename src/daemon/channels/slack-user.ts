@@ -15,6 +15,7 @@ import { WebClient } from "@slack/web-api";
 import type { ChannelAdapter, IncomingMessage, OutgoingMessage } from "../types.ts";
 import type { DraftManager } from "../draft-manager.ts";
 import { randomUUID } from "node:crypto";
+import { markdownToSlackMrkdwn } from "./slack-mrkdwn.ts";
 
 // CJS/ESM interop (same pattern as slack.ts)
 const slackBoltModule = SlackBolt as typeof import("@slack/bolt") & {
@@ -191,7 +192,7 @@ export class SlackUserAdapter implements ChannelAdapter {
     const client = new WebClient(this.userToken);
     await client.chat.postMessage({
       channel: channelId,
-      text,
+      text: markdownToSlackMrkdwn(text),
       thread_ts: threadId,
     });
   }
@@ -205,7 +206,7 @@ export class SlackUserAdapter implements ChannelAdapter {
     if (!client) return;
     await client.chat.postMessage({
       channel: channelId,
-      text,
+      text: markdownToSlackMrkdwn(text),
       thread_ts: threadId,
     });
   }
@@ -232,7 +233,7 @@ export class SlackUserAdapter implements ChannelAdapter {
     if (!client) return undefined;
     const result = await client.chat.postMessage({
       channel: channelId,
-      text,
+      text: markdownToSlackMrkdwn(text),
       thread_ts: threadId,
     });
     return result.ts;
@@ -247,7 +248,7 @@ export class SlackUserAdapter implements ChannelAdapter {
     await client.chat.update({
       channel: channelId,
       ts: messageId,
-      text,
+      text: markdownToSlackMrkdwn(text),
     });
   }
 
