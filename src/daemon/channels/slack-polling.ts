@@ -227,19 +227,21 @@ export class SlackPollingAdapter implements ChannelAdapter {
     if (!this.client) return;
 
     try {
+      // Only fetch DM list on startup (cheap: 1 API call).
+      // Member channels are fetched lazily on the first full scan.
       const dmChannels = await this.getDMChannels();
-      const memberChannels = await this.getMemberChannels();
-      // Use current epoch seconds as Slack timestamp baseline.
-      // Only messages arriving after this point will be processed.
       const nowTs = `${(Date.now() / 1000).toFixed(6)}`;
       for (const channelId of dmChannels) {
         this.lastSeenTs.set(channelId, nowTs);
       }
-      for (const channelId of memberChannels) {
-        this.lastSeenTs.set(channelId, nowTs);
+      // Set baseline for default channel too
+      if (this.defaultChannelId) {
+        this.lastSeenTs.set(this.defaultChannelId, nowTs);
       }
       console.log(
-        `[slack-polling] Baseline set for ${dmChannels.length} DMs + ${memberChannels.length} channels (using current time)`,
+        `[slack-polling] Baseline set for ${dmChannels.length} DMs` +
+          (this.defaultChannelId ? ` + default channel` : "") +
+          ` (using current time)`,
       );
     } catch (err) {
       console.warn("[slack-polling] Failed to initialize baselines:", err);
@@ -324,12 +326,15 @@ export class SlackPollingAdapter implements ChannelAdapter {
   }
 
   /**
-   * Main poll loop: check DMs and channel mentions for new messages.
+   * Main poll loop.
    *
-   * Uses a global mutex so only one adapter polls at a time (rate limits
-   * are shared across all tokens from the same OAuth app). On most cycles,
-   * only "active" channels (those that had recent messages) are polled.
-   * A full scan of all channels runs every FULL_SCAN_EVERY polls.
+   * Rate budget strategy (Tier 3: 50 req/min shared across all tokens):
+   *   - EVERY cycle: poll the default channel only (1 API call)
+   *   - EVERY cycle: poll active DMs (channels that had recent messages)
+   *   - FULL SCAN (every 10th cycle): poll ALL DMs + member channels for @mentions
+   *
+   * This keeps normal cycles to 1-3 API calls. Full scans are infrequent
+   * enough (~10 min) to stay well within rate limits.
    */
   private async poll(): Promise<void> {
     if (!this.running || !this.client || this.polling) return;
@@ -342,22 +347,24 @@ export class SlackPollingAdapter implements ChannelAdapter {
       this.pollCount++;
       const isFullScan = this.pollCount % SlackPollingAdapter.FULL_SCAN_EVERY === 0;
 
-      const dmChannels = await this.getDMChannels();
-      this.consecutiveErrors = 0; // Reset on success
+      // 1. ALWAYS poll the default channel (primary chat channel, 1 API call)
+      if (this.defaultChannelId) {
+        const hadMessages = await this.pollChannel(this.defaultChannelId, "channel");
+        if (hadMessages) {
+          this.activeChannels.add(this.defaultChannelId);
+        }
+        await delay(SlackPollingAdapter.INTER_CALL_DELAY_MS);
+      }
 
-      // Determine which channels to poll this cycle
-      const channelsToPoll = isFullScan
+      // 2. Poll active DMs (only channels with recent messages, or all on full scan)
+      const dmChannels = await this.getDMChannels();
+      this.consecutiveErrors = 0;
+
+      const dmsToPoll = isFullScan
         ? dmChannels
         : dmChannels.filter((ch) => this.activeChannels.has(ch));
 
-      if (isFullScan && dmChannels.length !== channelsToPoll.length) {
-        // Log full scans so we can see the cadence
-        console.log(
-          `[slack-polling] Full scan: ${dmChannels.length} channels (team ${this.teamId})`,
-        );
-      }
-
-      for (const channelId of channelsToPoll) {
+      for (const channelId of dmsToPoll) {
         if (!this.running) break;
         const hadMessages = await this.pollChannel(channelId, "dm");
         if (hadMessages) {
@@ -366,29 +373,26 @@ export class SlackPollingAdapter implements ChannelAdapter {
         await delay(SlackPollingAdapter.INTER_CALL_DELAY_MS);
       }
 
-      // Poll member channels for @mentions (only active ones, full scan periodically)
-      // Default channel is ALWAYS polled (it's the user's primary chat channel)
-      const memberChannels = await this.getMemberChannels();
-      const mentionChannelsToPoll = isFullScan
-        ? memberChannels
-        : memberChannels.filter(
-            (ch) => this.activeChannels.has(ch) || ch === this.defaultChannelId,
-          );
-
-      for (const channelId of mentionChannelsToPoll) {
-        if (!this.running) break;
-        const hadMessages = await this.pollChannel(channelId, "channel");
-        if (hadMessages) {
-          this.activeChannels.add(channelId);
-        }
-        await delay(SlackPollingAdapter.INTER_CALL_DELAY_MS);
-      }
-
-      // Decay: remove channels from active set if they haven't produced
-      // messages in a while. We do this by letting the full scan re-add them.
+      // 3. Full scan only: poll member channels for @mentions
       if (isFullScan) {
+        const memberChannels = await this.getMemberChannels();
+        console.log(
+          `[slack-polling] Full scan: ${dmChannels.length} DMs + ${memberChannels.length} channels (team ${this.teamId})`,
+        );
+
+        for (const channelId of memberChannels) {
+          if (!this.running) break;
+          // Skip default channel (already polled above)
+          if (channelId === this.defaultChannelId) continue;
+          const hadMessages = await this.pollChannel(channelId, "channel");
+          if (hadMessages) {
+            this.activeChannels.add(channelId);
+          }
+          await delay(SlackPollingAdapter.INTER_CALL_DELAY_MS);
+        }
+
+        // Decay active set -- full scan re-adds any with messages
         this.activeChannels.clear();
-        // The full scan above will re-add any channels that have new messages.
       }
     } catch (err: unknown) {
       const errorCode = (err as { data?: { error?: string } })?.data?.error;
