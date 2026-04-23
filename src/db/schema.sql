@@ -416,3 +416,11 @@ DO $$ BEGIN
     ON CONFLICT (name) DO NOTHING;
   END IF;
 END $$;
+
+-- Managed files: disk config files synced to DB for portability
+CREATE TABLE IF NOT EXISTS managed_files (
+  path        TEXT PRIMARY KEY,            -- relative path, e.g. "SOUL.md", "skills/commit/SKILL.md"
+  content     TEXT NOT NULL,
+  hash        TEXT NOT NULL,               -- SHA-256 of content (for change detection)
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);

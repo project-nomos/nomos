@@ -133,6 +133,14 @@ export class Gateway {
     // Initialize agent runtime (loads config, runs migrations)
     await this.runtime.initialize();
 
+    // Sync config files (SOUL.md, TOOLS.md, IDENTITY.md, skills) disk <-> DB
+    try {
+      const { syncAllFiles } = await import("../config/file-sync.ts");
+      await syncAllFiles();
+    } catch (err) {
+      console.warn("[gateway] File sync failed:", err instanceof Error ? err.message : err);
+    }
+
     // Verify LLM access before starting services
     await this.checkLlmAccess();
 

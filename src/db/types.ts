@@ -248,6 +248,13 @@ export interface CommitmentsTable {
   updated_at: Generated<Date>;
 }
 
+export interface ManagedFilesTable {
+  path: string;
+  content: string;
+  hash: string;
+  updated_at: Generated<Date>;
+}
+
 // ---------------------------------------------------------------------------
 // Database interface
 // ---------------------------------------------------------------------------
@@ -272,6 +279,7 @@ export interface Database {
   contacts: ContactsTable;
   contact_identities: ContactIdentitiesTable;
   commitments: CommitmentsTable;
+  managed_files: ManagedFilesTable;
 }
 
 // ---------------------------------------------------------------------------
