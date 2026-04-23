@@ -9,6 +9,7 @@ import { useToast } from "@/contexts/toast-context";
 import { useUnsavedChanges } from "@/hooks/use-unsaved-changes";
 
 const MODELS = [
+  { value: "claude-opus-4-7", label: "Claude Opus 4.7" },
   { value: "claude-sonnet-4-6", label: "Claude Sonnet 4.6" },
   { value: "claude-opus-4-6", label: "Claude Opus 4.6" },
   { value: "claude-haiku-4-5", label: "Claude Haiku 4.5" },
@@ -100,6 +101,13 @@ export default function AssistantSettingsPage() {
   const [extractionModel, setExtractionModel] = useState("claude-haiku-4-5");
   const [initialExtractionModel, setInitialExtractionModel] = useState("claude-haiku-4-5");
 
+  // Embeddings
+  const [embeddingModel, setEmbeddingModel] = useState("gemini-embedding-001");
+  const [initialEmbeddingModel, setInitialEmbeddingModel] = useState("gemini-embedding-001");
+  const [googleApiKey, setGoogleApiKey] = useState("");
+  const [hasGoogleApiKey, setHasGoogleApiKey] = useState(false);
+  const [googleApiKeyDirty, setGoogleApiKeyDirty] = useState(false);
+
   // Image generation
   const [imageGeneration, setImageGeneration] = useState(false);
   const [initialImageGeneration, setInitialImageGeneration] = useState(false);
@@ -148,6 +156,8 @@ export default function AssistantSettingsPage() {
     workerBudgetUsd !== initialWorkerBudgetUsd ||
     adaptiveMemory !== initialAdaptiveMemory ||
     extractionModel !== initialExtractionModel ||
+    embeddingModel !== initialEmbeddingModel ||
+    googleApiKeyDirty ||
     geminiApiKeyDirty ||
     imageGeneration !== initialImageGeneration ||
     imageGenerationModel !== initialImageGenerationModel ||
@@ -240,6 +250,15 @@ export default function AssistantSettingsPage() {
       const em = envData.NOMOS_EXTRACTION_MODEL ?? "claude-haiku-4-5";
       setExtractionModel(em);
       setInitialExtractionModel(em);
+
+      // Embeddings
+      const ebm = envData.EMBEDDING_MODEL ?? "gemini-embedding-001";
+      setEmbeddingModel(ebm);
+      setInitialEmbeddingModel(ebm);
+
+      setHasGoogleApiKey(!!envData.GOOGLE_API_KEY);
+      setGoogleApiKey("");
+      setGoogleApiKeyDirty(false);
 
       // Image generation
       const ig = envData.NOMOS_IMAGE_GENERATION === "true";
@@ -352,6 +371,8 @@ export default function AssistantSettingsPage() {
           envUpdates.NOMOS_ADAPTIVE_MEMORY = adaptiveMemory ? "true" : "";
         if (extractionModel !== initialExtractionModel)
           envUpdates.NOMOS_EXTRACTION_MODEL = extractionModel;
+        if (embeddingModel !== initialEmbeddingModel) envUpdates.EMBEDDING_MODEL = embeddingModel;
+        if (googleApiKeyDirty) envUpdates.GOOGLE_API_KEY = googleApiKey;
         if (imageGeneration !== initialImageGeneration)
           envUpdates.NOMOS_IMAGE_GENERATION = imageGeneration ? "true" : "";
         if (geminiApiKeyDirty) envUpdates.GEMINI_API_KEY = geminiApiKey;
@@ -856,6 +877,40 @@ export default function AssistantSettingsPage() {
               </p>
             </div>
           )}
+        </div>
+      </section>
+
+      {/* Embeddings */}
+      <section className="mb-8 rounded-xl border border-surface0 bg-mantle p-5">
+        <h2 className="text-sm font-semibold text-subtext1 uppercase tracking-wider mb-4">
+          Embeddings
+        </h2>
+        <div className="space-y-4">
+          <div className="space-y-1.5">
+            <label className="block text-sm font-medium text-subtext1">Google API Key</label>
+            <TokenInput
+              label="Google API Key"
+              value={googleApiKey}
+              onChange={(v) => {
+                setGoogleApiKey(v);
+                setGoogleApiKeyDirty(true);
+              }}
+              placeholder={
+                hasGoogleApiKey ? "Configured -- enter new value to replace" : "AIzaSy..."
+              }
+              helperText="Used for Gemini embeddings. Get a key from Google AI Studio."
+            />
+          </div>
+          <div className="space-y-1.5">
+            <label className="block text-sm font-medium text-subtext1">Embedding Model</label>
+            <input
+              type="text"
+              value={embeddingModel}
+              onChange={(e) => setEmbeddingModel(e.target.value)}
+              className="w-full rounded-lg border border-surface1 bg-surface0 px-3 py-2 text-sm text-text placeholder:text-overlay0 focus:outline-none focus:border-mauve focus:ring-1 focus:ring-mauve/30 font-mono"
+            />
+            <p className="text-xs text-overlay0">Default: gemini-embedding-001 (768 dimensions)</p>
+          </div>
         </div>
       </section>
 

@@ -49,6 +49,8 @@ const ALLOWED_KEYS = [
   "BLUEBUBBLES_PASSWORD",
   "BLUEBUBBLES_WEBHOOK_PORT",
   "BLUEBUBBLES_READ_RECEIPTS",
+  "GOOGLE_API_KEY",
+  "EMBEDDING_MODEL",
 ];
 
 /** Keys that contain secrets and should be masked in GET responses. */
@@ -64,6 +66,7 @@ const SECRET_KEYS = new Set([
   "TELEGRAM_BOT_TOKEN",
   "OPENROUTER_API_KEY",
   "BLUEBUBBLES_PASSWORD",
+  "GOOGLE_API_KEY",
 ]);
 
 /** Keys that are writable via PUT. */
@@ -109,6 +112,8 @@ const WRITABLE_KEYS = new Set([
   "BLUEBUBBLES_PASSWORD",
   "BLUEBUBBLES_WEBHOOK_PORT",
   "BLUEBUBBLES_READ_RECEIPTS",
+  "GOOGLE_API_KEY",
+  "EMBEDDING_MODEL",
 ]);
 
 /**
@@ -200,6 +205,8 @@ const ENV_TO_DB: Record<string, DbMapping> = {
   },
   NOMOS_VIDEO_GENERATION: { table: "config", dbKey: "app.videoGeneration" },
   NOMOS_VIDEO_GENERATION_MODEL: { table: "config", dbKey: "app.videoGenerationModel" },
+  GOOGLE_API_KEY: { table: "integrations", dbKey: "google-ai", field: "api_key", isSecret: true },
+  EMBEDDING_MODEL: { table: "config", dbKey: "app.embeddingModel" },
   IMESSAGE_ENABLED: { table: "integrations", dbKey: "imessage", field: "enabled" },
   IMESSAGE_MODE: { table: "integrations", dbKey: "imessage", field: "mode" },
   IMESSAGE_ALLOWED_CHATS: { table: "integrations", dbKey: "imessage", field: "allowed_chats" },
