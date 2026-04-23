@@ -58,6 +58,7 @@
     "@grpc/grpc-js": "^1.14.3",
     "@grpc/proto-loader": "^0.8.0",
     "@hapi/boom": "^10.0.1",
+    "@photon-ai/advanced-imessage-kit": "^1.14.3",
     "@project-nomos/cate-sdk": "0.0.1",
     "@slack/bolt": "^4.6.0",
     "@slack/socket-mode": "^2.0.6",

@@ -55,6 +55,8 @@ const ALLOWED_KEYS = [
   "NOMOS_IMAGE_GENERATION_MODEL",
   "NOMOS_VIDEO_GENERATION",
   "NOMOS_VIDEO_GENERATION_MODEL",
+  "PHOTON_SERVER_URL",
+  "PHOTON_API_KEY",
 ];
 
 /** Keys that contain secrets and should be masked in GET responses. */
@@ -71,6 +73,7 @@ const SECRET_KEYS = new Set([
   "OPENROUTER_API_KEY",
   "BLUEBUBBLES_PASSWORD",
   "GOOGLE_API_KEY",
+  "PHOTON_API_KEY",
 ]);
 
 /** Keys that are writable via PUT. */
@@ -122,6 +125,8 @@ const WRITABLE_KEYS = new Set([
   "NOMOS_IMAGE_GENERATION_MODEL",
   "NOMOS_VIDEO_GENERATION",
   "NOMOS_VIDEO_GENERATION_MODEL",
+  "PHOTON_SERVER_URL",
+  "PHOTON_API_KEY",
 ]);
 
 /**

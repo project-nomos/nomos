@@ -20,6 +20,7 @@ import { randomUUID } from "node:crypto";
 import { IMessageReceiver } from "./imessage-receiver.ts";
 import { sendIMessage } from "./imessage-sender.ts";
 import { BlueBubblesAdapter, type BlueBubblesConfig } from "./imessage-bluebubbles.ts";
+import { PhotonAdapter, type PhotonConfig } from "./imessage-photon.ts";
 import type { ChannelAdapter, IncomingMessage, OutgoingMessage } from "../types.ts";
 import type { DraftManager } from "../draft-manager.ts";
 
@@ -46,7 +47,7 @@ function chunk(text: string): string[] {
 /** Chat style: 45 = group chat (43 = 1:1, handled as the else case). */
 const STYLE_GROUP = 45;
 
-export type IMessageMode = "chatdb" | "bluebubbles";
+export type IMessageMode = "chatdb" | "bluebubbles" | "photon";
 export type IMessageAgentMode = "passive" | "agent";
 
 interface ChatMeta {
@@ -82,6 +83,9 @@ export class IMessageAdapter implements ChannelAdapter {
   /** Map chatIdentifier -> chatGuid for BlueBubbles send routing. */
   private bbChatGuids = new Map<string, string>();
 
+  // photon mode
+  private photonAdapter: PhotonAdapter | null = null;
+
   constructor(options: IMessageAdapterOptions) {
     this.onMessage = options.onMessage;
     this.agentMode =
@@ -112,7 +116,9 @@ export class IMessageAdapter implements ChannelAdapter {
         (this.agentMode === "agent" ? ` (owner: ${[...this.ownerIdentities].join(", ")})` : ""),
     );
 
-    if (this.imessageMode === "bluebubbles") {
+    if (this.imessageMode === "photon") {
+      await this.startPhoton();
+    } else if (this.imessageMode === "bluebubbles") {
       await this.startBlueBubbles();
     } else {
       await this.startChatDb();
@@ -215,8 +221,37 @@ export class IMessageAdapter implements ChannelAdapter {
     );
   }
 
+  private async startPhoton(): Promise<void> {
+    const serverUrl = process.env.PHOTON_SERVER_URL;
+    if (!serverUrl) {
+      throw new Error("Photon mode requires PHOTON_SERVER_URL");
+    }
+
+    const config: PhotonConfig = {
+      serverUrl,
+      apiKey: process.env.PHOTON_API_KEY,
+    };
+
+    this.photonAdapter = new PhotonAdapter(config, (msg) => {
+      // Agent mode: only process messages from owner
+      if (this.agentMode === "agent") {
+        if (!this.isOwner(msg.userId)) return;
+      }
+
+      this.onMessage(msg);
+    });
+
+    await this.photonAdapter.start();
+    console.log(
+      `[imessage-adapter] Started in Photon mode (${this.agentMode}) -- server: ${serverUrl}`,
+    );
+  }
+
   async stop(): Promise<void> {
-    if (this.imessageMode === "bluebubbles" && this.bbAdapter) {
+    if (this.imessageMode === "photon" && this.photonAdapter) {
+      await this.photonAdapter.stop();
+      this.photonAdapter = null;
+    } else if (this.imessageMode === "bluebubbles" && this.bbAdapter) {
       await this.bbAdapter.stop();
       this.bbAdapter = null;
       this.bbChatGuids.clear();
@@ -253,10 +288,25 @@ export class IMessageAdapter implements ChannelAdapter {
    * Used by DraftManager after a draft is approved, and by agent mode.
    */
   async sendDirect(message: OutgoingMessage): Promise<void> {
-    if (this.imessageMode === "bluebubbles") {
+    if (this.imessageMode === "photon") {
+      await this.sendPhoton(message);
+    } else if (this.imessageMode === "bluebubbles") {
       await this.sendBlueBubbles(message);
     } else {
       await this.sendChatDb(message);
+    }
+  }
+
+  private async sendPhoton(message: OutgoingMessage): Promise<void> {
+    if (!this.photonAdapter) {
+      console.warn("[imessage-adapter] Photon adapter not initialized");
+      return;
+    }
+
+    try {
+      await this.photonAdapter.sendToContact(message.channelId, message.content);
+    } catch (err) {
+      console.error("[imessage-adapter] Photon send failed:", err);
     }
   }
 

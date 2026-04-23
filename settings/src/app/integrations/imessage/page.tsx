@@ -8,7 +8,7 @@ import { DirtyIndicator } from "@/components/dirty-indicator";
 import { useToast } from "@/contexts/toast-context";
 import { useUnsavedChanges } from "@/hooks/use-unsaved-changes";
 
-type IMessageMode = "chatdb" | "bluebubbles";
+type IMessageMode = "chatdb" | "bluebubbles" | "photon";
 type AgentMode = "passive" | "agent";
 
 export default function IMessageSettingsPage() {
@@ -38,6 +38,12 @@ export default function IMessageSettingsPage() {
   const [bbReadReceipts, setBbReadReceipts] = useState(false);
   const [initialBbReadReceipts, setInitialBbReadReceipts] = useState(false);
 
+  // Photon-specific
+  const [photonServerUrl, setPhotonServerUrl] = useState("");
+  const [initialPhotonServerUrl, setInitialPhotonServerUrl] = useState("");
+  const [photonApiKey, setPhotonApiKey] = useState("");
+  const [initialPhotonApiKey, setInitialPhotonApiKey] = useState("");
+
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [pingResult, setPingResult] = useState<boolean | null>(null);
@@ -53,7 +59,9 @@ export default function IMessageSettingsPage() {
     bbServerUrl !== initialBbServerUrl ||
     bbPassword !== initialBbPassword ||
     bbWebhookPort !== initialBbWebhookPort ||
-    bbReadReceipts !== initialBbReadReceipts;
+    bbReadReceipts !== initialBbReadReceipts ||
+    photonServerUrl !== initialPhotonServerUrl ||
+    photonApiKey !== initialPhotonApiKey;
   useUnsavedChanges(isDirty);
 
   const loadData = useCallback(async () => {
@@ -101,6 +109,14 @@ export default function IMessageSettingsPage() {
       const rr = envData.BLUEBUBBLES_READ_RECEIPTS === "true";
       setBbReadReceipts(rr);
       setInitialBbReadReceipts(rr);
+
+      const pUrl = envData.PHOTON_SERVER_URL ?? "";
+      setPhotonServerUrl(pUrl);
+      setInitialPhotonServerUrl(pUrl);
+
+      const pKey = envData.PHOTON_API_KEY ?? "";
+      setPhotonApiKey(pKey);
+      setInitialPhotonApiKey(pKey);
     } catch (err) {
       console.error("Failed to load iMessage data:", err);
       addToast("Failed to load Messages.app data", "error");
@@ -161,6 +177,8 @@ export default function IMessageSettingsPage() {
       if (bbWebhookPort !== initialBbWebhookPort) updates.BLUEBUBBLES_WEBHOOK_PORT = bbWebhookPort;
       if (bbReadReceipts !== initialBbReadReceipts)
         updates.BLUEBUBBLES_READ_RECEIPTS = bbReadReceipts ? "true" : "";
+      if (photonServerUrl !== initialPhotonServerUrl) updates.PHOTON_SERVER_URL = photonServerUrl;
+      if (photonApiKey !== initialPhotonApiKey) updates.PHOTON_API_KEY = photonApiKey;
 
       const res = await fetch("/api/env", {
         method: "PUT",
@@ -412,6 +430,33 @@ export default function IMessageSettingsPage() {
                 </a>
               </div>
             </label>
+
+            <label className="flex items-start gap-3 cursor-pointer p-3 rounded-lg border border-surface1 hover:border-mauve/50 transition-colors">
+              <input
+                type="radio"
+                name="imessage-mode"
+                value="photon"
+                checked={mode === "photon"}
+                onChange={() => setMode("photon")}
+                className="accent-mauve mt-0.5"
+              />
+              <div>
+                <span className="text-sm font-medium text-text">Photon Server</span>
+                <p className="text-xs text-overlay0 mt-0.5">
+                  Connects to a Photon iMessage server for full-featured support: reactions,
+                  tapbacks, typing indicators, message effects, scheduled messages, contact cards,
+                  and rich link previews.
+                </p>
+                <a
+                  href="https://github.com/photon-hq/advanced-imessage-kit"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 text-xs text-blue hover:text-blue/80 mt-1"
+                >
+                  photon-hq/advanced-imessage-kit <ExternalLink size={10} />
+                </a>
+              </div>
+            </label>
           </div>
         </section>
       )}
@@ -503,6 +548,42 @@ export default function IMessageSettingsPage() {
                   )}
                 </span>
               )}
+            </div>
+          </div>
+        </section>
+      )}
+
+      {/* Photon Config */}
+      {enabled && mode === "photon" && (
+        <section className="mb-8 rounded-xl border border-surface0 bg-mantle p-5">
+          <h2 className="text-sm font-semibold text-subtext1 uppercase tracking-wider mb-4">
+            Photon Server
+          </h2>
+          <div className="space-y-4">
+            <div className="space-y-1.5">
+              <label className="block text-sm font-medium text-subtext1">Server URL</label>
+              <input
+                type="text"
+                value={photonServerUrl}
+                onChange={(e) => setPhotonServerUrl(e.target.value)}
+                placeholder="http://localhost:1234"
+                className="w-full rounded-lg border border-surface1 bg-surface0 px-3 py-2 text-sm text-text placeholder:text-overlay0 focus:outline-none focus:border-mauve focus:ring-1 focus:ring-mauve/30 font-mono"
+              />
+              <p className="text-xs text-overlay0">The URL of your Photon iMessage server.</p>
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="block text-sm font-medium text-subtext1">API Key</label>
+              <input
+                type="password"
+                value={photonApiKey}
+                onChange={(e) => setPhotonApiKey(e.target.value)}
+                placeholder="Photon API key (optional)"
+                className="w-full rounded-lg border border-surface1 bg-surface0 px-3 py-2 text-sm text-text placeholder:text-overlay0 focus:outline-none focus:border-mauve focus:ring-1 focus:ring-mauve/30 font-mono"
+              />
+              <p className="text-xs text-overlay0">
+                API key for authentication (if configured on the server).
+              </p>
             </div>
           </div>
         </section>

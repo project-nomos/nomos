@@ -1573,6 +1573,73 @@ export function createMemoryMcpServer(): McpSdkServerConfigWithInstance {
     return delivered;
   }
 
+  // ── iMessage Tools ──
+
+  const imessageReadTool = tool(
+    "imessage_read",
+    "Read recent iMessages from a contact. Use this to check message history before responding. Requires iMessage to be configured in Photon mode.",
+    {
+      contact: z.string().describe("Phone number (+1...) or email address of the contact"),
+      limit: z.number().optional().describe("Maximum messages to return (default: 20)"),
+    },
+    async (args) => {
+      try {
+        const { PhotonAdapter } = await import("../daemon/channels/imessage-photon.ts");
+        const serverUrl = process.env.PHOTON_SERVER_URL;
+        if (!serverUrl) {
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: "iMessage Photon server not configured. Set PHOTON_SERVER_URL.",
+              },
+            ],
+          };
+        }
+
+        const adapter = new PhotonAdapter(
+          { serverUrl, apiKey: process.env.PHOTON_API_KEY },
+          () => {},
+        );
+        await adapter.start();
+
+        // Find the chat for this contact
+        const chats = await adapter.getChats();
+        const chat = chats.find(
+          (c) =>
+            c.identifier.includes(args.contact) ||
+            c.displayName.toLowerCase().includes(args.contact.toLowerCase()),
+        );
+
+        if (!chat) {
+          await adapter.stop();
+          return {
+            content: [{ type: "text" as const, text: `No chat found for ${args.contact}` }],
+          };
+        }
+
+        const messages = await adapter.getMessages(chat.guid, { limit: args.limit ?? 20 });
+        await adapter.stop();
+
+        const formatted = messages
+          .map((m) => {
+            const from = m.isFromMe ? "Me" : (m.handle?.address ?? "Unknown");
+            const ts = new Date(m.dateCreated).toLocaleString();
+            return `[${ts}] ${from}: ${m.text ?? "(attachment)"}`;
+          })
+          .reverse()
+          .join("\n");
+
+        return {
+          content: [{ type: "text" as const, text: formatted || "No messages found" }],
+        };
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        return { content: [{ type: "text" as const, text: `iMessage read failed: ${msg}` }] };
+      }
+    },
+  );
+
   // ── Proactive Message Tool ──
 
   const proactiveSendTool = tool(
@@ -1807,6 +1874,8 @@ export function createMemoryMcpServer(): McpSdkServerConfigWithInstance {
       memoryConsolidateTool,
       // Sleep / self-resume
       sleepTool,
+      // iMessage tools
+      imessageReadTool,
       // Proactive messaging
       proactiveSendTool,
       // Inter-agent messaging
