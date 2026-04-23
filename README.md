@@ -45,11 +45,11 @@
 
 Most AI assistants are stateless chatbots that forget you the moment a conversation ends. Nomos is building toward something different: an **AI digital clone** that knows you deeply, acts on your behalf, and gets smarter with every interaction.
 
-- **Ingests your history** — Import years of Slack, Gmail, Messages.app, Discord, Telegram, and WhatsApp messages. Your clone starts with deep context from day one, not a blank slate. Channels auto-sync when first connected; continuous delta sync keeps them current.
+- **Ingests your history** -- Import years of Messages.app, Gmail, and WhatsApp messages for deep context. The clone learns primarily from direct conversations and draft edits -- when you modify a draft before approving, the edit is captured as a learning signal. CLI manual ingestion (`nomos ingest slack --since DATE`) is available for on-demand imports.
 - **Learns your voice** — Per-contact communication style model analyzes how you write — formality, length, emoji, greetings — and drafts messages in your authentic voice. Different tone for your manager vs. your friends.
 - **Compiles knowledge** — A Karpathy-style knowledge wiki transforms raw messages into structured articles about your contacts, projects, and topics. The clone reads compiled knowledge first, RAG second.
 - **Unified identity graph** — Links contacts across Slack, email, Messages.app, Discord, Telegram, and WhatsApp. One person, one profile, regardless of which platform they message you on.
-- **Acts on your behalf** — Drafts and sends emails, manages your calendar, preps meeting briefs, tracks commitments, follows up, triages across channels. Per-contact autonomy: auto-send, draft-for-approval, or silent.
+- **Acts on your behalf** -- Drafts and sends emails, manages your calendar, preps meeting briefs, tracks commitments, follows up, triages across channels. Per-platform consent modes: `always_ask` (draft + approve), `auto_approve` (send immediately + FYI), `notify_only` (just notify, no response). Per-contact autonomy layered on top: auto-send, draft-for-approval, or silent.
 - **Remembers everything** — Every conversation is auto-indexed into vector memory. Ask "what did we decide about the API migration last week?" and it knows — across channels, across sessions.
 - **Reads you in real time** — A Theory of Mind engine tracks your mental state per session — focus level, emotional signals, urgency, whether you're stuck. Rule-based signals run every turn; a background LLM assessment catches sarcasm, implicit frustration, and goal shifts every few turns. The agent adapts its response style automatically.
 - **Represents you everywhere** — Slack, Discord, Telegram, WhatsApp, Messages.app, Email, terminal, web. Slack User Mode lets it draft and send messages as you. It's not a bot in your channel — it's you, augmented.
@@ -378,7 +378,7 @@ The digital clone features transform Nomos from a stateless chatbot into a persi
 <details>
 <summary><strong>Historical Data Ingestion</strong></summary>
 
-Import years of communication history from Slack, Gmail, Messages.app, Discord, Telegram, and WhatsApp. The ingestion pipeline deduplicates, chunks, embeds, and stores messages in pgvector-backed memory. When you connect a new channel, historical ingestion starts automatically as a background subprocess. Continuous delta sync keeps knowledge current.
+Import communication history from Messages.app, Gmail, and WhatsApp. The ingestion pipeline deduplicates, chunks, embeds, and stores messages in pgvector-backed memory. Auto-triggered bulk ingestion on channel connect has been retired for Slack, Discord, and Telegram -- the agent now learns primarily from direct conversations, draft edits, and knowledge extraction. CLI manual ingestion still works for on-demand imports. iMessage and Email ingestion is retained for style model training.
 
 ```bash
 nomos ingest imessage --since 2024-01-01              # Import Messages.app history

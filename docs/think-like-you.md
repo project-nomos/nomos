@@ -33,8 +33,15 @@ User Message
 | Memory Indexer (async)    |--->| Knowledge Extractor       |
 |   Chunk + embed + store   |    |   Facts, preferences,     |
 |                           |    |   corrections, patterns,  |
-|                           |    |   values                  |
-+---------------------------+    +---------------------------+
++---------------------------+    |   values                  |
+                                 +---------------------------+
+                                         ^
++---------------------------+            |
+| Draft Edit Tracker        |------------+
+|   Captures user edits to  |
+|   drafts before approval  |
+|   (approveWithEdit)       |
++---------------------------+
     |                                |
     v                                v
 +---------------------------+    +---------------------------+
@@ -146,6 +153,32 @@ Every extracted piece of knowledge has a confidence score (0.0 -- 0.95):
 - Max confidence is 0.95 (never fully certain)
 - Floor is 0.1 (never completely forgotten)
 - Corrections mark the original as "superseded" and create a new entry
+
+---
+
+## 2b. Draft Edit Tracking
+
+**File:** `src/daemon/draft-manager.ts` (`approveWithEdit()`)
+
+When a user modifies a draft before approving it, the edit is a high-signal learning opportunity -- it shows exactly how the agent's output differs from what the user actually wanted to say.
+
+### How It Works
+
+1. User receives a draft notification (via the default Slack channel)
+2. User edits the draft text and approves the modified version via `approveWithEdit()`
+3. The original draft and the edited version are diffed
+4. The diff is sent to the Knowledge Extractor as a "correction" signal
+5. Extracted corrections are stored in the user model with high confidence
+
+### Why Draft Edits Matter
+
+Draft edits are among the strongest learning signals available:
+
+- **Explicit preference** -- the user literally rewrote the agent's output
+- **Contextual** -- the edit happens in the context of a real conversation, not a synthetic scenario
+- **Fine-grained** -- word-level and tone-level corrections that style models and value extraction can't catch from passive observation alone
+
+This replaces bulk message ingestion as the primary learning mechanism for Slack, Discord, and Telegram. Instead of ingesting thousands of historical messages on startup, the agent learns incrementally from every draft interaction.
 
 ---
 
@@ -347,9 +380,10 @@ Powers the `/reflect` skill -- the agent assesses how well it knows you.
    - Extracts facts, preferences, corrections, patterns, values
    - Scores the message as a potential exemplar
    - Shadow Observer records tool usage and corrections
-4. **User Model updates** -- extracted knowledge merges with confidence tracking
-5. **Next turn** -- the updated model informs the next response via system prompt injection
-6. **Background** -- Auto-Dream consolidator periodically merges and prunes memory
+4. **Draft edits** -- when you modify a draft before approving, the diff is fed to the Knowledge Extractor as a high-confidence correction signal
+5. **User Model updates** -- extracted knowledge merges with confidence tracking
+6. **Next turn** -- the updated model informs the next response via system prompt injection
+7. **Background** -- Auto-Dream consolidator periodically merges and prunes memory
 
 ### What Goes Into the System Prompt
 

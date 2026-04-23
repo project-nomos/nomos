@@ -2,9 +2,11 @@
 
 Nomos can ingest years of historical communications from Slack, Gmail, iMessage, and WhatsApp to build deep context for the digital clone.
 
+> **Note:** Auto-triggered bulk ingestion on channel connect has been retired for Slack, Discord, and Telegram. The agent now learns primarily from direct conversations, draft edits (when you modify a draft before approving), and knowledge extraction from agent conversations. CLI manual ingestion still works for on-demand imports (e.g., `nomos ingest slack --since 2024-01-01`). iMessage and Email ingestion is retained for style model training.
+
 ## Overview
 
-The ingestion pipeline reads messages from external sources, deduplicates them, chunks the text, generates embeddings, and stores everything in pgvector-backed memory. After initial ingestion, continuous delta sync keeps the knowledge base current.
+The ingestion pipeline reads messages from external sources, deduplicates them, chunks the text, generates embeddings, and stores everything in pgvector-backed memory. After initial ingestion, continuous delta sync keeps the knowledge base current for platforms where auto-ingestion is still active (iMessage, Email).
 
 ## Supported Platforms
 
@@ -66,14 +68,16 @@ The style model trains exclusively on `metadata->>'direction' = 'sent'` regardle
 
 ## Delta Sync
 
-After initial ingestion completes, a cron job is automatically registered for continuous sync:
+After initial ingestion completes, a cron job is automatically registered for continuous sync on platforms where auto-ingestion is active:
 
-| Platform | Default interval | Cursor type             |
-| -------- | ---------------- | ----------------------- |
-| Slack    | Every 6 hours    | Slack pagination cursor |
-| Gmail    | Every 6 hours    | Gmail `historyId`       |
-| iMessage | Every 1 hour     | Last ROWID              |
-| WhatsApp | Manual only      | File-based              |
+| Platform | Default interval  | Cursor type             |
+| -------- | ----------------- | ----------------------- |
+| Slack    | Manual only (CLI) | Slack pagination cursor |
+| Gmail    | Every 6 hours     | Gmail `historyId`       |
+| iMessage | Every 1 hour      | Last ROWID              |
+| WhatsApp | Manual only       | File-based              |
+
+> **Note:** Slack, Discord, and Telegram no longer auto-register delta sync cron jobs. Use `nomos ingest slack --since DATE` for manual imports.
 
 Delta sync uses the `last_cursor` from the `ingest_jobs` table to fetch only new messages since the last successful run.
 
