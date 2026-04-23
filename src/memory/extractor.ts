@@ -61,11 +61,13 @@ User: {userMessage}
 Assistant: {agentResponse}
 
 Extract:
-- facts: things the user stated about themselves, their projects, tech stack, environment
+- facts: things the user stated about themselves, their projects, tech stack, environment, PEOPLE (names, relationships, phone numbers, emails, roles), addresses, schedules, or any concrete personal information. ALWAYS extract contact details (phone numbers, email addresses) as separate facts with the person's name as an entity.
 - preferences: user's expressed preferences for coding style, communication, tools, workflows
 - corrections: cases where the user corrected the assistant's output or assumptions
 - decisionPatterns: HOW the user thinks -- decision heuristics revealed when they choose between options, override suggestions, explain reasoning, or express priorities. Look for trade-off language ("more important than"), risk tolerance, prioritization patterns, and correction rationale. Each pattern should capture the underlying principle, not just the specific instance.
 - values: WHAT the user values -- core principles revealed through their choices, rejections, and explanations. Look for statements about quality, speed, simplicity, thoroughness, autonomy, collaboration, etc.
+
+IMPORTANT: When the user shares contact details (phone numbers, email addresses), extract EACH as a separate fact. Example: "Sophie - (415) 418-4370" should produce {"text": "Sophie's phone number is (415) 418-4370", "entities": ["Sophie", "(415) 418-4370"], "confidence": 0.95}
 
 Return: {"facts": [...], "preferences": [...], "corrections": [...], "decisionPatterns": [...], "values": [...]}
 Each fact: {"text": "...", "entities": ["..."], "confidence": 0.0-1.0}
