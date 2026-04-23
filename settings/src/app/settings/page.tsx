@@ -124,6 +124,10 @@ export default function AssistantSettingsPage() {
     "veo-3.0-generate-preview",
   );
 
+  // Consent modes per platform
+  const [consentModes, setConsentModes] = useState<Record<string, string>>({});
+  const [initialConsentModes, setInitialConsentModes] = useState<Record<string, string>>({});
+
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
@@ -160,7 +164,8 @@ export default function AssistantSettingsPage() {
     videoGeneration !== initialVideoGeneration ||
     videoGenerationModel !== initialVideoGenerationModel;
 
-  const isDirty = isIdentityDirty || isEnvDirty;
+  const isConsentDirty = JSON.stringify(consentModes) !== JSON.stringify(initialConsentModes);
+  const isDirty = isIdentityDirty || isEnvDirty || isConsentDirty;
   useUnsavedChanges(isDirty);
 
   const loadData = useCallback(async () => {
@@ -290,6 +295,16 @@ export default function AssistantSettingsPage() {
       const soul = (configData["agent.soul"] as string) ?? "";
       setAgentSoul(soul);
       setInitialAgentSoul(soul);
+
+      // Load consent modes
+      try {
+        const consentRes = await fetch("/api/consent");
+        const consentData = await consentRes.json();
+        setConsentModes(consentData);
+        setInitialConsentModes(consentData);
+      } catch {
+        // consent not available
+      }
     } catch (err) {
       console.error("Failed to load settings:", err);
       addToast("Failed to load settings", "error");
@@ -389,6 +404,19 @@ export default function AssistantSettingsPage() {
         const data = await failed.json();
         addToast(data.error ?? "Failed to save settings", "error");
         return;
+      }
+
+      // Save consent mode changes
+      if (isConsentDirty) {
+        for (const [platform, mode] of Object.entries(consentModes)) {
+          if (mode !== initialConsentModes[platform]) {
+            await fetch("/api/consent", {
+              method: "PUT",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ platform, mode }),
+            });
+          }
+        }
       }
 
       addToast("Settings saved successfully", "success");
@@ -832,6 +860,53 @@ export default function AssistantSettingsPage() {
               </div>
             </div>
           )}
+        </div>
+      </section>
+
+      {/* Message Consent */}
+      <section className="mb-8 rounded-xl border border-surface0 bg-mantle p-5">
+        <h2 className="text-sm font-semibold text-subtext1 uppercase tracking-wider mb-4">
+          Message Consent
+        </h2>
+        <p className="text-xs text-overlay0 mb-4">
+          Control how the agent handles incoming messages from each platform. Draft notifications
+          appear in your default Slack channel.
+        </p>
+        <div className="space-y-3">
+          {[
+            { key: "slack", label: "Slack (DMs & mentions)" },
+            { key: "discord", label: "Discord" },
+            { key: "telegram", label: "Telegram" },
+            { key: "imessage", label: "Messages.app" },
+            { key: "email", label: "Email" },
+            { key: "whatsapp", label: "WhatsApp" },
+          ].map(({ key, label }) => (
+            <div
+              key={key}
+              className="flex items-center justify-between rounded-lg border border-surface1 bg-surface0/50 px-4 py-3"
+            >
+              <span className="text-sm text-text">{label}</span>
+              <div className="flex items-center gap-1">
+                {[
+                  { value: "always_ask", label: "Always Ask" },
+                  { value: "auto_approve", label: "Auto Approve" },
+                  { value: "notify_only", label: "Notify Only" },
+                ].map((mode) => (
+                  <button
+                    key={mode.value}
+                    onClick={() => setConsentModes((prev) => ({ ...prev, [key]: mode.value }))}
+                    className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${
+                      (consentModes[key] ?? "always_ask") === mode.value
+                        ? "bg-mauve text-crust"
+                        : "bg-surface1 text-subtext0 hover:bg-surface1/80"
+                    }`}
+                  >
+                    {mode.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ))}
         </div>
       </section>
 

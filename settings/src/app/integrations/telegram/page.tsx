@@ -71,12 +71,6 @@ export default function TelegramSettingsPage() {
 
       addToast("Telegram settings saved", "success");
       await loadData();
-      // Auto-trigger ingestion for Telegram
-      fetch("/api/ingestion", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ platform: "telegram", action: "trigger-ingest" }),
-      }).catch(() => {});
     } catch (err) {
       console.error("Failed to save Telegram settings:", err);
       addToast("Failed to save settings", "error");

@@ -67,7 +67,7 @@ export class Gateway {
   private settingsProcess: ChildProcess | null = null;
   private cateIntegration: CATEIntegration | null = null;
   private ingestScheduler: IngestScheduler;
-  private pendingSlackIngest: { team_id: string }[] | null = null;
+  // Removed: pendingSlackIngest -- bulk ingestion retired in favor of agent conversation learning
   private options: GatewayOptions;
 
   constructor(options: GatewayOptions = {}) {
@@ -196,17 +196,9 @@ export class Gateway {
       await this.registerChannelAdapters();
       await this.channelManager.start();
 
-      // Trigger deferred Slack ingestion after a cooldown so poll timers
-      // have time to spread out and don't collide with ingestion API calls.
-      if (this.pendingSlackIngest) {
-        const workspaces = this.pendingSlackIngest;
-        this.pendingSlackIngest = null;
-        setTimeout(() => {
-          for (const ws of workspaces) {
-            this.ingestScheduler.triggerStartup(`slack:${ws.team_id}`, "history", "slack");
-          }
-        }, 60_000); // Wait 60s before starting ingestion
-      }
+      // Note: Slack/Discord/Telegram bulk ingestion removed.
+      // Agent learns from direct conversations and draft edits, not raw message history.
+      // Manual ingestion still available via CLI: nomos ingest slack --since DATE
     }
 
     // Auto-ingest Gmail when Google Workspace is configured
@@ -822,9 +814,7 @@ export class Gateway {
           }
         }
 
-        // Slack ingestion is deferred until after channelManager.start()
-        // to avoid competing for API rate limits during baseline setup.
-        this.pendingSlackIngest = workspaces;
+        // Slack bulk ingestion retired -- agent learns from conversations + draft edits
       } else if (process.env.SLACK_USER_TOKEN && process.env.SLACK_APP_TOKEN) {
         // Backwards compat: single env var, no DB rows
         const adapter = new SlackUserAdapter({
@@ -863,7 +853,7 @@ export class Gateway {
           content: text,
         }),
       );
-      this.ingestScheduler.triggerStartup("discord", "history", "discord");
+      // Discord ingestion removed -- agent learns from conversations, not history
     }
 
     if (process.env.TELEGRAM_BOT_TOKEN) {
@@ -881,7 +871,7 @@ export class Gateway {
           content: text,
         }),
       );
-      this.ingestScheduler.triggerStartup("telegram", "history", "telegram");
+      // Telegram ingestion removed -- agent learns from conversations, not history
     }
 
     // WhatsApp is always available (uses QR code auth)
