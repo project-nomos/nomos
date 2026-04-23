@@ -27,7 +27,7 @@ import { syncFileToDb } from "../config/file-sync.ts";
 
 const LOCK_FILE = path.join(homedir(), ".nomos", "wiki-compiler.lock");
 const WIKI_DIR = path.join(homedir(), ".nomos", "wiki");
-const MIN_INTERVAL_MS = 2 * 60 * 60 * 1000; // 2 hours
+const MIN_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
 const MAX_ARTICLES_PER_RUN = 20;
 const COMPILE_MODEL = "claude-sonnet-4-6";
 

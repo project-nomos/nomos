@@ -242,7 +242,7 @@ export class Gateway {
       if (!existingWikiJob) {
         await cronStore.createJob({
           name: "wiki-compile",
-          schedule: "6h",
+          schedule: "1h",
           scheduleType: "every",
           sessionTarget: "isolated",
           deliveryMode: "none",
