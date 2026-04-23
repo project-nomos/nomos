@@ -88,7 +88,10 @@ export class Gateway {
         this.wsServer.broadcast(event);
         this.grpcServer.broadcast(event);
       },
-      notifySlack: (userId, draft) => this.sendSlackDraftNotification(userId, draft),
+      notifyDefaultChannel: (draft, context) =>
+        this.sendDraftNotificationToDefaultChannel(draft, context),
+      notifyDefaultChannelFyi: (platform, channelId, content, context) =>
+        this.sendFyiNotificationToDefaultChannel(platform, channelId, content, context),
     });
 
     // 4. Create WebSocket server
@@ -1021,38 +1024,85 @@ export class Gateway {
     });
   }
 
-  /** Send a Slack bot DM to the user with Block Kit approval buttons. */
-  private async sendSlackDraftNotification(userId: string, draft: DraftRow): Promise<void> {
-    const botToken = process.env.SLACK_BOT_TOKEN;
+  /** Get bot token from integrations table or env. */
+  private async getBotToken(): Promise<string | undefined> {
+    if (process.env.SLACK_BOT_TOKEN) return process.env.SLACK_BOT_TOKEN;
+    try {
+      const { getIntegration } = await import("../db/integrations.ts");
+      const slack = await getIntegration("slack");
+      return (slack?.secrets as Record<string, string>)?.bot_token;
+    } catch {
+      return undefined;
+    }
+  }
+
+  /** Get default notification channel config. */
+  private async getDefaultChannel(): Promise<{ channelId: string; platform: string } | null> {
+    try {
+      const { getNotificationDefault } = await import("../db/notification-defaults.ts");
+      return await getNotificationDefault();
+    } catch {
+      return null;
+    }
+  }
+
+  /** Platform display names for notifications. */
+  private static readonly PLATFORM_LABELS: Record<string, string> = {
+    slack: "Slack",
+    discord: "Discord",
+    telegram: "Telegram",
+    imessage: "iMessage",
+    email: "Email",
+    whatsapp: "WhatsApp",
+    cate: "CATE",
+  };
+
+  private platformLabel(platform: string): string {
+    const base = platform.split(":")[0].replace("slack-user", "slack");
+    return Gateway.PLATFORM_LABELS[base] ?? platform;
+  }
+
+  /**
+   * Post a draft notification to the default Slack channel with Approve/Edit/Decline buttons.
+   * Replaces the old sendSlackDraftNotification (which posted to a bot DM).
+   */
+  private async sendDraftNotificationToDefaultChannel(
+    draft: DraftRow,
+    context: Record<string, unknown>,
+  ): Promise<void> {
+    const nd = await this.getDefaultChannel();
+    if (!nd) return;
+
+    const botToken = await this.getBotToken();
     if (!botToken) return;
 
-    const slackAdapter = this.channelManager.getAdapter("slack") as SlackAdapter | undefined;
-    if (!slackAdapter) return;
-
-    // Open a DM channel with the user
     const { WebClient } = await import("@slack/web-api");
     const client = new WebClient(botToken);
-    const dm = await client.conversations.open({ users: userId });
-    const dmChannel = dm.channel?.id;
-    if (!dmChannel) return;
 
-    const contextLabel =
-      (draft.context as Record<string, unknown>).messageType === "dm"
-        ? `DM from ${(draft.context as Record<string, unknown>).senderName ?? "unknown"}`
-        : `Mention in #${(draft.context as Record<string, unknown>).channelName ?? "channel"}`;
+    const senderName = (context.senderName as string) ?? draft.user_id;
+    const platformLabel = this.platformLabel(draft.platform);
+    const messageType = (context.messageType as string) ?? "message";
+    const channelName = (context.channelName as string) ?? "";
+
+    const contextLine =
+      messageType === "dm"
+        ? `${platformLabel} DM from *${senderName}*`
+        : messageType === "mention"
+          ? `${platformLabel} @mention in #${channelName} from *${senderName}*`
+          : `${platformLabel} message from *${senderName}*`;
 
     const preview =
       draft.content.length > 2900 ? draft.content.slice(0, 2900) + "..." : draft.content;
 
     await client.chat.postMessage({
-      channel: dmChannel,
-      text: `Draft response ready (${draft.id.slice(0, 8)})`,
+      channel: nd.channelId,
+      text: `Draft response for ${contextLine}`,
       blocks: [
         {
           type: "section",
           text: {
             type: "mrkdwn",
-            text: `*Draft response ready*\n_${contextLabel}_`,
+            text: `*${contextLine}*`,
           },
         },
         {
@@ -1075,7 +1125,7 @@ export class Gateway {
             },
             {
               type: "button",
-              text: { type: "plain_text", text: "Reject" },
+              text: { type: "plain_text", text: "Decline" },
               style: "danger",
               action_id: "reject_draft",
               value: draft.id,
@@ -1083,6 +1133,56 @@ export class Gateway {
           ],
         },
       ],
+    });
+  }
+
+  /**
+   * Post a FYI notification to the default channel (for auto-approved messages).
+   */
+  private async sendFyiNotificationToDefaultChannel(
+    platform: string,
+    channelId: string,
+    content: string,
+    context: Record<string, unknown>,
+  ): Promise<void> {
+    const nd = await this.getDefaultChannel();
+    if (!nd) return;
+
+    const botToken = await this.getBotToken();
+    if (!botToken) return;
+
+    const { WebClient } = await import("@slack/web-api");
+    const client = new WebClient(botToken);
+
+    const senderName = (context.senderName as string) ?? channelId;
+    const platformLabel = this.platformLabel(platform);
+    const preview = content.length > 200 ? content.slice(0, 200) + "..." : content;
+
+    await client.chat.postMessage({
+      channel: nd.channelId,
+      text: `Auto-replied to ${senderName} on ${platformLabel}: ${preview}`,
+    });
+  }
+
+  /**
+   * Post a "notify only" notification to the default channel (no draft, no response).
+   */
+  async postNotifyOnlyToDefaultChannel(msg: IncomingMessage): Promise<void> {
+    const nd = await this.getDefaultChannel();
+    if (!nd) return;
+
+    const botToken = await this.getBotToken();
+    if (!botToken) return;
+
+    const { WebClient } = await import("@slack/web-api");
+    const client = new WebClient(botToken);
+
+    const platformLabel = this.platformLabel(msg.platform);
+    const preview = msg.content.length > 300 ? msg.content.slice(0, 300) + "..." : msg.content;
+
+    await client.chat.postMessage({
+      channel: nd.channelId,
+      text: `${platformLabel} message from ${msg.userId}:\n${preview}`,
     });
   }
 }
