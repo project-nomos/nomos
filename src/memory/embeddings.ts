@@ -1,7 +1,89 @@
-import { GoogleAuth } from "google-auth-library";
+/**
+ * Embedding generation -- supports two backends:
+ *
+ * 1. Gemini API (preferred): uses GOOGLE_API_KEY with the generativelanguage endpoint.
+ *    No GCP project needed, works with any Gemini API key.
+ *
+ * 2. Vertex AI (legacy): uses GOOGLE_CLOUD_PROJECT + Application Default Credentials.
+ *    Requires gcloud auth and a GCP project with aiplatform API enabled.
+ *
+ * Detection: GOOGLE_API_KEY -> Gemini API. GOOGLE_CLOUD_PROJECT -> Vertex AI.
+ */
 
 const EMBEDDING_DIM = 768;
-const MAX_BATCH_SIZE = 250; // Vertex AI supports up to 250 instances per request
+const MAX_BATCH_SIZE = 100; // Gemini API batch limit
+
+// ── Gemini API backend ──
+
+interface GeminiEmbeddingResponse {
+  embedding: { values: number[] };
+}
+
+interface GeminiBatchResponse {
+  embeddings: Array<{ values: number[] }>;
+}
+
+async function generateEmbeddingsGemini(texts: string[]): Promise<number[][]> {
+  const apiKey = process.env.GOOGLE_API_KEY;
+  if (!apiKey) throw new Error("GOOGLE_API_KEY is required for embeddings");
+
+  const model = process.env.EMBEDDING_MODEL ?? "gemini-embedding-001";
+  const results: number[][] = [];
+
+  for (let i = 0; i < texts.length; i += MAX_BATCH_SIZE) {
+    const batch = texts.slice(i, i + MAX_BATCH_SIZE);
+
+    if (batch.length === 1) {
+      // Single text -- use embedContent
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:embedContent?key=${apiKey}`;
+      const response = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: `models/${model}`,
+          content: { parts: [{ text: batch[0] }] },
+          outputDimensionality: EMBEDDING_DIM,
+        }),
+      });
+
+      if (!response.ok) {
+        const body = await response.text();
+        throw new Error(`Gemini embedding error ${response.status}: ${body}`);
+      }
+
+      const data = (await response.json()) as GeminiEmbeddingResponse;
+      results.push(data.embedding.values);
+    } else {
+      // Batch -- use batchEmbedContents
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:batchEmbedContents?key=${apiKey}`;
+      const response = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          requests: batch.map((text) => ({
+            model: `models/${model}`,
+            content: { parts: [{ text }] },
+            outputDimensionality: EMBEDDING_DIM,
+          })),
+        }),
+      });
+
+      if (!response.ok) {
+        const body = await response.text();
+        throw new Error(`Gemini batch embedding error ${response.status}: ${body}`);
+      }
+
+      const data = (await response.json()) as GeminiBatchResponse;
+      for (const emb of data.embeddings) {
+        results.push(emb.values);
+      }
+    }
+  }
+
+  return results;
+}
+
+// ── Vertex AI backend (legacy) ──
 
 interface VertexEmbeddingResponse {
   predictions: Array<{
@@ -12,37 +94,18 @@ interface VertexEmbeddingResponse {
   }>;
 }
 
-let authClient: GoogleAuth | undefined;
+async function generateEmbeddingsVertex(texts: string[]): Promise<number[][]> {
+  const { GoogleAuth } = await import("google-auth-library");
 
-function getAuth(): GoogleAuth {
-  if (!authClient) {
-    authClient = new GoogleAuth({
-      scopes: ["https://www.googleapis.com/auth/cloud-platform"],
-    });
-  }
-  return authClient;
-}
-
-function getConfig(): { projectId: string; location: string; model: string } {
   const projectId = process.env.GOOGLE_CLOUD_PROJECT;
-  if (!projectId) {
-    throw new Error("GOOGLE_CLOUD_PROJECT is required for embeddings. Set it in your environment.");
-  }
+  if (!projectId) throw new Error("GOOGLE_CLOUD_PROJECT is required for Vertex AI embeddings");
 
-  return {
-    projectId,
-    location: process.env.VERTEX_AI_LOCATION ?? "global",
-    model: process.env.EMBEDDING_MODEL ?? "gemini-embedding-001",
-  };
-}
+  const location = process.env.VERTEX_AI_LOCATION ?? "global";
+  const model = process.env.EMBEDDING_MODEL ?? "gemini-embedding-001";
 
-/**
- * Generate embeddings for one or more texts using Google's gemini-embedding-001
- * via the Vertex AI API. Requires GOOGLE_CLOUD_PROJECT and ADC credentials.
- */
-export async function generateEmbeddings(texts: string[]): Promise<number[][]> {
-  const { projectId, location, model } = getConfig();
-  const auth = getAuth();
+  const auth = new GoogleAuth({
+    scopes: ["https://www.googleapis.com/auth/cloud-platform"],
+  });
   const client = await auth.getClient();
   const tokenResponse = await client.getAccessToken();
   const accessToken = tokenResponse.token;
@@ -52,12 +115,10 @@ export async function generateEmbeddings(texts: string[]): Promise<number[][]> {
   }
 
   const endpoint = `https://${location}-aiplatform.googleapis.com/v1/projects/${projectId}/locations/${location}/publishers/google/models/${model}:predict`;
-
   const results: number[][] = Array.from<number[]>({ length: texts.length });
 
-  // Process in batches
-  for (let i = 0; i < texts.length; i += MAX_BATCH_SIZE) {
-    const batch = texts.slice(i, i + MAX_BATCH_SIZE);
+  for (let i = 0; i < texts.length; i += 250) {
+    const batch = texts.slice(i, i + 250);
 
     const response = await fetch(endpoint, {
       method: "POST",
@@ -85,6 +146,19 @@ export async function generateEmbeddings(texts: string[]): Promise<number[][]> {
   return results;
 }
 
+// ── Public API ──
+
+/**
+ * Generate embeddings for one or more texts.
+ * Auto-selects backend: GOOGLE_API_KEY -> Gemini API, GOOGLE_CLOUD_PROJECT -> Vertex AI.
+ */
+export async function generateEmbeddings(texts: string[]): Promise<number[][]> {
+  if (process.env.GOOGLE_API_KEY) {
+    return generateEmbeddingsGemini(texts);
+  }
+  return generateEmbeddingsVertex(texts);
+}
+
 /**
  * Generate a single embedding for a text.
  */
@@ -98,8 +172,7 @@ export const DIMENSIONS = EMBEDDING_DIM;
 
 /**
  * Check if embedding generation is available.
- * Returns false if GOOGLE_CLOUD_PROJECT is not configured.
  */
 export function isEmbeddingAvailable(): boolean {
-  return Boolean(process.env.GOOGLE_CLOUD_PROJECT);
+  return Boolean(process.env.GOOGLE_API_KEY || process.env.GOOGLE_CLOUD_PROJECT);
 }
