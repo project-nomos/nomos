@@ -234,6 +234,29 @@ export class Gateway {
       console.warn("[gateway] Proactive jobs registration failed:", err);
     }
 
+    // Register wiki compilation cron job (compile knowledge every 6 hours)
+    try {
+      const { CronStore } = await import("../cron/store.ts");
+      const cronStore = new CronStore();
+      const existingWikiJob = await cronStore.getJobByName("wiki-compile");
+      if (!existingWikiJob) {
+        await cronStore.createJob({
+          name: "wiki-compile",
+          schedule: "6h",
+          scheduleType: "every",
+          sessionTarget: "isolated",
+          deliveryMode: "none",
+          prompt: "__wiki_compile__",
+          enabled: true,
+          errorCount: 0,
+        });
+        console.log("[gateway] Registered wiki compilation cron job (every 6h)");
+        process.emit("cron:refresh" as never);
+      }
+    } catch (err) {
+      console.warn("[gateway] Wiki cron registration failed:", err);
+    }
+
     // Start CATE protocol server (agent-to-agent trust layer)
     try {
       this.cateIntegration = await initCATEIntegration({
