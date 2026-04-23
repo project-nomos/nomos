@@ -150,6 +150,35 @@ export class SlackUserAdapter implements ChannelAdapter {
       }
     });
 
+    // Register draft approval/rejection action handlers for the default channel.
+    // These handle button clicks on draft notifications posted by the gateway.
+    // Must be registered here because SlackAdapter (bot mode) may not be running.
+    this.app.action("approve_draft", async ({ action, ack, respond }) => {
+      await ack();
+      const draftId = (action as { value?: string }).value;
+      if (!draftId) return;
+      const result = await this.draftManager.approve(draftId);
+      await respond({
+        replace_original: true,
+        text: result.success
+          ? `:white_check_mark: Draft ${draftId.slice(0, 8)} approved and sent`
+          : `:x: Failed: ${result.error}`,
+      });
+    });
+
+    this.app.action("reject_draft", async ({ action, ack, respond }) => {
+      await ack();
+      const draftId = (action as { value?: string }).value;
+      if (!draftId) return;
+      const result = await this.draftManager.reject(draftId);
+      await respond({
+        replace_original: true,
+        text: result.success
+          ? `:no_entry_sign: Draft ${draftId.slice(0, 8)} declined`
+          : `:x: Failed: ${result.error}`,
+      });
+    });
+
     await this.app.start();
     console.log(
       `[slack-user-adapter] Running via Socket Mode (user: ${this.userId}, team: ${this.teamId})`,

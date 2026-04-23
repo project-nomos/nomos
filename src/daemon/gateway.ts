@@ -636,7 +636,7 @@ export class Gateway {
       // Run incoming transform hooks (fire-and-forget the async, enqueue immediately)
       this.channelManager
         .transformIncoming(rawMsg)
-        .then((msg) => {
+        .then(async (msg) => {
           const adapter = this.channelManager.getAdapter(msg.platform);
 
           // Notify connected clients about the incoming message
@@ -659,6 +659,24 @@ export class Gateway {
               console.error("[gateway] Observe indexing failed:", err),
             );
             return;
+          }
+
+          // Consent gate: check if this platform is "notify_only"
+          // Default channel is exempt (direct chat with agent)
+          const isDefault = await this.isDefaultChannel(msg.platform, msg.channelId);
+          if (!isDefault) {
+            try {
+              const { getConsentMode } = await import("../db/consent-config.ts");
+              const consent = await getConsentMode(msg.platform);
+              if (consent === "notify_only") {
+                this.postNotifyOnlyToDefaultChannel(msg).catch((err) =>
+                  console.error("[gateway] Notify-only notification failed:", err),
+                );
+                return; // don't process through agent
+              }
+            } catch {
+              // consent config not available -- continue with default (always_ask)
+            }
           }
 
           const sessionKey = `${msg.platform}:${msg.channelId}`;
@@ -830,29 +848,57 @@ export class Gateway {
     }
 
     if (process.env.DISCORD_BOT_TOKEN) {
-      const adapter = new DiscordAdapter(enqueue);
+      const adapter = new DiscordAdapter({
+        onMessage: enqueue,
+        draftManager: this.draftManager,
+      });
       this.channelManager.register(adapter);
+      // Register sendDirect (not send) to avoid infinite draft loop
       this.draftManager.registerSendFn("discord", (channelId, text, threadId) =>
-        adapter.send({ inReplyTo: "", platform: "discord", channelId, threadId, content: text }),
+        adapter.sendDirect({
+          inReplyTo: "",
+          platform: "discord",
+          channelId,
+          threadId,
+          content: text,
+        }),
       );
       this.ingestScheduler.triggerStartup("discord", "history", "discord");
     }
 
     if (process.env.TELEGRAM_BOT_TOKEN) {
-      const adapter = new TelegramAdapter(enqueue);
+      const adapter = new TelegramAdapter({
+        onMessage: enqueue,
+        draftManager: this.draftManager,
+      });
       this.channelManager.register(adapter);
       this.draftManager.registerSendFn("telegram", (channelId, text, threadId) =>
-        adapter.send({ inReplyTo: "", platform: "telegram", channelId, threadId, content: text }),
+        adapter.sendDirect({
+          inReplyTo: "",
+          platform: "telegram",
+          channelId,
+          threadId,
+          content: text,
+        }),
       );
       this.ingestScheduler.triggerStartup("telegram", "history", "telegram");
     }
 
     // WhatsApp is always available (uses QR code auth)
     if (process.env.WHATSAPP_ENABLED === "true") {
-      const adapter = new WhatsAppAdapter(enqueue);
+      const adapter = new WhatsAppAdapter({
+        onMessage: enqueue,
+        draftManager: this.draftManager,
+      });
       this.channelManager.register(adapter);
       this.draftManager.registerSendFn("whatsapp", (channelId, text, threadId) =>
-        adapter.send({ inReplyTo: "", platform: "whatsapp", channelId, threadId, content: text }),
+        adapter.sendDirect({
+          inReplyTo: "",
+          platform: "whatsapp",
+          channelId,
+          threadId,
+          content: text,
+        }),
       );
     }
 
@@ -1022,6 +1068,13 @@ export class Gateway {
         resolve();
       });
     });
+  }
+
+  /** Check if a message is in the default notification channel (exempt from consent). */
+  private async isDefaultChannel(platform: string, channelId: string): Promise<boolean> {
+    const nd = await this.getDefaultChannel();
+    if (!nd) return false;
+    return nd.platform === platform && nd.channelId === channelId;
   }
 
   /** Get bot token from integrations table or env. */
