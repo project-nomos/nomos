@@ -149,6 +149,7 @@ export class IMessageAdapter implements ChannelAdapter {
         handleIdentifier: msg.handleIdentifier,
       });
 
+      const senderName = msg.chatDisplayName || msg.handleIdentifier;
       this.onMessage({
         id: randomUUID(),
         platform: "imessage",
@@ -156,6 +157,7 @@ export class IMessageAdapter implements ChannelAdapter {
         userId: msg.handleIdentifier,
         content: msg.text,
         timestamp: new Date(),
+        metadata: { senderName, messageType: "dm", handleIdentifier: msg.handleIdentifier },
       });
     });
 
@@ -230,8 +232,12 @@ export class IMessageAdapter implements ChannelAdapter {
   async send(message: OutgoingMessage): Promise<void> {
     // Passive mode: route through draft manager for approval
     if (this.agentMode === "passive" && this.draftManager) {
+      // Look up sender info from cached metadata
+      const meta = this.chatMeta.get(message.channelId);
+      const senderName = meta?.handleIdentifier ?? message.channelId;
       await this.draftManager.createDraft(message, "imessage-passive", {
-        messageType: "imessage",
+        messageType: "dm",
+        senderName,
         channelId: message.channelId,
         agentMode: "passive",
       });
