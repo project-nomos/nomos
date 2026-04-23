@@ -997,12 +997,12 @@ export default function AssistantSettingsPage() {
               <p className="text-xs text-overlay0">
                 Generate videos from text prompts using Google&apos;s Veo model via the{" "}
                 <code className="text-xs bg-surface0 px-1 rounded">generate_video</code> tool.
-                {apiProvider === "vertex" ? (
-                  <span className="text-green ml-1">Using Vertex AI.</span>
-                ) : hasGeminiApiKey || imageGeneration ? (
-                  <span className="text-green ml-1">Gemini API key configured.</span>
+                {hasGoogleApiKey ? (
+                  <span className="text-green ml-1">Google API key configured.</span>
                 ) : (
-                  <span className="text-peach ml-1">Requires Vertex AI or a Gemini API key.</span>
+                  <span className="text-peach ml-1">
+                    Requires Google API key (set in Google AI above).
+                  </span>
                 )}
               </p>
             </div>
