@@ -40,6 +40,11 @@ export const SLASH_COMMANDS = [
   { name: "permissions", desc: "Manage agent permissions" },
   { name: "integrations", desc: "Setup channel integrations" },
   { name: "team", desc: "Run a task with parallel agent workers" },
+  { name: "calibrate", desc: "Start a calibration session to teach the agent how you think" },
+  { name: "reflect", desc: "Agent self-assessment -- how well does it know you?" },
+  { name: "twin-test", desc: "Adversarial test -- can the agent write like you?" },
+  { name: "dna", desc: "Export/import your personality DNA" },
+  { name: "wiki", desc: "Compile or browse the knowledge wiki" },
   { name: "quit", desc: "Exit nomos" },
 ] as const;
 
@@ -157,6 +162,31 @@ export async function dispatchSlashCommand(
       return { output: await cmdIntegrations(ctx, args) };
     case "team":
       return cmdTeam(args, input);
+    case "calibrate":
+      return { output: "", passthrough: "Start a calibration session. Use the /calibrate skill." };
+    case "reflect":
+      return { output: "", passthrough: "Run a self-reflection. Use the /reflect skill." };
+    case "twin-test":
+      return { output: "", passthrough: "Run an adversarial twin test. Use the /twin-test skill." };
+    case "dna": {
+      const subCmd = args[0] ?? "";
+      if (subCmd === "export")
+        return {
+          output: "",
+          passthrough: "Export my personality DNA. Use the /dna skill with export mode.",
+        };
+      if (subCmd === "import")
+        return {
+          output: "",
+          passthrough: `Import personality DNA from ${args[1] ?? "file"}. Use the /dna skill with import mode.`,
+        };
+      return { output: "", passthrough: "Show my personality DNA status. Use the /dna skill." };
+    }
+    case "wiki":
+      return {
+        output: "",
+        passthrough: `Knowledge wiki: ${args.join(" ") || "show status and list articles"}. Use the wiki tools.`,
+      };
     case "undo-files":
       return { output: cmdUndoFiles() };
     default:
