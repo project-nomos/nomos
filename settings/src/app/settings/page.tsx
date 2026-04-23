@@ -111,9 +111,6 @@ export default function AssistantSettingsPage() {
   // Image generation
   const [imageGeneration, setImageGeneration] = useState(false);
   const [initialImageGeneration, setInitialImageGeneration] = useState(false);
-  const [geminiApiKey, setGeminiApiKey] = useState("");
-  const [hasGeminiApiKey, setHasGeminiApiKey] = useState(false);
-  const [geminiApiKeyDirty, setGeminiApiKeyDirty] = useState(false);
   const [imageGenerationModel, setImageGenerationModel] = useState("gemini-3-pro-image-preview");
   const [initialImageGenerationModel, setInitialImageGenerationModel] = useState(
     "gemini-3-pro-image-preview",
@@ -158,7 +155,6 @@ export default function AssistantSettingsPage() {
     extractionModel !== initialExtractionModel ||
     embeddingModel !== initialEmbeddingModel ||
     googleApiKeyDirty ||
-    geminiApiKeyDirty ||
     imageGeneration !== initialImageGeneration ||
     imageGenerationModel !== initialImageGenerationModel ||
     videoGeneration !== initialVideoGeneration ||
@@ -264,10 +260,6 @@ export default function AssistantSettingsPage() {
       const ig = envData.NOMOS_IMAGE_GENERATION === "true";
       setImageGeneration(ig);
       setInitialImageGeneration(ig);
-
-      setHasGeminiApiKey(!!envData.GEMINI_API_KEY);
-      setGeminiApiKey("");
-      setGeminiApiKeyDirty(false);
 
       const igm = envData.NOMOS_IMAGE_GENERATION_MODEL ?? "gemini-3-pro-image-preview";
       setImageGenerationModel(igm);
@@ -375,7 +367,6 @@ export default function AssistantSettingsPage() {
         if (googleApiKeyDirty) envUpdates.GOOGLE_API_KEY = googleApiKey;
         if (imageGeneration !== initialImageGeneration)
           envUpdates.NOMOS_IMAGE_GENERATION = imageGeneration ? "true" : "";
-        if (geminiApiKeyDirty) envUpdates.GEMINI_API_KEY = geminiApiKey;
         if (imageGenerationModel !== initialImageGenerationModel)
           envUpdates.NOMOS_IMAGE_GENERATION_MODEL = imageGenerationModel;
         if (videoGeneration !== initialVideoGeneration)
@@ -539,14 +530,22 @@ export default function AssistantSettingsPage() {
         {/* Anthropic-specific config */}
         {apiProvider === "anthropic" && (
           <div className="mt-4 pt-4 border-t border-surface0">
+            <div className="flex items-center justify-between mb-2">
+              <label className="block text-sm font-medium text-subtext1">API Key</label>
+              {hasApiKey ? (
+                <span className="text-xs text-green font-medium">Key configured</span>
+              ) : (
+                <span className="text-xs text-red font-medium">Key required</span>
+              )}
+            </div>
             <TokenInput
-              label="API Key"
+              label="Anthropic API Key"
               value={apiKey}
               onChange={(v) => {
                 setApiKey(v);
                 setApiKeyDirty(true);
               }}
-              placeholder={hasApiKey ? "Configured - enter new value to replace" : "sk-ant-..."}
+              placeholder={hasApiKey ? "Configured -- enter new value to replace" : "sk-ant-..."}
               helperText="Your Anthropic API key"
             />
           </div>
@@ -880,27 +879,44 @@ export default function AssistantSettingsPage() {
         </div>
       </section>
 
-      {/* Embeddings */}
+      {/* Google AI (Embeddings + Image/Video) */}
       <section className="mb-8 rounded-xl border border-surface0 bg-mantle p-5">
-        <h2 className="text-sm font-semibold text-subtext1 uppercase tracking-wider mb-4">
-          Embeddings
-        </h2>
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-sm font-semibold text-subtext1 uppercase tracking-wider">
+            Google AI
+          </h2>
+          {hasGoogleApiKey ? (
+            <span className="text-xs text-green font-medium">Key configured</span>
+          ) : (
+            <span className="text-xs text-peach font-medium">Key required</span>
+          )}
+        </div>
+        <p className="text-xs text-overlay0 mb-4">
+          Shared API key for embeddings, image generation, and video generation.
+        </p>
         <div className="space-y-4">
-          <div className="space-y-1.5">
-            <label className="block text-sm font-medium text-subtext1">Google API Key</label>
-            <TokenInput
-              label="Google API Key"
-              value={googleApiKey}
-              onChange={(v) => {
-                setGoogleApiKey(v);
-                setGoogleApiKeyDirty(true);
-              }}
-              placeholder={
-                hasGoogleApiKey ? "Configured -- enter new value to replace" : "AIzaSy..."
-              }
-              helperText="Used for Gemini embeddings. Get a key from Google AI Studio."
-            />
-          </div>
+          <TokenInput
+            label="Google API Key"
+            value={googleApiKey}
+            onChange={(v) => {
+              setGoogleApiKey(v);
+              setGoogleApiKeyDirty(true);
+            }}
+            placeholder={hasGoogleApiKey ? "Configured -- enter new value to replace" : "AIzaSy..."}
+            helperText={
+              <>
+                Get a key from{" "}
+                <a
+                  href="https://aistudio.google.com/apikey"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-blue hover:text-blue/80 underline"
+                >
+                  Google AI Studio
+                </a>
+              </>
+            }
+          />
           <div className="space-y-1.5">
             <label className="block text-sm font-medium text-subtext1">Embedding Model</label>
             <input
@@ -932,12 +948,12 @@ export default function AssistantSettingsPage() {
               <p className="text-xs text-overlay0">
                 Generate images from text prompts using Google&apos;s Gemini model via the{" "}
                 <code className="text-xs bg-surface0 px-1 rounded">generate_image</code> tool.
-                {apiProvider === "vertex" ? (
-                  <span className="text-green ml-1">Using Vertex AI.</span>
-                ) : hasGeminiApiKey ? (
-                  <span className="text-green ml-1">Gemini API key configured.</span>
+                {hasGoogleApiKey ? (
+                  <span className="text-green ml-1">Google API key configured.</span>
                 ) : (
-                  <span className="text-peach ml-1">Requires Vertex AI or a Gemini API key.</span>
+                  <span className="text-peach ml-1">
+                    Requires Google API key (set in Embeddings above).
+                  </span>
                 )}
               </p>
             </div>
@@ -945,34 +961,6 @@ export default function AssistantSettingsPage() {
 
           {imageGeneration && (
             <div className="space-y-4 pl-7 border-l-2 border-surface1 ml-2">
-              {apiProvider !== "vertex" && (
-                <TokenInput
-                  label="Gemini API Key"
-                  value={geminiApiKey}
-                  onChange={(v) => {
-                    setGeminiApiKey(v);
-                    setGeminiApiKeyDirty(true);
-                  }}
-                  placeholder={
-                    hasGeminiApiKey
-                      ? "Configured - enter new value to replace"
-                      : "Your Gemini API key"
-                  }
-                  helperText={
-                    <>
-                      Get a free API key from{" "}
-                      <a
-                        href="https://aistudio.google.com/apikey"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-blue hover:text-blue/80 underline"
-                      >
-                        Google AI Studio
-                      </a>
-                    </>
-                  }
-                />
-              )}
               <div className="space-y-1.5">
                 <label className="block text-sm font-medium text-subtext1">Model</label>
                 <input

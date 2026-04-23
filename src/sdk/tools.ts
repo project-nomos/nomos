@@ -384,7 +384,7 @@ export function createMemoryMcpServer(): McpSdkServerConfigWithInstance {
             content: [
               {
                 type: "text",
-                text: "Image generation is not enabled. Enable it in Settings or set NOMOS_IMAGE_GENERATION=true and GEMINI_API_KEY in your environment.",
+                text: "Image generation is not enabled. Enable it in Settings or set NOMOS_IMAGE_GENERATION=true and GOOGLE_API_KEY in your environment.",
               },
             ],
             isError: true,
@@ -449,7 +449,7 @@ export function createMemoryMcpServer(): McpSdkServerConfigWithInstance {
             content: [
               {
                 type: "text",
-                text: "Video generation is not enabled. Enable it in Settings or set NOMOS_VIDEO_GENERATION=true and GEMINI_API_KEY in your environment.",
+                text: "Video generation is not enabled. Enable it in Settings or set NOMOS_VIDEO_GENERATION=true and GOOGLE_API_KEY in your environment.",
               },
             ],
             isError: true,

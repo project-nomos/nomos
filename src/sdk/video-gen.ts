@@ -40,10 +40,10 @@ export async function generateVideo(
     durationSeconds?: number;
   },
 ): Promise<{ videoPath: string }> {
-  const apiKey = options?.apiKey ?? process.env.GEMINI_API_KEY;
+  const apiKey = options?.apiKey ?? process.env.GOOGLE_API_KEY ?? process.env.GEMINI_API_KEY;
   if (!apiKey) {
     throw new Error(
-      "GEMINI_API_KEY is required for video generation. Get one at https://aistudio.google.com/apikey",
+      "GOOGLE_API_KEY is required for video generation. Set it in Settings > Google AI.",
     );
   }
 
