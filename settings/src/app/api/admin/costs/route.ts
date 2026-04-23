@@ -17,7 +17,6 @@ export async function GET() {
         created_at,
         updated_at
       FROM sessions
-      WHERE session_key LIKE 'cli:%'
       ORDER BY updated_at DESC
       LIMIT 50
     `;

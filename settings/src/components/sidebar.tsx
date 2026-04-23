@@ -18,6 +18,9 @@ import {
   DollarSign,
   Activity,
   Puzzle,
+  BookOpen,
+  Upload,
+  Bell,
 } from "lucide-react";
 import { DaemonStatus } from "@/components/daemon-status";
 
@@ -39,6 +42,9 @@ const channelItems = [
 const advancedItems = [
   { href: "/admin/database", label: "Database", icon: Database },
   { href: "/admin/memory", label: "Memory", icon: Brain },
+  { href: "/admin/wiki", label: "Wiki", icon: BookOpen },
+  { href: "/admin/ingestion", label: "Ingestion", icon: Upload },
+  { href: "/admin/proactive", label: "Proactive", icon: Bell },
   { href: "/admin/extensions", label: "Extensions", icon: Puzzle },
   { href: "/admin/costs", label: "Costs", icon: DollarSign },
   { href: "/admin/context", label: "Context", icon: Activity },
