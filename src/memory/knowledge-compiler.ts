@@ -82,7 +82,7 @@ export async function compileKnowledge(options?: { force?: boolean }): Promise<C
     `;
 
     const contacts = await sql`
-      SELECT c.id, c.name, c.autonomy,
+      SELECT c.id, c.display_name as name, c.autonomy,
              json_agg(json_build_object(
                'platform', ci.platform,
                'user_id', ci.platform_user_id,
@@ -91,7 +91,7 @@ export async function compileKnowledge(options?: { force?: boolean }): Promise<C
              )) as identities
       FROM contacts c
       LEFT JOIN contact_identities ci ON ci.contact_id = c.id
-      GROUP BY c.id, c.name, c.autonomy
+      GROUP BY c.id, c.display_name, c.autonomy
     `;
 
     const existingArticles = await listArticles();
