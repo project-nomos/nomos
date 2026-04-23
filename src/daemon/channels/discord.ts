@@ -11,20 +11,33 @@ import {
   type TextChannel,
 } from "discord.js";
 import type { ChannelAdapter, IncomingMessage, OutgoingMessage } from "../types.ts";
+import type { DraftManager } from "../draft-manager.ts";
 import { chunkResponse } from "../response-chunker.ts";
 import { randomUUID } from "node:crypto";
 import { Buffer } from "node:buffer";
 import { AttachmentBuilder } from "discord.js";
 
+export interface DiscordAdapterOptions {
+  onMessage: (msg: IncomingMessage) => void;
+  draftManager?: DraftManager;
+}
+
 export class DiscordAdapter implements ChannelAdapter {
   readonly platform = "discord";
   private client: Client | null = null;
   private onMessage: (msg: IncomingMessage) => void;
+  private draftManager?: DraftManager;
   // Map channelId → last Message for reply
   private lastMessages = new Map<string, Message>();
 
-  constructor(onMessage: (msg: IncomingMessage) => void) {
-    this.onMessage = onMessage;
+  constructor(options: DiscordAdapterOptions | ((msg: IncomingMessage) => void)) {
+    if (typeof options === "function") {
+      // Backwards compat
+      this.onMessage = options;
+    } else {
+      this.onMessage = options.onMessage;
+      this.draftManager = options.draftManager;
+    }
   }
 
   async start(): Promise<void> {
@@ -80,6 +93,18 @@ export class DiscordAdapter implements ChannelAdapter {
   }
 
   async send(message: OutgoingMessage): Promise<void> {
+    if (this.draftManager) {
+      await this.draftManager.createDraft(message, "discord", {
+        messageType: "message",
+        channelId: message.channelId,
+      });
+      return;
+    }
+    await this.sendDirect(message);
+  }
+
+  /** Send directly to Discord, bypassing draft approval. Called by DraftManager after approval. */
+  async sendDirect(message: OutgoingMessage): Promise<void> {
     if (!this.client) return;
 
     const channel = await this.client.channels.fetch(message.channelId);
@@ -88,7 +113,6 @@ export class DiscordAdapter implements ChannelAdapter {
     const result = chunkResponse(message.content, "discord");
     const originalMsg = this.lastMessages.get(message.channelId);
 
-    // Build file attachment for very long responses
     const files =
       result.strategy === "file" && result.fullText && result.filename
         ? [new AttachmentBuilder(Buffer.from(result.fullText, "utf-8"), { name: result.filename })]
@@ -96,7 +120,6 @@ export class DiscordAdapter implements ChannelAdapter {
 
     for (let i = 0; i < result.chunks.length; i++) {
       const text = result.chunks[i];
-      // Attach file to the last chunk message
       const attachFiles = i === result.chunks.length - 1 ? files : undefined;
 
       if (originalMsg) {

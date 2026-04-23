@@ -669,6 +669,20 @@ export class AgentRuntime {
         this.sdkSessionIds.set(sessionKey, result.sessionId);
       }
 
+      // Persist cost data to sessions table (fire-and-forget)
+      if (result.costUsd || result.inputTokens || result.outputTokens) {
+        import("../db/sessions.ts")
+          .then(({ updateSessionCost }) =>
+            updateSessionCost(
+              sessionKey,
+              result.costUsd ?? 0,
+              result.inputTokens ?? 0,
+              result.outputTokens ?? 0,
+            ),
+          )
+          .catch(() => {});
+      }
+
       return {
         inReplyTo: message.id,
         platform: message.platform,
@@ -734,7 +748,13 @@ export class AgentRuntime {
     sessionKey?: string,
     userState?: string,
     personaPrompt?: string,
-  ): Promise<{ text: string; sessionId?: string }> {
+  ): Promise<{
+    text: string;
+    sessionId?: string;
+    costUsd?: number;
+    inputTokens?: number;
+    outputTokens?: number;
+  }> {
     // Auto-approve all tools from our MCP servers
     const allowedTools = Object.keys(this.mcpServers).map((name) => `mcp__${name}`);
 
@@ -776,6 +796,9 @@ export class AgentRuntime {
 
     let fullText = "";
     let sessionId: string | undefined;
+    let costUsd = 0;
+    let inputTokens = 0;
+    let outputTokens = 0;
 
     for await (const msg of sdkQuery) {
       // Forward all SDK events to the emitter
@@ -820,6 +843,9 @@ export class AgentRuntime {
 
         case "result": {
           sessionId = msg.session_id;
+          costUsd = msg.total_cost_usd ?? 0;
+          inputTokens = msg.usage?.input_tokens ?? 0;
+          outputTokens = msg.usage?.output_tokens ?? 0;
           for (const block of msg.result) {
             if (block.type === "text") {
               fullText += block.text;
@@ -861,7 +887,7 @@ export class AgentRuntime {
       }
     }
 
-    return { text: fullText, sessionId };
+    return { text: fullText, sessionId, costUsd, inputTokens, outputTokens };
   }
 }
 

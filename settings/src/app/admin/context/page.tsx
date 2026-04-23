@@ -1,13 +1,14 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Activity, Layers, MessageSquare, Wrench, Brain, Sparkles } from "lucide-react";
+import { Activity, Layers, MessageSquare, Wrench, Brain, Sparkles, User } from "lucide-react";
 
 interface ContextSection {
   label: string;
   tokens: number;
   color: string;
   percent: number;
+  detail?: string;
 }
 
 interface ContextData {
@@ -26,6 +27,7 @@ function formatTokens(tokens: number): string {
 
 const SECTION_ICONS: Record<string, React.ComponentType<{ size: number; className?: string }>> = {
   "System Prompt": Layers,
+  "User Model": User,
   Conversation: MessageSquare,
   "Tool Schemas": Wrench,
   Memory: Brain,
@@ -145,7 +147,10 @@ export default function ContextPage() {
                 style={{ backgroundColor: section.color }}
               />
               <Icon size={16} className="text-overlay0 shrink-0" />
-              <span className="text-sm text-text flex-1">{section.label}</span>
+              <div className="flex-1 min-w-0">
+                <span className="text-sm text-text">{section.label}</span>
+                {section.detail && <p className="text-xs text-overlay0 mt-0.5">{section.detail}</p>}
+              </div>
               <span className="text-sm font-mono text-subtext0">
                 {formatTokens(section.tokens)}
               </span>

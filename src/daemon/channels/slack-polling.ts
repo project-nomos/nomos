@@ -19,12 +19,15 @@ import { WebClient } from "@slack/web-api";
 import type { ChannelAdapter, IncomingMessage, OutgoingMessage } from "../types.ts";
 import type { DraftManager } from "../draft-manager.ts";
 import { randomUUID } from "node:crypto";
+import { markdownToSlackMrkdwn } from "./slack-mrkdwn.ts";
 
 export interface SlackPollingAdapterOptions {
   token: string;
   cookie?: string;
   teamId: string;
   pollIntervalMs?: number;
+  /** Delay before the first poll (for staggering multiple workspaces). */
+  startDelayMs?: number;
   onMessage: (msg: IncomingMessage) => void;
   draftManager: DraftManager;
   /** Called when the token becomes invalid (expired session). */
@@ -81,11 +84,14 @@ export class SlackPollingAdapter implements ChannelAdapter {
     return `slack-user:${this.teamId}`;
   }
 
+  private readonly startDelayMs: number;
+
   constructor(options: SlackPollingAdapterOptions) {
     this.token = options.token;
     this.cookie = options.cookie;
     this.teamId = options.teamId;
-    this.pollIntervalMs = options.pollIntervalMs ?? 60_000; // 60s default (was 30s)
+    this.pollIntervalMs = options.pollIntervalMs ?? 5 * 60_000; // 5 min (was 60s)
+    this.startDelayMs = options.startDelayMs ?? 0;
     this.onMessage = options.onMessage;
     this.draftManager = options.draftManager;
     this.onAuthError = options.onAuthError;
@@ -155,12 +161,31 @@ export class SlackPollingAdapter implements ChannelAdapter {
     // Initial poll to set baselines (don't process old messages)
     await this.initializeBaselines();
 
-    // Start polling
-    this.pollTimer = setInterval(() => {
-      this.poll().catch((err) => {
-        console.error(`[slack-polling] Poll error (team ${this.teamId}):`, err);
-      });
-    }, this.pollIntervalMs);
+    // Start polling after optional stagger delay (prevents burst of API calls
+    // when multiple workspaces start simultaneously)
+    const startPolling = () => {
+      console.log(
+        `[slack-polling] Polling started for team ${this.teamId} (every ${Math.round(this.pollIntervalMs / 1000)}s)`,
+      );
+      // Run first poll immediately, then on interval
+      this.poll().catch((err) =>
+        console.error(`[slack-polling] Poll error (team ${this.teamId}):`, err),
+      );
+      this.pollTimer = setInterval(() => {
+        this.poll().catch((err) => {
+          console.error(`[slack-polling] Poll error (team ${this.teamId}):`, err);
+        });
+      }, this.pollIntervalMs);
+    };
+
+    if (this.startDelayMs > 0) {
+      console.log(
+        `[slack-polling] Delaying poll start by ${Math.round(this.startDelayMs / 1000)}s for team ${this.teamId}`,
+      );
+      setTimeout(startPolling, this.startDelayMs);
+    } else {
+      startPolling();
+    }
   }
 
   async stop(): Promise<void> {
@@ -197,7 +222,7 @@ export class SlackPollingAdapter implements ChannelAdapter {
     if (!this.client) return;
     await this.client.chat.postMessage({
       channel: channelId,
-      text,
+      text: markdownToSlackMrkdwn(text),
       thread_ts: threadId,
     });
   }
@@ -211,7 +236,7 @@ export class SlackPollingAdapter implements ChannelAdapter {
     if (!client) return;
     await client.chat.postMessage({
       channel: channelId,
-      text,
+      text: markdownToSlackMrkdwn(text),
       thread_ts: threadId,
     });
   }
@@ -229,17 +254,21 @@ export class SlackPollingAdapter implements ChannelAdapter {
 
   /**
    * Post a message and return the timestamp (for streaming support).
+   * ONLY works in the default channel -- returns undefined for other channels
+   * so the streaming responder falls through to send() -> draft manager.
    */
   async postMessage(
     channelId: string,
     text: string,
     threadId?: string,
   ): Promise<string | undefined> {
+    if (channelId !== this.defaultChannelId) return undefined;
+
     const client = this.clientFor(channelId);
     if (!client) return undefined;
     const result = await client.chat.postMessage({
       channel: channelId,
-      text,
+      text: markdownToSlackMrkdwn(text),
       thread_ts: threadId,
     });
     return result.ts;
@@ -247,14 +276,17 @@ export class SlackPollingAdapter implements ChannelAdapter {
 
   /**
    * Update an existing message (for streaming support).
+   * Only works in the default channel.
    */
   async updateMessage(channelId: string, messageId: string, text: string): Promise<void> {
+    if (channelId !== this.defaultChannelId) return;
+
     const client = this.clientFor(channelId);
     if (!client) return;
     await client.chat.update({
       channel: channelId,
       ts: messageId,
-      text,
+      text: markdownToSlackMrkdwn(text),
     });
   }
 
@@ -589,7 +621,9 @@ export class SlackPollingAdapter implements ChannelAdapter {
           e.text,
           "",
           "---",
-          "Draft a response AS ME (the user). I will approve it before it's sent.",
+          "Draft a response AS ME (the user). I will review and approve before it's sent.",
+          "IMPORTANT: Do NOT send this yourself. Just draft the message content.",
+          "Also suggest whether to reply in-thread or as a new message.",
         ].join("\n");
 
     this.onMessage({
@@ -619,7 +653,9 @@ export class SlackPollingAdapter implements ChannelAdapter {
       e.text,
       "",
       "---",
-      "Draft a response AS ME (the user). I will approve it before it's sent.",
+      "Draft a response AS ME (the user). I will review and approve before it's sent.",
+      "IMPORTANT: Do NOT send this yourself. Just draft the message content.",
+      "Also suggest whether to reply in-thread or as a new message.",
     ].join("\n");
 
     this.onMessage({

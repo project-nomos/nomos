@@ -61,7 +61,7 @@ export const DEFAULT_PLUGINS: ReadonlyArray<{
   // Community (external_plugins/)
   { name: "discord", source: "external_plugins" },
   { name: "github", source: "external_plugins" },
-  { name: "imessage", source: "external_plugins" },
+  // imessage plugin removed -- conflicts with built-in iMessage adapter + imessage_send tool
   { name: "linear", source: "external_plugins" },
   { name: "playwright", source: "external_plugins" },
   { name: "telegram", source: "external_plugins" },

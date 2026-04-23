@@ -384,7 +384,7 @@ export function createMemoryMcpServer(): McpSdkServerConfigWithInstance {
             content: [
               {
                 type: "text",
-                text: "Image generation is not enabled. Enable it in Settings or set NOMOS_IMAGE_GENERATION=true and GEMINI_API_KEY in your environment.",
+                text: "Image generation is not enabled. Enable it in Settings or set NOMOS_IMAGE_GENERATION=true and GOOGLE_API_KEY in your environment.",
               },
             ],
             isError: true,
@@ -449,7 +449,7 @@ export function createMemoryMcpServer(): McpSdkServerConfigWithInstance {
             content: [
               {
                 type: "text",
-                text: "Video generation is not enabled. Enable it in Settings or set NOMOS_VIDEO_GENERATION=true and GEMINI_API_KEY in your environment.",
+                text: "Video generation is not enabled. Enable it in Settings or set NOMOS_VIDEO_GENERATION=true and GOOGLE_API_KEY in your environment.",
               },
             ],
             isError: true,
@@ -1573,6 +1573,108 @@ export function createMemoryMcpServer(): McpSdkServerConfigWithInstance {
     return delivered;
   }
 
+  // ── iMessage Tools ──
+
+  const imessageSendTool = tool(
+    "imessage_send",
+    "Send an iMessage to a contact via AppleScript (macOS). Takes a phone number (+1...) or email and sends directly. No allowlist or approval files needed -- just call this tool. The user has already approved the message in chat.",
+    {
+      recipient: z.string().describe("Phone number (e.g., +14159631119) or email address"),
+      text: z.string().describe("Message text to send"),
+    },
+    async (args) => {
+      try {
+        if (process.platform !== "darwin") {
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: "iMessage sending requires macOS. Use Photon or BlueBubbles mode for cross-platform.",
+              },
+            ],
+          };
+        }
+
+        const { sendIMessage } = await import("../daemon/channels/imessage-sender.ts");
+        await sendIMessage(args.recipient, args.text);
+
+        return {
+          content: [{ type: "text" as const, text: `iMessage sent to ${args.recipient}.` }],
+        };
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        return {
+          content: [{ type: "text" as const, text: `iMessage send failed: ${msg}` }],
+        };
+      }
+    },
+  );
+
+  const imessageReadTool = tool(
+    "imessage_read",
+    "Read recent iMessages from a contact. Use this to check message history before responding. Requires iMessage to be configured in Photon mode.",
+    {
+      contact: z.string().describe("Phone number (+1...) or email address of the contact"),
+      limit: z.number().optional().describe("Maximum messages to return (default: 20)"),
+    },
+    async (args) => {
+      try {
+        const { PhotonAdapter } = await import("../daemon/channels/imessage-photon.ts");
+        const serverUrl = process.env.PHOTON_SERVER_URL;
+        if (!serverUrl) {
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: "iMessage Photon server not configured. Set PHOTON_SERVER_URL.",
+              },
+            ],
+          };
+        }
+
+        const adapter = new PhotonAdapter(
+          { serverUrl, apiKey: process.env.PHOTON_API_KEY },
+          () => {},
+        );
+        await adapter.start();
+
+        // Find the chat for this contact
+        const chats = await adapter.getChats();
+        const chat = chats.find(
+          (c) =>
+            c.identifier.includes(args.contact) ||
+            c.displayName.toLowerCase().includes(args.contact.toLowerCase()),
+        );
+
+        if (!chat) {
+          await adapter.stop();
+          return {
+            content: [{ type: "text" as const, text: `No chat found for ${args.contact}` }],
+          };
+        }
+
+        const messages = await adapter.getMessages(chat.guid, { limit: args.limit ?? 20 });
+        await adapter.stop();
+
+        const formatted = messages
+          .map((m) => {
+            const from = m.isFromMe ? "Me" : (m.handle?.address ?? "Unknown");
+            const ts = new Date(m.dateCreated).toLocaleString();
+            return `[${ts}] ${from}: ${m.text ?? "(attachment)"}`;
+          })
+          .reverse()
+          .join("\n");
+
+        return {
+          content: [{ type: "text" as const, text: formatted || "No messages found" }],
+        };
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        return { content: [{ type: "text" as const, text: `iMessage read failed: ${msg}` }] };
+      }
+    },
+  );
+
   // ── Proactive Message Tool ──
 
   const proactiveSendTool = tool(
@@ -1807,6 +1909,9 @@ export function createMemoryMcpServer(): McpSdkServerConfigWithInstance {
       memoryConsolidateTool,
       // Sleep / self-resume
       sleepTool,
+      // iMessage tools
+      imessageSendTool,
+      imessageReadTool,
       // Proactive messaging
       proactiveSendTool,
       // Inter-agent messaging

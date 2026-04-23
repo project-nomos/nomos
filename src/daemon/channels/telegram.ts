@@ -4,17 +4,29 @@
 
 import { Bot, InputFile } from "grammy";
 import type { ChannelAdapter, IncomingMessage, OutgoingMessage } from "../types.ts";
+import type { DraftManager } from "../draft-manager.ts";
 import { chunkResponse } from "../response-chunker.ts";
 import { randomUUID } from "node:crypto";
 import { Buffer } from "node:buffer";
+
+export interface TelegramAdapterOptions {
+  onMessage: (msg: IncomingMessage) => void;
+  draftManager?: DraftManager;
+}
 
 export class TelegramAdapter implements ChannelAdapter {
   readonly platform = "telegram";
   private bot: Bot | null = null;
   private onMessage: (msg: IncomingMessage) => void;
+  private draftManager?: DraftManager;
 
-  constructor(onMessage: (msg: IncomingMessage) => void) {
-    this.onMessage = onMessage;
+  constructor(options: TelegramAdapterOptions | ((msg: IncomingMessage) => void)) {
+    if (typeof options === "function") {
+      this.onMessage = options;
+    } else {
+      this.onMessage = options.onMessage;
+      this.draftManager = options.draftManager;
+    }
   }
 
   async start(): Promise<void> {
@@ -62,6 +74,18 @@ export class TelegramAdapter implements ChannelAdapter {
   }
 
   async send(message: OutgoingMessage): Promise<void> {
+    if (this.draftManager) {
+      await this.draftManager.createDraft(message, "telegram", {
+        messageType: "message",
+        channelId: message.channelId,
+      });
+      return;
+    }
+    await this.sendDirect(message);
+  }
+
+  /** Send directly to Telegram, bypassing draft approval. Called by DraftManager after approval. */
+  async sendDirect(message: OutgoingMessage): Promise<void> {
     if (!this.bot) return;
     const chatId = message.channelId;
     const result = chunkResponse(message.content, "telegram");
@@ -70,7 +94,6 @@ export class TelegramAdapter implements ChannelAdapter {
       await this.bot.api.sendMessage(chatId, text);
     }
 
-    // Upload full response as document for very long messages
     if (result.strategy === "file" && result.fullText && result.filename) {
       await this.bot.api.sendDocument(
         chatId,

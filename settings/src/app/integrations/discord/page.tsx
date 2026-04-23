@@ -82,12 +82,6 @@ export default function DiscordSettingsPage() {
 
       addToast("Discord settings saved", "success");
       await loadData();
-      // Auto-trigger ingestion for Discord
-      fetch("/api/ingestion", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ platform: "discord", action: "trigger-ingest" }),
-      }).catch(() => {});
     } catch (err) {
       console.error("Failed to save Discord settings:", err);
       addToast("Failed to save settings", "error");

@@ -71,6 +71,25 @@ export class CronEngine {
       return;
     }
 
+    // Intercept wiki compilation sentinel -- run compiler directly
+    if (job.prompt === "__wiki_compile__") {
+      console.log("[cron-engine] Firing wiki compilation");
+      import("../memory/knowledge-compiler.ts")
+        .then(({ compileKnowledge }) => compileKnowledge())
+        .then((result) => {
+          console.log(
+            `[cron-engine] Wiki compilation: ${result.articlesCreated} created, ${result.articlesUpdated} updated`,
+          );
+        })
+        .catch((err) => {
+          console.error(
+            "[cron-engine] Wiki compilation failed:",
+            err instanceof Error ? err.message : err,
+          );
+        });
+      return;
+    }
+
     console.log(`[cron-engine] Triggering job: ${job.name} (${job.id})`);
 
     const sessionKey =

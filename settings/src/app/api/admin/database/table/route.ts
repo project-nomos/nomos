@@ -24,6 +24,7 @@ export async function GET(request: NextRequest) {
     "draft_messages",
     "ingest_jobs",
     "integrations",
+    "managed_files",
     "memory_chunks",
     "pairing_requests",
     "sessions",

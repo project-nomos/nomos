@@ -9,6 +9,7 @@ import { useToast } from "@/contexts/toast-context";
 import { useUnsavedChanges } from "@/hooks/use-unsaved-changes";
 
 const MODELS = [
+  { value: "claude-opus-4-7", label: "Claude Opus 4.7" },
   { value: "claude-sonnet-4-6", label: "Claude Sonnet 4.6" },
   { value: "claude-opus-4-6", label: "Claude Opus 4.6" },
   { value: "claude-haiku-4-5", label: "Claude Haiku 4.5" },
@@ -100,12 +101,16 @@ export default function AssistantSettingsPage() {
   const [extractionModel, setExtractionModel] = useState("claude-haiku-4-5");
   const [initialExtractionModel, setInitialExtractionModel] = useState("claude-haiku-4-5");
 
+  // Embeddings
+  const [embeddingModel, setEmbeddingModel] = useState("gemini-embedding-001");
+  const [initialEmbeddingModel, setInitialEmbeddingModel] = useState("gemini-embedding-001");
+  const [googleApiKey, setGoogleApiKey] = useState("");
+  const [hasGoogleApiKey, setHasGoogleApiKey] = useState(false);
+  const [googleApiKeyDirty, setGoogleApiKeyDirty] = useState(false);
+
   // Image generation
   const [imageGeneration, setImageGeneration] = useState(false);
   const [initialImageGeneration, setInitialImageGeneration] = useState(false);
-  const [geminiApiKey, setGeminiApiKey] = useState("");
-  const [hasGeminiApiKey, setHasGeminiApiKey] = useState(false);
-  const [geminiApiKeyDirty, setGeminiApiKeyDirty] = useState(false);
   const [imageGenerationModel, setImageGenerationModel] = useState("gemini-3-pro-image-preview");
   const [initialImageGenerationModel, setInitialImageGenerationModel] = useState(
     "gemini-3-pro-image-preview",
@@ -118,6 +123,10 @@ export default function AssistantSettingsPage() {
   const [initialVideoGenerationModel, setInitialVideoGenerationModel] = useState(
     "veo-3.0-generate-preview",
   );
+
+  // Consent modes per platform
+  const [consentModes, setConsentModes] = useState<Record<string, string>>({});
+  const [initialConsentModes, setInitialConsentModes] = useState<Record<string, string>>({});
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -148,13 +157,15 @@ export default function AssistantSettingsPage() {
     workerBudgetUsd !== initialWorkerBudgetUsd ||
     adaptiveMemory !== initialAdaptiveMemory ||
     extractionModel !== initialExtractionModel ||
-    geminiApiKeyDirty ||
+    embeddingModel !== initialEmbeddingModel ||
+    googleApiKeyDirty ||
     imageGeneration !== initialImageGeneration ||
     imageGenerationModel !== initialImageGenerationModel ||
     videoGeneration !== initialVideoGeneration ||
     videoGenerationModel !== initialVideoGenerationModel;
 
-  const isDirty = isIdentityDirty || isEnvDirty;
+  const isConsentDirty = JSON.stringify(consentModes) !== JSON.stringify(initialConsentModes);
+  const isDirty = isIdentityDirty || isEnvDirty || isConsentDirty;
   useUnsavedChanges(isDirty);
 
   const loadData = useCallback(async () => {
@@ -241,14 +252,19 @@ export default function AssistantSettingsPage() {
       setExtractionModel(em);
       setInitialExtractionModel(em);
 
+      // Embeddings
+      const ebm = envData.EMBEDDING_MODEL ?? "gemini-embedding-001";
+      setEmbeddingModel(ebm);
+      setInitialEmbeddingModel(ebm);
+
+      setHasGoogleApiKey(!!envData.GOOGLE_API_KEY);
+      setGoogleApiKey("");
+      setGoogleApiKeyDirty(false);
+
       // Image generation
       const ig = envData.NOMOS_IMAGE_GENERATION === "true";
       setImageGeneration(ig);
       setInitialImageGeneration(ig);
-
-      setHasGeminiApiKey(!!envData.GEMINI_API_KEY);
-      setGeminiApiKey("");
-      setGeminiApiKeyDirty(false);
 
       const igm = envData.NOMOS_IMAGE_GENERATION_MODEL ?? "gemini-3-pro-image-preview";
       setImageGenerationModel(igm);
@@ -279,6 +295,16 @@ export default function AssistantSettingsPage() {
       const soul = (configData["agent.soul"] as string) ?? "";
       setAgentSoul(soul);
       setInitialAgentSoul(soul);
+
+      // Load consent modes
+      try {
+        const consentRes = await fetch("/api/consent");
+        const consentData = await consentRes.json();
+        setConsentModes(consentData);
+        setInitialConsentModes(consentData);
+      } catch {
+        // consent not available
+      }
     } catch (err) {
       console.error("Failed to load settings:", err);
       addToast("Failed to load settings", "error");
@@ -352,9 +378,10 @@ export default function AssistantSettingsPage() {
           envUpdates.NOMOS_ADAPTIVE_MEMORY = adaptiveMemory ? "true" : "";
         if (extractionModel !== initialExtractionModel)
           envUpdates.NOMOS_EXTRACTION_MODEL = extractionModel;
+        if (embeddingModel !== initialEmbeddingModel) envUpdates.EMBEDDING_MODEL = embeddingModel;
+        if (googleApiKeyDirty) envUpdates.GOOGLE_API_KEY = googleApiKey;
         if (imageGeneration !== initialImageGeneration)
           envUpdates.NOMOS_IMAGE_GENERATION = imageGeneration ? "true" : "";
-        if (geminiApiKeyDirty) envUpdates.GEMINI_API_KEY = geminiApiKey;
         if (imageGenerationModel !== initialImageGenerationModel)
           envUpdates.NOMOS_IMAGE_GENERATION_MODEL = imageGenerationModel;
         if (videoGeneration !== initialVideoGeneration)
@@ -377,6 +404,19 @@ export default function AssistantSettingsPage() {
         const data = await failed.json();
         addToast(data.error ?? "Failed to save settings", "error");
         return;
+      }
+
+      // Save consent mode changes
+      if (isConsentDirty) {
+        for (const [platform, mode] of Object.entries(consentModes)) {
+          if (mode !== initialConsentModes[platform]) {
+            await fetch("/api/consent", {
+              method: "PUT",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ platform, mode }),
+            });
+          }
+        }
       }
 
       addToast("Settings saved successfully", "success");
@@ -518,14 +558,22 @@ export default function AssistantSettingsPage() {
         {/* Anthropic-specific config */}
         {apiProvider === "anthropic" && (
           <div className="mt-4 pt-4 border-t border-surface0">
+            <div className="flex items-center justify-between mb-2">
+              <label className="block text-sm font-medium text-subtext1">API Key</label>
+              {hasApiKey ? (
+                <span className="text-xs text-green font-medium">Key configured</span>
+              ) : (
+                <span className="text-xs text-red font-medium">Key required</span>
+              )}
+            </div>
             <TokenInput
-              label="API Key"
+              label="Anthropic API Key"
               value={apiKey}
               onChange={(v) => {
                 setApiKey(v);
                 setApiKeyDirty(true);
               }}
-              placeholder={hasApiKey ? "Configured - enter new value to replace" : "sk-ant-..."}
+              placeholder={hasApiKey ? "Configured -- enter new value to replace" : "sk-ant-..."}
               helperText="Your Anthropic API key"
             />
           </div>
@@ -815,6 +863,53 @@ export default function AssistantSettingsPage() {
         </div>
       </section>
 
+      {/* Message Consent */}
+      <section className="mb-8 rounded-xl border border-surface0 bg-mantle p-5">
+        <h2 className="text-sm font-semibold text-subtext1 uppercase tracking-wider mb-4">
+          Message Consent
+        </h2>
+        <p className="text-xs text-overlay0 mb-4">
+          Control how the agent handles incoming messages from each platform. Draft notifications
+          appear in your default Slack channel.
+        </p>
+        <div className="space-y-3">
+          {[
+            { key: "slack", label: "Slack (DMs & mentions)" },
+            { key: "discord", label: "Discord" },
+            { key: "telegram", label: "Telegram" },
+            { key: "imessage", label: "Messages.app" },
+            { key: "email", label: "Email" },
+            { key: "whatsapp", label: "WhatsApp" },
+          ].map(({ key, label }) => (
+            <div
+              key={key}
+              className="flex items-center justify-between rounded-lg border border-surface1 bg-surface0/50 px-4 py-3"
+            >
+              <span className="text-sm text-text">{label}</span>
+              <div className="flex items-center gap-1">
+                {[
+                  { value: "always_ask", label: "Always Ask" },
+                  { value: "auto_approve", label: "Auto Approve" },
+                  { value: "notify_only", label: "Notify Only" },
+                ].map((mode) => (
+                  <button
+                    key={mode.value}
+                    onClick={() => setConsentModes((prev) => ({ ...prev, [key]: mode.value }))}
+                    className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${
+                      (consentModes[key] ?? "always_ask") === mode.value
+                        ? "bg-mauve text-crust"
+                        : "bg-surface1 text-subtext0 hover:bg-surface1/80"
+                    }`}
+                  >
+                    {mode.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      </section>
+
       {/* Adaptive Memory */}
       <section className="mb-8 rounded-xl border border-surface0 bg-mantle p-5">
         <h2 className="text-sm font-semibold text-subtext1 uppercase tracking-wider mb-4">
@@ -859,6 +954,57 @@ export default function AssistantSettingsPage() {
         </div>
       </section>
 
+      {/* Google AI (Embeddings + Image/Video) */}
+      <section className="mb-8 rounded-xl border border-surface0 bg-mantle p-5">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-sm font-semibold text-subtext1 uppercase tracking-wider">
+            Google AI
+          </h2>
+          {hasGoogleApiKey ? (
+            <span className="text-xs text-green font-medium">Key configured</span>
+          ) : (
+            <span className="text-xs text-peach font-medium">Key required</span>
+          )}
+        </div>
+        <p className="text-xs text-overlay0 mb-4">
+          Shared API key for embeddings, image generation, and video generation.
+        </p>
+        <div className="space-y-4">
+          <TokenInput
+            label="Google API Key"
+            value={googleApiKey}
+            onChange={(v) => {
+              setGoogleApiKey(v);
+              setGoogleApiKeyDirty(true);
+            }}
+            placeholder={hasGoogleApiKey ? "Configured -- enter new value to replace" : "AIzaSy..."}
+            helperText={
+              <>
+                Get a key from{" "}
+                <a
+                  href="https://aistudio.google.com/apikey"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-blue hover:text-blue/80 underline"
+                >
+                  Google AI Studio
+                </a>
+              </>
+            }
+          />
+          <div className="space-y-1.5">
+            <label className="block text-sm font-medium text-subtext1">Embedding Model</label>
+            <input
+              type="text"
+              value={embeddingModel}
+              onChange={(e) => setEmbeddingModel(e.target.value)}
+              className="w-full rounded-lg border border-surface1 bg-surface0 px-3 py-2 text-sm text-text placeholder:text-overlay0 focus:outline-none focus:border-mauve focus:ring-1 focus:ring-mauve/30 font-mono"
+            />
+            <p className="text-xs text-overlay0">Default: gemini-embedding-001 (768 dimensions)</p>
+          </div>
+        </div>
+      </section>
+
       {/* Image Generation */}
       <section className="mb-8 rounded-xl border border-surface0 bg-mantle p-5">
         <h2 className="text-sm font-semibold text-subtext1 uppercase tracking-wider mb-4">
@@ -877,12 +1023,12 @@ export default function AssistantSettingsPage() {
               <p className="text-xs text-overlay0">
                 Generate images from text prompts using Google&apos;s Gemini model via the{" "}
                 <code className="text-xs bg-surface0 px-1 rounded">generate_image</code> tool.
-                {apiProvider === "vertex" ? (
-                  <span className="text-green ml-1">Using Vertex AI.</span>
-                ) : hasGeminiApiKey ? (
-                  <span className="text-green ml-1">Gemini API key configured.</span>
+                {hasGoogleApiKey ? (
+                  <span className="text-green ml-1">Google API key configured.</span>
                 ) : (
-                  <span className="text-peach ml-1">Requires Vertex AI or a Gemini API key.</span>
+                  <span className="text-peach ml-1">
+                    Requires Google API key (set in Embeddings above).
+                  </span>
                 )}
               </p>
             </div>
@@ -890,34 +1036,6 @@ export default function AssistantSettingsPage() {
 
           {imageGeneration && (
             <div className="space-y-4 pl-7 border-l-2 border-surface1 ml-2">
-              {apiProvider !== "vertex" && (
-                <TokenInput
-                  label="Gemini API Key"
-                  value={geminiApiKey}
-                  onChange={(v) => {
-                    setGeminiApiKey(v);
-                    setGeminiApiKeyDirty(true);
-                  }}
-                  placeholder={
-                    hasGeminiApiKey
-                      ? "Configured - enter new value to replace"
-                      : "Your Gemini API key"
-                  }
-                  helperText={
-                    <>
-                      Get a free API key from{" "}
-                      <a
-                        href="https://aistudio.google.com/apikey"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-blue hover:text-blue/80 underline"
-                      >
-                        Google AI Studio
-                      </a>
-                    </>
-                  }
-                />
-              )}
               <div className="space-y-1.5">
                 <label className="block text-sm font-medium text-subtext1">Model</label>
                 <input
@@ -954,12 +1072,12 @@ export default function AssistantSettingsPage() {
               <p className="text-xs text-overlay0">
                 Generate videos from text prompts using Google&apos;s Veo model via the{" "}
                 <code className="text-xs bg-surface0 px-1 rounded">generate_video</code> tool.
-                {apiProvider === "vertex" ? (
-                  <span className="text-green ml-1">Using Vertex AI.</span>
-                ) : hasGeminiApiKey || imageGeneration ? (
-                  <span className="text-green ml-1">Gemini API key configured.</span>
+                {hasGoogleApiKey ? (
+                  <span className="text-green ml-1">Google API key configured.</span>
                 ) : (
-                  <span className="text-peach ml-1">Requires Vertex AI or a Gemini API key.</span>
+                  <span className="text-peach ml-1">
+                    Requires Google API key (set in Google AI above).
+                  </span>
                 )}
               </p>
             </div>

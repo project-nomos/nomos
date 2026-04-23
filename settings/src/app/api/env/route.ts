@@ -49,6 +49,14 @@ const ALLOWED_KEYS = [
   "BLUEBUBBLES_PASSWORD",
   "BLUEBUBBLES_WEBHOOK_PORT",
   "BLUEBUBBLES_READ_RECEIPTS",
+  "GOOGLE_API_KEY",
+  "EMBEDDING_MODEL",
+  "NOMOS_IMAGE_GENERATION",
+  "NOMOS_IMAGE_GENERATION_MODEL",
+  "NOMOS_VIDEO_GENERATION",
+  "NOMOS_VIDEO_GENERATION_MODEL",
+  "PHOTON_SERVER_URL",
+  "PHOTON_API_KEY",
 ];
 
 /** Keys that contain secrets and should be masked in GET responses. */
@@ -64,6 +72,8 @@ const SECRET_KEYS = new Set([
   "TELEGRAM_BOT_TOKEN",
   "OPENROUTER_API_KEY",
   "BLUEBUBBLES_PASSWORD",
+  "GOOGLE_API_KEY",
+  "PHOTON_API_KEY",
 ]);
 
 /** Keys that are writable via PUT. */
@@ -109,6 +119,14 @@ const WRITABLE_KEYS = new Set([
   "BLUEBUBBLES_PASSWORD",
   "BLUEBUBBLES_WEBHOOK_PORT",
   "BLUEBUBBLES_READ_RECEIPTS",
+  "GOOGLE_API_KEY",
+  "EMBEDDING_MODEL",
+  "NOMOS_IMAGE_GENERATION",
+  "NOMOS_IMAGE_GENERATION_MODEL",
+  "NOMOS_VIDEO_GENERATION",
+  "NOMOS_VIDEO_GENERATION_MODEL",
+  "PHOTON_SERVER_URL",
+  "PHOTON_API_KEY",
 ]);
 
 /**
@@ -200,6 +218,8 @@ const ENV_TO_DB: Record<string, DbMapping> = {
   },
   NOMOS_VIDEO_GENERATION: { table: "config", dbKey: "app.videoGeneration" },
   NOMOS_VIDEO_GENERATION_MODEL: { table: "config", dbKey: "app.videoGenerationModel" },
+  GOOGLE_API_KEY: { table: "integrations", dbKey: "google-ai", field: "api_key", isSecret: true },
+  EMBEDDING_MODEL: { table: "config", dbKey: "app.embeddingModel" },
   IMESSAGE_ENABLED: { table: "integrations", dbKey: "imessage", field: "enabled" },
   IMESSAGE_MODE: { table: "integrations", dbKey: "imessage", field: "mode" },
   IMESSAGE_ALLOWED_CHATS: { table: "integrations", dbKey: "imessage", field: "allowed_chats" },
@@ -429,12 +449,22 @@ export async function PUT(request: Request) {
     // DB not available — will still write to .env
   }
 
-  // Write to .env as secondary sync
-  writeEnv(updates);
+  // Write non-secret config to .env as convenience (for bootstrap / CLI use).
+  // Secrets are ONLY stored in the DB (encrypted) to avoid duplication issues
+  // where .env tokens cause duplicate adapter registrations on daemon start.
+  const envUpdates: Record<string, string> = {};
+  for (const [key, value] of Object.entries(updates)) {
+    if (!SECRET_KEYS.has(key)) {
+      envUpdates[key] = value;
+    }
+  }
+  if (Object.keys(envUpdates).length > 0) {
+    writeEnv(envUpdates);
+  }
 
   return NextResponse.json({
     ok: true,
     updated: Object.keys(updates),
-    source: dbWritten ? "db+env" : "env",
+    source: dbWritten ? "db" : "env",
   });
 }

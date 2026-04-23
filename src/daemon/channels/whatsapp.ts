@@ -15,6 +15,7 @@ import * as path from "node:path";
 import * as os from "node:os";
 import { randomUUID } from "node:crypto";
 import type { ChannelAdapter, IncomingMessage, OutgoingMessage } from "../types.ts";
+import type { DraftManager } from "../draft-manager.ts";
 
 const MAX_LENGTH = 4096;
 
@@ -46,13 +47,24 @@ const logger = {
   error: () => {},
 };
 
+export interface WhatsAppAdapterOptions {
+  onMessage: (msg: IncomingMessage) => void;
+  draftManager?: DraftManager;
+}
+
 export class WhatsAppAdapter implements ChannelAdapter {
   readonly platform = "whatsapp";
   private sock: WASocket | null = null;
   private onMessage: (msg: IncomingMessage) => void;
+  private draftManager?: DraftManager;
 
-  constructor(onMessage: (msg: IncomingMessage) => void) {
-    this.onMessage = onMessage;
+  constructor(options: WhatsAppAdapterOptions | ((msg: IncomingMessage) => void)) {
+    if (typeof options === "function") {
+      this.onMessage = options;
+    } else {
+      this.onMessage = options.onMessage;
+      this.draftManager = options.draftManager;
+    }
   }
 
   async start(): Promise<void> {
@@ -134,6 +146,18 @@ export class WhatsAppAdapter implements ChannelAdapter {
   }
 
   async send(message: OutgoingMessage): Promise<void> {
+    if (this.draftManager) {
+      await this.draftManager.createDraft(message, "whatsapp", {
+        messageType: "message",
+        channelId: message.channelId,
+      });
+      return;
+    }
+    await this.sendDirect(message);
+  }
+
+  /** Send directly to WhatsApp, bypassing draft approval. */
+  async sendDirect(message: OutgoingMessage): Promise<void> {
     if (!this.sock) return;
     const chunks = chunk(message.content);
     for (const text of chunks) {

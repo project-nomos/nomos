@@ -356,9 +356,10 @@ What we add via MCP and the daemon:
 - Custom API endpoint passthrough (`ANTHROPIC_BASE_URL`)
 - Scheduled task execution (cron)
 - Streaming progressive updates to channel platforms
-- Approve-before-send draft workflow (Slack User Mode, extensible to all channels)
+- Unified consent system -- all channels route through DraftManager with per-platform consent modes (always_ask, auto_approve, notify_only)
+- Draft edit tracking -- approveWithEdit() captures user modifications to drafts as learning signals
 - Multi-workspace Slack support with OAuth
-- Historical data ingestion with delta sync (Slack, Gmail, iMessage, WhatsApp)
+- Historical data ingestion with delta sync (iMessage, Gmail, WhatsApp; Slack/Discord/Telegram via manual CLI only)
 - Communication style modeling (global + per-contact voice profiles)
 - Compiled knowledge wiki (Karpathy-style LLM knowledge base)
 - Cross-channel identity graph with auto-linking
@@ -438,9 +439,16 @@ Daemon Process (Gateway)
 |     (facts, preferences, corrections) and updates the user model.
 |
 +-- DraftManager
-|     Orchestrates draft creation, approval, and sending for Slack User Mode.
-|     Platform-keyed send functions (Map<string, SendFn>).
-|     Notifies via WebSocket events and Slack bot DMs.
+|     Unified consent-aware draft orchestration for ALL channels.
+|     ALL channel adapters (Discord, Telegram, WhatsApp, Slack, iMessage, Email)
+|     route outgoing messages through DraftManager.
+|     Per-platform consent modes: always_ask (draft + approve),
+|     auto_approve (send immediately + FYI notification),
+|     notify_only (just notify, no response).
+|     Default channel (direct chat with agent) is exempt from consent.
+|     Draft notifications go to the default Slack channel (not bot DM).
+|     approveWithEdit() captures user edits as learning signals for
+|     knowledge extraction. Platform-keyed send functions (Map<string, SendFn>).
 |
 +-- WebSocketServer (ws://localhost:8765)
 |     Terminal UI client connections.
@@ -468,7 +476,10 @@ Daemon Process (Gateway)
 +-- IngestPipeline
 |     Historical data ingestion: Slack, Gmail, iMessage, WhatsApp.
 |     Dedup → chunk → embed → store. Cursor-based delta sync via CronEngine.
-|     Auto-triggers on channel connect. Sent-only filtering for Slack/Gmail.
+|     Auto-trigger on channel connect is retired for Slack, Discord, and
+|     Telegram. CLI manual ingestion still works (nomos ingest slack --since).
+|     iMessage/Email ingestion retained for style model training.
+|     Sent-only filtering for Slack/Gmail.
 |
 +-- KnowledgeCompiler
 |     Karpathy-style wiki compilation from ingested messages.
@@ -606,7 +617,7 @@ Source (Slack/Gmail/iMessage/WhatsApp)
 
 **Delta sync**: After initial ingestion, the pipeline registers a cron job for continuous delta sync using cursor-based pagination (Slack cursor, Gmail historyId, iMessage ROWID). Default interval: 6 hours for API-based sources, 1 hour for local sources.
 
-**Auto-trigger**: When a channel integration is saved (via Settings UI or onboarding), the gateway auto-triggers a background ingestion job if no prior ingest exists for that platform.
+**Auto-trigger**: Auto-triggered bulk ingestion on channel connect has been retired for Slack, Discord, and Telegram. The agent now learns primarily from direct conversations, draft edits (via `approveWithEdit()`), and knowledge extraction from agent conversations. CLI manual ingestion (`nomos ingest slack --since DATE`) still works for on-demand imports. iMessage and Email auto-trigger is retained for style model training.
 
 ### Communication Style Model
 

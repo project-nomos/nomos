@@ -33,19 +33,24 @@ IMESSAGE_OWNER_APPLE_ID=you@icloud.com
 
 ## Choose Your Connection Mode
 
-|                        | Local chat.db                | BlueBubbles          |
-| ---------------------- | ---------------------------- | -------------------- |
-| **Read messages**      | SQLite polling + WAL watcher | Webhooks (real-time) |
-| **Send messages**      | AppleScript                  | REST API             |
-| **Reactions/tapbacks** | No                           | Yes                  |
-| **Typing indicators**  | No                           | Yes                  |
-| **Read receipts**      | No                           | Yes                  |
-| **Attachments**        | No                           | Yes (up to 8MB)      |
-| **Group management**   | No                           | Yes                  |
-| **Daemon platform**    | macOS only                   | Any (Mac is relay)   |
-| **Setup complexity**   | Minimal                      | Moderate             |
+|                        | Local chat.db                | BlueBubbles          | Photon Server                      |
+| ---------------------- | ---------------------------- | -------------------- | ---------------------------------- |
+| **Read messages**      | SQLite polling + WAL watcher | Webhooks (real-time) | Socket.IO (real-time)              |
+| **Send messages**      | AppleScript                  | REST API             | REST API                           |
+| **Reactions/tapbacks** | No                           | Yes                  | Yes                                |
+| **Typing indicators**  | No                           | Yes                  | Yes                                |
+| **Read receipts**      | No                           | Yes                  | Yes                                |
+| **Attachments**        | No                           | Yes (up to 8MB)      | Yes                                |
+| **Message effects**    | No                           | No                   | Yes (slam, loud, etc.)             |
+| **Scheduled messages** | No                           | No                   | Yes                                |
+| **Rich link previews** | No                           | No                   | Yes                                |
+| **Contact cards**      | No                           | No                   | Yes                                |
+| **Group management**   | No                           | Yes                  | Yes                                |
+| **Daemon platform**    | macOS only                   | Any (Mac is relay)   | Any (Mac is relay)                 |
+| **Setup complexity**   | Minimal                      | Moderate             | Moderate                           |
+| **Package**            | Built-in                     | Built-in             | `@photon-ai/advanced-imessage-kit` |
 
-**Recommendation:** Start with chat.db for the simplest setup. Switch to BlueBubbles when you need sending capabilities, reactions, or want the daemon running on a non-Mac machine.
+**Recommendation:** Start with chat.db for the simplest setup. Switch to Photon for full-featured iMessage automation (reactions, effects, scheduled messages). Use BlueBubbles as an alternative cross-platform relay.
 
 Configure the mode via Settings UI at `/integrations/imessage` or with the `IMESSAGE_MODE` env var.
 
@@ -211,7 +216,72 @@ Beyond basic messaging, BlueBubbles enables:
 
 ---
 
-## Common Settings (Both Modes)
+## Mode 3: Photon Server
+
+Photon is a full-featured iMessage server that provides the richest set of capabilities: reactions, message effects, scheduled messages, rich link previews, contact cards, and more.
+
+### Prerequisites
+
+- A Mac running the Photon iMessage server
+- Photon server configured with HTTP API enabled
+- Network connectivity between the daemon and the Photon Mac
+- Nomos daemon running (on any platform)
+
+### Step 1: Install Photon Server
+
+Follow the [Photon setup guide](https://github.com/photon-hq/advanced-imessage-kit) to install and configure the server on your Mac.
+
+### Step 2: Configure Nomos
+
+**Via Settings UI:** Go to `/integrations/imessage`, enable iMessage, select "Photon Server" mode, enter your server URL and API key.
+
+**Via environment:**
+
+```bash
+IMESSAGE_ENABLED=true
+IMESSAGE_MODE=photon
+PHOTON_SERVER_URL=http://your-mac-ip:1234
+PHOTON_API_KEY=your-api-key          # optional, if server requires auth
+```
+
+### Step 3: Start the Daemon
+
+```bash
+nomos daemon run
+```
+
+You should see:
+
+```
+[imessage-photon] Connected to Photon server at http://your-mac-ip:1234
+[imessage-adapter] Started in Photon mode (passive) -- server: http://your-mac-ip:1234
+```
+
+### Photon Capabilities
+
+Beyond basic messaging, Photon enables:
+
+- **Reactions/tapbacks** -- love, like, dislike, laugh, emphasize, question
+- **Message effects** -- slam, loud, gentle, invisible ink, etc.
+- **Scheduled messages** -- send messages at a specified time
+- **Rich link previews** -- send URLs with proper previews
+- **Contact cards** -- share contact information
+- **Typing indicators** -- show typing status
+- **Read receipts** -- mark messages as read
+- **Message editing** -- edit or unsend sent messages
+- **Attachments** -- send and receive files
+- **Polls** -- create and vote in iMessage polls
+
+### Photon Environment Variables
+
+| Variable            | Required | Default | Description                |
+| ------------------- | -------- | ------- | -------------------------- |
+| `PHOTON_SERVER_URL` | Yes      | --      | Photon server URL          |
+| `PHOTON_API_KEY`    | No       | --      | API key for authentication |
+
+---
+
+## Common Settings (All Modes)
 
 ### Restrict to Specific Contacts or Groups
 
@@ -245,7 +315,7 @@ Long responses are automatically split into chunks at 4,000 characters, breaking
 | Variable                       | Required         | Default            | Description                                       |
 | ------------------------------ | ---------------- | ------------------ | ------------------------------------------------- |
 | `IMESSAGE_ENABLED`             | Yes              | --                 | Set to `"true"` to enable                         |
-| `IMESSAGE_MODE`                | No               | `chatdb`           | Connection mode: `chatdb` or `bluebubbles`        |
+| `IMESSAGE_MODE`                | No               | `chatdb`           | Connection: `chatdb`, `bluebubbles`, or `photon`  |
 | `IMESSAGE_AGENT_MODE`          | No               | `passive`          | Agent mode: `passive` (draft) or `agent` (direct) |
 | `IMESSAGE_OWNER_PHONE`         | Agent mode       | --                 | Owner phone number (e.g., `+15551234567`)         |
 | `IMESSAGE_OWNER_APPLE_ID`      | Agent mode       | --                 | Owner Apple ID email (e.g., `you@icloud.com`)     |
@@ -255,6 +325,8 @@ Long responses are automatically split into chunks at 4,000 characters, breaking
 | `BLUEBUBBLES_WEBHOOK_PORT`     | No               | `8803`             | Webhook listener port                             |
 | `BLUEBUBBLES_WEBHOOK_PASSWORD` | No               | (same as password) | Webhook auth password                             |
 | `BLUEBUBBLES_READ_RECEIPTS`    | No               | `false`            | Send read receipts                                |
+| `PHOTON_SERVER_URL`            | Photon only      | --                 | Photon server URL                                 |
+| `PHOTON_API_KEY`               | No               | --                 | Photon API key (if server requires auth)          |
 
 ---
 

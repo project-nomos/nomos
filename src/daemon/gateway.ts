@@ -67,7 +67,7 @@ export class Gateway {
   private settingsProcess: ChildProcess | null = null;
   private cateIntegration: CATEIntegration | null = null;
   private ingestScheduler: IngestScheduler;
-  private pendingSlackIngest: { team_id: string }[] | null = null;
+  // Removed: pendingSlackIngest -- bulk ingestion retired in favor of agent conversation learning
   private options: GatewayOptions;
 
   constructor(options: GatewayOptions = {}) {
@@ -88,7 +88,10 @@ export class Gateway {
         this.wsServer.broadcast(event);
         this.grpcServer.broadcast(event);
       },
-      notifySlack: (userId, draft) => this.sendSlackDraftNotification(userId, draft),
+      notifyDefaultChannel: (draft, context) =>
+        this.sendDraftNotificationToDefaultChannel(draft, context),
+      notifyDefaultChannelFyi: (platform, channelId, content, context) =>
+        this.sendFyiNotificationToDefaultChannel(platform, channelId, content, context),
     });
 
     // 4. Create WebSocket server
@@ -132,6 +135,14 @@ export class Gateway {
 
     // Initialize agent runtime (loads config, runs migrations)
     await this.runtime.initialize();
+
+    // Sync config files (SOUL.md, TOOLS.md, IDENTITY.md, skills) disk <-> DB
+    try {
+      const { syncAllFiles } = await import("../config/file-sync.ts");
+      await syncAllFiles();
+    } catch (err) {
+      console.warn("[gateway] File sync failed:", err instanceof Error ? err.message : err);
+    }
 
     // Verify LLM access before starting services
     await this.checkLlmAccess();
@@ -185,24 +196,16 @@ export class Gateway {
       await this.registerChannelAdapters();
       await this.channelManager.start();
 
-      // Trigger deferred Slack ingestion after a cooldown so poll timers
-      // have time to spread out and don't collide with ingestion API calls.
-      if (this.pendingSlackIngest) {
-        const workspaces = this.pendingSlackIngest;
-        this.pendingSlackIngest = null;
-        setTimeout(() => {
-          for (const ws of workspaces) {
-            this.ingestScheduler.triggerAuto(`slack:${ws.team_id}`, "history", "slack");
-          }
-        }, 60_000); // Wait 60s before starting ingestion
-      }
+      // Note: Slack/Discord/Telegram bulk ingestion removed.
+      // Agent learns from direct conversations and draft edits, not raw message history.
+      // Manual ingestion still available via CLI: nomos ingest slack --since DATE
     }
 
     // Auto-ingest Gmail when Google Workspace is configured
     try {
       const { isGoogleWorkspaceConfiguredAsync } = await import("../sdk/google-workspace-mcp.ts");
       if (await isGoogleWorkspaceConfiguredAsync()) {
-        this.ingestScheduler.triggerAuto("gmail", "history", "gmail");
+        this.ingestScheduler.triggerStartup("gmail", "history", "gmail");
       }
     } catch {
       // Google Workspace not available
@@ -229,6 +232,29 @@ export class Gateway {
       await registerProactiveJobs();
     } catch (err) {
       console.warn("[gateway] Proactive jobs registration failed:", err);
+    }
+
+    // Register wiki compilation cron job (compile knowledge every 6 hours)
+    try {
+      const { CronStore } = await import("../cron/store.ts");
+      const cronStore = new CronStore();
+      const existingWikiJob = await cronStore.getJobByName("wiki-compile");
+      if (!existingWikiJob) {
+        await cronStore.createJob({
+          name: "wiki-compile",
+          schedule: "1h",
+          scheduleType: "every",
+          sessionTarget: "isolated",
+          deliveryMode: "none",
+          prompt: "__wiki_compile__",
+          enabled: true,
+          errorCount: 0,
+        });
+        console.log("[gateway] Registered wiki compilation cron job (every 6h)");
+        process.emit("cron:refresh" as never);
+      }
+    } catch (err) {
+      console.warn("[gateway] Wiki cron registration failed:", err);
     }
 
     // Start CATE protocol server (agent-to-agent trust layer)
@@ -625,7 +651,7 @@ export class Gateway {
       // Run incoming transform hooks (fire-and-forget the async, enqueue immediately)
       this.channelManager
         .transformIncoming(rawMsg)
-        .then((msg) => {
+        .then(async (msg) => {
           const adapter = this.channelManager.getAdapter(msg.platform);
 
           // Notify connected clients about the incoming message
@@ -648,6 +674,24 @@ export class Gateway {
               console.error("[gateway] Observe indexing failed:", err),
             );
             return;
+          }
+
+          // Consent gate: check if this platform is "notify_only"
+          // Default channel is exempt (direct chat with agent)
+          const isDefault = await this.isDefaultChannel(msg.platform, msg.channelId);
+          if (!isDefault) {
+            try {
+              const { getConsentMode } = await import("../db/consent-config.ts");
+              const consent = await getConsentMode(msg.platform);
+              if (consent === "notify_only") {
+                this.postNotifyOnlyToDefaultChannel(msg).catch((err) =>
+                  console.error("[gateway] Notify-only notification failed:", err),
+                );
+                return; // don't process through agent
+              }
+            } catch {
+              // consent config not available -- continue with default (always_ask)
+            }
           }
 
           const sessionKey = `${msg.platform}:${msg.channelId}`;
@@ -690,12 +734,11 @@ export class Gateway {
         });
     };
 
-    // Only register adapters whose tokens are present
-    if (process.env.SLACK_BOT_TOKEN && process.env.SLACK_APP_TOKEN) {
-      this.channelManager.register(new SlackAdapter(enqueue, this.draftManager));
-    }
-
-    // Slack user mode: load workspaces from DB, fall back to env var
+    // Slack user mode: load workspaces from DB, fall back to env var.
+    // This block runs FIRST so we know whether Socket Mode is in use
+    // (which means the SlackAdapter bot mode should NOT start -- two
+    // Socket Mode connections on the same xapp- token compete for events).
+    let usingSocketMode = false;
     {
       const { listWorkspaces, syncSlackConfigToFile } = await import("../db/slack-workspaces.ts");
       const workspaces = await listWorkspaces();
@@ -742,12 +785,14 @@ export class Gateway {
           // not available
         }
 
+        let pollingAdapterIndex = 0;
         for (const ws of workspaces) {
           const isDefaultWorkspace = ws.team_id === defaultChannelTeamId;
 
           // Use Socket Mode (real-time) for the default channel workspace
           // when an xapp- token is available. Polling for everything else.
           if (isDefaultWorkspace && slackAppToken) {
+            usingSocketMode = true;
             console.log(
               `[gateway] Using Socket Mode for workspace ${ws.team_id} (default channel)`,
             );
@@ -764,10 +809,14 @@ export class Gateway {
               adapter.sendAsUser(channelId, text, threadId),
             );
           } else {
+            // Stagger polling adapters 2 min apart to avoid rate limit bursts
+            const staggerMs = pollingAdapterIndex * 2 * 60_000;
+            pollingAdapterIndex++;
             const adapter = new SlackPollingAdapter({
               token: ws.access_token,
               cookie: ws.cookie_d,
               teamId: ws.team_id,
+              startDelayMs: staggerMs,
               onMessage: enqueue,
               draftManager: this.draftManager,
               onAuthError: (teamId, teamName) => {
@@ -788,9 +837,7 @@ export class Gateway {
           }
         }
 
-        // Slack ingestion is deferred until after channelManager.start()
-        // to avoid competing for API rate limits during baseline setup.
-        this.pendingSlackIngest = workspaces;
+        // Slack bulk ingestion retired -- agent learns from conversations + draft edits
       } else if (process.env.SLACK_USER_TOKEN && process.env.SLACK_APP_TOKEN) {
         // Backwards compat: single env var, no DB rows
         const adapter = new SlackUserAdapter({
@@ -807,30 +854,64 @@ export class Gateway {
       }
     }
 
+    // Bot-mode SlackAdapter: only start if NOT using Socket Mode for user mode.
+    // Two Socket Mode connections on the same xapp- token compete for events.
+    if (process.env.SLACK_BOT_TOKEN && process.env.SLACK_APP_TOKEN && !usingSocketMode) {
+      this.channelManager.register(new SlackAdapter(enqueue, this.draftManager));
+    }
+
     if (process.env.DISCORD_BOT_TOKEN) {
-      const adapter = new DiscordAdapter(enqueue);
+      const adapter = new DiscordAdapter({
+        onMessage: enqueue,
+        draftManager: this.draftManager,
+      });
       this.channelManager.register(adapter);
+      // Register sendDirect (not send) to avoid infinite draft loop
       this.draftManager.registerSendFn("discord", (channelId, text, threadId) =>
-        adapter.send({ inReplyTo: "", platform: "discord", channelId, threadId, content: text }),
+        adapter.sendDirect({
+          inReplyTo: "",
+          platform: "discord",
+          channelId,
+          threadId,
+          content: text,
+        }),
       );
-      this.ingestScheduler.triggerAuto("discord", "history", "discord");
+      // Discord ingestion removed -- agent learns from conversations, not history
     }
 
     if (process.env.TELEGRAM_BOT_TOKEN) {
-      const adapter = new TelegramAdapter(enqueue);
+      const adapter = new TelegramAdapter({
+        onMessage: enqueue,
+        draftManager: this.draftManager,
+      });
       this.channelManager.register(adapter);
       this.draftManager.registerSendFn("telegram", (channelId, text, threadId) =>
-        adapter.send({ inReplyTo: "", platform: "telegram", channelId, threadId, content: text }),
+        adapter.sendDirect({
+          inReplyTo: "",
+          platform: "telegram",
+          channelId,
+          threadId,
+          content: text,
+        }),
       );
-      this.ingestScheduler.triggerAuto("telegram", "history", "telegram");
+      // Telegram ingestion removed -- agent learns from conversations, not history
     }
 
     // WhatsApp is always available (uses QR code auth)
     if (process.env.WHATSAPP_ENABLED === "true") {
-      const adapter = new WhatsAppAdapter(enqueue);
+      const adapter = new WhatsAppAdapter({
+        onMessage: enqueue,
+        draftManager: this.draftManager,
+      });
       this.channelManager.register(adapter);
       this.draftManager.registerSendFn("whatsapp", (channelId, text, threadId) =>
-        adapter.send({ inReplyTo: "", platform: "whatsapp", channelId, threadId, content: text }),
+        adapter.sendDirect({
+          inReplyTo: "",
+          platform: "whatsapp",
+          channelId,
+          threadId,
+          content: text,
+        }),
       );
     }
 
@@ -866,8 +947,8 @@ export class Gateway {
         }),
       );
 
-      // Auto-ingest historical iMessages on first connection
-      this.ingestScheduler.triggerAuto("imessage", "history", "imessage");
+      // Delta sync on startup (full ingest only triggered from Settings UI)
+      this.ingestScheduler.triggerStartup("imessage", "history", "imessage");
     }
 
     // Email adapter (IMAP/SMTP from integrations table)
@@ -897,8 +978,8 @@ export class Gateway {
         });
         this.channelManager.register(adapter);
 
-        // Auto-ingest historical emails on first connection
-        this.ingestScheduler.triggerAuto("gmail", "history", "gmail");
+        // Delta sync on startup (full ingest only triggered from Settings UI)
+        this.ingestScheduler.triggerStartup("gmail", "history", "gmail");
       }
     } catch {
       // Email not configured — skip
@@ -1002,38 +1083,92 @@ export class Gateway {
     });
   }
 
-  /** Send a Slack bot DM to the user with Block Kit approval buttons. */
-  private async sendSlackDraftNotification(userId: string, draft: DraftRow): Promise<void> {
-    const botToken = process.env.SLACK_BOT_TOKEN;
+  /** Check if a message is in the default notification channel (exempt from consent). */
+  private async isDefaultChannel(platform: string, channelId: string): Promise<boolean> {
+    const nd = await this.getDefaultChannel();
+    if (!nd) return false;
+    return nd.platform === platform && nd.channelId === channelId;
+  }
+
+  /** Get bot token from integrations table or env. */
+  private async getBotToken(): Promise<string | undefined> {
+    if (process.env.SLACK_BOT_TOKEN) return process.env.SLACK_BOT_TOKEN;
+    try {
+      const { getIntegration } = await import("../db/integrations.ts");
+      const slack = await getIntegration("slack");
+      return (slack?.secrets as Record<string, string>)?.bot_token;
+    } catch {
+      return undefined;
+    }
+  }
+
+  /** Get default notification channel config. */
+  private async getDefaultChannel(): Promise<{ channelId: string; platform: string } | null> {
+    try {
+      const { getNotificationDefault } = await import("../db/notification-defaults.ts");
+      return await getNotificationDefault();
+    } catch {
+      return null;
+    }
+  }
+
+  /** Platform display names for notifications. */
+  private static readonly PLATFORM_LABELS: Record<string, string> = {
+    slack: "Slack",
+    discord: "Discord",
+    telegram: "Telegram",
+    imessage: "iMessage",
+    email: "Email",
+    whatsapp: "WhatsApp",
+    cate: "CATE",
+  };
+
+  private platformLabel(platform: string): string {
+    const base = platform.split(":")[0].replace("slack-user", "slack");
+    return Gateway.PLATFORM_LABELS[base] ?? platform;
+  }
+
+  /**
+   * Post a draft notification to the default Slack channel with Approve/Edit/Decline buttons.
+   * Replaces the old sendSlackDraftNotification (which posted to a bot DM).
+   */
+  private async sendDraftNotificationToDefaultChannel(
+    draft: DraftRow,
+    context: Record<string, unknown>,
+  ): Promise<void> {
+    const nd = await this.getDefaultChannel();
+    if (!nd) return;
+
+    const botToken = await this.getBotToken();
     if (!botToken) return;
 
-    const slackAdapter = this.channelManager.getAdapter("slack") as SlackAdapter | undefined;
-    if (!slackAdapter) return;
-
-    // Open a DM channel with the user
     const { WebClient } = await import("@slack/web-api");
     const client = new WebClient(botToken);
-    const dm = await client.conversations.open({ users: userId });
-    const dmChannel = dm.channel?.id;
-    if (!dmChannel) return;
 
-    const contextLabel =
-      (draft.context as Record<string, unknown>).messageType === "dm"
-        ? `DM from ${(draft.context as Record<string, unknown>).senderName ?? "unknown"}`
-        : `Mention in #${(draft.context as Record<string, unknown>).channelName ?? "channel"}`;
+    const senderName = (context.senderName as string) ?? draft.user_id;
+    const platformLabel = this.platformLabel(draft.platform);
+    const messageType = (context.messageType as string) ?? "message";
+    const channelName = (context.channelName as string) ?? "";
+
+    const contextLine =
+      messageType === "dm"
+        ? `${platformLabel} DM from *${senderName}*`
+        : messageType === "mention"
+          ? `${platformLabel} @mention in #${channelName} from *${senderName}*`
+          : `${platformLabel} message from *${senderName}*`;
 
     const preview =
       draft.content.length > 2900 ? draft.content.slice(0, 2900) + "..." : draft.content;
 
     await client.chat.postMessage({
-      channel: dmChannel,
-      text: `Draft response ready (${draft.id.slice(0, 8)})`,
+      channel: nd.channelId,
+      text: `Draft response for ${contextLine}`,
       blocks: [
         {
           type: "section",
           text: {
             type: "mrkdwn",
-            text: `*Draft response ready*\n_${contextLabel}_`,
+            text: `*${contextLine}*`,
           },
         },
         {
@@ -1056,7 +1191,7 @@ export class Gateway {
             },
             {
               type: "button",
-              text: { type: "plain_text", text: "Reject" },
+              text: { type: "plain_text", text: "Decline" },
               style: "danger",
               action_id: "reject_draft",
               value: draft.id,
@@ -1064,6 +1199,56 @@ export class Gateway {
           ],
         },
       ],
+    });
+  }
+
+  /**
+   * Post a FYI notification to the default channel (for auto-approved messages).
+   */
+  private async sendFyiNotificationToDefaultChannel(
+    platform: string,
+    channelId: string,
+    content: string,
+    context: Record<string, unknown>,
+  ): Promise<void> {
+    const nd = await this.getDefaultChannel();
+    if (!nd) return;
+
+    const botToken = await this.getBotToken();
+    if (!botToken) return;
+
+    const { WebClient } = await import("@slack/web-api");
+    const client = new WebClient(botToken);
+
+    const senderName = (context.senderName as string) ?? channelId;
+    const platformLabel = this.platformLabel(platform);
+    const preview = content.length > 200 ? content.slice(0, 200) + "..." : content;
+
+    await client.chat.postMessage({
+      channel: nd.channelId,
+      text: `Auto-replied to ${senderName} on ${platformLabel}: ${preview}`,
+    });
+  }
+
+  /**
+   * Post a "notify only" notification to the default channel (no draft, no response).
+   */
+  async postNotifyOnlyToDefaultChannel(msg: IncomingMessage): Promise<void> {
+    const nd = await this.getDefaultChannel();
+    if (!nd) return;
+
+    const botToken = await this.getBotToken();
+    if (!botToken) return;
+
+    const { WebClient } = await import("@slack/web-api");
+    const client = new WebClient(botToken);
+
+    const platformLabel = this.platformLabel(msg.platform);
+    const preview = msg.content.length > 300 ? msg.content.slice(0, 300) + "..." : msg.content;
+
+    await client.chat.postMessage({
+      channel: nd.channelId,
+      text: `${platformLabel} message from ${msg.userId}:\n${preview}`,
     });
   }
 }

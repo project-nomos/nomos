@@ -15,6 +15,7 @@ import { WebClient } from "@slack/web-api";
 import type { ChannelAdapter, IncomingMessage, OutgoingMessage } from "../types.ts";
 import type { DraftManager } from "../draft-manager.ts";
 import { randomUUID } from "node:crypto";
+import { markdownToSlackMrkdwn } from "./slack-mrkdwn.ts";
 
 // CJS/ESM interop (same pattern as slack.ts)
 const slackBoltModule = SlackBolt as typeof import("@slack/bolt") & {
@@ -37,6 +38,7 @@ export class SlackUserAdapter implements ChannelAdapter {
   private readonly teamId: string;
   private readonly userToken: string;
   private readonly appToken: string;
+  private readonly botTokenStr: string | undefined;
   private app: InstanceType<typeof App> | null = null;
   private userClient: WebClient | null = null;
   private botClient: WebClient | null = null;
@@ -59,6 +61,7 @@ export class SlackUserAdapter implements ChannelAdapter {
   constructor(options: SlackUserAdapterOptions) {
     this.userToken = options.userToken;
     this.appToken = options.appToken;
+    this.botTokenStr = options.botToken;
     this.teamId = options.teamId;
     this.onMessage = options.onMessage;
     this.draftManager = options.draftManager;
@@ -70,11 +73,14 @@ export class SlackUserAdapter implements ChannelAdapter {
   }
 
   async start(): Promise<void> {
-    // Bolt app using the user token for event subscriptions
-    this.app = new App({ token: this.userToken, appToken: this.appToken, socketMode: true });
+    // Bolt requires the BOT token for Socket Mode event delivery.
+    // User tokens don't receive Socket Mode events reliably.
+    // The user token is kept separately for API calls (posting as user).
+    const boltToken = this.botTokenStr ?? this.userToken;
+    this.app = new App({ token: boltToken, appToken: this.appToken, socketMode: true });
     this.userClient = new WebClient(this.userToken);
 
-    // Resolve own user ID
+    // Resolve own user ID (from user token)
     const auth = await this.userClient.auth.test();
     this.userId = auth.user_id ?? null;
     if (!this.userId) {
@@ -144,6 +150,35 @@ export class SlackUserAdapter implements ChannelAdapter {
       }
     });
 
+    // Register draft approval/rejection action handlers for the default channel.
+    // These handle button clicks on draft notifications posted by the gateway.
+    // Must be registered here because SlackAdapter (bot mode) may not be running.
+    this.app.action("approve_draft", async ({ action, ack, respond }) => {
+      await ack();
+      const draftId = (action as { value?: string }).value;
+      if (!draftId) return;
+      const result = await this.draftManager.approve(draftId);
+      await respond({
+        replace_original: true,
+        text: result.success
+          ? `:white_check_mark: Draft ${draftId.slice(0, 8)} approved and sent`
+          : `:x: Failed: ${result.error}`,
+      });
+    });
+
+    this.app.action("reject_draft", async ({ action, ack, respond }) => {
+      await ack();
+      const draftId = (action as { value?: string }).value;
+      if (!draftId) return;
+      const result = await this.draftManager.reject(draftId);
+      await respond({
+        replace_original: true,
+        text: result.success
+          ? `:no_entry_sign: Draft ${draftId.slice(0, 8)} declined`
+          : `:x: Failed: ${result.error}`,
+      });
+    });
+
     await this.app.start();
     console.log(
       `[slack-user-adapter] Running via Socket Mode (user: ${this.userId}, team: ${this.teamId})`,
@@ -186,7 +221,7 @@ export class SlackUserAdapter implements ChannelAdapter {
     const client = new WebClient(this.userToken);
     await client.chat.postMessage({
       channel: channelId,
-      text,
+      text: markdownToSlackMrkdwn(text),
       thread_ts: threadId,
     });
   }
@@ -200,7 +235,7 @@ export class SlackUserAdapter implements ChannelAdapter {
     if (!client) return;
     await client.chat.postMessage({
       channel: channelId,
-      text,
+      text: markdownToSlackMrkdwn(text),
       thread_ts: threadId,
     });
   }
@@ -217,17 +252,23 @@ export class SlackUserAdapter implements ChannelAdapter {
 
   /**
    * Post a message and return the timestamp (for streaming support).
+   * ONLY works in the default channel -- returns undefined for other channels
+   * so the streaming responder falls through to send() -> draft manager.
+   * This prevents the agent from posting directly in DMs without approval.
    */
   async postMessage(
     channelId: string,
     text: string,
     threadId?: string,
   ): Promise<string | undefined> {
+    // Non-default channels: block streaming, force through draft approval
+    if (channelId !== this.defaultChannelId) return undefined;
+
     const client = this.clientFor(channelId);
     if (!client) return undefined;
     const result = await client.chat.postMessage({
       channel: channelId,
-      text,
+      text: markdownToSlackMrkdwn(text),
       thread_ts: threadId,
     });
     return result.ts;
@@ -235,14 +276,17 @@ export class SlackUserAdapter implements ChannelAdapter {
 
   /**
    * Update an existing message (for streaming support).
+   * Only works in the default channel (matches postMessage guard).
    */
   async updateMessage(channelId: string, messageId: string, text: string): Promise<void> {
+    if (channelId !== this.defaultChannelId) return;
+
     const client = this.clientFor(channelId);
     if (!client) return;
     await client.chat.update({
       channel: channelId,
       ts: messageId,
-      text,
+      text: markdownToSlackMrkdwn(text),
     });
   }
 
@@ -250,6 +294,8 @@ export class SlackUserAdapter implements ChannelAdapter {
    * Delete a message.
    */
   async deleteMessage(channelId: string, messageId: string): Promise<void> {
+    if (channelId !== this.defaultChannelId) return;
+
     const client = this.clientFor(channelId);
     if (!client) return;
     await client.chat.delete({
@@ -292,7 +338,9 @@ export class SlackUserAdapter implements ChannelAdapter {
       e.text!,
       "",
       "---",
-      "Draft a response AS ME (the user). I will approve it before it's sent.",
+      "Draft a response AS ME (the user). I will review and approve before it's sent.",
+      "IMPORTANT: Do NOT send this yourself. Just draft the message content.",
+      "Also suggest whether to reply in-thread or as a new message.",
     ].join("\n");
 
     this.onMessage({
@@ -324,7 +372,9 @@ export class SlackUserAdapter implements ChannelAdapter {
       cleanText,
       "",
       "---",
-      "Draft a response AS ME (the user). I will approve it before it's sent.",
+      "Draft a response AS ME (the user). I will review and approve before it's sent.",
+      "IMPORTANT: Do NOT send this yourself. Just draft the message content.",
+      "Also suggest whether to reply in-thread or as a new message in the channel.",
     ].join("\n");
 
     this.onMessage({

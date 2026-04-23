@@ -87,6 +87,7 @@ const MODEL_PRICING: Record<string, ModelCosts> = {
   "claude-opus-4-1": COST_OPUS_LEGACY,
   "claude-opus-4-5": COST_OPUS,
   "claude-opus-4-6": COST_OPUS,
+  "claude-opus-4-7": COST_OPUS,
 };
 
 // ── Usage Types ──

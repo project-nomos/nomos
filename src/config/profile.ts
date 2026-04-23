@@ -87,6 +87,19 @@ export function buildSystemPromptAppend(params: {
 }): string {
   const sections: string[] = [];
 
+  // Hard constraint: memory search before "I don't know"
+  // Placed first so it's never lost in context window truncation
+  sections.push(
+    `## MANDATORY: Search Before Responding
+
+BEFORE saying "I don't know", "I don't have that", or asking the user to provide information they may have already shared:
+1. Call \`memory_search\` with relevant keywords (names, phone numbers, topics, relationships)
+2. Call \`user_model_recall\` to check accumulated facts and preferences
+3. Only say you don't know AFTER both searches return nothing
+
+You are the user's digital clone with access to their message history and accumulated knowledge. Act like it.`,
+  );
+
   // Personality (from SOUL.md)
   if (params.soulPrompt) {
     sections.push(

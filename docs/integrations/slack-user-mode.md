@@ -39,7 +39,7 @@ Both use Socket Mode and your `xoxp-` user token.
      ↓
 5. You're notified in two places:
    • CLI: a system event appears; use /drafts to view
-   • Slack: the bot sends you a DM with Approve / Reject buttons
+   • Slack: a notification is posted to the default Slack channel with Approve / Reject buttons
      ↓
 6. You approve (or reject):
    • CLI: /approve <id>
@@ -284,7 +284,7 @@ Use /approve <id> or /reject <id>
 
 **In Slack:**
 
-The bot sends you a DM with the draft content and two buttons:
+A notification is posted to the default Slack channel (e.g., `#my-agent`) with the draft content and two buttons:
 
 ```
 ┌──────────────────────────────────────┐
@@ -311,7 +311,7 @@ The bot sends you a DM with the draft content and two buttons:
 
 **From Slack:**
 
-Click the **Approve** or **Reject** button in the bot's DM. The message updates in-place to confirm the action.
+Click the **Approve** or **Reject** button in the default channel notification. The message updates in-place to confirm the action.
 
 ### What Happens on Approval
 
@@ -422,6 +422,20 @@ The user token can only post to channels the user is a member of. Join the chann
 ### Draft appears but message sends as bot
 
 Make sure you're using `/approve` in the CLI or the Slack button — both use the `xoxp-` user token. If the agent's response is going through the normal bot flow instead, check that the message came in on the `slack-user` platform (not `slack`).
+
+## Consent Modes
+
+All channel adapters (not just Slack User Mode) now route outgoing messages through the DraftManager with configurable per-platform consent modes. The default channel (direct chat with agent) is always exempt.
+
+| Mode           | Behavior                                                           |
+| -------------- | ------------------------------------------------------------------ |
+| `always_ask`   | Draft is created and held for approval (default for most channels) |
+| `auto_approve` | Message is sent immediately; a FYI notification is posted          |
+| `notify_only`  | Notification is posted but no response is sent                     |
+
+Configure consent modes via the Settings UI (**Settings > Message Consent**) or programmatically through `consent-config.ts` DB keys.
+
+Draft notifications (for `always_ask` mode) are posted to the default Slack channel -- not as a bot DM. This keeps all draft approvals in a single, visible location.
 
 ## Security Considerations
 

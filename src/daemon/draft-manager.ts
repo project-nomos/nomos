@@ -1,8 +1,14 @@
 /**
- * DraftManager: orchestrates draft creation, approval, and sending.
+ * DraftManager: orchestrates draft creation, approval, editing, and sending.
  *
- * Sits between the SlackUserAdapter (which intercepts outgoing messages)
- * and the actual send functions (which post as the user after approval).
+ * Unified consent system -- ALL channel adapters route outgoing messages
+ * through this manager. Behavior is controlled by per-platform consent mode:
+ *   - always_ask: create draft, post to default channel with Approve/Edit/Decline
+ *   - auto_approve: send immediately, post FYI notification to default channel
+ *   - notify_only: should not reach here (handled upstream in gateway)
+ *
+ * Per-contact autonomy (auto/draft/silent) is checked AFTER platform consent
+ * for backwards compatibility with the identity graph.
  */
 
 import {
@@ -14,12 +20,20 @@ import {
 import type { DraftRow } from "../db/drafts.ts";
 import type { OutgoingMessage, AgentEvent } from "./types.ts";
 import { findContactByIdentity } from "../identity/identities.ts";
+import { getConsentMode, type ConsentMode } from "../db/consent-config.ts";
 
 export interface DraftManagerOptions {
-  /** Broadcast a system event to all WebSocket clients */
+  /** Broadcast a system event to all connected clients (gRPC + WebSocket). */
   notifyWs?: (event: AgentEvent) => void;
-  /** Send a Slack DM to the user with approval buttons */
-  notifySlack?: (userId: string, draft: DraftRow) => Promise<void>;
+  /** Post a draft notification to the default Slack channel. */
+  notifyDefaultChannel?: (draft: DraftRow, context: Record<string, unknown>) => Promise<void>;
+  /** Post an FYI (auto-approved) notification to the default Slack channel. */
+  notifyDefaultChannelFyi?: (
+    platform: string,
+    channelId: string,
+    content: string,
+    context: Record<string, unknown>,
+  ) => Promise<void>;
 }
 
 type SendFn = (channelId: string, text: string, threadId?: string) => Promise<void>;
@@ -27,16 +41,28 @@ type SendFn = (channelId: string, text: string, threadId?: string) => Promise<vo
 export class DraftManager {
   private sendFns = new Map<string, SendFn>();
   private notifyWs?: (event: AgentEvent) => void;
-  private notifySlack?: (userId: string, draft: DraftRow) => Promise<void>;
+  private notifyDefaultChannel?: (
+    draft: DraftRow,
+    context: Record<string, unknown>,
+  ) => Promise<void>;
+  private notifyDefaultChannelFyi?: (
+    platform: string,
+    channelId: string,
+    content: string,
+    context: Record<string, unknown>,
+  ) => Promise<void>;
 
   constructor(options: DraftManagerOptions = {}) {
     this.notifyWs = options.notifyWs;
-    this.notifySlack = options.notifySlack;
+    this.notifyDefaultChannel = options.notifyDefaultChannel;
+    this.notifyDefaultChannelFyi = options.notifyDefaultChannelFyi;
   }
 
   /**
    * Register a platform-specific send function.
    * Called by the gateway after the adapter starts.
+   * IMPORTANT: This must point to sendDirect/sendAsUser, NOT send(),
+   * to avoid infinite loops through createDraft().
    */
   registerSendFn(platform: string, fn: SendFn): void {
     this.sendFns.set(platform, fn);
@@ -44,38 +70,35 @@ export class DraftManager {
 
   /**
    * Create a draft from an outgoing message.
-   * Checks the recipient contact's autonomy level:
-   * - "auto": send immediately without drafting
-   * - "silent": discard the message silently
-   * - "draft" (default): create a draft for approval
+   *
+   * Flow:
+   * 1. Check platform consent mode (always_ask / auto_approve / notify_only)
+   * 2. For auto_approve: send immediately + FYI notification
+   * 3. For always_ask: check per-contact autonomy, then create draft
+   * 4. For notify_only: return null (should be handled upstream)
    */
   async createDraft(
     message: OutgoingMessage,
     userId: string,
     context: Record<string, unknown> = {},
   ): Promise<DraftRow | null> {
-    // Check contact autonomy level
+    // 1. Check platform consent mode
+    const consentMode = await this.resolveConsentMode(message.platform);
+
+    if (consentMode === "auto_approve") {
+      return this.handleAutoApprove(message, context);
+    }
+
+    if (consentMode === "notify_only") {
+      // Should not reach here (gateway intercepts), but handle gracefully
+      return null;
+    }
+
+    // 2. "always_ask" -- check per-contact autonomy for backwards compat
     const autonomy = await this.resolveAutonomy(message.platform, message.channelId);
 
     if (autonomy === "auto") {
-      // Send directly without drafting
-      const sendFn = this.sendFns.get(message.platform);
-      if (sendFn) {
-        await sendFn(message.channelId, message.content, message.threadId);
-        console.log(`[draft-manager] Auto-sent to ${message.channelId} (autonomy: auto)`);
-        this.notifyWs?.({
-          type: "system",
-          subtype: "auto_sent",
-          message: `Message auto-sent on ${message.platform} to ${message.channelId}`,
-          data: {
-            platform: message.platform,
-            channelId: message.channelId,
-            autonomy: "auto",
-            preview: message.content.slice(0, 120),
-          },
-        });
-      }
-      return null;
+      return this.handleAutoApprove(message, context);
     }
 
     if (autonomy === "silent") {
@@ -93,6 +116,7 @@ export class DraftManager {
       return null;
     }
 
+    // 3. Create draft for approval
     const draft = await dbCreateDraft({
       platform: message.platform,
       channelId: message.channelId,
@@ -103,7 +127,7 @@ export class DraftManager {
       context,
     });
 
-    // Notify WebSocket clients
+    // Notify connected clients (gRPC + WebSocket)
     this.notifyWs?.({
       type: "system",
       subtype: "draft_created",
@@ -117,10 +141,10 @@ export class DraftManager {
       },
     });
 
-    // Notify via Slack bot DM
-    if (this.notifySlack) {
-      this.notifySlack(userId, draft).catch((err) =>
-        console.error("[draft-manager] Failed to send Slack notification:", err),
+    // Post to default Slack channel with Approve/Edit/Decline buttons
+    if (this.notifyDefaultChannel) {
+      this.notifyDefaultChannel(draft, context).catch((err) =>
+        console.error("[draft-manager] Failed to post to default channel:", err),
       );
     }
 
@@ -156,12 +180,55 @@ export class DraftManager {
       console.log(`[draft-manager] Draft approved and sent: ${draft.id.slice(0, 8)}`);
       return { success: true };
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      const errMsg = err instanceof Error ? err.message : String(err);
       console.error(
         `[draft-manager] Failed to send approved draft ${draft.id.slice(0, 8)}:`,
-        message,
+        errMsg,
       );
-      return { success: false, error: `Send failed: ${message}` };
+      return { success: false, error: `Send failed: ${errMsg}` };
+    }
+  }
+
+  /**
+   * Approve a draft with edits: send the edited content, capture the diff for learning.
+   */
+  async approveWithEdit(
+    draftId: string,
+    editedContent: string,
+  ): Promise<{ success: boolean; error?: string }> {
+    const draft = await dbApproveDraft(draftId);
+    if (!draft) {
+      return { success: false, error: "Draft not found or already processed" };
+    }
+
+    const sendFn = this.sendFns.get(draft.platform);
+    if (!sendFn) {
+      return { success: false, error: `No send function registered for ${draft.platform}` };
+    }
+
+    try {
+      // Send the EDITED content, not the original draft
+      await sendFn(draft.channel_id, editedContent, draft.thread_id ?? undefined);
+      await markDraftSent(draft.id);
+
+      // Capture the edit as a learning signal (fire-and-forget)
+      if (editedContent !== draft.content) {
+        this.captureDraftEdit(draft.content, editedContent).catch(() => {});
+      }
+
+      this.notifyWs?.({
+        type: "system",
+        subtype: "draft_approved",
+        message: `Draft ${draft.id.slice(0, 8)} approved (edited) and sent`,
+        data: { draftId: draft.id, edited: true },
+      });
+
+      console.log(`[draft-manager] Draft approved (edited) and sent: ${draft.id.slice(0, 8)}`);
+      return { success: true };
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      console.error(`[draft-manager] Failed to send edited draft ${draft.id.slice(0, 8)}:`, errMsg);
+      return { success: false, error: `Send failed: ${errMsg}` };
     }
   }
 
@@ -185,6 +252,57 @@ export class DraftManager {
     return { success: true };
   }
 
+  // ── Private helpers ──
+
+  /**
+   * Handle auto-approve: send immediately + post FYI notification.
+   */
+  private async handleAutoApprove(
+    message: OutgoingMessage,
+    context: Record<string, unknown>,
+  ): Promise<null> {
+    const sendFn = this.sendFns.get(message.platform);
+    if (sendFn) {
+      await sendFn(message.channelId, message.content, message.threadId);
+      console.log(`[draft-manager] Auto-sent to ${message.channelId} on ${message.platform}`);
+
+      this.notifyWs?.({
+        type: "system",
+        subtype: "auto_sent",
+        message: `Message auto-sent on ${message.platform} to ${message.channelId}`,
+        data: {
+          platform: message.platform,
+          channelId: message.channelId,
+          preview: message.content.slice(0, 120),
+        },
+      });
+
+      // FYI notification to default channel
+      if (this.notifyDefaultChannelFyi) {
+        this.notifyDefaultChannelFyi(
+          message.platform,
+          message.channelId,
+          message.content,
+          context,
+        ).catch((err) =>
+          console.error("[draft-manager] Failed to post FYI to default channel:", err),
+        );
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Resolve per-platform consent mode.
+   */
+  private async resolveConsentMode(platform: string): Promise<ConsentMode> {
+    try {
+      return await getConsentMode(platform);
+    } catch {
+      return "always_ask";
+    }
+  }
+
   /**
    * Look up the autonomy level for a contact based on platform + channel/user ID.
    * Falls back to "draft" if no contact is found.
@@ -199,8 +317,40 @@ export class DraftManager {
         return contact.autonomy;
       }
     } catch {
-      // Identity graph not available or DB error — fall back to draft
+      // Identity graph not available or DB error
     }
     return "draft";
+  }
+
+  /**
+   * Capture a draft edit as a learning signal.
+   * Feeds the original -> edited diff to the knowledge extractor.
+   */
+  private async captureDraftEdit(original: string, edited: string): Promise<void> {
+    try {
+      const { updateUserModel } = await import("../memory/user-model.ts");
+      await updateUserModel(
+        {
+          facts: [],
+          preferences: [],
+          corrections: [
+            {
+              original,
+              corrected: edited,
+              confidence: 0.9,
+            },
+          ],
+          decisionPatterns: [],
+          values: [],
+        },
+        [],
+      );
+      console.log(`[draft-manager] Draft edit captured as learning signal`);
+    } catch (err) {
+      console.warn(
+        "[draft-manager] Failed to capture draft edit:",
+        err instanceof Error ? err.message : err,
+      );
+    }
   }
 }
