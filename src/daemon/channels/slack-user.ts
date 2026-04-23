@@ -53,6 +53,7 @@ export class SlackUserAdapter implements ChannelAdapter {
   // Cache for user/channel name lookups
   private userNameCache = new Map<string, string>();
   private channelNameCache = new Map<string, string>();
+  private lastIncomingContext = new Map<string, { senderName: string; messageType: string }>();
 
   get platform(): string {
     return `slack-user:${this.teamId}`;
@@ -206,9 +207,12 @@ export class SlackUserAdapter implements ChannelAdapter {
       return;
     }
 
+    const incoming = this.lastIncomingContext.get(message.channelId);
     const context: Record<string, unknown> = {
       channelId: message.channelId,
       threadId: message.threadId,
+      senderName: incoming?.senderName ?? message.channelId,
+      messageType: incoming?.messageType ?? "dm",
     };
 
     await this.draftManager.createDraft(message, this.userId, context);
@@ -353,6 +357,8 @@ export class SlackUserAdapter implements ChannelAdapter {
       timestamp: new Date(),
       metadata: { senderName, messageType: "dm" },
     });
+
+    this.lastIncomingContext.set(e.channel, { senderName, messageType: "dm" });
   }
 
   private async handleMention(e: {
@@ -387,6 +393,8 @@ export class SlackUserAdapter implements ChannelAdapter {
       timestamp: new Date(),
       metadata: { senderName, channelName, messageType: "mention" },
     });
+
+    this.lastIncomingContext.set(e.channel, { senderName, messageType: "mention" });
   }
 
   private async lookupUserName(userId: string): Promise<string> {
