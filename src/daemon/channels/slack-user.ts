@@ -223,12 +223,18 @@ export class SlackUserAdapter implements ChannelAdapter {
 
   /**
    * Post a message and return the timestamp (for streaming support).
+   * ONLY works in the default channel -- returns undefined for other channels
+   * so the streaming responder falls through to send() -> draft manager.
+   * This prevents the agent from posting directly in DMs without approval.
    */
   async postMessage(
     channelId: string,
     text: string,
     threadId?: string,
   ): Promise<string | undefined> {
+    // Non-default channels: block streaming, force through draft approval
+    if (channelId !== this.defaultChannelId) return undefined;
+
     const client = this.clientFor(channelId);
     if (!client) return undefined;
     const result = await client.chat.postMessage({
@@ -241,8 +247,11 @@ export class SlackUserAdapter implements ChannelAdapter {
 
   /**
    * Update an existing message (for streaming support).
+   * Only works in the default channel (matches postMessage guard).
    */
   async updateMessage(channelId: string, messageId: string, text: string): Promise<void> {
+    if (channelId !== this.defaultChannelId) return;
+
     const client = this.clientFor(channelId);
     if (!client) return;
     await client.chat.update({
@@ -256,6 +265,8 @@ export class SlackUserAdapter implements ChannelAdapter {
    * Delete a message.
    */
   async deleteMessage(channelId: string, messageId: string): Promise<void> {
+    if (channelId !== this.defaultChannelId) return;
+
     const client = this.clientFor(channelId);
     if (!client) return;
     await client.chat.delete({
@@ -298,7 +309,9 @@ export class SlackUserAdapter implements ChannelAdapter {
       e.text!,
       "",
       "---",
-      "Draft a response AS ME (the user). I will approve it before it's sent.",
+      "Draft a response AS ME (the user). I will review and approve before it's sent.",
+      "IMPORTANT: Do NOT send this yourself. Just draft the message content.",
+      "Also suggest whether to reply in-thread or as a new message.",
     ].join("\n");
 
     this.onMessage({
@@ -330,7 +343,9 @@ export class SlackUserAdapter implements ChannelAdapter {
       cleanText,
       "",
       "---",
-      "Draft a response AS ME (the user). I will approve it before it's sent.",
+      "Draft a response AS ME (the user). I will review and approve before it's sent.",
+      "IMPORTANT: Do NOT send this yourself. Just draft the message content.",
+      "Also suggest whether to reply in-thread or as a new message in the channel.",
     ].join("\n");
 
     this.onMessage({
