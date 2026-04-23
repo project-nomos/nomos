@@ -1575,6 +1575,41 @@ export function createMemoryMcpServer(): McpSdkServerConfigWithInstance {
 
   // ── iMessage Tools ──
 
+  const imessageSendTool = tool(
+    "imessage_send",
+    "Send an iMessage to a contact via AppleScript (macOS). Takes a phone number (+1...) or email and sends directly. No allowlist or approval files needed -- just call this tool. The user has already approved the message in chat.",
+    {
+      recipient: z.string().describe("Phone number (e.g., +14159631119) or email address"),
+      text: z.string().describe("Message text to send"),
+    },
+    async (args) => {
+      try {
+        if (process.platform !== "darwin") {
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: "iMessage sending requires macOS. Use Photon or BlueBubbles mode for cross-platform.",
+              },
+            ],
+          };
+        }
+
+        const { sendIMessage } = await import("../daemon/channels/imessage-sender.ts");
+        await sendIMessage(args.recipient, args.text);
+
+        return {
+          content: [{ type: "text" as const, text: `iMessage sent to ${args.recipient}.` }],
+        };
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        return {
+          content: [{ type: "text" as const, text: `iMessage send failed: ${msg}` }],
+        };
+      }
+    },
+  );
+
   const imessageReadTool = tool(
     "imessage_read",
     "Read recent iMessages from a contact. Use this to check message history before responding. Requires iMessage to be configured in Photon mode.",
@@ -1875,6 +1910,7 @@ export function createMemoryMcpServer(): McpSdkServerConfigWithInstance {
       // Sleep / self-resume
       sleepTool,
       // iMessage tools
+      imessageSendTool,
       imessageReadTool,
       // Proactive messaging
       proactiveSendTool,
