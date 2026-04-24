@@ -275,6 +275,18 @@ export function classifyQuery(text: string): ClassificationResult {
     scores["code_blocks"] = codeBlocks;
   }
 
+  // Force complex tier for known multi-step skills
+  const COMPLEX_SKILLS = ["/twin-test", "/calibrate", "/reflect", "/dna", "/team"];
+  const forceComplex = COMPLEX_SKILLS.some((s) => lower.includes(s));
+  if (forceComplex) {
+    totalScore = Math.max(totalScore, 0.1);
+  }
+
+  // Force at least moderate for any skill invocation
+  if (lower.includes("/") && /\/[a-z]/.test(lower)) {
+    totalScore = Math.max(totalScore, 0.03);
+  }
+
   // Determine tier from total score using sigmoid for smooth boundaries
   const confidence = sigmoid(totalScore * 10 - 2);
 
