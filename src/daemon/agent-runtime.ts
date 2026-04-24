@@ -693,9 +693,13 @@ export class AgentRuntime {
       };
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
+      console.error(
+        `[agent-runtime] SDK error (model: ${model ?? this.config.model}, resume: ${!!resumeId}): ${errMsg}`,
+      );
 
-      // If resume failed, retry without resume
-      if (resumeId && /session|conversation/i.test(errMsg)) {
+      // If resume failed, retry without resume.
+      // "exited with code 1" is a generic SDK crash that often indicates a corrupt/stale session.
+      if (resumeId && /session|conversation|exited with code/i.test(errMsg)) {
         this.sdkSessionIds.delete(sessionKey);
 
         emit({
@@ -792,6 +796,11 @@ export class AgentRuntime {
       maxTurns: 50,
       anthropicBaseUrl: this.config.anthropicBaseUrl,
       plugins: this.plugins,
+      stderr: (data: string) => {
+        // Log SDK subprocess stderr so we can diagnose crash reasons
+        const trimmed = data.trim();
+        if (trimmed) console.error(`[agent-runtime:stderr] ${trimmed}`);
+      },
     });
 
     let fullText = "";

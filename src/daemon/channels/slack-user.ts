@@ -44,6 +44,7 @@ export class SlackUserAdapter implements ChannelAdapter {
   private botClient: WebClient | null = null;
   private userId: string | null = null;
   private botUserId: string | null = null;
+  private teamName: string | null = null;
   private onMessage: (msg: IncomingMessage) => void;
   private draftManager: DraftManager;
 
@@ -53,6 +54,12 @@ export class SlackUserAdapter implements ChannelAdapter {
   // Cache for user/channel name lookups
   private userNameCache = new Map<string, string>();
   private channelNameCache = new Map<string, string>();
+
+  // Cache last incoming message context per channel so send() can enrich drafts
+  private lastIncomingContext = new Map<string, Record<string, unknown>>();
+
+  // All known user IDs for the owner across workspaces (loaded once on start)
+  private ownUserIds = new Set<string>();
 
   get platform(): string {
     return `slack-user:${this.teamId}`;
@@ -83,6 +90,7 @@ export class SlackUserAdapter implements ChannelAdapter {
     // Resolve own user ID (from user token)
     const auth = await this.userClient.auth.test();
     this.userId = auth.user_id ?? null;
+    this.teamName = (auth.team as string) ?? null;
     if (!this.userId) {
       throw new Error(`Could not resolve user ID from token for team ${this.teamId}`);
     }
@@ -97,6 +105,23 @@ export class SlackUserAdapter implements ChannelAdapter {
         console.warn(`[slack-user-adapter] Bot token auth failed -- agent will post as user`);
         this.botClient = null;
       }
+    }
+
+    // Load all known user IDs for the owner across workspaces.
+    // This catches own messages even when Slack Connect surfaces them with
+    // a different workspace's user ID.
+    if (this.userId) this.ownUserIds.add(this.userId);
+    if (this.botUserId) this.ownUserIds.add(this.botUserId);
+    try {
+      const { listIntegrationsByPrefix } = await import("../../db/integrations.ts");
+      const workspaces = await listIntegrationsByPrefix("slack-ws:");
+      for (const ws of workspaces) {
+        const uid = (ws.metadata as Record<string, unknown>)?.user_id;
+        if (typeof uid === "string") this.ownUserIds.add(uid);
+      }
+      console.log(`[slack-user-adapter] Own user IDs: ${[...this.ownUserIds].join(", ")}`);
+    } catch {
+      // integrations not available
     }
 
     // Load default notification channel
@@ -136,7 +161,18 @@ export class SlackUserAdapter implements ChannelAdapter {
       const isDefaultChannel = e.channel === this.defaultChannelId;
 
       // Skip own messages -- except in the default channel
-      if (e.user === this.userId && !isDefaultChannel) return;
+      if (e.user === this.userId && !isDefaultChannel) {
+        return;
+      }
+
+      // Also skip messages from any of our known workspace user IDs
+      if (!isDefaultChannel && this.isOwnUserId(e.user)) {
+        return;
+      }
+
+      console.log(
+        `[slack-user-adapter] Processing message: user=${e.user}, channel=${e.channel}, type=${e.channel_type}, isDefault=${isDefaultChannel}, myUserId=${this.userId}`,
+      );
 
       if (isDefaultChannel) {
         // Default channel: raw message, no draft framing
@@ -179,9 +215,73 @@ export class SlackUserAdapter implements ChannelAdapter {
       });
     });
 
+    // Edit draft: open a modal with the draft content for editing
+    this.app.action("edit_draft", async ({ action, ack, body }) => {
+      await ack();
+      const draftId = (action as { value?: string }).value;
+      if (!draftId) return;
+
+      // Load draft content from DB
+      const { getDraft } = await import("../../db/drafts.ts");
+      const draft = await getDraft(draftId);
+      if (!draft) return;
+
+      const client = this.botClient ?? this.userClient;
+      if (!client) return;
+
+      await client.views.open({
+        trigger_id: (body as { trigger_id?: string }).trigger_id!,
+        view: {
+          type: "modal",
+          callback_id: "edit_draft_submit",
+          private_metadata: draftId,
+          title: { type: "plain_text", text: "Edit Draft" },
+          submit: { type: "plain_text", text: "Send" },
+          close: { type: "plain_text", text: "Cancel" },
+          blocks: [
+            {
+              type: "input",
+              block_id: "draft_content",
+              label: { type: "plain_text", text: "Message" },
+              element: {
+                type: "plain_text_input",
+                action_id: "content",
+                multiline: true,
+                initial_value: draft.content,
+              },
+            },
+          ],
+        },
+      });
+    });
+
+    // Handle modal submission: approve the draft with edited content
+    this.app.view("edit_draft_submit", async ({ ack, view }) => {
+      await ack();
+      const draftId = view.private_metadata;
+      const editedContent = view.state.values.draft_content?.content?.value ?? "";
+
+      if (!draftId || !editedContent) return;
+
+      const result = await this.draftManager.approveWithEdit(draftId, editedContent);
+
+      // Post confirmation to default channel
+      if (this.defaultChannelId) {
+        const client = this.botClient ?? this.userClient;
+        if (client) {
+          await client.chat.postMessage({
+            channel: this.defaultChannelId,
+            text: result.success
+              ? `:white_check_mark: Draft ${draftId.slice(0, 8)} edited and sent`
+              : `:x: Failed to send edited draft: ${result.error}`,
+          });
+        }
+      }
+    });
+
     await this.app.start();
     console.log(
-      `[slack-user-adapter] Running via Socket Mode (user: ${this.userId}, team: ${this.teamId})`,
+      `[slack-user-adapter] Running via Socket Mode (user: ${this.userId}, bot: ${this.botUserId}, team: ${this.teamId}, defaultChannel: ${this.defaultChannelId})`,
     );
   }
 
@@ -206,10 +306,17 @@ export class SlackUserAdapter implements ChannelAdapter {
       return;
     }
 
+    // Merge cached incoming context (senderName, messageType, workspaceName, originalMessage)
+    const cachedCtx = this.lastIncomingContext.get(message.channelId) ?? {};
     const context: Record<string, unknown> = {
       channelId: message.channelId,
       threadId: message.threadId,
+      workspaceName: this.teamName ?? this.teamId,
+      ...cachedCtx,
     };
+
+    // Clear cache after use (don't leak context into next conversation)
+    this.lastIncomingContext.delete(message.channelId);
 
     await this.draftManager.createDraft(message, this.userId, context);
   }
@@ -343,6 +450,18 @@ export class SlackUserAdapter implements ChannelAdapter {
       "Also suggest whether to reply in-thread or as a new message.",
     ].join("\n");
 
+    // Cache incoming context so send() can enrich draft notifications.
+    // Accumulate originalMessage for rapid sequential messages (message batching).
+    const prevCtx = this.lastIncomingContext.get(e.channel);
+    const prevOriginal =
+      prevCtx?.senderName === senderName ? (prevCtx.originalMessage as string) : "";
+    this.lastIncomingContext.set(e.channel, {
+      senderName,
+      messageType: "dm",
+      workspaceName: this.teamName ?? this.teamId,
+      originalMessage: prevOriginal ? `${prevOriginal}\n${e.text!}` : e.text!,
+    });
+
     this.onMessage({
       id: randomUUID(),
       platform: this.platform,
@@ -377,6 +496,19 @@ export class SlackUserAdapter implements ChannelAdapter {
       "Also suggest whether to reply in-thread or as a new message in the channel.",
     ].join("\n");
 
+    // Cache incoming context so send() can enrich draft notifications.
+    // Accumulate originalMessage for rapid sequential messages (message batching).
+    const prevCtx = this.lastIncomingContext.get(e.channel);
+    const prevOriginal =
+      prevCtx?.senderName === senderName ? (prevCtx.originalMessage as string) : "";
+    this.lastIncomingContext.set(e.channel, {
+      senderName,
+      channelName,
+      messageType: "mention",
+      workspaceName: this.teamName ?? this.teamId,
+      originalMessage: prevOriginal ? `${prevOriginal}\n${cleanText}` : cleanText,
+    });
+
     this.onMessage({
       id: randomUUID(),
       platform: this.platform,
@@ -389,18 +521,69 @@ export class SlackUserAdapter implements ChannelAdapter {
     });
   }
 
+  /** Check if a user ID belongs to the owner (across all workspaces). */
+  private isOwnUserId(userId: string): boolean {
+    return this.ownUserIds.has(userId);
+  }
+
   private async lookupUserName(userId: string): Promise<string> {
     const cached = this.userNameCache.get(userId);
     if (cached) return cached;
 
-    try {
-      const result = await this.userClient!.users.info({ user: userId });
-      const name = result.user?.real_name ?? result.user?.name ?? userId;
+    // Try bot client first (more likely to have users:read scope), then user client
+    for (const [label, client] of [
+      ["bot", this.botClient],
+      ["user", this.userClient],
+    ] as const) {
+      if (!client) continue;
+      try {
+        const result = await (client as WebClient).users.info({ user: userId });
+        const name = result.user?.real_name ?? result.user?.name ?? userId;
+        if (name !== userId) {
+          this.userNameCache.set(userId, name);
+          return name;
+        }
+      } catch {
+        // user_not_found is expected for Slack Connect / cross-workspace users
+      }
+    }
+
+    // Fallback: try other workspace tokens (for Slack Connect / cross-workspace users)
+    const name = await this.lookupUserCrossWorkspace(userId);
+    if (name) {
       this.userNameCache.set(userId, name);
       return name;
-    } catch {
-      return userId;
     }
+
+    return userId;
+  }
+
+  /**
+   * Try to resolve a user name using tokens from other workspaces.
+   * Needed for Slack Connect users whose IDs belong to a different workspace.
+   */
+  private async lookupUserCrossWorkspace(userId: string): Promise<string | null> {
+    try {
+      const { listIntegrationsByPrefix } = await import("../../db/integrations.ts");
+      const workspaces = await listIntegrationsByPrefix("slack-ws:");
+      for (const ws of workspaces) {
+        // Skip our own workspace (already tried)
+        if (ws.name === `slack-ws:${this.teamId}`) continue;
+        const token = ws.secrets?.access_token;
+        if (!token) continue;
+        try {
+          const client = new WebClient(token as string);
+          const result = await client.users.info({ user: userId });
+          const name = result.user?.real_name ?? result.user?.name ?? null;
+          if (name) return name;
+        } catch {
+          // not found in this workspace either
+        }
+      }
+    } catch {
+      // integrations not available
+    }
+    return null;
   }
 
   private async lookupChannelName(channelId: string): Promise<string> {

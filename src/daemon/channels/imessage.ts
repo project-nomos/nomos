@@ -86,6 +86,9 @@ export class IMessageAdapter implements ChannelAdapter {
   // photon mode
   private photonAdapter: PhotonAdapter | null = null;
 
+  // Cache last incoming message per channel so send() can include originalMessage in drafts
+  private lastIncomingContext = new Map<string, Record<string, unknown>>();
+
   constructor(options: IMessageAdapterOptions) {
     this.onMessage = options.onMessage;
     this.agentMode =
@@ -156,6 +159,17 @@ export class IMessageAdapter implements ChannelAdapter {
       });
 
       const senderName = msg.chatDisplayName || msg.handleIdentifier;
+
+      // Cache incoming context so send() can include originalMessage in draft notifications
+      const prevCtx = this.lastIncomingContext.get(msg.chatIdentifier);
+      const prevOriginal =
+        prevCtx?.senderName === senderName ? (prevCtx.originalMessage as string) : "";
+      this.lastIncomingContext.set(msg.chatIdentifier, {
+        senderName,
+        messageType: "dm",
+        originalMessage: prevOriginal ? `${prevOriginal}\n${msg.text}` : msg.text,
+      });
+
       this.onMessage({
         id: randomUUID(),
         platform: "imessage",
@@ -267,15 +281,20 @@ export class IMessageAdapter implements ChannelAdapter {
   async send(message: OutgoingMessage): Promise<void> {
     // Passive mode: route through draft manager for approval
     if (this.agentMode === "passive" && this.draftManager) {
-      // Look up sender info from cached metadata
+      // Merge cached incoming context (senderName, originalMessage)
+      const cachedCtx = this.lastIncomingContext.get(message.channelId) ?? {};
       const meta = this.chatMeta.get(message.channelId);
-      const senderName = meta?.handleIdentifier ?? message.channelId;
+      const senderName =
+        (cachedCtx.senderName as string) ?? meta?.handleIdentifier ?? message.channelId;
       await this.draftManager.createDraft(message, "imessage-passive", {
         messageType: "dm",
         senderName,
         channelId: message.channelId,
         agentMode: "passive",
+        ...cachedCtx,
       });
+      // Clear cache after use
+      this.lastIncomingContext.delete(message.channelId);
       return;
     }
 
@@ -299,33 +318,24 @@ export class IMessageAdapter implements ChannelAdapter {
 
   private async sendPhoton(message: OutgoingMessage): Promise<void> {
     if (!this.photonAdapter) {
-      console.warn("[imessage-adapter] Photon adapter not initialized");
-      return;
+      throw new Error("Photon adapter not initialized");
     }
-
-    try {
-      await this.photonAdapter.sendToContact(message.channelId, message.content);
-    } catch (err) {
-      console.error("[imessage-adapter] Photon send failed:", err);
-    }
+    await this.photonAdapter.sendToContact(message.channelId, message.content);
   }
 
   private async sendChatDb(message: OutgoingMessage): Promise<void> {
     const meta = this.chatMeta.get(message.channelId);
     if (!meta) {
-      console.warn(`[imessage-adapter] No cached metadata for ${message.channelId}, cannot send`);
-      return;
+      throw new Error(
+        `No cached chat metadata for ${message.channelId} -- cannot send. The chat must have an incoming message first.`,
+      );
     }
 
     const target = meta.chatStyle === STYLE_GROUP ? meta.chatGuid : meta.handleIdentifier;
 
     const chunks = chunk(message.content);
     for (const text of chunks) {
-      try {
-        await sendIMessage(target, text);
-      } catch (err) {
-        console.error("[imessage-adapter] Send failed:", err);
-      }
+      await sendIMessage(target, text);
     }
   }
 

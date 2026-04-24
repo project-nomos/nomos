@@ -30,6 +30,8 @@ export class EmailAdapter implements ChannelAdapter {
 
   // Track threads for context
   private threadSubjects = new Map<string, string>();
+  // Cache last incoming context per channel for draft notifications
+  private lastIncomingContext = new Map<string, Record<string, unknown>>();
 
   constructor(options: EmailAdapterOptions) {
     this.imapClient = new ImapClient(options.imap);
@@ -68,10 +70,13 @@ export class EmailAdapter implements ChannelAdapter {
 
   async send(message: OutgoingMessage): Promise<void> {
     // Route through DraftManager for approve-before-send
+    const cachedCtx = this.lastIncomingContext.get(message.channelId) ?? {};
     await this.draftManager.createDraft(message, this.userEmail, {
       channelId: message.channelId,
       threadId: message.threadId,
+      ...cachedCtx,
     });
+    this.lastIncomingContext.delete(message.channelId);
   }
 
   private handleIncomingEmail(email: ParsedEmail): void {
@@ -102,6 +107,13 @@ export class EmailAdapter implements ChannelAdapter {
         references: email.references,
       },
     };
+
+    // Cache incoming context for draft notifications
+    this.lastIncomingContext.set(email.from, {
+      senderName: email.fromName || email.from,
+      messageType: "dm",
+      originalMessage: `Subject: ${email.subject}\n\n${content}`,
+    });
 
     this.onMessage(incoming);
   }
