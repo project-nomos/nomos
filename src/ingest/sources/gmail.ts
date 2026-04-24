@@ -4,9 +4,14 @@
  * Fetches sent emails using the Gmail API.
  * Only ingests from the Sent folder (in:sent) to avoid spam/newsletters.
  * Saves historyId as cursor for delta sync.
+ *
+ * Auth: uses gws CLI tokens (via `gws auth export`) for Google Workspace
+ * accounts. Falls back to Application Default Credentials (gcloud ADC)
+ * for Vertex AI / service account setups.
  */
 
-import { GoogleAuth } from "google-auth-library";
+import { GoogleAuth, OAuth2Client } from "google-auth-library";
+import { execFile } from "node:child_process";
 import type { IngestSource, IngestMessage, IngestOptions } from "../types.ts";
 
 const PAGE_DELAY_MS = 200; // Gmail: 250 quota units/sec
@@ -34,27 +39,46 @@ export class GmailIngestSource implements IngestSource {
   readonly platform = "gmail";
   readonly sourceType = "history";
 
-  private auth: GoogleAuth;
   private latestHistoryId: string | null = null;
 
-  constructor() {
-    this.auth = new GoogleAuth({
+  /**
+   * Get an access token for Gmail API.
+   * Priority: gws CLI tokens > Application Default Credentials (gcloud/service account).
+   */
+  private async getAccessToken(): Promise<string> {
+    // 1. Try gws CLI (Google Workspace auth)
+    try {
+      const creds = await exportGwsCredentials();
+      if (creds) {
+        const oauth2 = new OAuth2Client(creds.client_id, creds.client_secret);
+        oauth2.setCredentials({ refresh_token: creds.refresh_token });
+        const { token } = await oauth2.getAccessToken();
+        if (token) return token;
+      }
+    } catch {
+      // gws not available or export failed -- fall through to ADC
+    }
+
+    // 2. Fall back to Application Default Credentials (Vertex AI / service account)
+    const auth = new GoogleAuth({
       scopes: ["https://www.googleapis.com/auth/gmail.readonly"],
     });
+    const client = await auth.getClient();
+    const tokenResponse = await client.getAccessToken();
+    if (!tokenResponse.token) {
+      throw new Error(
+        "Failed to obtain Gmail access token. Either authorize via Settings > Google Workspace, " +
+          "or run: gcloud auth application-default login",
+      );
+    }
+    return tokenResponse.token;
   }
 
   async *ingest(
     options: IngestOptions,
     cursor?: string,
   ): AsyncGenerator<IngestMessage, void, undefined> {
-    const client = await this.auth.getClient();
-    const tokenResponse = await client.getAccessToken();
-    const accessToken = tokenResponse.token;
-    if (!accessToken) {
-      throw new Error(
-        "Failed to obtain Gmail access token. Run: gcloud auth application-default login",
-      );
-    }
+    const accessToken = await this.getAccessToken();
 
     // Build query: sent folder only
     let query = "in:sent";
@@ -198,4 +222,41 @@ function stripHtml(html: string): string {
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+interface GwsCredentials {
+  client_id: string;
+  client_secret: string;
+  refresh_token: string;
+}
+
+/**
+ * Export credentials from the gws CLI (`gws auth export`).
+ * Returns null if gws is not available or not authenticated.
+ */
+function exportGwsCredentials(): Promise<GwsCredentials | null> {
+  return new Promise((resolve) => {
+    execFile("npx", ["gws", "auth", "export"], { timeout: 15_000 }, (err, stdout) => {
+      if (err) {
+        resolve(null);
+        return;
+      }
+      try {
+        // stdout may have a "Using keyring..." prefix line before the JSON
+        const jsonStart = stdout.indexOf("{");
+        if (jsonStart < 0) {
+          resolve(null);
+          return;
+        }
+        const creds = JSON.parse(stdout.slice(jsonStart)) as GwsCredentials;
+        if (creds.client_id && creds.refresh_token) {
+          resolve(creds);
+        } else {
+          resolve(null);
+        }
+      } catch {
+        resolve(null);
+      }
+    });
+  });
 }

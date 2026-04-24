@@ -30,13 +30,19 @@ export async function POST() {
     // DB not available
   }
   const env = await readConfig(
-    ["GOOGLE_OAUTH_CLIENT_ID", "GOOGLE_OAUTH_CLIENT_SECRET", "GWS_SERVICES"],
+    [
+      "GOOGLE_OAUTH_CLIENT_ID",
+      "GOOGLE_OAUTH_CLIENT_SECRET",
+      "GWS_SERVICES",
+      "GOOGLE_CLOUD_PROJECT",
+    ],
     sql,
   );
 
   const clientId = env.GOOGLE_OAUTH_CLIENT_ID;
   const clientSecret = env.GOOGLE_OAUTH_CLIENT_SECRET;
   const gwsServices = env.GWS_SERVICES;
+  const gcpProjectId = env.GOOGLE_CLOUD_PROJECT;
 
   if (!clientId || !clientSecret) {
     return NextResponse.json(
@@ -52,9 +58,8 @@ export async function POST() {
   const gwsConfigDir = path.join(os.homedir(), ".config", "gws");
   const clientSecretPath = path.join(gwsConfigDir, "client_secret.json");
 
-  // Extract a project_id from the client ID (format: {number}-{hash}.apps.googleusercontent.com)
-  const projectIdMatch = clientId.match(/^(\d+-[a-z0-9]+)\./);
-  const projectId = projectIdMatch ? projectIdMatch[1] : "google-workspace-cli";
+  // Use the configured GCP project ID, or fall back to the project number from the Client ID
+  const projectId = gcpProjectId || "google-workspace-cli";
 
   const clientSecretData = {
     installed: {
@@ -70,11 +75,26 @@ export async function POST() {
   fs.mkdirSync(gwsConfigDir, { recursive: true });
   fs.writeFileSync(clientSecretPath, JSON.stringify(clientSecretData, null, 2));
 
-  // Build args for gws auth login
-  const args = ["gws", "auth", "login"];
-  if (gwsServices && gwsServices !== "all") {
-    args.push("-s", gwsServices);
-  }
+  // Build args for gws auth login with explicit scopes.
+  // Using --scopes ensures Gmail/Calendar are included even if the gws CLI
+  // doesn't map service names to scopes correctly.
+  // All Google Workspace scopes -- pass explicitly since the gws CLI's
+  // -s flag doesn't reliably map service names to OAuth scopes.
+  const ALL_SCOPES = [
+    "https://www.googleapis.com/auth/gmail.readonly",
+    "https://www.googleapis.com/auth/gmail.send",
+    "https://www.googleapis.com/auth/calendar",
+    "https://www.googleapis.com/auth/calendar.events",
+    "https://www.googleapis.com/auth/drive",
+    "https://www.googleapis.com/auth/drive.file",
+    "https://www.googleapis.com/auth/documents",
+    "https://www.googleapis.com/auth/spreadsheets",
+    "https://www.googleapis.com/auth/presentations",
+    "https://www.googleapis.com/auth/tasks",
+    "https://www.googleapis.com/auth/contacts",
+    "https://www.googleapis.com/auth/contacts.readonly",
+  ].join(",");
+  const args = ["gws", "auth", "login", "--scopes", ALL_SCOPES];
 
   // Spawn gws auth login with piped stdout/stderr so we can capture the OAuth URL
   try {
@@ -162,15 +182,20 @@ export async function POST() {
       );
     }
 
-    // Inject openid+email scopes so we can resolve the account email later
+    // Inject openid+email scopes and force consent prompt.
+    // prompt=consent is required for Google Workspace accounts with
+    // re-authentication policies (RAPT) -- without it, token exchange
+    // fails with invalid_rapt even on fresh logins.
     let authUrl = url;
     try {
       const parsed = new URL(authUrl);
       const scope = parsed.searchParams.get("scope") ?? "";
       if (!scope.includes("openid")) {
         parsed.searchParams.set("scope", `openid email ${scope}`);
-        authUrl = parsed.toString();
       }
+      parsed.searchParams.set("prompt", "consent");
+      parsed.searchParams.set("access_type", "offline");
+      authUrl = parsed.toString();
     } catch {
       // If URL parsing fails, use the original
     }

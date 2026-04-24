@@ -1002,6 +1002,31 @@ export default function AssistantSettingsPage() {
             />
             <p className="text-xs text-overlay0">Default: gemini-embedding-001 (768 dimensions)</p>
           </div>
+          <div className="pt-4 border-t border-surface0 space-y-4">
+            <div className="flex items-center justify-between">
+              <p className="text-xs text-overlay0">
+                Optional: GCP project for Vertex AI embeddings or Google Workspace APIs.
+              </p>
+              <a
+                href="https://console.cloud.google.com"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 text-xs text-blue hover:text-blue/80"
+              >
+                GCP Console <ExternalLink size={10} />
+              </a>
+            </div>
+            <div className="space-y-1.5">
+              <label className="block text-sm font-medium text-subtext1">GCP Project ID</label>
+              <input
+                type="text"
+                value={gcpProject}
+                onChange={(e) => setGcpProject(e.target.value)}
+                placeholder="my-project-12345"
+                className="w-full rounded-lg border border-surface1 bg-surface0 px-3 py-2 text-sm text-text placeholder:text-overlay0 focus:outline-none focus:border-mauve focus:ring-1 focus:ring-mauve/30 font-mono"
+              />
+            </div>
+          </div>
         </div>
       </section>
 
