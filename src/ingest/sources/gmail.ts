@@ -236,27 +236,32 @@ interface GwsCredentials {
  */
 function exportGwsCredentials(): Promise<GwsCredentials | null> {
   return new Promise((resolve) => {
-    execFile("npx", ["gws", "auth", "export"], { timeout: 15_000 }, (err, stdout) => {
-      if (err) {
-        resolve(null);
-        return;
-      }
-      try {
-        // stdout may have a "Using keyring..." prefix line before the JSON
-        const jsonStart = stdout.indexOf("{");
-        if (jsonStart < 0) {
+    execFile(
+      "npx",
+      ["@googleworkspace/cli", "auth", "export"],
+      { timeout: 15_000 },
+      (err, stdout) => {
+        if (err) {
           resolve(null);
           return;
         }
-        const creds = JSON.parse(stdout.slice(jsonStart)) as GwsCredentials;
-        if (creds.client_id && creds.refresh_token) {
-          resolve(creds);
-        } else {
+        try {
+          // stdout may have a "Using keyring..." prefix line before the JSON
+          const jsonStart = stdout.indexOf("{");
+          if (jsonStart < 0) {
+            resolve(null);
+            return;
+          }
+          const creds = JSON.parse(stdout.slice(jsonStart)) as GwsCredentials;
+          if (creds.client_id && creds.refresh_token) {
+            resolve(creds);
+          } else {
+            resolve(null);
+          }
+        } catch {
           resolve(null);
         }
-      } catch {
-        resolve(null);
-      }
-    });
+      },
+    );
   });
 }

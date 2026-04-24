@@ -27,7 +27,9 @@ export async function GET() {
 
   // Also check gws auth status for the currently authenticated account
   try {
-    const { stdout } = await execFileAsync("npx", ["gws", "auth", "status"], { timeout: 10000 });
+    const { stdout } = await execFileAsync("npx", ["@googleworkspace/cli", "auth", "status"], {
+      timeout: 10000,
+    });
     const status = JSON.parse(stdout);
     if (status.auth_method !== "none" || status.token_cache_exists) {
       // If no accounts in DB yet, try to resolve email from gws
@@ -35,7 +37,7 @@ export async function GET() {
         try {
           const { stdout: exportOut } = await execFileAsync(
             "npx",
-            ["gws", "auth", "export", "--unmasked"],
+            ["@googleworkspace/cli", "auth", "export", "--unmasked"],
             { timeout: 10000 },
           );
           const creds = JSON.parse(exportOut);
@@ -105,7 +107,7 @@ export async function DELETE(request: NextRequest) {
 
   // Logout from gws (v0.22.5+ is single-account, no --account flag)
   try {
-    await execFileAsync("npx", ["gws", "auth", "logout"], { timeout: 10000 });
+    await execFileAsync("npx", ["@googleworkspace/cli", "auth", "logout"], { timeout: 10000 });
   } catch {
     // Token may already be invalid
   }

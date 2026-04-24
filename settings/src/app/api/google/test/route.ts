@@ -7,7 +7,9 @@ const execFileAsync = promisify(execFile);
 export async function POST() {
   // Check if gws binary is available
   try {
-    const { stdout } = await execFileAsync("npx", ["gws", "--version"], { timeout: 10000 });
+    const { stdout } = await execFileAsync("npx", ["@googleworkspace/cli", "--version"], {
+      timeout: 10000,
+    });
     const version = stdout
       .trim()
       .replace(/^gws\s+/, "")
@@ -15,9 +17,13 @@ export async function POST() {
 
     // Check auth status
     try {
-      const { stdout: statusOut } = await execFileAsync("npx", ["gws", "auth", "status"], {
-        timeout: 10000,
-      });
+      const { stdout: statusOut } = await execFileAsync(
+        "npx",
+        ["@googleworkspace/cli", "auth", "status"],
+        {
+          timeout: 10000,
+        },
+      );
       const status = JSON.parse(statusOut);
 
       if (
@@ -41,7 +47,7 @@ export async function POST() {
     try {
       await execFileAsync(
         "npx",
-        ["gws", "gmail", "users", "getProfile", "--params", '{"userId":"me"}'],
+        ["@googleworkspace/cli", "gmail", "users", "getProfile", "--params", '{"userId":"me"}'],
         { timeout: 15000 },
       );
       return NextResponse.json({

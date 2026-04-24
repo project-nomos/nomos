@@ -1166,13 +1166,19 @@ async function cmdIntegrations(ctx: CommandContext, args: string[]): Promise<str
 
     // Check gws availability
     try {
-      const { stdout } = await execFileAsync("npx", ["gws", "--version"], { timeout: 10000 });
+      const { stdout } = await execFileAsync("npx", ["@googleworkspace/cli", "--version"], {
+        timeout: 10000,
+      });
       const version = stdout.trim();
 
       // Check for existing auth
-      const { stdout: authOut } = await execFileAsync("npx", ["gws", "auth", "status"], {
-        timeout: 10000,
-      });
+      const { stdout: authOut } = await execFileAsync(
+        "npx",
+        ["@googleworkspace/cli", "auth", "status"],
+        {
+          timeout: 10000,
+        },
+      );
       const authData = JSON.parse(authOut);
 
       if (authData.auth_method !== "none" || authData.token_cache_exists) {

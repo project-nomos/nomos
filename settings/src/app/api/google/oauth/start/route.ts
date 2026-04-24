@@ -94,7 +94,7 @@ export async function POST() {
     "https://www.googleapis.com/auth/contacts",
     "https://www.googleapis.com/auth/contacts.readonly",
   ].join(",");
-  const args = ["gws", "auth", "login", "--scopes", ALL_SCOPES];
+  const args = ["@googleworkspace/cli", "auth", "login", "--scopes", ALL_SCOPES];
 
   // Spawn gws auth login with piped stdout/stderr so we can capture the OAuth URL
   try {
