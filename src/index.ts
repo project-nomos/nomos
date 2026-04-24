@@ -5,6 +5,10 @@ import { config } from "dotenv";
 import { buildProgram } from "./cli/program.ts";
 import { ensureEncryptionKey } from "./db/encryption.ts";
 
+// Remove CLAUDECODE so SDK subprocesses don't refuse to start.
+// Set when launched from inside a Claude Code terminal.
+delete process.env.CLAUDECODE;
+
 // Load env vars: cwd first, then ~/.nomos/ as fallback for Homebrew installs
 const nomosDir = join(homedir(), ".nomos");
 config({ path: [".env.local", ".env"], quiet: true });
