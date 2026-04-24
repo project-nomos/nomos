@@ -19,6 +19,7 @@ export class TelegramAdapter implements ChannelAdapter {
   private bot: Bot | null = null;
   private onMessage: (msg: IncomingMessage) => void;
   private draftManager?: DraftManager;
+  private lastIncomingContext = new Map<string, Record<string, unknown>>();
 
   constructor(options: TelegramAdapterOptions | ((msg: IncomingMessage) => void)) {
     if (typeof options === "function") {
@@ -52,13 +53,29 @@ export class TelegramAdapter implements ChannelAdapter {
       const content = ctx.message.text.replace(new RegExp(`@${botUsername}`, "g"), "").trim();
       if (!content) return;
 
+      const senderName = ctx.from?.first_name
+        ? `${ctx.from.first_name}${ctx.from.last_name ? ` ${ctx.from.last_name}` : ""}`
+        : String(ctx.from?.id ?? "unknown");
+      const channelId = String(chat.id);
+
+      // Cache incoming context for draft notifications
+      const prevCtx = this.lastIncomingContext.get(channelId);
+      const prevOriginal =
+        prevCtx?.senderName === senderName ? (prevCtx.originalMessage as string) : "";
+      this.lastIncomingContext.set(channelId, {
+        senderName,
+        messageType: chat.type === "private" ? "dm" : "mention",
+        originalMessage: prevOriginal ? `${prevOriginal}\n${content}` : content,
+      });
+
       this.onMessage({
         id: randomUUID(),
         platform: "telegram",
-        channelId: String(chat.id),
+        channelId,
         userId: String(ctx.from?.id ?? "unknown"),
         content,
         timestamp: new Date(),
+        metadata: { senderName },
       });
     });
 
@@ -75,10 +92,13 @@ export class TelegramAdapter implements ChannelAdapter {
 
   async send(message: OutgoingMessage): Promise<void> {
     if (this.draftManager) {
+      const cachedCtx = this.lastIncomingContext.get(message.channelId) ?? {};
       await this.draftManager.createDraft(message, "telegram", {
         messageType: "message",
         channelId: message.channelId,
+        ...cachedCtx,
       });
+      this.lastIncomingContext.delete(message.channelId);
       return;
     }
     await this.sendDirect(message);

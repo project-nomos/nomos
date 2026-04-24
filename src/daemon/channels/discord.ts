@@ -29,6 +29,8 @@ export class DiscordAdapter implements ChannelAdapter {
   private draftManager?: DraftManager;
   // Map channelId → last Message for reply
   private lastMessages = new Map<string, Message>();
+  // Cache last incoming context per channel for draft notifications
+  private lastIncomingContext = new Map<string, Record<string, unknown>>();
 
   constructor(options: DiscordAdapterOptions | ((msg: IncomingMessage) => void)) {
     if (typeof options === "function") {
@@ -70,6 +72,18 @@ export class DiscordAdapter implements ChannelAdapter {
 
       this.lastMessages.set(message.channelId, message);
 
+      // Cache incoming context for draft notifications
+      const senderName = message.author.displayName ?? message.author.username;
+      const prevCtx = this.lastIncomingContext.get(message.channelId);
+      const prevOriginal =
+        prevCtx?.senderName === senderName ? (prevCtx.originalMessage as string) : "";
+      this.lastIncomingContext.set(message.channelId, {
+        senderName,
+        messageType: message.guild ? "mention" : "dm",
+        channelName: message.guild ? (message.channel as TextChannel).name : undefined,
+        originalMessage: prevOriginal ? `${prevOriginal}\n${content}` : content,
+      });
+
       this.onMessage({
         id: randomUUID(),
         platform: "discord",
@@ -77,7 +91,7 @@ export class DiscordAdapter implements ChannelAdapter {
         userId: message.author.id,
         content,
         timestamp: new Date(),
-        metadata: { guildId: message.guild?.id },
+        metadata: { guildId: message.guild?.id, senderName },
       });
     });
 
@@ -94,10 +108,13 @@ export class DiscordAdapter implements ChannelAdapter {
 
   async send(message: OutgoingMessage): Promise<void> {
     if (this.draftManager) {
+      const cachedCtx = this.lastIncomingContext.get(message.channelId) ?? {};
       await this.draftManager.createDraft(message, "discord", {
         messageType: "message",
         channelId: message.channelId,
+        ...cachedCtx,
       });
+      this.lastIncomingContext.delete(message.channelId);
       return;
     }
     await this.sendDirect(message);

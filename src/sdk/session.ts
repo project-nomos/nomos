@@ -79,12 +79,13 @@ export function runSession(params: RunSessionParams): Query {
   }
 
   // Build env, including custom base URL if provided.
-  // Unset CLAUDECODE to allow spawning nested SDK sessions (e.g., team workers).
+  // Remove CLAUDECODE so the SDK subprocess doesn't think it's nested inside Claude Code.
+  // Must delete the key entirely -- setting to undefined leaves it as "" in the child process.
   const env: Record<string, string | undefined> = {
     ...process.env,
     CLAUDE_AGENT_SDK_CLIENT_APP: "nomos/0.1.0",
-    CLAUDECODE: undefined,
   };
+  delete env.CLAUDECODE;
   if (params.anthropicBaseUrl) {
     env.ANTHROPIC_BASE_URL = params.anthropicBaseUrl;
   }

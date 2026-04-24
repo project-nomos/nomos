@@ -57,6 +57,7 @@ export class WhatsAppAdapter implements ChannelAdapter {
   private sock: WASocket | null = null;
   private onMessage: (msg: IncomingMessage) => void;
   private draftManager?: DraftManager;
+  private lastIncomingContext = new Map<string, Record<string, unknown>>();
 
   constructor(options: WhatsAppAdapterOptions | ((msg: IncomingMessage) => void)) {
     if (typeof options === "function") {
@@ -123,6 +124,16 @@ export class WhatsAppAdapter implements ChannelAdapter {
             .trim();
           if (!content) continue;
 
+          const senderName = msg.pushName ?? msg.key.participant ?? jid;
+          const prevCtx = this.lastIncomingContext.get(jid);
+          const prevOriginal =
+            prevCtx?.senderName === senderName ? (prevCtx.originalMessage as string) : "";
+          this.lastIncomingContext.set(jid, {
+            senderName,
+            messageType: jid.endsWith("@g.us") ? "mention" : "dm",
+            originalMessage: prevOriginal ? `${prevOriginal}\n${content}` : content,
+          });
+
           this.onMessage({
             id: randomUUID(),
             platform: "whatsapp",
@@ -130,6 +141,7 @@ export class WhatsAppAdapter implements ChannelAdapter {
             userId: msg.key.participant ?? jid,
             content,
             timestamp: new Date(),
+            metadata: { senderName },
           });
         }
       });
@@ -147,10 +159,13 @@ export class WhatsAppAdapter implements ChannelAdapter {
 
   async send(message: OutgoingMessage): Promise<void> {
     if (this.draftManager) {
+      const cachedCtx = this.lastIncomingContext.get(message.channelId) ?? {};
       await this.draftManager.createDraft(message, "whatsapp", {
         messageType: "message",
         channelId: message.channelId,
+        ...cachedCtx,
       });
+      this.lastIncomingContext.delete(message.channelId);
       return;
     }
     await this.sendDirect(message);

@@ -25,6 +25,7 @@ import { TelegramAdapter } from "./channels/telegram.ts";
 import { WhatsAppAdapter } from "./channels/whatsapp.ts";
 import { IMessageAdapter } from "./channels/imessage.ts";
 import { StreamingResponder } from "./streaming-responder.ts";
+import { MessageBatcher } from "./message-batcher.ts";
 import { indexConversationTurn } from "./memory-indexer.ts";
 import { closeBrowser } from "../sdk/browser.ts";
 import { sendProactiveMessage } from "./proactive-sender.ts";
@@ -645,8 +646,53 @@ export class Gateway {
     this.grpcServer.broadcast(event);
   }
 
+  /** Process a message through the agent runtime (message queue → agent → response). */
+  private processAgentMessage(msg: IncomingMessage): void {
+    const adapter = this.channelManager.getAdapter(msg.platform);
+    const sessionKey = `${msg.platform}:${msg.channelId}`;
+
+    // Create streaming responder if adapter supports progressive updates
+    let responder: StreamingResponder | null = null;
+    if (adapter?.postMessage && adapter?.updateMessage) {
+      responder = new StreamingResponder(
+        (text) => adapter.postMessage!(msg.channelId, text, msg.threadId),
+        (ts, text) => adapter.updateMessage!(msg.channelId, ts, text),
+        adapter.deleteMessage ? (ts) => adapter.deleteMessage!(msg.channelId, ts) : undefined,
+      );
+    }
+
+    this.messageQueue
+      .enqueue(sessionKey, msg, responder?.handleEvent ?? (() => {}))
+      .then(async (result) => {
+        if (responder) {
+          const handled = await responder.finalize(result.content);
+          if (!handled) {
+            await this.channelManager.send(result);
+          }
+        } else {
+          await this.channelManager.send(result);
+        }
+
+        // Fire-and-forget: index conversation turn into vector memory
+        indexConversationTurn(msg, result).catch((err) =>
+          console.error("[gateway] Memory indexing failed:", err),
+        );
+      })
+      .catch(async (err) => {
+        // Update placeholder with error if possible
+        await responder?.finalize("Sorry, an error occurred.");
+        console.error(`[gateway] Failed to process message from ${msg.platform}:`, err);
+      });
+  }
+
   /** Register available channel adapters based on env vars. */
   private async registerChannelAdapters(): Promise<void> {
+    // Message batcher: debounces rapid sequential messages from the same sender.
+    // Only non-default-channel messages are batched; default channel is instant.
+    const batcher = new MessageBatcher({
+      onReady: (msg) => this.processAgentMessage(msg),
+    });
+
     const enqueue = (rawMsg: IncomingMessage) => {
       // Run incoming transform hooks (fire-and-forget the async, enqueue immediately)
       this.channelManager
@@ -694,40 +740,14 @@ export class Gateway {
             }
           }
 
-          const sessionKey = `${msg.platform}:${msg.channelId}`;
-
-          // Create streaming responder if adapter supports progressive updates
-          let responder: StreamingResponder | null = null;
-          if (adapter?.postMessage && adapter?.updateMessage) {
-            responder = new StreamingResponder(
-              (text) => adapter.postMessage!(msg.channelId, text, msg.threadId),
-              (ts, text) => adapter.updateMessage!(msg.channelId, ts, text),
-              adapter.deleteMessage ? (ts) => adapter.deleteMessage!(msg.channelId, ts) : undefined,
-            );
+          // Default channel: process immediately (no batching for direct agent chat)
+          if (isDefault) {
+            this.processAgentMessage(msg);
+            return;
           }
 
-          this.messageQueue
-            .enqueue(sessionKey, msg, responder?.handleEvent ?? (() => {}))
-            .then(async (result) => {
-              if (responder) {
-                const handled = await responder.finalize(result.content);
-                if (!handled) {
-                  await this.channelManager.send(result);
-                }
-              } else {
-                await this.channelManager.send(result);
-              }
-
-              // Fire-and-forget: index conversation turn into vector memory
-              indexConversationTurn(msg, result).catch((err) =>
-                console.error("[gateway] Memory indexing failed:", err),
-              );
-            })
-            .catch(async (err) => {
-              // Update placeholder with error if possible
-              await responder?.finalize("Sorry, an error occurred.");
-              console.error(`[gateway] Failed to process message from ${msg.platform}:`, err);
-            });
+          // Non-default: route through batcher to combine rapid sequential messages
+          batcher.add(msg);
         })
         .catch((err) => {
           console.error(`[gateway] Incoming hook transform failed:`, err);
@@ -1146,59 +1166,87 @@ export class Gateway {
     const client = new WebClient(botToken);
 
     const senderName = (context.senderName as string) ?? draft.user_id;
-    const platformLabel = this.platformLabel(draft.platform);
+    const workspaceName = (context.workspaceName as string) ?? this.platformLabel(draft.platform);
     const messageType = (context.messageType as string) ?? "message";
     const channelName = (context.channelName as string) ?? "";
+    const originalMessage = (context.originalMessage as string) ?? "";
 
     const contextLine =
       messageType === "dm"
-        ? `${platformLabel} DM from *${senderName}*`
+        ? `${workspaceName} DM from *${senderName}*`
         : messageType === "mention"
-          ? `${platformLabel} @mention in #${channelName} from *${senderName}*`
-          : `${platformLabel} message from *${senderName}*`;
+          ? `${workspaceName} @mention in #${channelName} from *${senderName}*`
+          : `${workspaceName} message from *${senderName}*`;
 
-    const preview =
-      draft.content.length > 2900 ? draft.content.slice(0, 2900) + "..." : draft.content;
+    const draftPreview =
+      draft.content.length > 2000 ? draft.content.slice(0, 2000) + "..." : draft.content;
+
+    // Build blocks: context line, original message (if available), draft, actions
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const blocks: any[] = [
+      {
+        type: "section",
+        text: {
+          type: "mrkdwn",
+          text: `*${contextLine}*`,
+        },
+      },
+    ];
+
+    // Show the original incoming message for context
+    if (originalMessage) {
+      const msgPreview =
+        originalMessage.length > 500 ? originalMessage.slice(0, 500) + "..." : originalMessage;
+      blocks.push({
+        type: "section",
+        text: {
+          type: "mrkdwn",
+          text: `> ${msgPreview.replace(/\n/g, "\n> ")}`,
+        },
+      });
+      blocks.push({ type: "divider" });
+    }
+
+    blocks.push(
+      {
+        type: "section",
+        text: {
+          type: "mrkdwn",
+          text: `*Draft response:*\n${draftPreview}`,
+        },
+      },
+      {
+        type: "actions",
+        block_id: `draft_${draft.id}`,
+        elements: [
+          {
+            type: "button",
+            text: { type: "plain_text", text: "Approve" },
+            style: "primary",
+            action_id: "approve_draft",
+            value: draft.id,
+          },
+          {
+            type: "button",
+            text: { type: "plain_text", text: "Edit & Send" },
+            action_id: "edit_draft",
+            value: draft.id,
+          },
+          {
+            type: "button",
+            text: { type: "plain_text", text: "Decline" },
+            style: "danger",
+            action_id: "reject_draft",
+            value: draft.id,
+          },
+        ],
+      },
+    );
 
     await client.chat.postMessage({
       channel: nd.channelId,
       text: `Draft response for ${contextLine}`,
-      blocks: [
-        {
-          type: "section",
-          text: {
-            type: "mrkdwn",
-            text: `*${contextLine}*`,
-          },
-        },
-        {
-          type: "section",
-          text: {
-            type: "mrkdwn",
-            text: `\`\`\`\n${preview}\n\`\`\``,
-          },
-        },
-        {
-          type: "actions",
-          block_id: `draft_${draft.id}`,
-          elements: [
-            {
-              type: "button",
-              text: { type: "plain_text", text: "Approve" },
-              style: "primary",
-              action_id: "approve_draft",
-              value: draft.id,
-            },
-            {
-              type: "button",
-              text: { type: "plain_text", text: "Decline" },
-              style: "danger",
-              action_id: "reject_draft",
-              value: draft.id,
-            },
-          ],
-        },
-      ],
+      blocks,
     });
   }
 
@@ -1221,12 +1269,12 @@ export class Gateway {
     const client = new WebClient(botToken);
 
     const senderName = (context.senderName as string) ?? channelId;
-    const platformLabel = this.platformLabel(platform);
+    const workspaceName = (context.workspaceName as string) ?? this.platformLabel(platform);
     const preview = content.length > 200 ? content.slice(0, 200) + "..." : content;
 
     await client.chat.postMessage({
       channel: nd.channelId,
-      text: `Auto-replied to ${senderName} on ${platformLabel}: ${preview}`,
+      text: `Auto-replied to ${senderName} on ${workspaceName}: ${preview}`,
     });
   }
 
@@ -1243,12 +1291,14 @@ export class Gateway {
     const { WebClient } = await import("@slack/web-api");
     const client = new WebClient(botToken);
 
-    const platformLabel = this.platformLabel(msg.platform);
+    const senderName = (msg.metadata?.senderName as string) ?? msg.userId;
+    const workspaceName =
+      (msg.metadata?.workspaceName as string) ?? this.platformLabel(msg.platform);
     const preview = msg.content.length > 300 ? msg.content.slice(0, 300) + "..." : msg.content;
 
     await client.chat.postMessage({
       channel: nd.channelId,
-      text: `${platformLabel} message from ${msg.userId}:\n${preview}`,
+      text: `${workspaceName} message from ${senderName}:\n${preview}`,
     });
   }
 }

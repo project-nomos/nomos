@@ -68,6 +68,10 @@ export async function runForkedAgent(options: ForkedAgentOptions): Promise<Forke
     systemPromptAppend: options.systemPromptAppend,
     permissionMode: "bypassPermissions",
     maxTurns: options.maxTurns ?? DEFAULT_FORK_MAX_TURNS,
+    stderr: (data: string) => {
+      const trimmed = data.trim();
+      if (trimmed) console.error(`[forked-agent:stderr:${label}] ${trimmed}`);
+    },
   };
 
   const sdkQuery = runSession(params);

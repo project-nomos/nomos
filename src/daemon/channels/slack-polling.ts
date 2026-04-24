@@ -64,13 +64,16 @@ export class SlackPollingAdapter implements ChannelAdapter {
   // Bot client for posting agent responses with the bot identity (not as the user)
   private botClient: WebClient | null = null;
   private botUserId: string | null = null;
-  private static readonly CHANNEL_REFRESH_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
-  private static readonly INTER_CALL_DELAY_MS = 2000; // ~30 req/min, safe headroom for Tier 3
+  // All known user IDs for the owner across workspaces
+  private ownUserIds = new Set<string>();
+  private static readonly CHANNEL_REFRESH_INTERVAL_MS = 30 * 60 * 1000; // 30 minutes
+  private static readonly INTER_CALL_DELAY_MS = 3000; // ~20 req/min, conservative for Tier 3
+  private static readonly FULL_SCAN_DELAY_MS = 5000; // Slower during full scans
 
   // Active channel tracking: only poll channels with recent messages
   private activeChannels = new Set<string>();
   private pollCount = 0;
-  private static readonly FULL_SCAN_EVERY = 10; // Full scan every 10th poll
+  private static readonly FULL_SCAN_EVERY = 60; // Full scan every 60th poll (~5h at 5min intervals)
 
   // Global mutex: only one adapter instance polls at a time across all workspaces.
   // Slack rate limits are per-app (OAuth client), shared across all tokens.
@@ -79,6 +82,9 @@ export class SlackPollingAdapter implements ChannelAdapter {
   // Cache for user/channel name lookups
   private userNameCache = new Map<string, string>();
   private channelNameCache = new Map<string, string>();
+
+  // Cache last incoming message context per channel so send() can enrich drafts
+  private lastIncomingContext = new Map<string, Record<string, unknown>>();
 
   get platform(): string {
     return `slack-user:${this.teamId}`;
@@ -144,6 +150,20 @@ export class SlackPollingAdapter implements ChannelAdapter {
       }
     }
 
+    // Load all known user IDs for the owner across workspaces
+    if (this.userId) this.ownUserIds.add(this.userId);
+    if (this.botUserId) this.ownUserIds.add(this.botUserId);
+    try {
+      const { listIntegrationsByPrefix } = await import("../../db/integrations.ts");
+      const workspaces = await listIntegrationsByPrefix("slack-ws:");
+      for (const ws of workspaces) {
+        const uid = (ws.metadata as Record<string, unknown>)?.user_id;
+        if (typeof uid === "string") this.ownUserIds.add(uid);
+      }
+    } catch {
+      // integrations not available
+    }
+
     // Load default notification channel -- messages there are treated like DMs
     try {
       const { getNotificationDefault } = await import("../../db/notification-defaults.ts");
@@ -207,10 +227,17 @@ export class SlackPollingAdapter implements ChannelAdapter {
       return;
     }
 
+    // Merge cached incoming context (senderName, messageType, workspaceName, originalMessage)
+    const cachedCtx = this.lastIncomingContext.get(message.channelId) ?? {};
     const context: Record<string, unknown> = {
       channelId: message.channelId,
       threadId: message.threadId,
+      workspaceName: this.teamName ?? this.teamId,
+      ...cachedCtx,
     };
+
+    // Clear cache after use (don't leak context into next conversation)
+    this.lastIncomingContext.delete(message.channelId);
 
     await this.draftManager.createDraft(message, this.userId, context);
   }
@@ -420,11 +447,12 @@ export class SlackPollingAdapter implements ChannelAdapter {
    *
    * Rate budget strategy (Tier 3: 50 req/min shared across all tokens):
    *   - EVERY cycle: poll the default channel only (1 API call)
-   *   - EVERY cycle: poll active DMs (channels that had recent messages)
-   *   - FULL SCAN (every 10th cycle): poll ALL DMs + member channels for @mentions
+   *   - EVERY cycle: poll active DMs only (channels that had recent messages)
+   *   - FULL SCAN (every ~5h): poll ALL DMs to discover new conversations
+   *   - Member channels (@mentions) are NOT polled -- too expensive.
+   *     Use Socket Mode on the default workspace for real-time @mentions.
    *
-   * This keeps normal cycles to 1-3 API calls. Full scans are infrequent
-   * enough (~10 min) to stay well within rate limits.
+   * Normal cycles: 1-3 API calls. Full scans: capped at 10 DMs/cycle.
    */
   private async poll(): Promise<void> {
     if (!this.running || !this.client || this.polling) return;
@@ -446,13 +474,18 @@ export class SlackPollingAdapter implements ChannelAdapter {
         await delay(SlackPollingAdapter.INTER_CALL_DELAY_MS);
       }
 
-      // 2. Poll active DMs (only channels with recent messages, or all on full scan)
+      // 2. Poll active DMs (only channels with recent messages)
+      // On full scan: poll ALL DMs but cap to avoid rate limits
       const dmChannels = await this.getDMChannels();
       this.consecutiveErrors = 0;
 
       const dmsToPoll = isFullScan
-        ? dmChannels
+        ? dmChannels.slice(0, 10) // Cap full scan to 10 DMs max
         : dmChannels.filter((ch) => this.activeChannels.has(ch));
+
+      const callDelay = isFullScan
+        ? SlackPollingAdapter.FULL_SCAN_DELAY_MS
+        : SlackPollingAdapter.INTER_CALL_DELAY_MS;
 
       for (const channelId of dmsToPoll) {
         if (!this.running) break;
@@ -460,27 +493,13 @@ export class SlackPollingAdapter implements ChannelAdapter {
         if (hadMessages) {
           this.activeChannels.add(channelId);
         }
-        await delay(SlackPollingAdapter.INTER_CALL_DELAY_MS);
+        await delay(callDelay);
       }
 
-      // 3. Full scan only: poll member channels for @mentions
       if (isFullScan) {
-        const memberChannels = await this.getMemberChannels();
         console.log(
-          `[slack-polling] Full scan: ${dmChannels.length} DMs + ${memberChannels.length} channels (team ${this.teamId})`,
+          `[slack-polling] Full scan: ${dmsToPoll.length}/${dmChannels.length} DMs polled (team ${this.teamId})`,
         );
-
-        for (const channelId of memberChannels) {
-          if (!this.running) break;
-          // Skip default channel (already polled above)
-          if (channelId === this.defaultChannelId) continue;
-          const hadMessages = await this.pollChannel(channelId, "channel");
-          if (hadMessages) {
-            this.activeChannels.add(channelId);
-          }
-          await delay(SlackPollingAdapter.INTER_CALL_DELAY_MS);
-        }
-
         // Decay active set -- full scan re-adds any with messages
         this.activeChannels.clear();
       }
@@ -556,8 +575,10 @@ export class SlackPollingAdapter implements ChannelAdapter {
       const isDefaultChannel = channelId === this.defaultChannelId;
       for (const msg of messages.reverse()) {
         // Skip own messages -- except in the default channel where the
-        // user chats directly with the agent via their own user token
-        if (msg.user === this.userId && !isDefaultChannel) continue;
+        // user chats directly with the agent via their own user token.
+        // Check all known user IDs across workspaces (Slack Connect can surface
+        // messages with a different workspace's user ID).
+        if (!isDefaultChannel && msg.user && this.ownUserIds.has(msg.user)) continue;
         // Skip ALL bot messages to prevent echo loops. This catches:
         // - Our own bot responses (bot_id set when posting via bot token)
         // - Any other bot in the channel
@@ -626,6 +647,20 @@ export class SlackPollingAdapter implements ChannelAdapter {
           "Also suggest whether to reply in-thread or as a new message.",
         ].join("\n");
 
+    // Cache incoming context so send() can enrich draft notifications.
+    // Accumulate originalMessage for rapid sequential messages (message batching).
+    if (!isDefaultChannel) {
+      const prevCtx = this.lastIncomingContext.get(e.channel);
+      const prevOriginal =
+        prevCtx?.senderName === senderName ? (prevCtx.originalMessage as string) : "";
+      this.lastIncomingContext.set(e.channel, {
+        senderName,
+        messageType: "dm",
+        workspaceName: this.teamName ?? this.teamId,
+        originalMessage: prevOriginal ? `${prevOriginal}\n${e.text}` : e.text,
+      });
+    }
+
     this.onMessage({
       id: randomUUID(),
       platform: this.platform,
@@ -658,6 +693,19 @@ export class SlackPollingAdapter implements ChannelAdapter {
       "Also suggest whether to reply in-thread or as a new message.",
     ].join("\n");
 
+    // Cache incoming context so send() can enrich draft notifications.
+    // Accumulate originalMessage for rapid sequential messages (message batching).
+    const prevMentionCtx = this.lastIncomingContext.get(e.channel);
+    const prevMentionOriginal =
+      prevMentionCtx?.senderName === senderName ? (prevMentionCtx.originalMessage as string) : "";
+    this.lastIncomingContext.set(e.channel, {
+      senderName,
+      channelName,
+      messageType: "mention",
+      workspaceName: this.teamName ?? this.teamId,
+      originalMessage: prevMentionOriginal ? `${prevMentionOriginal}\n${e.text}` : e.text,
+    });
+
     this.onMessage({
       id: randomUUID(),
       platform: this.platform,
@@ -674,15 +722,29 @@ export class SlackPollingAdapter implements ChannelAdapter {
     const cached = this.userNameCache.get(userId);
     if (cached) return cached;
 
-    try {
-      const result = await this.client!.users.info({ user: userId });
-      const name =
-        result.user?.profile?.display_name || result.user?.real_name || result.user?.name || userId;
-      this.userNameCache.set(userId, name);
-      return name;
-    } catch {
-      return userId;
+    // Try main client, then bot client (bot may have users:read scope when user token doesn't)
+    for (const [label, client] of [
+      ["user", this.client],
+      ["bot", this.botClient],
+    ] as const) {
+      if (!client) continue;
+      try {
+        const result = await (client as WebClient).users.info({ user: userId });
+        const name =
+          result.user?.profile?.display_name ||
+          result.user?.real_name ||
+          result.user?.name ||
+          userId;
+        if (name !== userId) {
+          this.userNameCache.set(userId, name);
+          return name;
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.warn(`[slack-polling] ${label} client failed to resolve user ${userId}: ${msg}`);
+      }
     }
+    return userId;
   }
 
   private async lookupChannelName(channelId: string): Promise<string> {

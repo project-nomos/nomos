@@ -208,6 +208,9 @@ export class DraftManager {
 
     try {
       // Send the EDITED content, not the original draft
+      console.log(
+        `[draft-manager] Sending edited draft ${draft.id.slice(0, 8)} to ${draft.platform}:${draft.channel_id}`,
+      );
       await sendFn(draft.channel_id, editedContent, draft.thread_id ?? undefined);
       await markDraftSent(draft.id);
 
