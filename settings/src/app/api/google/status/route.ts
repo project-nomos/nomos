@@ -22,7 +22,9 @@ export async function GET() {
   let gwsInstalled = false;
   let gwsVersion = "";
   try {
-    const { stdout } = await execFileAsync("npx", ["gws", "--version"], { timeout: 10000 });
+    const { stdout } = await execFileAsync("npx", ["@googleworkspace/cli", "--version"], {
+      timeout: 10000,
+    });
     gwsInstalled = true;
     gwsVersion = stdout
       .trim()
@@ -56,7 +58,7 @@ export async function GET() {
   // Check gws auth status for token validity
   if (gwsInstalled) {
     try {
-      const { stdout } = await execFileAsync("npx", ["gws", "auth", "status"], {
+      const { stdout } = await execFileAsync("npx", ["@googleworkspace/cli", "auth", "status"], {
         timeout: 10000,
       });
       const status = JSON.parse(stdout);
@@ -68,7 +70,7 @@ export async function GET() {
           try {
             const { stdout: exportOut } = await execFileAsync(
               "npx",
-              ["gws", "auth", "export", "--unmasked"],
+              ["@googleworkspace/cli", "auth", "export", "--unmasked"],
               { timeout: 10000 },
             );
             const creds = JSON.parse(exportOut);

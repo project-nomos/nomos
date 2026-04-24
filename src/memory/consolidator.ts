@@ -236,12 +236,8 @@ async function llmConsolidate(): Promise<number> {
           if (block.type === "text" && block.text) fullText += block.text;
         }
       }
-      if (msg.type === "result") {
-        for (const block of msg.result) {
-          if ((block as { type: string; text?: string }).type === "text") {
-            fullText += (block as { type: string; text: string }).text;
-          }
-        }
+      if (msg.type === "result" && "result" in msg) {
+        fullText += msg.result;
       }
     }
 

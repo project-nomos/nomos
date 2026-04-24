@@ -263,7 +263,7 @@ const chatInfoTool = tool(
       };
     }
   },
-  { annotations: { readOnly: true } },
+  { annotations: { readOnlyHint: true } },
 );
 
 const chatMemberTool = tool(
@@ -294,7 +294,7 @@ const chatMemberTool = tool(
       };
     }
   },
-  { annotations: { readOnly: true } },
+  { annotations: { readOnlyHint: true } },
 );
 
 const sendTypingTool = tool(
@@ -341,7 +341,7 @@ const botInfoTool = tool(
       };
     }
   },
-  { annotations: { readOnly: true } },
+  { annotations: { readOnlyHint: true } },
 );
 
 // ---------------------------------------------------------------------------

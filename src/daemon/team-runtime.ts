@@ -740,6 +740,7 @@ Verify the workers' changes are correct. Run builds, tests, linters, and adversa
       maxBudgetUsd?: number;
       cwd?: string;
       plugins?: SdkPluginConfig[];
+      useSubscription?: boolean;
     },
     emit?: (event: { type: string; message: string }) => void,
   ): Promise<string> {
@@ -759,6 +760,7 @@ Verify the workers' changes are correct. Run builds, tests, linters, and adversa
       maxTurns: options.maxTurns ?? 20,
       maxBudgetUsd: options.maxBudgetUsd,
       plugins: options.plugins,
+      useSubscription: options.useSubscription,
       stderr: (line: string) => {
         const trimmed = line.trim();
         if (trimmed) {

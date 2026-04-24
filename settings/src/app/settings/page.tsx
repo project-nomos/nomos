@@ -87,6 +87,10 @@ export default function AssistantSettingsPage() {
   const [anthropicBaseUrl, setAnthropicBaseUrl] = useState("");
   const [initialAnthropicBaseUrl, setInitialAnthropicBaseUrl] = useState("");
 
+  // Subscription mode
+  const [useSubscription, setUseSubscription] = useState(false);
+  const [initialUseSubscription, setInitialUseSubscription] = useState(false);
+
   // Multi-agent teams
   const [teamMode, setTeamMode] = useState(false);
   const [initialTeamMode, setInitialTeamMode] = useState(false);
@@ -152,6 +156,7 @@ export default function AssistantSettingsPage() {
     modelModerate !== initialModelModerate ||
     modelComplex !== initialModelComplex ||
     anthropicBaseUrl !== initialAnthropicBaseUrl ||
+    useSubscription !== initialUseSubscription ||
     teamMode !== initialTeamMode ||
     maxTeamWorkers !== initialMaxTeamWorkers ||
     workerBudgetUsd !== initialWorkerBudgetUsd ||
@@ -229,6 +234,11 @@ export default function AssistantSettingsPage() {
       const baseUrl = envData.ANTHROPIC_BASE_URL ?? "";
       setAnthropicBaseUrl(baseUrl);
       setInitialAnthropicBaseUrl(baseUrl);
+
+      // Subscription mode
+      const us = envData.NOMOS_USE_SUBSCRIPTION === "true";
+      setUseSubscription(us);
+      setInitialUseSubscription(us);
 
       // Multi-agent teams
       const tm = envData.NOMOS_TEAM_MODE === "true";
@@ -369,6 +379,8 @@ export default function AssistantSettingsPage() {
         } else if (anthropicBaseUrl !== initialAnthropicBaseUrl) {
           envUpdates.ANTHROPIC_BASE_URL = anthropicBaseUrl;
         }
+        if (useSubscription !== initialUseSubscription)
+          envUpdates.NOMOS_USE_SUBSCRIPTION = useSubscription ? "true" : "";
         if (teamMode !== initialTeamMode) envUpdates.NOMOS_TEAM_MODE = teamMode ? "true" : "";
         if (maxTeamWorkers !== initialMaxTeamWorkers)
           envUpdates.NOMOS_MAX_TEAM_WORKERS = maxTeamWorkers;
@@ -576,6 +588,24 @@ export default function AssistantSettingsPage() {
               placeholder={hasApiKey ? "Configured -- enter new value to replace" : "sk-ant-..."}
               helperText="Your Anthropic API key"
             />
+            <div className="mt-4 flex items-center justify-between rounded-lg border border-surface0 bg-base px-3 py-2.5">
+              <div>
+                <span className="text-sm font-medium text-text">Use Claude Subscription</span>
+                <p className="text-xs text-overlay0 mt-0.5">
+                  Use your Claude Max/Pro subscription instead of API key. Higher rate limits, usage
+                  billed to subscription.
+                </p>
+              </div>
+              <label className="relative inline-flex cursor-pointer items-center">
+                <input
+                  type="checkbox"
+                  checked={useSubscription}
+                  onChange={(e) => setUseSubscription(e.target.checked)}
+                  className="peer sr-only"
+                />
+                <div className="peer h-5 w-9 rounded-full bg-surface1 after:absolute after:left-[2px] after:top-[2px] after:h-4 after:w-4 after:rounded-full after:bg-overlay0 after:transition-all after:content-[''] peer-checked:bg-mauve peer-checked:after:translate-x-full peer-checked:after:bg-crust" />
+              </label>
+            </div>
           </div>
         )}
 
@@ -1001,6 +1031,31 @@ export default function AssistantSettingsPage() {
               className="w-full rounded-lg border border-surface1 bg-surface0 px-3 py-2 text-sm text-text placeholder:text-overlay0 focus:outline-none focus:border-mauve focus:ring-1 focus:ring-mauve/30 font-mono"
             />
             <p className="text-xs text-overlay0">Default: gemini-embedding-001 (768 dimensions)</p>
+          </div>
+          <div className="pt-4 border-t border-surface0 space-y-4">
+            <div className="flex items-center justify-between">
+              <p className="text-xs text-overlay0">
+                Optional: GCP project for Vertex AI embeddings or Google Workspace APIs.
+              </p>
+              <a
+                href="https://console.cloud.google.com"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 text-xs text-blue hover:text-blue/80"
+              >
+                GCP Console <ExternalLink size={10} />
+              </a>
+            </div>
+            <div className="space-y-1.5">
+              <label className="block text-sm font-medium text-subtext1">GCP Project ID</label>
+              <input
+                type="text"
+                value={gcpProject}
+                onChange={(e) => setGcpProject(e.target.value)}
+                placeholder="my-project-12345"
+                className="w-full rounded-lg border border-surface1 bg-surface0 px-3 py-2 text-sm text-text placeholder:text-overlay0 focus:outline-none focus:border-mauve focus:ring-1 focus:ring-mauve/30 font-mono"
+              />
+            </div>
           </div>
         </div>
       </section>

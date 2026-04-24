@@ -139,12 +139,8 @@ async function processWithAgent(userMessage: string): Promise<string> {
   let fullResponse = "";
 
   for await (const event of session) {
-    if (event.type === "result") {
-      for (const block of event.result) {
-        if (block.type === "text") {
-          fullResponse += block.text;
-        }
-      }
+    if (event.type === "result" && "result" in event) {
+      fullResponse += event.result;
     }
   }
 

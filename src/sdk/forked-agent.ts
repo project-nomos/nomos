@@ -62,12 +62,16 @@ export async function runForkedAgent(options: ForkedAgentOptions): Promise<Forke
 
   console.log(`[forked-agent] Starting ${label} (model: ${model})...`);
 
+  // Check if subscription mode is enabled (reads env at call time)
+  const useSubscription = process.env.NOMOS_USE_SUBSCRIPTION === "true";
+
   const params: RunSessionParams = {
     prompt: options.prompt,
     model,
     systemPromptAppend: options.systemPromptAppend,
     permissionMode: "bypassPermissions",
     maxTurns: options.maxTurns ?? DEFAULT_FORK_MAX_TURNS,
+    useSubscription,
     stderr: (data: string) => {
       const trimmed = data.trim();
       if (trimmed) console.error(`[forked-agent:stderr:${label}] ${trimmed}`);
@@ -98,10 +102,8 @@ export async function runForkedAgent(options: ForkedAgentOptions): Promise<Forke
       inputTokens = msg.usage?.input_tokens ?? 0;
       outputTokens = msg.usage?.output_tokens ?? 0;
 
-      for (const block of msg.result) {
-        if (block.type === "text") {
-          fullText += block.text;
-        }
+      if ("result" in msg) {
+        fullText += msg.result;
       }
     }
   }

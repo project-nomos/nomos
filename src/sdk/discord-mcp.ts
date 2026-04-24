@@ -193,7 +193,7 @@ const readChannelTool = tool(
       };
     }
   },
-  { annotations: { readOnly: true } },
+  { annotations: { readOnlyHint: true } },
 );
 
 const reactTool = tool(
@@ -288,7 +288,7 @@ const listPinsTool = tool(
       };
     }
   },
-  { annotations: { readOnly: true } },
+  { annotations: { readOnlyHint: true } },
 );
 
 const createThreadTool = tool(
@@ -394,7 +394,7 @@ const listChannelsTool = tool(
       };
     }
   },
-  { annotations: { readOnly: true } },
+  { annotations: { readOnlyHint: true } },
 );
 
 const memberInfoTool = tool(
@@ -430,7 +430,7 @@ const memberInfoTool = tool(
       };
     }
   },
-  { annotations: { readOnly: true } },
+  { annotations: { readOnlyHint: true } },
 );
 
 const searchMessagesTool = tool(
@@ -477,7 +477,7 @@ const searchMessagesTool = tool(
       };
     }
   },
-  { annotations: { readOnly: true } },
+  { annotations: { readOnlyHint: true } },
 );
 
 // ---------------------------------------------------------------------------

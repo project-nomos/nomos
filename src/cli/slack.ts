@@ -245,10 +245,8 @@ async function startSlackListener(): Promise<void> {
         for await (const event of session) {
           if (event.type === "result") {
             sessionId = event.session_id;
-            for (const block of event.result) {
-              if (block.type === "text") {
-                fullResponse += block.text;
-              }
+            if ("result" in event) {
+              fullResponse += event.result;
             }
           }
         }
