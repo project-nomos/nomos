@@ -521,7 +521,7 @@ export class AgentRuntime {
         `[agent-runtime] Smart routing: "${classification.tier}" (confidence: ${classification.confidence.toFixed(2)}) → ${model}`,
       );
       // Show routing decision in the chat
-      const shortModel = model.replace("claude-", "").replace(/-\d+$/, "");
+      const shortModel = model.replace("claude-", "");
       emit({
         type: "system",
         subtype: "routing",
