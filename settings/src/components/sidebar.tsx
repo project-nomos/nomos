@@ -21,6 +21,7 @@ import {
   BookOpen,
   Upload,
   Bell,
+  Sparkles,
 } from "lucide-react";
 import { DaemonStatus } from "@/components/daemon-status";
 
@@ -42,6 +43,7 @@ const channelItems = [
 const advancedItems = [
   { href: "/admin/database", label: "Database", icon: Database },
   { href: "/admin/memory", label: "Memory", icon: Brain },
+  { href: "/admin/exemplars", label: "Exemplars", icon: Sparkles },
   { href: "/admin/wiki", label: "Wiki", icon: BookOpen },
   { href: "/admin/ingestion", label: "Ingestion", icon: Upload },
   { href: "/admin/proactive", label: "Proactive", icon: Bell },
