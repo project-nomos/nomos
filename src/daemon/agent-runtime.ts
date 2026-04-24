@@ -588,7 +588,7 @@ export class AgentRuntime {
         });
         emit({
           type: "result",
-          result: [{ type: "text", text: content }],
+          result: content,
           usage: { input_tokens: 0, output_tokens: 0 },
           total_cost_usd: 0,
         });
@@ -607,7 +607,7 @@ export class AgentRuntime {
         // Return error as content instead of re-throwing (prevents duplicate error events)
         emit({
           type: "result",
-          result: [{ type: "text", text: `Team error: ${errMsg}` }],
+          result: `Team error: ${errMsg}`,
           usage: { input_tokens: 0, output_tokens: 0 },
           total_cost_usd: 0,
         });
@@ -796,6 +796,7 @@ export class AgentRuntime {
       maxTurns: 50,
       anthropicBaseUrl: this.config.anthropicBaseUrl,
       plugins: this.plugins,
+      useSubscription: this.config.useSubscription,
       stderr: (data: string) => {
         // Log SDK subprocess stderr so we can diagnose crash reasons
         const trimmed = data.trim();
@@ -855,14 +856,12 @@ export class AgentRuntime {
           costUsd = msg.total_cost_usd ?? 0;
           inputTokens = msg.usage?.input_tokens ?? 0;
           outputTokens = msg.usage?.output_tokens ?? 0;
-          for (const block of msg.result) {
-            if (block.type === "text") {
-              fullText += block.text;
-            }
+          if ("result" in msg) {
+            fullText += msg.result;
           }
           emit({
             type: "result",
-            result: msg.result,
+            result: "result" in msg ? msg.result : "",
             usage: msg.usage,
             total_cost_usd: msg.total_cost_usd,
             session_id: msg.session_id,

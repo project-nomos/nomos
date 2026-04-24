@@ -80,6 +80,8 @@ export interface NomosConfig {
   videoGeneration: boolean;
   /** Veo model for video generation (default: veo-3.0-generate-preview) */
   videoGenerationModel?: string;
+  /** Use Claude subscription (Max/Pro) instead of API key for agent sessions (default: false) */
+  useSubscription: boolean;
 }
 
 export function loadEnvConfig(): NomosConfig {
@@ -145,6 +147,7 @@ export function loadEnvConfig(): NomosConfig {
     imageGenerationModel: process.env.NOMOS_IMAGE_GENERATION_MODEL,
     videoGeneration: process.env.NOMOS_VIDEO_GENERATION === "true",
     videoGenerationModel: process.env.NOMOS_VIDEO_GENERATION_MODEL,
+    useSubscription: process.env.NOMOS_USE_SUBSCRIPTION === "true",
   };
 }
 

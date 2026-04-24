@@ -119,6 +119,7 @@ describe("validateConfig", () => {
       alternateBuffer: false,
       imageGeneration: false,
       videoGeneration: false,
+      useSubscription: false,
     };
 
     const errors = validateConfig(config);
@@ -154,6 +155,7 @@ describe("validateConfig", () => {
       alternateBuffer: false,
       imageGeneration: false,
       videoGeneration: false,
+      useSubscription: false,
     };
 
     const errors = validateConfig(config);
