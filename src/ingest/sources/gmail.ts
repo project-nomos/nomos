@@ -50,13 +50,20 @@ export class GmailIngestSource implements IngestSource {
     try {
       const creds = await exportGwsCredentials();
       if (creds) {
+        console.log("[ingest:gmail] Using gws CLI credentials for Gmail access");
         const oauth2 = new OAuth2Client(creds.client_id, creds.client_secret);
         oauth2.setCredentials({ refresh_token: creds.refresh_token });
         const { token } = await oauth2.getAccessToken();
         if (token) return token;
+        console.warn("[ingest:gmail] gws token refresh returned no token");
+      } else {
+        console.warn("[ingest:gmail] gws auth export returned no credentials");
       }
-    } catch {
-      // gws not available or export failed -- fall through to ADC
+    } catch (err) {
+      console.warn(
+        "[ingest:gmail] gws auth failed, falling back to ADC:",
+        err instanceof Error ? err.message : err,
+      );
     }
 
     // 2. Fall back to Application Default Credentials (Vertex AI / service account)
@@ -240,8 +247,9 @@ function exportGwsCredentials(): Promise<GwsCredentials | null> {
       "npx",
       ["@googleworkspace/cli", "auth", "export"],
       { timeout: 15_000 },
-      (err, stdout) => {
+      (err, stdout, stderr) => {
         if (err) {
+          console.warn("[ingest:gmail] gws auth export failed:", err.message, stderr?.trim());
           resolve(null);
           return;
         }

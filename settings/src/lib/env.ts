@@ -181,7 +181,7 @@ const ENV_TO_DB: Record<string, DbMapping> = {
   NOMOS_ADAPTIVE_MEMORY: { table: "config", dbKey: "app.adaptiveMemory" },
   NOMOS_EXTRACTION_MODEL: { table: "config", dbKey: "app.extractionModel" },
   CLAUDE_CODE_USE_VERTEX: { table: "integrations", dbKey: "vertex-ai", field: "enabled" },
-  GOOGLE_CLOUD_PROJECT: { table: "integrations", dbKey: "vertex-ai", field: "project_id" },
+  GOOGLE_CLOUD_PROJECT: { table: "config", dbKey: "app.gcpProject" },
   CLOUD_ML_REGION: { table: "integrations", dbKey: "vertex-ai", field: "region" },
 };
 
