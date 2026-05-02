@@ -702,7 +702,8 @@ export class AgentRuntime {
 
       // If resume failed, retry without resume.
       // "exited with code 1" is a generic SDK crash that often indicates a corrupt/stale session.
-      if (resumeId && /session|conversation|exited with code/i.test(errMsg)) {
+      // "Prompt is too long" means the resumed session exceeded the model's context window.
+      if (resumeId && /session|conversation|exited with code|prompt is too long/i.test(errMsg)) {
         this.sdkSessionIds.delete(sessionKey);
 
         emit({
