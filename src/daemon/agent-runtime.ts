@@ -703,7 +703,11 @@ export class AgentRuntime {
       // If resume failed, retry without resume.
       // "exited with code 1" is a generic SDK crash that often indicates a corrupt/stale session.
       // "Prompt is too long" means the resumed session exceeded the model's context window.
-      if (resumeId && /session|conversation|exited with code|prompt is too long/i.test(errMsg)) {
+      // "Autocompact is thrashing" means the base context is too large even after compaction.
+      if (
+        resumeId &&
+        /session|conversation|exited with code|prompt is too long|autocompact/i.test(errMsg)
+      ) {
         this.sdkSessionIds.delete(sessionKey);
 
         emit({
@@ -737,6 +741,51 @@ export class AgentRuntime {
           };
         } catch (retryErr) {
           const retryMsg = retryErr instanceof Error ? retryErr.message : String(retryErr);
+
+          // If fresh session also fails with context issues, upgrade to a larger model
+          if (
+            /prompt is too long|autocompact/i.test(retryMsg) &&
+            model !== this.config.modelTiers.moderate
+          ) {
+            const upgradeModel = this.config.modelTiers.moderate;
+            console.warn(
+              `[agent-runtime] Context too large for ${model}, upgrading to ${upgradeModel}`,
+            );
+            emit({
+              type: "system",
+              subtype: "status",
+              message: `Upgrading to ${upgradeModel.replace("claude-", "")} (context too large)...`,
+            });
+
+            try {
+              const upgraded = await this.runAgent(
+                message.content,
+                undefined,
+                emit,
+                upgradeModel,
+                sessionKey,
+                userState,
+                personaPrompt,
+              );
+              if (upgraded.sessionId) {
+                this.sdkSessionIds.set(sessionKey, upgraded.sessionId);
+              }
+              return {
+                inReplyTo: message.id,
+                platform: message.platform,
+                channelId: message.channelId,
+                threadId: message.threadId,
+                content: upgraded.text || "_(no response)_",
+                sessionId: upgraded.sessionId,
+              };
+            } catch (upgradeErr) {
+              const upgradeMsg =
+                upgradeErr instanceof Error ? upgradeErr.message : String(upgradeErr);
+              emit({ type: "error", message: upgradeMsg });
+              throw upgradeErr;
+            }
+          }
+
           emit({ type: "error", message: retryMsg });
           throw retryErr;
         }
