@@ -53,6 +53,8 @@ export interface RunSessionParams {
   cwd?: string;
   /** Plugins to load into the SDK session */
   plugins?: SdkPluginConfig[];
+  /** Use Claude subscription (Max/Pro) instead of API key */
+  useSubscription?: boolean;
 }
 
 /**
@@ -86,6 +88,14 @@ export function runSession(params: RunSessionParams): Query {
     CLAUDE_AGENT_SDK_CLIENT_APP: "nomos/0.1.0",
   };
   delete env.CLAUDECODE;
+
+  // Subscription mode: remove API key so the SDK subprocess uses the
+  // Claude subscription (Max/Pro) OAuth credentials from ~/.claude/.credentials.json.
+  // This avoids API rate limits and uses the subscription's higher limits instead.
+  if (params.useSubscription) {
+    delete env.ANTHROPIC_API_KEY;
+    delete env.ANTHROPIC_BASE_URL;
+  }
   if (params.anthropicBaseUrl) {
     env.ANTHROPIC_BASE_URL = params.anthropicBaseUrl;
   }

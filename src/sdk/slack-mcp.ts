@@ -211,7 +211,7 @@ export function createSlackTools(getClient: () => Promise<any>) {
         };
       }
     },
-    { annotations: { readOnly: true } },
+    { annotations: { readOnlyHint: true } },
   );
 
   const readThreadTool = tool(
@@ -243,7 +243,7 @@ export function createSlackTools(getClient: () => Promise<any>) {
         };
       }
     },
-    { annotations: { readOnly: true } },
+    { annotations: { readOnlyHint: true } },
   );
 
   const reactTool = tool(
@@ -317,7 +317,7 @@ export function createSlackTools(getClient: () => Promise<any>) {
         };
       }
     },
-    { annotations: { readOnly: true } },
+    { annotations: { readOnlyHint: true } },
   );
 
   const userInfoTool = tool(
@@ -354,7 +354,7 @@ export function createSlackTools(getClient: () => Promise<any>) {
         };
       }
     },
-    { annotations: { readOnly: true } },
+    { annotations: { readOnlyHint: true } },
   );
 
   const pinMessageTool = tool(
@@ -429,7 +429,7 @@ export function createSlackTools(getClient: () => Promise<any>) {
         };
       }
     },
-    { annotations: { readOnly: true } },
+    { annotations: { readOnlyHint: true } },
   );
 
   const searchMessagesTool = tool(
@@ -468,7 +468,7 @@ export function createSlackTools(getClient: () => Promise<any>) {
         };
       }
     },
-    { annotations: { readOnly: true } },
+    { annotations: { readOnlyHint: true } },
   );
 
   const uploadFileTool = tool(

@@ -72,7 +72,7 @@ export function createGoogleWorkspaceMcpConfigs(): Record<string, McpServerConfi
     "google-workspace": {
       type: "stdio",
       command: "npx",
-      args: ["gws", "mcp", "-s", services, "--tool-mode", "compact"],
+      args: ["@googleworkspace/cli", "mcp", "-s", services, "--tool-mode", "compact"],
     } as McpServerConfig,
   };
 }
@@ -99,7 +99,7 @@ export async function createGoogleWorkspaceMcpConfigsAsync(): Promise<
     "google-workspace": {
       type: "stdio",
       command: "npx",
-      args: ["gws", "mcp", "-s", services, "--tool-mode", "compact"],
+      args: ["@googleworkspace/cli", "mcp", "-s", services, "--tool-mode", "compact"],
     } as McpServerConfig,
   };
 }
@@ -109,7 +109,9 @@ export async function createGoogleWorkspaceMcpConfigsAsync(): Promise<
  */
 export async function isGwsAvailable(): Promise<{ available: boolean; version?: string }> {
   try {
-    const { stdout } = await execFileAsync("npx", ["gws", "--version"], { timeout: 10000 });
+    const { stdout } = await execFileAsync("npx", ["@googleworkspace/cli", "--version"], {
+      timeout: 10000,
+    });
     const version = stdout
       .trim()
       .replace(/^gws\s+/, "")
@@ -131,7 +133,9 @@ export async function getGwsAuthStatus(): Promise<{
   email?: string;
 }> {
   try {
-    const { stdout } = await execFileAsync("npx", ["gws", "auth", "status"], { timeout: 10000 });
+    const { stdout } = await execFileAsync("npx", ["@googleworkspace/cli", "auth", "status"], {
+      timeout: 10000,
+    });
     const status = JSON.parse(stdout);
     const authenticated =
       status.auth_method !== "none" ||
@@ -145,7 +149,7 @@ export async function getGwsAuthStatus(): Promise<{
       try {
         const { stdout: exportOut } = await execFileAsync(
           "npx",
-          ["gws", "auth", "export", "--unmasked"],
+          ["@googleworkspace/cli", "auth", "export", "--unmasked"],
           { timeout: 10000 },
         );
         const creds = JSON.parse(exportOut) as Record<string, string>;

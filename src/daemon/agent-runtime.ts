@@ -26,10 +26,7 @@ import {
   createTelegramMcpServer,
   loadTelegramTokenFromDb,
 } from "../sdk/telegram-mcp.ts";
-import {
-  isGoogleWorkspaceConfiguredAsync,
-  createGoogleWorkspaceMcpConfigsAsync,
-} from "../sdk/google-workspace-mcp.ts";
+import { isGoogleWorkspaceConfiguredAsync } from "../sdk/google-workspace-mcp.ts";
 import { loadEnvConfig, type NomosConfig } from "../config/env.ts";
 import { classifyQuery } from "../routing/classifier.ts";
 import {
@@ -219,7 +216,7 @@ export class AgentRuntime {
       this.mcpServers["nomos-telegram"] = createTelegramMcpServer();
     }
     if (await isGoogleWorkspaceConfiguredAsync()) {
-      Object.assign(this.mcpServers, await createGoogleWorkspaceMcpConfigsAsync());
+      // gws CLI is used via Bash (not MCP) -- no MCP server to register.
       // Sync authorized accounts from gws CLI to DB and load for system prompt
       try {
         const { syncGoogleAccountsFromGws } = await import("../db/google-accounts.ts");
@@ -418,20 +415,26 @@ export class AgentRuntime {
     if (isTelegramConfigured()) {
       parts.push("- **Telegram**: Send and receive messages via Telegram bot");
     }
-    if (this.mcpServers["google-workspace"]) {
-      parts.push("- **Google Workspace**: All services via gws CLI MCP");
-      // List authorized accounts so the agent knows about them
-      if (this.gwsAccounts && this.gwsAccounts.length > 0) {
-        const accountList = this.gwsAccounts
-          .map((a) => `  - ${a.email}${a.isDefault ? " (default)" : ""}`)
-          .join("\n");
-        parts.push(`  Authorized accounts:\n${accountList}`);
-        if (this.gwsAccounts.length > 1) {
-          parts.push(
-            "  Use `switch_google_account` to switch between accounts before making Google Workspace API calls.",
-          );
-        }
-      }
+    if (this.gwsAccounts && this.gwsAccounts.length > 0) {
+      const accountList = this.gwsAccounts
+        .map((a) => `  - ${a.email}${a.isDefault ? " (default)" : ""}`)
+        .join("\n");
+      parts.push(
+        [
+          `- **Google Workspace** (via \`gws\` CLI -- use Bash tool to run commands):`,
+          `  Authorized accounts:\n${accountList}`,
+          `  **Usage**: Run \`npx @googleworkspace/cli <service> <resource> <method> --params '<JSON>'\` via the Bash tool.`,
+          `  **Examples**:`,
+          `    - List emails: \`npx @googleworkspace/cli gmail users messages list --params '{"userId":"me","maxResults":5}'\``,
+          `    - Read email: \`npx @googleworkspace/cli gmail users messages get --params '{"userId":"me","id":"<msgId>","format":"full"}'\``,
+          `    - Send email: \`npx @googleworkspace/cli gmail users messages send --params '{"userId":"me"}' --json '{"raw":"<base64>"}'\``,
+          `    - List events: \`npx @googleworkspace/cli calendar events list --params '{"calendarId":"primary","maxResults":5}'\``,
+          `    - List files: \`npx @googleworkspace/cli drive files list --params '{"pageSize":10}'\``,
+          `    - Search: \`npx @googleworkspace/cli gmail users messages list --params '{"userId":"me","q":"from:someone subject:topic"}'\``,
+          `  **Multi-account**: The active account is the default. To switch, re-auth is needed.`,
+          `  **Tip**: Use \`npx @googleworkspace/cli schema <service.resource.method>\` to check available params.`,
+        ].join("\n"),
+      );
     }
 
     // Check for WhatsApp
@@ -521,7 +524,7 @@ export class AgentRuntime {
         `[agent-runtime] Smart routing: "${classification.tier}" (confidence: ${classification.confidence.toFixed(2)}) → ${model}`,
       );
       // Show routing decision in the chat
-      const shortModel = model.replace("claude-", "").replace(/-\d+$/, "");
+      const shortModel = model.replace("claude-", "");
       emit({
         type: "system",
         subtype: "routing",
@@ -588,7 +591,7 @@ export class AgentRuntime {
         });
         emit({
           type: "result",
-          result: [{ type: "text", text: content }],
+          result: content,
           usage: { input_tokens: 0, output_tokens: 0 },
           total_cost_usd: 0,
         });
@@ -607,7 +610,7 @@ export class AgentRuntime {
         // Return error as content instead of re-throwing (prevents duplicate error events)
         emit({
           type: "result",
-          result: [{ type: "text", text: `Team error: ${errMsg}` }],
+          result: `Team error: ${errMsg}`,
           usage: { input_tokens: 0, output_tokens: 0 },
           total_cost_usd: 0,
         });
@@ -699,7 +702,12 @@ export class AgentRuntime {
 
       // If resume failed, retry without resume.
       // "exited with code 1" is a generic SDK crash that often indicates a corrupt/stale session.
-      if (resumeId && /session|conversation|exited with code/i.test(errMsg)) {
+      // "Prompt is too long" means the resumed session exceeded the model's context window.
+      // "Autocompact is thrashing" means the base context is too large even after compaction.
+      if (
+        resumeId &&
+        /session|conversation|exited with code|prompt is too long|autocompact/i.test(errMsg)
+      ) {
         this.sdkSessionIds.delete(sessionKey);
 
         emit({
@@ -733,6 +741,51 @@ export class AgentRuntime {
           };
         } catch (retryErr) {
           const retryMsg = retryErr instanceof Error ? retryErr.message : String(retryErr);
+
+          // If fresh session also fails with context issues, upgrade to a larger model
+          if (
+            /prompt is too long|autocompact/i.test(retryMsg) &&
+            model !== this.config.modelTiers.moderate
+          ) {
+            const upgradeModel = this.config.modelTiers.moderate;
+            console.warn(
+              `[agent-runtime] Context too large for ${model}, upgrading to ${upgradeModel}`,
+            );
+            emit({
+              type: "system",
+              subtype: "status",
+              message: `Upgrading to ${upgradeModel.replace("claude-", "")} (context too large)...`,
+            });
+
+            try {
+              const upgraded = await this.runAgent(
+                message.content,
+                undefined,
+                emit,
+                upgradeModel,
+                sessionKey,
+                userState,
+                personaPrompt,
+              );
+              if (upgraded.sessionId) {
+                this.sdkSessionIds.set(sessionKey, upgraded.sessionId);
+              }
+              return {
+                inReplyTo: message.id,
+                platform: message.platform,
+                channelId: message.channelId,
+                threadId: message.threadId,
+                content: upgraded.text || "_(no response)_",
+                sessionId: upgraded.sessionId,
+              };
+            } catch (upgradeErr) {
+              const upgradeMsg =
+                upgradeErr instanceof Error ? upgradeErr.message : String(upgradeErr);
+              emit({ type: "error", message: upgradeMsg });
+              throw upgradeErr;
+            }
+          }
+
           emit({ type: "error", message: retryMsg });
           throw retryErr;
         }
@@ -796,6 +849,7 @@ export class AgentRuntime {
       maxTurns: 50,
       anthropicBaseUrl: this.config.anthropicBaseUrl,
       plugins: this.plugins,
+      useSubscription: this.config.useSubscription,
       stderr: (data: string) => {
         // Log SDK subprocess stderr so we can diagnose crash reasons
         const trimmed = data.trim();
@@ -855,14 +909,12 @@ export class AgentRuntime {
           costUsd = msg.total_cost_usd ?? 0;
           inputTokens = msg.usage?.input_tokens ?? 0;
           outputTokens = msg.usage?.output_tokens ?? 0;
-          for (const block of msg.result) {
-            if (block.type === "text") {
-              fullText += block.text;
-            }
+          if ("result" in msg) {
+            fullText += msg.result;
           }
           emit({
             type: "result",
-            result: msg.result,
+            result: "result" in msg ? msg.result : "",
             usage: msg.usage,
             total_cost_usd: msg.total_cost_usd,
             session_id: msg.session_id,

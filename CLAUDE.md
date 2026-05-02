@@ -28,6 +28,20 @@ pnpm check                   # format:check + typecheck + lint (CI gate)
 pnpm daemon:dev              # Run daemon in foreground via tsx
 ```
 
+### Background Service (macOS)
+
+The daemon can run as a launchd service that starts automatically on login and restarts on crash:
+
+```bash
+nomos service install        # Install + start (auto-starts on login)
+nomos service uninstall      # Stop + remove auto-start
+nomos service status         # Show service status (installed/loaded/PID)
+```
+
+When the service is installed, it runs the Homebrew-installed `nomos` binary. For development, uninstall the service and use `pnpm daemon:dev` instead to avoid port conflicts between the installed and dev versions.
+
+Logs: `~/.nomos/logs/daemon.log`
+
 Run a single test:
 
 ```bash

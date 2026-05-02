@@ -94,26 +94,15 @@ export class StreamingResponder {
       return false;
     }
 
-    // Long messages: delete placeholder, let the adapter's chunked send() handle it
-    if (fullText.length > MAX_LENGTH) {
-      if (this.deleteFn) {
-        try {
-          await this.deleteFn(this.messageId);
-        } catch {
-          // best-effort cleanup
-        }
-      }
-      return false;
-    }
-
-    // Send final complete text
+    // Update the existing message with the final text.
+    // Slack's chat.update supports up to ~40k chars -- no need to delete + repost.
     try {
       await this.update(this.messageId, fullText);
+      return true;
     } catch {
+      // Update failed (e.g., message was deleted) -- fall back to normal send
       return false;
     }
-
-    return true;
   }
 
   private postPlaceholder(): void {

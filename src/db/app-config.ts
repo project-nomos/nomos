@@ -31,6 +31,8 @@ const CONFIG_KEY_MAP: Record<string, keyof NomosConfig> = {
   "app.imageGenerationModel": "imageGenerationModel",
   "app.videoGeneration": "videoGeneration",
   "app.videoGenerationModel": "videoGenerationModel",
+  "app.useSubscription": "useSubscription",
+  "app.gcpProject": "googleCloudProject",
 };
 
 /** Reverse map: NomosConfig field → config table key */

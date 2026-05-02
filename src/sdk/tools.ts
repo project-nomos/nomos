@@ -105,7 +105,7 @@ export function createMemoryMcpServer(): McpSdkServerConfigWithInstance {
     },
     {
       annotations: {
-        readOnly: true,
+        readOnlyHint: true,
       },
     },
   );
@@ -165,7 +165,7 @@ export function createMemoryMcpServer(): McpSdkServerConfigWithInstance {
     },
     {
       annotations: {
-        readOnly: true,
+        readOnlyHint: true,
       },
     },
   );
@@ -212,7 +212,7 @@ export function createMemoryMcpServer(): McpSdkServerConfigWithInstance {
     {
       annotations: {
         // Mark as non-destructive so permission modes don't block it
-        readOnly: false,
+        readOnlyHint: false,
       },
     },
   );
@@ -274,7 +274,7 @@ export function createMemoryMcpServer(): McpSdkServerConfigWithInstance {
     },
     {
       annotations: {
-        readOnly: true,
+        readOnlyHint: true,
       },
     },
   );
@@ -313,7 +313,7 @@ export function createMemoryMcpServer(): McpSdkServerConfigWithInstance {
     },
     {
       annotations: {
-        readOnly: true,
+        readOnlyHint: true,
       },
     },
   );
@@ -356,7 +356,7 @@ export function createMemoryMcpServer(): McpSdkServerConfigWithInstance {
     },
     {
       annotations: {
-        readOnly: false,
+        readOnlyHint: false,
       },
     },
   );
@@ -414,7 +414,7 @@ export function createMemoryMcpServer(): McpSdkServerConfigWithInstance {
     },
     {
       annotations: {
-        readOnly: false,
+        readOnlyHint: false,
       },
     },
   );
@@ -475,7 +475,7 @@ export function createMemoryMcpServer(): McpSdkServerConfigWithInstance {
     },
     {
       annotations: {
-        readOnly: false,
+        readOnlyHint: false,
       },
     },
   );
@@ -516,7 +516,7 @@ export function createMemoryMcpServer(): McpSdkServerConfigWithInstance {
     },
     {
       annotations: {
-        readOnly: false,
+        readOnlyHint: false,
       },
     },
   );
@@ -617,7 +617,7 @@ export function createMemoryMcpServer(): McpSdkServerConfigWithInstance {
     },
     {
       annotations: {
-        readOnly: false,
+        readOnlyHint: false,
       },
     },
   );
@@ -674,7 +674,7 @@ export function createMemoryMcpServer(): McpSdkServerConfigWithInstance {
     },
     {
       annotations: {
-        readOnly: true,
+        readOnlyHint: true,
       },
     },
   );
@@ -754,7 +754,7 @@ export function createMemoryMcpServer(): McpSdkServerConfigWithInstance {
     },
     {
       annotations: {
-        readOnly: false,
+        readOnlyHint: false,
       },
     },
   );
@@ -777,7 +777,7 @@ export function createMemoryMcpServer(): McpSdkServerConfigWithInstance {
     },
     {
       annotations: {
-        readOnly: true,
+        readOnlyHint: true,
       },
     },
   );
@@ -827,7 +827,7 @@ export function createMemoryMcpServer(): McpSdkServerConfigWithInstance {
     },
     {
       annotations: {
-        readOnly: true,
+        readOnlyHint: true,
       },
     },
   );
@@ -883,7 +883,7 @@ export function createMemoryMcpServer(): McpSdkServerConfigWithInstance {
     },
     {
       annotations: {
-        readOnly: true,
+        readOnlyHint: true,
       },
     },
   );
@@ -1087,7 +1087,7 @@ export function createMemoryMcpServer(): McpSdkServerConfigWithInstance {
         return { content: [{ type: "text", text: `Snapshot failed: ${message}` }], isError: true };
       }
     },
-    { annotations: { readOnly: true } },
+    { annotations: { readOnlyHint: true } },
   );
 
   const browserCloseTool = tool(
@@ -1165,7 +1165,7 @@ export function createMemoryMcpServer(): McpSdkServerConfigWithInstance {
         };
       }
     },
-    { annotations: { readOnly: true } },
+    { annotations: { readOnlyHint: true } },
   );
 
   const taskKillTool = tool(
@@ -1368,7 +1368,7 @@ export function createMemoryMcpServer(): McpSdkServerConfigWithInstance {
         content: [{ type: "text", text: planText }],
       };
     },
-    { annotations: { readOnly: true } },
+    { annotations: { readOnlyHint: true } },
   );
 
   // ── LSP Code Intelligence Tools ──
@@ -1408,7 +1408,7 @@ export function createMemoryMcpServer(): McpSdkServerConfigWithInstance {
         };
       }
     },
-    { annotations: { readOnly: true } },
+    { annotations: { readOnlyHint: true } },
   );
 
   const lspFindReferencesTool = tool(
@@ -1455,7 +1455,7 @@ export function createMemoryMcpServer(): McpSdkServerConfigWithInstance {
         };
       }
     },
-    { annotations: { readOnly: true } },
+    { annotations: { readOnlyHint: true } },
   );
 
   const lspHoverTool = tool(
@@ -1484,7 +1484,7 @@ export function createMemoryMcpServer(): McpSdkServerConfigWithInstance {
         };
       }
     },
-    { annotations: { readOnly: true } },
+    { annotations: { readOnlyHint: true } },
   );
 
   const lspDocumentSymbolsTool = tool(
@@ -1533,7 +1533,7 @@ export function createMemoryMcpServer(): McpSdkServerConfigWithInstance {
         };
       }
     },
-    { annotations: { readOnly: true } },
+    { annotations: { readOnlyHint: true } },
   );
 
   // ── Proactive Message Delivery Helper ──
@@ -1838,7 +1838,7 @@ export function createMemoryMcpServer(): McpSdkServerConfigWithInstance {
         };
       }
     },
-    { annotations: { readOnly: true } },
+    { annotations: { readOnlyHint: true } },
   );
 
   const switchModeTool = tool(

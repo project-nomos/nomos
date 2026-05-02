@@ -49,7 +49,7 @@ export type AgentEvent =
   | { type: "tool_use_summary"; tool_name: string; summary?: string }
   | {
       type: "result";
-      result: unknown[];
+      result: string;
       usage: { input_tokens: number; output_tokens: number };
       total_cost_usd: number;
       session_id?: string;
