@@ -186,6 +186,7 @@ jobs:
           done
 
       - name: Update version and Homebrew formula
+        id: update
         run: |
           VERSION="${RELEASE_VERSION#v}"
           VERSION="${VERSION#v}"
@@ -196,8 +197,22 @@ jobs:
           SHA256=$(curl -sL "$TARBALL_URL" | sha256sum | cut -d' ' -f1)
           sed -i "s|url \".*\"|url \"${TARBALL_URL}\"|" Formula/nomos.rb
           sed -i "s|sha256 \".*\"|sha256 \"${SHA256}\"|" Formula/nomos.rb
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add package.json Formula/nomos.rb
-          git commit -m "release: update to v${VERSION}" || true
-          git push origin HEAD:main || true
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Create pull request for formula update
+        uses: peter-evans/create-pull-request@v7
+        with:
+          token: ${{ secrets.RELEASE_BOT_TOKEN || secrets.GITHUB_TOKEN }}
+          branch: release/v${{ steps.update.outputs.version }}-formula
+          base: main
+          commit-message: "release: update to v${{ steps.update.outputs.version }}"
+          title: "release: update to v${{ steps.update.outputs.version }}"
+          body: |
+            Automated formula + version bump for release v${{ steps.update.outputs.version }}.
+
+            Updates:
+            - `package.json` version
+            - `Formula/nomos.rb` URL + SHA256 to the self-contained Homebrew tarball
+
+            Merge to make this version installable via `brew install`.
+          delete-branch: true
