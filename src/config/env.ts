@@ -91,7 +91,10 @@ export function loadEnvConfig(): NomosConfig {
   const defaultModel = process.env.NOMOS_MODEL ?? "claude-sonnet-4-6";
 
   return {
-    databaseUrl: process.env.DATABASE_URL,
+    // Default to a local Postgres instance with `nomos` db -- works out of the
+    // box for Homebrew users who run `brew install postgresql && createdb nomos`.
+    // Override via DATABASE_URL env var or the Settings UI.
+    databaseUrl: process.env.DATABASE_URL ?? "postgresql://localhost:5432/nomos",
     apiProvider: (process.env.NOMOS_API_PROVIDER as ApiProvider) ?? "anthropic",
     model: defaultModel,
     smartRouting: process.env.NOMOS_SMART_ROUTING === "true",
