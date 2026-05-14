@@ -71,28 +71,36 @@ class Nomos < Formula
     mkdir_p "#{Dir.home}/.nomos"
     mkdir_p "#{Dir.home}/.nomos/logs"
     mkdir_p var/"log/nomos"
+
+    # Auto-start the service so the Settings UI is immediately accessible
+    # for first-run configuration (database, API keys, integrations).
+    # Falls through silently if brew services is unavailable.
+    system "brew", "services", "restart", "nomos"
   end
 
   def caveats
     <<~EOS
-      nomos requires PostgreSQL with pgvector extension.
-      Configure via environment variables or the Settings UI:
+      Nomos is now running in the background. Open the Settings UI to finish setup:
 
-        export DATABASE_URL=postgresql://user:pass@localhost:5432/nomos
-        export ANTHROPIC_API_KEY=sk-ant-...
+        http://localhost:3456
 
-      Start the background service (daemon + Settings UI) once:
-        brew services start nomos
+      The Settings UI walks you through configuring:
+        - PostgreSQL database (default: postgresql://localhost:5432/nomos)
+          Requires the pgvector extension: brew install pgvector
+        - API provider (Anthropic key, OpenRouter, Vertex AI, or Claude Max subscription)
+        - Channel integrations (Slack, Discord, iMessage, etc.)
+        - Personality and skills
 
-      Future upgrades auto-restart the service.
+      Service management:
+        brew services restart nomos    # restart after config changes
+        brew services stop nomos       # stop the daemon
+        brew services info nomos       # check service status
 
-      Check status:
-        nomos status
+      CLI shortcuts:
+        nomos status        # quick health check (daemon, DB, service)
+        nomos chat          # interactive REPL (also runs first-time setup wizard)
 
-      Run first-time setup:
-        nomos chat
-
-      Optional — browser automation:
+      Optional — browser automation for skills:
         npx playwright install chromium
     EOS
   end

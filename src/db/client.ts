@@ -8,10 +8,8 @@ let kyselyInstance: Kysely<Database> | null = null;
 
 function getSqlInstance(): postgres.Sql {
   if (!sqlInstance) {
-    const url = process.env.DATABASE_URL;
-    if (!url) {
-      throw new Error("DATABASE_URL environment variable is required");
-    }
+    // Default to local Postgres with `nomos` db (matches loadEnvConfig fallback).
+    const url = process.env.DATABASE_URL ?? "postgresql://localhost:5432/nomos";
     sqlInstance = postgres(url, {
       max: 10,
       idle_timeout: 30,
