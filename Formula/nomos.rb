@@ -107,11 +107,17 @@ class Nomos < Formula
     PLIST
     plist_path.write(plist_content)
 
-    # Bootstrap the LaunchAgent. Ignore errors -- on upgrades the service
-    # might already be loaded; users can fix manually via `nomos service install`.
+    # (Re)load the LaunchAgent and force-restart it.
+    # - bootout: unload any prior instance (ignore failure if not loaded)
+    # - bootstrap: load the (possibly new) plist
+    # - kickstart -k: kill any running process and respawn from the new plist,
+    #   so upgrades pick up new code immediately instead of users staring at
+    #   the old build until they restart manually.
     uid = Process.uid
+    label = "com.projectnomos.daemon"
     system "launchctl", "bootout", "gui/#{uid}", plist_path.to_s, [:out, :err] => "/dev/null"
-    system "launchctl", "bootstrap", "gui/#{uid}", plist_path.to_s
+    system "launchctl", "bootstrap", "gui/#{uid}", plist_path.to_s, [:out, :err] => "/dev/null"
+    system "launchctl", "kickstart", "-k", "gui/#{uid}/#{label}"
   end
 
   def caveats
