@@ -105,6 +105,9 @@ class Nomos < Formula
       </dict>
       </plist>
     PLIST
+    # Pathname#write is monkey-patched by Homebrew to refuse overwriting, so
+    # delete any existing plist before writing the new one (upgrades hit this).
+    plist_path.delete if plist_path.exist?
     plist_path.write(plist_content)
 
     # (Re)load the LaunchAgent and force-restart it.
