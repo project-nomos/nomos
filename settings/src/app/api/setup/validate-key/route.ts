@@ -6,11 +6,38 @@ export async function POST(request: Request) {
   if (forbidden) return forbidden;
 
   const body = (await request.json()) as {
-    provider: "anthropic" | "vertex";
+    provider: "anthropic" | "anthropic-subscription" | "vertex";
     apiKey?: string;
     projectId?: string;
     region?: string;
   };
+
+  if (body.provider === "anthropic-subscription") {
+    // Check if Claude Code is logged in (~/.claude/.credentials.json exists with valid OAuth)
+    try {
+      const { execFile } = await import("node:child_process");
+      const { promisify } = await import("node:util");
+      const execFileAsync = promisify(execFile);
+      const { stdout } = await execFileAsync("claude", ["auth", "status"], { timeout: 5000 });
+      const data = JSON.parse(stdout);
+      if (data.loggedIn) {
+        return NextResponse.json({
+          valid: true,
+          warning: `Signed in as ${data.email ?? "unknown"} (${data.subscriptionType ?? "subscription"})`,
+        });
+      }
+      return NextResponse.json({
+        valid: false,
+        error: "Not signed in to Claude. Run `claude login` in a terminal first.",
+      });
+    } catch {
+      return NextResponse.json({
+        valid: false,
+        error:
+          "Claude Code CLI not found. Install it (npm i -g @anthropic-ai/claude-code) and run `claude login`.",
+      });
+    }
+  }
 
   if (body.provider === "anthropic") {
     if (!body.apiKey) {
