@@ -108,16 +108,37 @@ class Nomos < Formula
     plist_path.write(plist_content)
 
     # (Re)load the LaunchAgent and force-restart it.
-    # - bootout: unload any prior instance (ignore failure if not loaded)
-    # - bootstrap: load the (possibly new) plist
-    # - kickstart -k: kill any running process and respawn from the new plist,
-    #   so upgrades pick up new code immediately instead of users staring at
-    #   the old build until they restart manually.
+    # Upgrades are tricky: the old plist's ProgramArguments points at a path
+    # in the old Cellar (e.g. /opt/homebrew/Cellar/nomos/0.1.37/...) which gets
+    # deleted by `brew cleanup`. The old daemon process keeps running against
+    # files that no longer exist, so the Settings UI fails with "ENOENT" until
+    # the user manually restarts.
+    #
+    # Sequence:
+    # 1. Kill any process from the old plist (by label, in case its file is gone)
+    # 2. Bootout the old plist file path (if still loaded)
+    # 3. Bootstrap the new plist
+    # 4. Kickstart -k to force a fresh process from the new plist
     uid = Process.uid
     label = "com.projectnomos.daemon"
-    system "launchctl", "bootout", "gui/#{uid}", plist_path.to_s, [:out, :err] => "/dev/null"
-    system "launchctl", "bootstrap", "gui/#{uid}", plist_path.to_s, [:out, :err] => "/dev/null"
-    system "launchctl", "kickstart", "-k", "gui/#{uid}/#{label}"
+    domain = "gui/#{uid}"
+    null_out = [:out, :err] => "/dev/null"
+
+    # 1. Forcibly kill the existing daemon (matches by label, not file path).
+    system "launchctl", "kill", "TERM", "#{domain}/#{label}", null_out
+    sleep 1
+    system "launchctl", "kill", "KILL", "#{domain}/#{label}", null_out
+
+    # 2. Unload the old plist (file path) if still loaded.
+    system "launchctl", "bootout", domain, plist_path.to_s, null_out
+    # Also try unloading by label in case the file path differs.
+    system "launchctl", "bootout", "#{domain}/#{label}", null_out
+
+    # 3. Load the new plist.
+    system "launchctl", "bootstrap", domain, plist_path.to_s, null_out
+
+    # 4. Force-restart so the daemon spawns fresh from the new plist's paths.
+    system "launchctl", "kickstart", "-k", "#{domain}/#{label}"
   end
 
   def caveats
