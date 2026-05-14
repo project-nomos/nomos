@@ -34,13 +34,11 @@ import { IngestScheduler } from "../ingest/scheduler.ts";
 import { EmailAdapter } from "./channels/email.ts";
 import { observeMessage } from "./observer.ts";
 import { registerProactiveJobs } from "../proactive/scheduler.ts";
-import {
-  initCATEIntegration,
-  stopCATEIntegration,
-  type CATEIntegration,
-} from "../cate/integration.ts";
 import type { IncomingMessage, AgentEvent } from "./types.ts";
 import type { DraftRow } from "../db/drafts.ts";
+
+/** CATE integration is loaded lazily so the daemon works without the optional cate-sdk dependency. */
+type CATEIntegration = { close?: () => Promise<void> | void } | null;
 
 export interface GatewayOptions {
   /** WebSocket server port (default: 8765) */
@@ -258,38 +256,44 @@ export class Gateway {
       console.warn("[gateway] Wiki cron registration failed:", err);
     }
 
-    // Start CATE protocol server (agent-to-agent trust layer)
+    // Start CATE protocol server (agent-to-agent trust layer).
+    // The SDK is an optional dependency -- skip silently if not installed.
     try {
-      this.cateIntegration = await initCATEIntegration({
-        port: 8801,
-        onMessage: async (envelope) => {
-          // Route incoming CATE envelopes to the message queue
-          const payload = envelope.payload ?? "";
-          const msg: IncomingMessage = {
-            id: envelope.header.msg_id,
-            platform: "cate",
-            channelId: envelope.header.thread_id,
-            threadId: envelope.header.thread_id,
-            userId: envelope.parties.from.did,
-            content: payload,
-            timestamp: new Date(envelope.header.timestamp),
-          };
-          const sessionKey = `cate:${envelope.header.thread_id}`;
-          this.broadcast({
-            type: "system",
-            subtype: "message_received",
-            message: `Agent-to-agent message from ${envelope.parties.from.did}`,
-            data: {
+      const cateModule = await import("../cate/integration.ts").catch(() => null);
+      if (!cateModule) {
+        console.log("[gateway] CATE SDK not installed -- skipping agent-to-agent integration");
+      } else {
+        this.cateIntegration = (await cateModule.initCATEIntegration({
+          port: 8801,
+          onMessage: async (envelope) => {
+            // Route incoming CATE envelopes to the message queue
+            const payload = envelope.payload ?? "";
+            const msg: IncomingMessage = {
+              id: envelope.header.msg_id,
               platform: "cate",
               channelId: envelope.header.thread_id,
+              threadId: envelope.header.thread_id,
               userId: envelope.parties.from.did,
-              preview: payload.slice(0, 120),
-              timestamp: envelope.header.timestamp,
-            },
-          });
-          this.messageQueue.enqueue(sessionKey, msg, () => {});
-        },
-      });
+              content: payload,
+              timestamp: new Date(envelope.header.timestamp),
+            };
+            const sessionKey = `cate:${envelope.header.thread_id}`;
+            this.broadcast({
+              type: "system",
+              subtype: "message_received",
+              message: `Agent-to-agent message from ${envelope.parties.from.did}`,
+              data: {
+                platform: "cate",
+                channelId: envelope.header.thread_id,
+                userId: envelope.parties.from.did,
+                preview: payload.slice(0, 120),
+                timestamp: envelope.header.timestamp,
+              },
+            });
+            this.messageQueue.enqueue(sessionKey, msg, () => {});
+          },
+        })) as CATEIntegration;
+      }
     } catch (err) {
       console.warn("[gateway] CATE integration failed to start:", err);
     }
@@ -351,7 +355,12 @@ export class Gateway {
 
     // Stop in reverse order
     if (this.cateIntegration) {
-      await stopCATEIntegration(this.cateIntegration);
+      try {
+        const cateModule = await import("../cate/integration.ts");
+        await cateModule.stopCATEIntegration(this.cateIntegration as never);
+      } catch {
+        // CATE SDK not available -- nothing to stop
+      }
     }
     this.stopSettingsServer();
     this.cronEngine.stop();
