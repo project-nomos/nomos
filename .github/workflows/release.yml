@@ -89,7 +89,10 @@ jobs:
         run: |
           cd settings
           pnpm install --ignore-scripts
-          npx next build
+          # `pnpm build` runs `next build` + copy-static.mjs which copies
+          # .next/static and public/ into the standalone output.
+          # Without this the Settings UI loads as unstyled HTML.
+          pnpm build
 
       - name: Create Homebrew bundle tarball
         run: |
