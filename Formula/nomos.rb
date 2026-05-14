@@ -3,8 +3,8 @@ class Nomos < Formula
 
   desc "TypeScript CLI AI agent powered by Anthropic models"
   homepage "https://github.com/project-nomos/nomos"
-  url "https://github.com/project-nomos/nomos/releases/download/v0.1.33/nomos-0.1.33-homebrew.tar.gz"
-  sha256 "3832ff534a559f05e82cbc8af1428a5809d0ac06e0bf7077ef8cf05ace1b8c06"
+  url "https://github.com/project-nomos/nomos/releases/download/v0.1.34/nomos-0.1.34-homebrew.tar.gz"
+  sha256 "6339afa20b707d248cef820d2199d1cf29ef8cf7975aea1c358448b12c7d8bb6"
   license "MIT"
 
   livecheck do
