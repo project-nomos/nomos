@@ -75,11 +75,38 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      # Build a self-contained Homebrew tarball that bundles node_modules + dist.
+      # Avoids requiring GitHub Packages auth during `brew install` (cate-sdk
+      # is hosted on GitHub Packages which requires a token even for public
+      # packages -- a known GitHub limitation).
+      - name: Fetch Anthropic skills and plugins (for bundled tarball)
+        run: |
+          bash scripts/fetch-anthropic-skills.sh || true
+          bash scripts/fetch-plugins.sh || true
+
+      - name: Build Settings UI (for bundled tarball)
+        run: |
+          cd settings
+          pnpm install --ignore-scripts
+          npx next build
+
+      - name: Create Homebrew bundle tarball
+        run: |
+          # Stage just the bits the brew formula needs.
+          # Including node_modules so brew install doesn't need to hit npm.
+          VERSION="${RELEASE_VERSION#v}"
+          STAGE_DIR="nomos-${VERSION}-homebrew"
+          mkdir -p "$STAGE_DIR"
+          cp -r dist node_modules package.json skills proto settings "$STAGE_DIR/"
+          tar -czf "nomos-${VERSION}-homebrew.tar.gz" "$STAGE_DIR"
+          ls -lh "nomos-${VERSION}-homebrew.tar.gz"
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.RELEASE_VERSION }}
           generate_release_notes: true
+          files: nomos-*-homebrew.tar.gz
 
   docker:
     name: Push Docker Image
@@ -142,14 +169,30 @@ jobs:
         if: github.event_name == 'workflow_dispatch'
         run: echo "RELEASE_VERSION=v${{ inputs.version }}" >> "$GITHUB_ENV"
 
+      - name: Wait for release asset
+        run: |
+          # The `release` job runs first and uploads the homebrew tarball asset.
+          # Poll until it's visible so we can checksum it.
+          VERSION="${RELEASE_VERSION#v}"
+          ASSET_URL="https://github.com/${{ github.repository }}/releases/download/${RELEASE_VERSION}/nomos-${VERSION}-homebrew.tar.gz"
+          for i in 1 2 3 4 5 6 7 8 9 10; do
+            STATUS=$(curl -sLo /dev/null -w "%{http_code}" "$ASSET_URL")
+            if [ "$STATUS" = "200" ]; then
+              echo "Asset is available"
+              break
+            fi
+            echo "Waiting for asset (try $i, status: $STATUS)..."
+            sleep 10
+          done
+
       - name: Update version and Homebrew formula
         run: |
           VERSION="${RELEASE_VERSION#v}"
           VERSION="${VERSION#v}"
           # Bump package.json version so local dev shows correct version
           npm pkg set version="$VERSION"
-          # Update Homebrew formula URL and SHA
-          TARBALL_URL="https://github.com/${{ github.repository }}/archive/refs/tags/${RELEASE_VERSION}.tar.gz"
+          # Point Homebrew formula at the self-contained release asset (includes node_modules)
+          TARBALL_URL="https://github.com/${{ github.repository }}/releases/download/${RELEASE_VERSION}/nomos-${VERSION}-homebrew.tar.gz"
           SHA256=$(curl -sL "$TARBALL_URL" | sha256sum | cut -d' ' -f1)
           sed -i "s|url \".*\"|url \"${TARBALL_URL}\"|" Formula/nomos.rb
           sed -i "s|sha256 \".*\"|sha256 \"${SHA256}\"|" Formula/nomos.rb

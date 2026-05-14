@@ -13,7 +13,6 @@ class Nomos < Formula
   end
 
   depends_on "node@22"
-  depends_on "pnpm" => :build
 
   # Native Node.js addons (.node files) must not be relinked by Homebrew
   skip_clean "libexec"
@@ -35,23 +34,10 @@ class Nomos < Formula
   end
 
   def install
-    # Set package.json version from formula version (source tarball has 0.1.0)
-    system "npm", "pkg", "set", "version=#{version}"
-
-    # Install production dependencies only, skip postinstall (playwright/uvx)
-    system "pnpm", "install", "--prod", "--ignore-scripts"
-
-    # Fetch Anthropic skills and plugins, install build tooling, and build
-    system "bash", "scripts/fetch-anthropic-skills.sh"
-    system "bash", "scripts/fetch-plugins.sh"
-    system "pnpm", "install", "--ignore-scripts"
-    system "pnpm", "build"
-
-    # Build Settings UI (Next.js app)
-    cd "settings" do
-      system "pnpm", "install", "--ignore-scripts"
-      system "npx", "next", "build"
-    end
+    # The release tarball is pre-built by CI: it already contains
+    # `dist/`, `node_modules/`, `skills/`, `proto/`, and a built `settings/`
+    # Next.js app. No pnpm install or build steps needed at user-install time.
+    # This avoids requiring GitHub Packages auth for the cate-sdk dependency.
 
     # Install everything except node_modules to libexec.
     libexec.install "dist"
