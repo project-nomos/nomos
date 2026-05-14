@@ -17,21 +17,9 @@ class Nomos < Formula
   # Native Node.js addons (.node files) must not be relinked by Homebrew
   skip_clean "libexec"
 
-  # Homebrew-managed launchd service (brew services start/stop/restart nomos)
-  service do
-    run [opt_bin/"nomos", "daemon", "run"]
-    keep_alive true
-    log_path var/"log/nomos/daemon.log"
-    error_log_path var/"log/nomos/daemon.log"
-    working_dir Dir.home
-    environment_variables(
-      HOME: Dir.home,
-      PATH: "#{HOMEBREW_PREFIX}/opt/node@22/bin:#{HOMEBREW_PREFIX}/bin:/usr/local/bin:/usr/bin:/bin",
-      DAEMON_WITH_SETTINGS: "true",
-      SETTINGS_PORT: "3456",
-    )
-    process_type :background
-  end
+  # Note: no `service do` block -- post_install writes a user LaunchAgent
+  # directly so the service starts immediately after install without needing
+  # `brew services start`. Manage via `nomos service install/uninstall/status`.
 
   def install
     # The release tarball is pre-built by CI: it already contains
@@ -72,10 +60,58 @@ class Nomos < Formula
     mkdir_p "#{Dir.home}/.nomos/logs"
     mkdir_p var/"log/nomos"
 
-    # Auto-start the service so the Settings UI is immediately accessible
-    # for first-run configuration (database, API keys, integrations).
-    # Falls through silently if brew services is unavailable.
-    system "brew", "services", "restart", "nomos"
+    # Auto-install + start a user LaunchAgent so the Settings UI is immediately
+    # accessible. We can't use `brew services` from within post_install (it
+    # deadlocks on brew's own lockfile), so write the plist directly.
+    plist_dir = Pathname.new("#{Dir.home}/Library/LaunchAgents")
+    plist_dir.mkpath
+    plist_path = plist_dir/"com.projectnomos.daemon.plist"
+    plist_content = <<~PLIST
+      <?xml version="1.0" encoding="UTF-8"?>
+      <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+      <plist version="1.0">
+      <dict>
+        <key>Label</key>
+        <string>com.projectnomos.daemon</string>
+        <key>ProgramArguments</key>
+        <array>
+          <string>#{opt_bin}/nomos</string>
+          <string>daemon</string>
+          <string>run</string>
+        </array>
+        <key>EnvironmentVariables</key>
+        <dict>
+          <key>HOME</key>
+          <string>#{Dir.home}</string>
+          <key>PATH</key>
+          <string>#{Formula["node@22"].opt_bin}:#{HOMEBREW_PREFIX}/bin:/usr/local/bin:/usr/bin:/bin</string>
+          <key>DAEMON_WITH_SETTINGS</key>
+          <string>true</string>
+          <key>SETTINGS_PORT</key>
+          <string>3456</string>
+        </dict>
+        <key>RunAtLoad</key>
+        <true/>
+        <key>KeepAlive</key>
+        <true/>
+        <key>StandardOutPath</key>
+        <string>#{Dir.home}/.nomos/logs/daemon.log</string>
+        <key>StandardErrorPath</key>
+        <string>#{Dir.home}/.nomos/logs/daemon.log</string>
+        <key>WorkingDirectory</key>
+        <string>#{Dir.home}</string>
+        <key>ProcessType</key>
+        <string>Background</string>
+      </dict>
+      </plist>
+    PLIST
+    plist_path.write(plist_content)
+
+    # Bootstrap the LaunchAgent. Ignore errors -- on upgrades the service
+    # might already be loaded; users can fix manually via `nomos service install`.
+    uid = Process.uid
+    system "launchctl", "bootout", "gui/#{uid}", plist_path.to_s, [:out, :err] => "/dev/null"
+    system "launchctl", "bootstrap", "gui/#{uid}", plist_path.to_s
   end
 
   def caveats
@@ -92,9 +128,9 @@ class Nomos < Formula
         - Personality and skills
 
       Service management:
-        brew services restart nomos    # restart after config changes
-        brew services stop nomos       # stop the daemon
-        brew services info nomos       # check service status
+        nomos service status         # show daemon + service state
+        nomos service install        # (re)install the user LaunchAgent
+        nomos service uninstall      # stop + disable auto-start on login
 
       CLI shortcuts:
         nomos status        # quick health check (daemon, DB, service)
