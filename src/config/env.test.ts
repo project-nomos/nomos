@@ -44,7 +44,7 @@ describe("loadEnvConfig", () => {
 
     expect(config.googleCloudProject).toBeUndefined();
     expect(config.vertexAiLocation).toBe("global");
-    expect(config.databaseUrl).toBeUndefined();
+    expect(config.databaseUrl).toBe("postgresql://localhost:5432/nomos");
     expect(config.model).toBe("claude-sonnet-4-6");
     expect(config.embeddingModel).toBe("gemini-embedding-001");
     expect(config.permissionMode).toBe("acceptEdits");
