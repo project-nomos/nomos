@@ -1,389 +1,280 @@
-# iMessage Integration
+# Messages.app (iMessage) Integration
 
-Connect Nomos to iMessage with two connection modes: **local chat.db** (zero setup, macOS-only) or **BlueBubbles** (full bidirectional, cross-platform via a Mac relay).
+Connect Nomos to iMessage / SMS via the [`imsg`](https://github.com/openclaw/imsg)
+CLI -- a local-first iMessage tool that reads `chat.db` directly, watches for
+new messages via filesystem events, and sends through Messages.app.
 
-> **macOS required** for both modes -- either as the daemon host (chat.db mode) or as a BlueBubbles relay server.
+> **macOS required.** The `imsg` CLI is macOS-only. The Nomos daemon must run
+> on the same Mac where Messages.app is signed in.
 
-## Agent Modes
+## Overview
 
-Messages.app supports two agent modes that control how Nomos interacts with incoming messages:
+The integration has two configuration axes:
 
-|                  | Passive                                              | Agent Client                            |
-| ---------------- | ---------------------------------------------------- | --------------------------------------- |
-| **Listens to**   | All incoming messages (or filtered by allowed chats) | Only your phone number and Apple ID     |
-| **Responds via** | Drafts in Slack for approval before sending          | Directly via iMessage                   |
-| **Use case**     | Monitor conversations, review before replying        | Chat with your agent from your iPhone   |
-| **Risk level**   | Safe -- nothing sent without approval                | Active -- sends responses automatically |
+**Feature mode** -- how much you can do:
 
-### Passive Mode (default)
+| Mode                | Setup                 | Read | Send text | Send files | Standard tapbacks | Edit | Unsend | Typing | Custom reactions | Effects |
+| ------------------- | --------------------- | ---- | --------- | ---------- | ----------------- | ---- | ------ | ------ | ---------------- | ------- |
+| **Basic** (default) | Just install `imsg`   | ✅   | ✅        | ✅         | ✅                | ❌   | ❌     | ❌     | ❌               | ❌      |
+| **Advanced**        | Requires SIP disabled | ✅   | ✅        | ✅         | ✅                | ✅   | ✅     | ✅     | ✅               | ✅      |
 
-Nomos listens to incoming iMessages, processes them through the agent, and drafts responses in your default Slack channel. You review and approve/reject each response before it's sent. This is the safest option for monitoring conversations.
+**Agent mode** -- how the agent handles messages:
 
-### Agent Client Mode
+| Mode                  | Behavior                                                                                                                   |
+| --------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| **Passive** (default) | Watches all conversations, drafts responses for your approval before sending. Drafts appear in your default Slack channel. |
+| **Agent**             | Only processes messages from the owner (your phone or Apple ID), responds directly. Acts as a personal agent client.       |
 
-Nomos acts as a personal agent client -- only responding to messages from your phone number and/or Apple ID. All other messages are ignored. Use this to interact with your agent directly from your iPhone, like having a personal assistant in your Messages app.
+## Quick Start
 
-**Required**: At least one owner identity (phone number or Apple ID) must be set. Configure via Settings UI or environment variables:
+### 1. Install the `imsg` CLI
 
 ```bash
-IMESSAGE_AGENT_MODE=agent
-IMESSAGE_OWNER_PHONE=+15551234567
+brew install steipete/tap/imsg
+imsg --version
+```
+
+### 2. Grant macOS permissions
+
+The terminal (or the parent app launching `imsg`) needs:
+
+- **Full Disk Access** -- to read `~/Library/Messages/chat.db`
+  - System Settings → Privacy & Security → Full Disk Access → add your terminal
+- **Automation** for Messages.app -- to send messages
+  - Granted automatically on first `imsg send` (you'll see a permission prompt)
+- **Contacts** (optional) -- for name resolution in JSON output
+
+### 3. Enable in Nomos
+
+**Via Settings UI** (recommended): Navigate to `http://localhost:3456/integrations/imessage`,
+toggle "Enable Messages.app integration", choose feature mode (basic/advanced) and agent mode.
+
+**Via env vars:**
+
+```bash
+IMESSAGE_ENABLED=true
+IMESSAGE_FEATURE_MODE=basic           # basic | advanced
+IMESSAGE_AGENT_MODE=passive           # passive | agent
+IMESSAGE_OWNER_PHONE=+15551234567     # required for agent mode
 IMESSAGE_OWNER_APPLE_ID=you@icloud.com
 ```
 
-## Choose Your Connection Mode
-
-|                        | Local chat.db                | BlueBubbles          | Photon Server                      |
-| ---------------------- | ---------------------------- | -------------------- | ---------------------------------- |
-| **Read messages**      | SQLite polling + WAL watcher | Webhooks (real-time) | Socket.IO (real-time)              |
-| **Send messages**      | AppleScript                  | REST API             | REST API                           |
-| **Reactions/tapbacks** | No                           | Yes                  | Yes                                |
-| **Typing indicators**  | No                           | Yes                  | Yes                                |
-| **Read receipts**      | No                           | Yes                  | Yes                                |
-| **Attachments**        | No                           | Yes (up to 8MB)      | Yes                                |
-| **Message effects**    | No                           | No                   | Yes (slam, loud, etc.)             |
-| **Scheduled messages** | No                           | No                   | Yes                                |
-| **Rich link previews** | No                           | No                   | Yes                                |
-| **Contact cards**      | No                           | No                   | Yes                                |
-| **Group management**   | No                           | Yes                  | Yes                                |
-| **Daemon platform**    | macOS only                   | Any (Mac is relay)   | Any (Mac is relay)                 |
-| **Setup complexity**   | Minimal                      | Moderate             | Moderate                           |
-| **Package**            | Built-in                     | Built-in             | `@photon-ai/advanced-imessage-kit` |
-
-**Recommendation:** Start with chat.db for the simplest setup. Switch to Photon for full-featured iMessage automation (reactions, effects, scheduled messages). Use BlueBubbles as an alternative cross-platform relay.
-
-Configure the mode via Settings UI at `/integrations/imessage` or with the `IMESSAGE_MODE` env var.
-
----
-
-## Mode 1: Local chat.db (Default)
-
-### Prerequisites
-
-- macOS with Messages.app signed into iMessage
-- Messages.app running (must stay open)
-- **Full Disk Access** granted to your terminal app
-- **Automation** permission for `osascript` to control Messages.app
-- Nomos daemon running
-
-### Step 1: Grant Permissions
-
-#### Full Disk Access
-
-1. Open **System Settings** > **Privacy & Security** > **Full Disk Access**
-2. Click **+** and add your terminal application
-3. Restart the terminal after granting access
-
-#### Automation Permission
-
-The first time a message is sent, macOS will prompt to allow your terminal to control Messages.app. Click **OK**.
-
-### Step 2: Enable iMessage
-
-**Via Settings UI:** Go to `/integrations/imessage`, enable iMessage, select "Local chat.db" mode.
-
-**Via environment:**
+### 4. Restart the daemon
 
 ```bash
-IMESSAGE_ENABLED=true
-IMESSAGE_MODE=chatdb          # default, can be omitted
-```
-
-### Step 3: Start the Daemon
-
-```bash
-nomos daemon run
+nomos daemon restart
 ```
 
 You should see:
 
 ```
-[imessage-receiver] Opened chat.db, starting from ROWID 12345
-[imessage-adapter] Started in chat.db mode — watching for incoming messages
+[imessage-adapter] Starting (agent: passive, features: basic, imsg: 0.x.x)
+[imsg-adapter] Started in basic mode (watching chat.db)
 ```
 
-### How chat.db Mode Works
+## Feature Modes
 
-1. On startup, records the current highest message ROWID as a high-water mark
-2. A chokidar file watcher monitors the WAL file for near-instant detection (~200ms)
-3. A fallback poll runs every 5 seconds in case file-system events are missed
-4. New messages (ROWID > high-water mark) are queried, filtered to incoming-only, and dispatched
-5. Replies are sent via AppleScript (`osascript`)
+### Basic Mode (recommended)
 
----
+The default mode covers everything most users need:
 
-## Mode 2: BlueBubbles
+- **Read** message history (`imsg history`)
+- **Watch** new messages in real time via filesystem events (`imsg watch`)
+- **Send** text and files through Messages.app via AppleScript
+- **React** with standard tapbacks: 👍 ❤️ 😂 ‼️ ❓ 👎 (`like`, `love`, `laugh`, `emphasis`, `question`, `dislike`)
+- **Search** chat history (`imsg search`)
+- **Group-aware** -- detects group chats, participants, and chat GUIDs
 
-BlueBubbles is a macOS server that exposes iMessage via REST API + webhooks. The daemon connects to it over HTTP, enabling full bidirectional iMessage support from any platform.
+No system modifications required. Just standard macOS permissions.
 
-### Prerequisites
+### Advanced Mode (SIP disabled required)
 
-- A Mac running BlueBubbles server (can be a Mac Mini, cloud Mac, etc.)
-- BlueBubbles installed and configured with web API enabled
-- Network connectivity between the daemon and the BlueBubbles Mac
-- Nomos daemon running (on any platform)
+Adds features that require macOS's IMCore bridge:
 
-### Step 1: Install BlueBubbles
+- **Edit** previously sent messages
+- **Unsend** messages
+- **Typing indicators**
+- **Custom emoji reactions** (any emoji, not just the six standard tapbacks)
+- **Message effects** (slam, gentle, confetti, etc.)
+- **Group management** -- create groups, rename, add/remove members, set photo
+- **Read receipts** (send + suppress)
 
-1. Download and install from [bluebubbles.app](https://bluebubbles.app)
-2. Follow the setup wizard — sign into iCloud, enable web API
-3. In BlueBubbles settings:
-   - Enable the **REST API**
-   - Note the **server URL** (e.g., `http://192.168.1.100:1234`)
-   - Note the **password** (found in Settings > API/Web Settings)
+#### Enabling Advanced Mode
 
-### Step 2: Install the Keep-Alive Script
+⚠️ **Security trade-off:** Advanced mode requires disabling System Integrity Protection (SIP), a core macOS security boundary. Only proceed if you understand the implications.
 
-BlueBubbles needs Messages.app running. Install the keep-alive LaunchAgent to ensure it stays open:
+1. **Boot into Recovery Mode**
+   - Apple Silicon: shut down, hold the power button until "Loading startup options" appears, select Options
+   - Intel: restart, hold ⌘R until the Apple logo appears
 
-```bash
-cd scripts/bluebubbles
-./install-keepalive.sh
-```
+2. **Disable SIP**
+   Open Terminal (Utilities menu → Terminal) and run:
 
-This installs:
-
-- `~/Scripts/poke-messages.scpt` — AppleScript that pokes Messages.app
-- `~/Library/LaunchAgents/com.nomos.poke-messages.plist` — Runs every 5 minutes
-
-To uninstall:
-
-```bash
-launchctl unload ~/Library/LaunchAgents/com.nomos.poke-messages.plist
-rm ~/Library/LaunchAgents/com.nomos.poke-messages.plist
-rm ~/Scripts/poke-messages.scpt
-```
-
-### Step 3: Configure Nomos
-
-**Via Settings UI:** Go to `/integrations/imessage`, enable iMessage, select "BlueBubbles Server" mode, enter your server URL and password. Use the "Test Connection" button to verify.
-
-**Via environment:**
-
-```bash
-IMESSAGE_ENABLED=true
-IMESSAGE_MODE=bluebubbles
-BLUEBUBBLES_SERVER_URL=http://192.168.1.100:1234
-BLUEBUBBLES_PASSWORD=your-bluebubbles-password
-```
-
-### Step 4: Configure Webhooks in BlueBubbles
-
-Point BlueBubbles webhooks to your Nomos daemon:
-
-1. In BlueBubbles, go to **Settings > Webhooks**
-2. Add a new webhook URL:
+   ```bash
+   csrutil disable
    ```
-   http://your-nomos-host:8803/bluebubbles-webhook?password=your-bluebubbles-password
+
+3. **Reboot normally**
+
+4. **Load the IMCore bridge**
+
+   ```bash
+   imsg launch
    ```
-3. Enable the **New Message** event
-4. Save
 
-### Step 5: Start the Daemon
+   This loads a dylib into Messages.app that exposes the advanced APIs. It runs once and persists until reboot.
 
-```bash
-nomos daemon run
-```
+5. **In Nomos Settings UI** → Messages.app → switch feature mode to **Advanced**.
 
-You should see:
+6. **Re-enable SIP** (optional but recommended for everyday use)
+   Boot back into Recovery Mode and run `csrutil enable`. Advanced features will stop working until you disable SIP again -- consider using a dedicated agent machine if you want both security and advanced features.
 
-```
-[bluebubbles] Webhook listening on port 8803
-[imessage-adapter] Started in BlueBubbles mode — server: http://192.168.1.100:1234
-```
+## Agent Modes
 
-### BlueBubbles Environment Variables
+### Passive Mode (default)
 
-| Variable                       | Required | Default            | Description                        |
-| ------------------------------ | -------- | ------------------ | ---------------------------------- |
-| `BLUEBUBBLES_SERVER_URL`       | Yes      | --                 | BlueBubbles server URL             |
-| `BLUEBUBBLES_PASSWORD`         | Yes      | --                 | Server API password                |
-| `BLUEBUBBLES_WEBHOOK_PORT`     | No       | `8803`             | Port for receiving webhooks        |
-| `BLUEBUBBLES_WEBHOOK_PASSWORD` | No       | (same as password) | Separate webhook auth password     |
-| `BLUEBUBBLES_READ_RECEIPTS`    | No       | `false`            | Send read receipts when processing |
+Best for: shared phones, family Macs, or when you want approval before any reply.
 
-### BlueBubbles Capabilities
+- All incoming messages are watched
+- The agent drafts responses based on your style (learned from history and exemplars)
+- Drafts appear in your **default notification channel** (typically a Slack channel) with Approve / Edit / Decline buttons
+- Nothing is sent until you approve
 
-Beyond basic messaging, BlueBubbles enables:
+Configure your default channel in Settings UI under **Integrations → Default Notification**.
 
-- **Reactions/tapbacks** — React to messages programmatically
-- **Typing indicators** — Show typing status to contacts
-- **Read receipts** — Mark messages as read
-- **Attachments** — Send and receive files (up to 8MB)
-- **Group management** — Create groups, add/remove participants, rename
-- **Message effects** — iMessage effects like "slam" and "loud"
-- **Edit/unsend** — Edit or unsend sent messages
+### Agent Mode
 
----
+Best for: dedicated personal-agent Mac, or when you want the agent to act as your client.
 
-## Mode 3: Photon Server
+- The adapter only processes messages **from you** (matched against `IMESSAGE_OWNER_PHONE` and/or `IMESSAGE_OWNER_APPLE_ID`)
+- The agent responds directly to your commands
+- Messages from others are ignored (so the agent doesn't accidentally reply to someone)
 
-Photon is a full-featured iMessage server that provides the richest set of capabilities: reactions, message effects, scheduled messages, rich link previews, contact cards, and more.
-
-### Prerequisites
-
-- A Mac running the Photon iMessage server
-- Photon server configured with HTTP API enabled
-- Network connectivity between the daemon and the Photon Mac
-- Nomos daemon running (on any platform)
-
-### Step 1: Install Photon Server
-
-Follow the [Photon setup guide](https://github.com/photon-hq/advanced-imessage-kit) to install and configure the server on your Mac.
-
-### Step 2: Configure Nomos
-
-**Via Settings UI:** Go to `/integrations/imessage`, enable iMessage, select "Photon Server" mode, enter your server URL and API key.
-
-**Via environment:**
+Required env vars in agent mode:
 
 ```bash
-IMESSAGE_ENABLED=true
-IMESSAGE_MODE=photon
-PHOTON_SERVER_URL=http://your-mac-ip:1234
-PHOTON_API_KEY=your-api-key          # optional, if server requires auth
+IMESSAGE_AGENT_MODE=agent
+IMESSAGE_OWNER_PHONE=+15551234567     # at least one of these
+IMESSAGE_OWNER_APPLE_ID=you@icloud.com
 ```
 
-### Step 3: Start the Daemon
+## How It Works
+
+### Incoming messages
+
+The adapter spawns `imsg watch --json --reactions --attachments` as a long-running
+subprocess. This streams newline-delimited JSON for each new message, using
+filesystem events on `chat.db` (with a poll fallback). Detection latency is
+typically sub-second.
+
+Each message includes:
+
+- `chat_identifier` / `chat_guid` / `chat_name` -- routing info
+- `sender` / `sender_name` -- raw handle + resolved name (if Contacts permission granted)
+- `text` -- message body
+- `is_group` / `participants` -- group context
+- `attachments[]` -- filename, MIME type, byte count, resolved path
+- `guid` -- message GUID (needed for reactions, edit, unsend)
+- `created_at` -- ISO timestamp
+
+### Outgoing messages
+
+The adapter shells out to `imsg send`:
 
 ```bash
-nomos daemon run
+imsg send --to "+14155551212" --text "on my way"
+imsg send --to "Jane Appleseed" --file ~/Desktop/voice.m4a
 ```
 
-You should see:
+`imsg` resolves contact names via Address Book, picks the right service
+(iMessage vs SMS) based on the recipient, and sends through Messages.app.
+Long messages are automatically chunked (Slack-style 4000-char chunks).
 
-```
-[imessage-photon] Connected to Photon server at http://your-mac-ip:1234
-[imessage-adapter] Started in Photon mode (passive) -- server: http://your-mac-ip:1234
-```
+### Historical ingestion
 
-### Photon Capabilities
+For bulk historical ingestion (training the agent's style on past conversations),
+the ingest pipeline reads `chat.db` directly via SQLite. See [Ingestion](../ingestion.md).
 
-Beyond basic messaging, Photon enables:
+## MCP Tools
 
-- **Reactions/tapbacks** -- love, like, dislike, laugh, emphasize, question
-- **Message effects** -- slam, loud, gentle, invisible ink, etc.
-- **Scheduled messages** -- send messages at a specified time
-- **Rich link previews** -- send URLs with proper previews
-- **Contact cards** -- share contact information
-- **Typing indicators** -- show typing status
-- **Read receipts** -- mark messages as read
-- **Message editing** -- edit or unsend sent messages
-- **Attachments** -- send and receive files
-- **Polls** -- create and vote in iMessage polls
+The agent has these in-process tools available:
 
-### Photon Environment Variables
+- `imessage_send` -- send a text message to a recipient
+- `imessage_read` -- read recent messages from a contact (uses `imsg history`)
 
-| Variable            | Required | Default | Description                |
-| ------------------- | -------- | ------- | -------------------------- |
-| `PHOTON_SERVER_URL` | Yes      | --      | Photon server URL          |
-| `PHOTON_API_KEY`    | No       | --      | API key for authentication |
-
----
-
-## Common Settings (All Modes)
-
-### Restrict to Specific Contacts or Groups
+For tapbacks and other actions, the agent uses `Bash` with the `imsg` CLI directly:
 
 ```bash
-IMESSAGE_ALLOWED_CHATS=+15551234567,user@example.com,chat123456789
+# Examples the agent can run:
+imsg react --chat-id 42 --reaction like
+imsg history --chat-id 42 --limit 50 --json
+imsg search --query "pizza" --json
 ```
 
-Comma-separated list. Accepts:
+## Environment Variables
 
-- **Phone numbers**: `+15551234567` (international format with `+`)
-- **Email addresses**: `user@example.com`
-- **Chat identifiers**: `chat123456789` (for group chats)
-
-If not set, the bot responds to all incoming messages.
-
-### Session Keys
-
-Each conversation gets a stable session key:
-
-- 1:1 chats: `imessage:+15551234567` or `imessage:user@example.com`
-- Group chats: `imessage:chat123456789`
-
-### Message Limits
-
-Long responses are automatically split into chunks at 4,000 characters, breaking at natural points (newlines, then spaces).
-
----
-
-## All Environment Variables
-
-| Variable                       | Required         | Default            | Description                                       |
-| ------------------------------ | ---------------- | ------------------ | ------------------------------------------------- |
-| `IMESSAGE_ENABLED`             | Yes              | --                 | Set to `"true"` to enable                         |
-| `IMESSAGE_MODE`                | No               | `chatdb`           | Connection: `chatdb`, `bluebubbles`, or `photon`  |
-| `IMESSAGE_AGENT_MODE`          | No               | `passive`          | Agent mode: `passive` (draft) or `agent` (direct) |
-| `IMESSAGE_OWNER_PHONE`         | Agent mode       | --                 | Owner phone number (e.g., `+15551234567`)         |
-| `IMESSAGE_OWNER_APPLE_ID`      | Agent mode       | --                 | Owner Apple ID email (e.g., `you@icloud.com`)     |
-| `IMESSAGE_ALLOWED_CHATS`       | No               | (all chats)        | Comma-separated identifiers (passive mode filter) |
-| `BLUEBUBBLES_SERVER_URL`       | BlueBubbles only | --                 | Server URL                                        |
-| `BLUEBUBBLES_PASSWORD`         | BlueBubbles only | --                 | API password                                      |
-| `BLUEBUBBLES_WEBHOOK_PORT`     | No               | `8803`             | Webhook listener port                             |
-| `BLUEBUBBLES_WEBHOOK_PASSWORD` | No               | (same as password) | Webhook auth password                             |
-| `BLUEBUBBLES_READ_RECEIPTS`    | No               | `false`            | Send read receipts                                |
-| `PHOTON_SERVER_URL`            | Photon only      | --                 | Photon server URL                                 |
-| `PHOTON_API_KEY`               | No               | --                 | Photon API key (if server requires auth)          |
-
----
+| Variable                  | Required        | Default   | Description                       |
+| ------------------------- | --------------- | --------- | --------------------------------- |
+| `IMESSAGE_ENABLED`        | Yes             | `false`   | Set to `true` to enable           |
+| `IMESSAGE_FEATURE_MODE`   | No              | `basic`   | `basic` or `advanced`             |
+| `IMESSAGE_AGENT_MODE`     | No              | `passive` | `passive` or `agent`              |
+| `IMESSAGE_OWNER_PHONE`    | Agent mode only | --        | Owner phone number (E.164 format) |
+| `IMESSAGE_OWNER_APPLE_ID` | Agent mode only | --        | Owner Apple ID email              |
 
 ## Troubleshooting
 
-### "iMessage chat.db mode requires macOS"
-
-Switch to BlueBubbles mode (`IMESSAGE_MODE=bluebubbles`) to run the daemon on non-Mac platforms.
-
-### chat.db permission denied
-
-Your terminal does not have Full Disk Access:
-
-1. Go to **System Settings** > **Privacy & Security** > **Full Disk Access**
-2. Add your terminal app
-3. Restart the terminal and the daemon
-
-### Messages not being received (chat.db)
-
-- Verify Messages.app is open and signed into iMessage
-- Check that the sender is not blocked
-- If `IMESSAGE_ALLOWED_CHATS` is set, confirm the sender's identifier is listed
-- Check daemon logs for `[imessage-receiver] Poll error:` messages
-
-### Messages not being received (BlueBubbles)
-
-- Verify the BlueBubbles server is running and reachable
-- Check that webhooks are configured correctly in BlueBubbles settings
-- Verify the webhook URL includes the correct password
-- Check daemon logs for `[bluebubbles] Webhook parse error:` messages
-
-### Messages not being sent (chat.db)
-
-- Verify Automation permission: **System Settings** > **Privacy & Security** > **Automation**
-- Check that Messages.app is running and signed in
-- Look for `[imessage-adapter] Send failed:` in daemon logs
-
-### Messages not being sent (BlueBubbles)
-
-- Test the connection via Settings UI or: `curl "http://your-server:1234/api/v1/ping?password=your-password"`
-- Check that the BlueBubbles server has iMessage active
-- Look for `[imessage-adapter] BlueBubbles send failed:` in daemon logs
-
-### "No cached metadata" warning
-
-Occurs if the daemon tries to reply to a conversation it hasn't seen an incoming message for. Send a message to the bot first to populate the cache.
-
-### BlueBubbles server goes offline
-
-The keep-alive script (`install-keepalive.sh`) ensures Messages.app stays running. If the BlueBubbles server itself crashes, restart it manually or configure it as a login item.
-
-### Finding chat identifiers for groups
-
-Start the daemon with `IMESSAGE_ALLOWED_CHATS` unset, send a test message in the group, then check daemon logs for the `channelId`.
-
-Or query directly (chat.db mode):
+### "imsg CLI is not installed"
 
 ```bash
-sqlite3 ~/Library/Messages/chat.db "SELECT chat_identifier, display_name FROM chat WHERE style = 45;"
+brew install steipete/tap/imsg
+imsg --version
 ```
+
+### `chat.db` permission denied
+
+Grant Full Disk Access to your terminal / IDE:
+
+- System Settings → Privacy & Security → Full Disk Access → add Terminal (or iTerm, VS Code, etc.)
+- Restart the terminal after granting
+
+### Messages not being received
+
+- Check the daemon logs for `[imsg-adapter]` lines
+- Verify `imsg watch` runs interactively: `imsg watch --json`
+- Confirm Full Disk Access is granted to the process running the daemon
+
+### Messages not being sent
+
+- Check Automation permission: System Settings → Privacy & Security → Automation → Terminal → Messages.app should be enabled
+- Make sure Messages.app is running and signed in to iMessage
+- Try sending manually: `imsg send --to "+15551234567" --text "test"`
+
+### Advanced features not working
+
+- Confirm SIP is disabled: `csrutil status` should report "System Integrity Protection status: disabled"
+- Run `imsg launch` after every reboot (or add it to a startup item)
+- Run `imsg status --json` to verify the bridge is loaded
+
+### Looking up a group chat ID
+
+```bash
+imsg chats --json | jq 'select(.is_group)'
+```
+
+## Why `imsg`?
+
+Earlier versions of this integration supported three modes (chat.db direct,
+BlueBubbles REST server, Photon Socket.IO server). Those were consolidated to
+`imsg` because:
+
+- **One trusted maintainer** -- steipete (well-known Apple developer) actively
+  maintains it
+- **Local-first** -- no separate server process to install/configure/keep running
+- **Stable JSON schema** -- explicitly designed for agents and scripts
+- **Same chat.db source of truth** as the old `chatdb` mode, but with
+  filesystem-event streaming instead of polling
+- **Advanced features available** if you opt in to SIP-disabled mode (was
+  BlueBubbles/Photon's main draw)
+- **Smaller codebase** -- replaces ~1,300 LOC of adapter code with ~250
+
+See the [imsg README](https://github.com/openclaw/imsg) for full docs.

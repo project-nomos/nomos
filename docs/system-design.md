@@ -178,11 +178,9 @@ src/
 │       ├── discord.ts         Discord (discord.js)
 │       ├── telegram.ts        Telegram (grammY, long polling)
 │       ├── whatsapp.ts        WhatsApp (Baileys, QR code auth)
-│       ├── imessage.ts        iMessage (dual mode: chat.db or BlueBubbles)
-│       ├── imessage-bluebubbles.ts  BlueBubbles REST + webhook adapter
-│       ├── imessage-receiver.ts     chat.db SQLite polling + WAL watcher
-│       ├── imessage-sender.ts       AppleScript send for chat.db mode
-│       ├── imessage-db.ts           chat.db SQLite query helpers
+│       ├── imessage.ts        iMessage adapter (delegates to imsg-imsg)
+│       ├── imessage-imsg.ts   `imsg` CLI wrapper (basic + advanced modes)
+│       ├── imessage-db.ts     chat.db SQLite helpers (for bulk historical ingestion)
 │       ├── email.ts           Email (IMAP IDLE + SMTP, draft-and-approve)
 │       ├── email-imap.ts      IMAP connection management and IDLE loop
 │       └── email-smtp.ts      SMTP send via nodemailer
@@ -465,7 +463,7 @@ Daemon Process (Gateway)
 |     +-- DiscordAdapter       (discord.js)
 |     +-- TelegramAdapter      (grammY, long polling)
 |     +-- WhatsAppAdapter      (Baileys, QR code auth)
-|     +-- IMessageAdapter      (dual: chat.db + AppleScript / BlueBubbles REST)
+|     +-- IMessageAdapter      (wraps `imsg` CLI: basic or advanced mode)
 |     +-- EmailAdapter         (IMAP IDLE + SMTP, draft-and-approve)
 |
 +-- ObservationPipeline
@@ -520,15 +518,15 @@ interface ChannelAdapter {
 
 Adapters are intentionally thin (50-100 lines each). They handle only platform authentication, inbound event parsing, and outbound message formatting. All agent logic lives in the shared `AgentRuntime`.
 
-| Adapter      | Platform Name          | Required Config                                                                   |
-| ------------ | ---------------------- | --------------------------------------------------------------------------------- |
-| Slack (bot)  | `slack`                | `SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN`                                              |
-| Slack (user) | `slack-user:<team_id>` | DB token + `SLACK_APP_TOKEN`, or `SLACK_USER_TOKEN`                               |
-| Discord      | `discord`              | `DISCORD_BOT_TOKEN`                                                               |
-| Telegram     | `telegram`             | `TELEGRAM_BOT_TOKEN`                                                              |
-| WhatsApp     | `whatsapp`             | `WHATSAPP_ENABLED=true`                                                           |
-| iMessage     | `imessage`             | `IMESSAGE_ENABLED=true` + `IMESSAGE_MODE` + `IMESSAGE_AGENT_MODE` (passive/agent) |
-| Email        | `email`                | IMAP/SMTP config in `integrations` table                                          |
+| Adapter      | Platform Name          | Required Config                                                                                                                                         |
+| ------------ | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Slack (bot)  | `slack`                | `SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN`                                                                                                                    |
+| Slack (user) | `slack-user:<team_id>` | DB token + `SLACK_APP_TOKEN`, or `SLACK_USER_TOKEN`                                                                                                     |
+| Discord      | `discord`              | `DISCORD_BOT_TOKEN`                                                                                                                                     |
+| Telegram     | `telegram`             | `TELEGRAM_BOT_TOKEN`                                                                                                                                    |
+| WhatsApp     | `whatsapp`             | `WHATSAPP_ENABLED=true`                                                                                                                                 |
+| iMessage     | `imessage`             | `IMESSAGE_ENABLED=true` + `IMESSAGE_FEATURE_MODE` (basic/advanced) + `IMESSAGE_AGENT_MODE` (passive/agent) -- requires `brew install steipete/tap/imsg` |
+| Email        | `email`                | IMAP/SMTP config in `integrations` table                                                                                                                |
 
 ### Slack User Mode (Multi-Workspace)
 
@@ -586,19 +584,23 @@ Fires via `runForkedAgent` (Haiku) with the last 10 user messages. Catches what 
 
 The state is injected into the system prompt as a "Current User State" section (with optional "Deep Assessment" subsection when LLM results are available). Per-session trackers are maintained in `AgentRuntime.tomTrackers` (Map keyed by session key). State is transient -- never persisted to DB.
 
-### iMessage Dual-Mode
+### iMessage via `imsg` CLI
 
-The iMessage adapter supports two connection modes, selected via `IMESSAGE_MODE`:
+The iMessage adapter wraps the [`imsg`](https://github.com/openclaw/imsg) CLI -- a local-first macOS-only tool maintained by steipete. The adapter spawns `imsg watch --json --reactions --attachments` as a long-running subprocess that streams newline-delimited JSON for each new message (using filesystem events on `chat.db` with a poll fallback, ~sub-second detection latency). Outgoing messages shell out to `imsg send`.
 
-- **`chatdb`** (default): macOS-only. Reads incoming messages by polling `~/Library/Messages/chat.db` (SQLite + WAL file watcher for ~200ms detection). Sends via AppleScript. Zero external dependencies.
-- **`bluebubbles`**: Connects to a BlueBubbles macOS server via REST API + webhooks. The daemon can run on any platform while a Mac relays iMessages. Supports reactions, typing indicators, read receipts, attachments (up to 8MB), group management, and message effects.
+Two feature modes (selected via `IMESSAGE_FEATURE_MODE`):
 
-In addition, the adapter supports two agent modes via `IMESSAGE_AGENT_MODE`:
+- **`basic`** (default): read/watch/send/standard tapbacks/attachments. Just needs the `imsg` CLI installed and Full Disk Access + Automation permissions. No system modifications.
+- **`advanced`**: adds edit, unsend, typing indicators, custom emoji reactions, message effects, and group management. Requires SIP (System Integrity Protection) disabled and `imsg launch` to load the IMCore bridge dylib into Messages.app.
 
-- **`passive`** (default): Listens to all incoming messages (optionally filtered by `IMESSAGE_ALLOWED_CHATS`), processes them through the agent, and routes responses through the DraftManager for Slack-based approval before sending. The `sendDirect()` method bypasses draft routing for approved drafts.
-- **`agent`**: Only processes messages from the owner's phone number (`IMESSAGE_OWNER_PHONE`) or Apple ID (`IMESSAGE_OWNER_APPLE_ID`). Responds directly via iMessage. Acts as a personal agent client accessible from the user's iPhone.
+Two agent modes (via `IMESSAGE_AGENT_MODE`):
 
-A keep-alive LaunchAgent (`scripts/bluebubbles/install-keepalive.sh`) ensures Messages.app stays running for BlueBubbles. The Settings UI at `/integrations/imessage` provides mode selection, agent mode configuration, owner identity settings, BlueBubbles server configuration, and connection testing.
+- **`passive`** (default): Listens to all incoming messages, drafts responses through the agent, routes them through the DraftManager for Slack-based approval before sending. The `sendDirect()` method bypasses draft routing for approved drafts.
+- **`agent`**: Only processes messages from the owner's phone number (`IMESSAGE_OWNER_PHONE`) or Apple ID (`IMESSAGE_OWNER_APPLE_ID`). Responds directly. Acts as a personal agent client accessible from the user's iPhone.
+
+The adapter is split across two files: `imessage.ts` (high-level adapter implementing `ChannelAdapter`, handles agent/passive routing + DraftManager integration) and `imessage-imsg.ts` (low-level `imsg` CLI wrapper with subprocess management + JSON parsing). A separate `imessage-db.ts` SQLite helper is used only for bulk historical ingestion via the `IngestPipeline` (faster than spawning `imsg history` per chat).
+
+Install: `brew install steipete/tap/imsg`. The Settings UI at `/integrations/imessage` provides feature/agent mode selection, owner identity configuration, and CLI installation status.
 
 ### Historical Data Ingestion
 
@@ -760,38 +762,36 @@ The `tool-approval.ts` module detects dangerous operations (destructive shell co
 
 ### Environment Variables
 
-| Variable                  | Required    | Purpose                                         |
-| ------------------------- | ----------- | ----------------------------------------------- |
-| `DATABASE_URL`            | Yes         | PostgreSQL connection string                    |
-| `ANTHROPIC_API_KEY`       | One of      | Anthropic direct API key                        |
-| `CLAUDE_CODE_USE_VERTEX`  | One of      | Enable Vertex AI provider                       |
-| `GOOGLE_CLOUD_PROJECT`    | With Vertex | GCP project ID                                  |
-| `CLOUD_ML_REGION`         | With Vertex | GCP region (e.g., `us-east5`)                   |
-| `NOMOS_MODEL`             | No          | Model override (default: `claude-sonnet-4-6`)   |
-| `NOMOS_SMART_ROUTING`     | No          | Enable complexity-based model routing           |
-| `NOMOS_MODEL_SIMPLE`      | No          | Model for simple queries (default: Haiku)       |
-| `NOMOS_MODEL_MODERATE`    | No          | Model for moderate queries (default: Sonnet)    |
-| `NOMOS_MODEL_COMPLEX`     | No          | Model for complex queries (default: Sonnet)     |
-| `NOMOS_TEAM_MODE`         | No          | Enable multi-agent team orchestration           |
-| `NOMOS_MAX_TEAM_WORKERS`  | No          | Max parallel workers in team mode (default: 3)  |
-| `ANTHROPIC_BASE_URL`      | No          | Custom Anthropic-compatible API endpoint        |
-| `NOMOS_ADAPTIVE_MEMORY`   | No          | Enable knowledge extraction + user model        |
-| `NOMOS_EXTRACTION_MODEL`  | No          | Model for extraction (default: Haiku)           |
-| `SLACK_BOT_TOKEN`         | No          | Slack bot mode                                  |
-| `SLACK_APP_TOKEN`         | No          | Slack Socket Mode (bot + user mode)             |
-| `SLACK_CLIENT_ID`         | No          | Slack OAuth (multi-workspace user mode)         |
-| `SLACK_CLIENT_SECRET`     | No          | Slack OAuth (multi-workspace user mode)         |
-| `SLACK_USER_TOKEN`        | No          | Legacy single-workspace user mode               |
-| `DISCORD_BOT_TOKEN`       | No          | Discord integration                             |
-| `TELEGRAM_BOT_TOKEN`      | No          | Telegram integration                            |
-| `WHATSAPP_ENABLED`        | No          | WhatsApp integration                            |
-| `IMESSAGE_ENABLED`        | No          | iMessage integration                            |
-| `IMESSAGE_MODE`           | No          | `chatdb` (default) or `bluebubbles`             |
-| `IMESSAGE_AGENT_MODE`     | No          | `passive` (draft & approve) or `agent` (direct) |
-| `IMESSAGE_OWNER_PHONE`    | No          | Owner phone for agent mode (e.g., +15551234567) |
-| `IMESSAGE_OWNER_APPLE_ID` | No          | Owner Apple ID for agent mode                   |
-| `BLUEBUBBLES_SERVER_URL`  | No          | BlueBubbles server URL (BlueBubbles mode)       |
-| `BLUEBUBBLES_PASSWORD`    | No          | BlueBubbles API password (BlueBubbles mode)     |
+| Variable                  | Required    | Purpose                                                          |
+| ------------------------- | ----------- | ---------------------------------------------------------------- |
+| `DATABASE_URL`            | Yes         | PostgreSQL connection string                                     |
+| `ANTHROPIC_API_KEY`       | One of      | Anthropic direct API key                                         |
+| `CLAUDE_CODE_USE_VERTEX`  | One of      | Enable Vertex AI provider                                        |
+| `GOOGLE_CLOUD_PROJECT`    | With Vertex | GCP project ID                                                   |
+| `CLOUD_ML_REGION`         | With Vertex | GCP region (e.g., `us-east5`)                                    |
+| `NOMOS_MODEL`             | No          | Model override (default: `claude-sonnet-4-6`)                    |
+| `NOMOS_SMART_ROUTING`     | No          | Enable complexity-based model routing                            |
+| `NOMOS_MODEL_SIMPLE`      | No          | Model for simple queries (default: Haiku)                        |
+| `NOMOS_MODEL_MODERATE`    | No          | Model for moderate queries (default: Sonnet)                     |
+| `NOMOS_MODEL_COMPLEX`     | No          | Model for complex queries (default: Sonnet)                      |
+| `NOMOS_TEAM_MODE`         | No          | Enable multi-agent team orchestration                            |
+| `NOMOS_MAX_TEAM_WORKERS`  | No          | Max parallel workers in team mode (default: 3)                   |
+| `ANTHROPIC_BASE_URL`      | No          | Custom Anthropic-compatible API endpoint                         |
+| `NOMOS_ADAPTIVE_MEMORY`   | No          | Enable knowledge extraction + user model                         |
+| `NOMOS_EXTRACTION_MODEL`  | No          | Model for extraction (default: Haiku)                            |
+| `SLACK_BOT_TOKEN`         | No          | Slack bot mode                                                   |
+| `SLACK_APP_TOKEN`         | No          | Slack Socket Mode (bot + user mode)                              |
+| `SLACK_CLIENT_ID`         | No          | Slack OAuth (multi-workspace user mode)                          |
+| `SLACK_CLIENT_SECRET`     | No          | Slack OAuth (multi-workspace user mode)                          |
+| `SLACK_USER_TOKEN`        | No          | Legacy single-workspace user mode                                |
+| `DISCORD_BOT_TOKEN`       | No          | Discord integration                                              |
+| `TELEGRAM_BOT_TOKEN`      | No          | Telegram integration                                             |
+| `WHATSAPP_ENABLED`        | No          | WhatsApp integration                                             |
+| `IMESSAGE_ENABLED`        | No          | iMessage integration (requires `brew install steipete/tap/imsg`) |
+| `IMESSAGE_FEATURE_MODE`   | No          | `basic` (default) or `advanced` (SIP disabled)                   |
+| `IMESSAGE_AGENT_MODE`     | No          | `passive` (draft & approve) or `agent` (direct)                  |
+| `IMESSAGE_OWNER_PHONE`    | No          | Owner phone for agent mode (e.g., +15551234567)                  |
+| `IMESSAGE_OWNER_APPLE_ID` | No          | Owner Apple ID for agent mode                                    |
 
 See `.env.example` for the full set of optional variables.
 
