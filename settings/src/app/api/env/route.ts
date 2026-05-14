@@ -44,20 +44,16 @@ const ALLOWED_KEYS = [
   "OPENROUTER_API_KEY",
   "NOMOS_BROWSER_AUTH",
   "IMESSAGE_ENABLED",
-  "IMESSAGE_MODE",
-  "IMESSAGE_ALLOWED_CHATS",
-  "BLUEBUBBLES_SERVER_URL",
-  "BLUEBUBBLES_PASSWORD",
-  "BLUEBUBBLES_WEBHOOK_PORT",
-  "BLUEBUBBLES_READ_RECEIPTS",
+  "IMESSAGE_FEATURE_MODE",
+  "IMESSAGE_AGENT_MODE",
+  "IMESSAGE_OWNER_PHONE",
+  "IMESSAGE_OWNER_APPLE_ID",
   "GOOGLE_API_KEY",
   "EMBEDDING_MODEL",
   "NOMOS_IMAGE_GENERATION",
   "NOMOS_IMAGE_GENERATION_MODEL",
   "NOMOS_VIDEO_GENERATION",
   "NOMOS_VIDEO_GENERATION_MODEL",
-  "PHOTON_SERVER_URL",
-  "PHOTON_API_KEY",
 ];
 
 /** Keys that contain secrets and should be masked in GET responses. */
@@ -72,9 +68,7 @@ const SECRET_KEYS = new Set([
   "DISCORD_BOT_TOKEN",
   "TELEGRAM_BOT_TOKEN",
   "OPENROUTER_API_KEY",
-  "BLUEBUBBLES_PASSWORD",
   "GOOGLE_API_KEY",
-  "PHOTON_API_KEY",
 ]);
 
 /** Keys that are writable via PUT. */
@@ -115,20 +109,16 @@ const WRITABLE_KEYS = new Set([
   "NOMOS_API_PROVIDER",
   "OPENROUTER_API_KEY",
   "IMESSAGE_ENABLED",
-  "IMESSAGE_MODE",
-  "IMESSAGE_ALLOWED_CHATS",
-  "BLUEBUBBLES_SERVER_URL",
-  "BLUEBUBBLES_PASSWORD",
-  "BLUEBUBBLES_WEBHOOK_PORT",
-  "BLUEBUBBLES_READ_RECEIPTS",
+  "IMESSAGE_FEATURE_MODE",
+  "IMESSAGE_AGENT_MODE",
+  "IMESSAGE_OWNER_PHONE",
+  "IMESSAGE_OWNER_APPLE_ID",
   "GOOGLE_API_KEY",
   "EMBEDDING_MODEL",
   "NOMOS_IMAGE_GENERATION",
   "NOMOS_IMAGE_GENERATION_MODEL",
   "NOMOS_VIDEO_GENERATION",
   "NOMOS_VIDEO_GENERATION_MODEL",
-  "PHOTON_SERVER_URL",
-  "PHOTON_API_KEY",
 ]);
 
 /**
@@ -224,17 +214,10 @@ const ENV_TO_DB: Record<string, DbMapping> = {
   GOOGLE_API_KEY: { table: "integrations", dbKey: "google-ai", field: "api_key", isSecret: true },
   EMBEDDING_MODEL: { table: "config", dbKey: "app.embeddingModel" },
   IMESSAGE_ENABLED: { table: "integrations", dbKey: "imessage", field: "enabled" },
-  IMESSAGE_MODE: { table: "integrations", dbKey: "imessage", field: "mode" },
-  IMESSAGE_ALLOWED_CHATS: { table: "integrations", dbKey: "imessage", field: "allowed_chats" },
-  BLUEBUBBLES_SERVER_URL: { table: "integrations", dbKey: "imessage", field: "server_url" },
-  BLUEBUBBLES_PASSWORD: {
-    table: "integrations",
-    dbKey: "imessage",
-    field: "password",
-    isSecret: true,
-  },
-  BLUEBUBBLES_WEBHOOK_PORT: { table: "integrations", dbKey: "imessage", field: "webhook_port" },
-  BLUEBUBBLES_READ_RECEIPTS: { table: "integrations", dbKey: "imessage", field: "read_receipts" },
+  IMESSAGE_FEATURE_MODE: { table: "integrations", dbKey: "imessage", field: "feature_mode" },
+  IMESSAGE_AGENT_MODE: { table: "integrations", dbKey: "imessage", field: "agent_mode" },
+  IMESSAGE_OWNER_PHONE: { table: "integrations", dbKey: "imessage", field: "owner_phone" },
+  IMESSAGE_OWNER_APPLE_ID: { table: "integrations", dbKey: "imessage", field: "owner_apple_id" },
 };
 
 /** Simple decrypt: if the value looks encrypted (three dot-separated hex segments), try to decrypt. */

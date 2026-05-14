@@ -1,67 +1,47 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { RefreshCw, ExternalLink, CheckCircle, XCircle, Shield, Eye } from "lucide-react";
+import {
+  RefreshCw,
+  ExternalLink,
+  CheckCircle,
+  XCircle,
+  Shield,
+  Eye,
+  AlertTriangle,
+} from "lucide-react";
 import { StatusBadge } from "@/components/status-badge";
-import { SyncProgress } from "@/components/sync-progress";
 import { DirtyIndicator } from "@/components/dirty-indicator";
 import { useToast } from "@/contexts/toast-context";
 import { useUnsavedChanges } from "@/hooks/use-unsaved-changes";
 
-type IMessageMode = "chatdb" | "bluebubbles" | "photon";
+type FeatureMode = "basic" | "advanced";
 type AgentMode = "passive" | "agent";
 
 export default function IMessageSettingsPage() {
   const { addToast } = useToast();
   const [enabled, setEnabled] = useState(false);
   const [initialEnabled, setInitialEnabled] = useState(false);
-  const [mode, setMode] = useState<IMessageMode>("chatdb");
-  const [initialMode, setInitialMode] = useState<IMessageMode>("chatdb");
+  const [featureMode, setFeatureMode] = useState<FeatureMode>("basic");
+  const [initialFeatureMode, setInitialFeatureMode] = useState<FeatureMode>("basic");
   const [agentMode, setAgentMode] = useState<AgentMode>("passive");
   const [initialAgentMode, setInitialAgentMode] = useState<AgentMode>("passive");
-  const [allowedChats, setAllowedChats] = useState("");
-  const [initialAllowedChats, setInitialAllowedChats] = useState("");
-
-  // Owner identity for agent mode
   const [ownerPhone, setOwnerPhone] = useState("");
   const [initialOwnerPhone, setInitialOwnerPhone] = useState("");
   const [ownerAppleId, setOwnerAppleId] = useState("");
   const [initialOwnerAppleId, setInitialOwnerAppleId] = useState("");
 
-  // BlueBubbles-specific
-  const [bbServerUrl, setBbServerUrl] = useState("");
-  const [initialBbServerUrl, setInitialBbServerUrl] = useState("");
-  const [bbPassword, setBbPassword] = useState("");
-  const [initialBbPassword, setInitialBbPassword] = useState("");
-  const [bbWebhookPort, setBbWebhookPort] = useState("8803");
-  const [initialBbWebhookPort, setInitialBbWebhookPort] = useState("8803");
-  const [bbReadReceipts, setBbReadReceipts] = useState(false);
-  const [initialBbReadReceipts, setInitialBbReadReceipts] = useState(false);
-
-  // Photon-specific
-  const [photonServerUrl, setPhotonServerUrl] = useState("");
-  const [initialPhotonServerUrl, setInitialPhotonServerUrl] = useState("");
-  const [photonApiKey, setPhotonApiKey] = useState("");
-  const [initialPhotonApiKey, setInitialPhotonApiKey] = useState("");
-
+  const [imsgInstalled, setImsgInstalled] = useState<boolean | null>(null);
+  const [imsgVersion, setImsgVersion] = useState<string>("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [pingResult, setPingResult] = useState<boolean | null>(null);
-  const [pinging, setPinging] = useState(false);
 
   const isDirty =
     enabled !== initialEnabled ||
-    mode !== initialMode ||
+    featureMode !== initialFeatureMode ||
     agentMode !== initialAgentMode ||
-    allowedChats !== initialAllowedChats ||
     ownerPhone !== initialOwnerPhone ||
-    ownerAppleId !== initialOwnerAppleId ||
-    bbServerUrl !== initialBbServerUrl ||
-    bbPassword !== initialBbPassword ||
-    bbWebhookPort !== initialBbWebhookPort ||
-    bbReadReceipts !== initialBbReadReceipts ||
-    photonServerUrl !== initialPhotonServerUrl ||
-    photonApiKey !== initialPhotonApiKey;
+    ownerAppleId !== initialOwnerAppleId;
   useUnsavedChanges(isDirty);
 
   const loadData = useCallback(async () => {
@@ -74,17 +54,13 @@ export default function IMessageSettingsPage() {
       setEnabled(isEnabled);
       setInitialEnabled(isEnabled);
 
-      const m = (envData.IMESSAGE_MODE as IMessageMode) || "chatdb";
-      setMode(m);
-      setInitialMode(m);
+      const fm = (envData.IMESSAGE_FEATURE_MODE as FeatureMode) || "basic";
+      setFeatureMode(fm);
+      setInitialFeatureMode(fm);
 
       const am = (envData.IMESSAGE_AGENT_MODE as AgentMode) || "passive";
       setAgentMode(am);
       setInitialAgentMode(am);
-
-      const chats = envData.IMESSAGE_ALLOWED_CHATS ?? "";
-      setAllowedChats(chats);
-      setInitialAllowedChats(chats);
 
       const phone = envData.IMESSAGE_OWNER_PHONE ?? "";
       setOwnerPhone(phone);
@@ -94,29 +70,9 @@ export default function IMessageSettingsPage() {
       setOwnerAppleId(appleId);
       setInitialOwnerAppleId(appleId);
 
-      const url = envData.BLUEBUBBLES_SERVER_URL ?? "";
-      setBbServerUrl(url);
-      setInitialBbServerUrl(url);
-
-      const pw = envData.BLUEBUBBLES_PASSWORD ?? "";
-      setBbPassword(pw);
-      setInitialBbPassword(pw);
-
-      const port = envData.BLUEBUBBLES_WEBHOOK_PORT ?? "8803";
-      setBbWebhookPort(port);
-      setInitialBbWebhookPort(port);
-
-      const rr = envData.BLUEBUBBLES_READ_RECEIPTS === "true";
-      setBbReadReceipts(rr);
-      setInitialBbReadReceipts(rr);
-
-      const pUrl = envData.PHOTON_SERVER_URL ?? "";
-      setPhotonServerUrl(pUrl);
-      setInitialPhotonServerUrl(pUrl);
-
-      const pKey = envData.PHOTON_API_KEY ?? "";
-      setPhotonApiKey(pKey);
-      setInitialPhotonApiKey(pKey);
+      // Check if imsg CLI is installed (server-side check via status)
+      setImsgInstalled(statusData.imessage?.imsgInstalled ?? null);
+      setImsgVersion(statusData.imessage?.imsgVersion ?? "");
     } catch (err) {
       console.error("Failed to load iMessage data:", err);
       addToast("Failed to load Messages.app data", "error");
@@ -129,34 +85,9 @@ export default function IMessageSettingsPage() {
     loadData();
   }, [loadData]);
 
-  const testConnection = async () => {
-    if (!bbServerUrl || !bbPassword) {
-      addToast("Server URL and password are required", "error");
-      return;
-    }
-    setPinging(true);
-    setPingResult(null);
-    try {
-      const res = await fetch(
-        `${bbServerUrl}/api/v1/ping?password=${encodeURIComponent(bbPassword)}`,
-      );
-      setPingResult(res.ok);
-      addToast(
-        res.ok ? "Connected to BlueBubbles" : "Connection failed",
-        res.ok ? "success" : "error",
-      );
-    } catch {
-      setPingResult(false);
-      addToast("Cannot reach BlueBubbles server", "error");
-    } finally {
-      setPinging(false);
-    }
-  };
-
   const save = async () => {
     if (!isDirty) return;
 
-    // Validate agent mode requires at least one owner identity
     if (enabled && agentMode === "agent" && !ownerPhone && !ownerAppleId) {
       addToast("Agent mode requires at least a phone number or Apple ID", "error");
       return;
@@ -167,41 +98,31 @@ export default function IMessageSettingsPage() {
       const updates: Record<string, string> = {};
 
       if (enabled !== initialEnabled) updates.IMESSAGE_ENABLED = enabled ? "true" : "";
-      if (mode !== initialMode) updates.IMESSAGE_MODE = mode;
+      if (featureMode !== initialFeatureMode) updates.IMESSAGE_FEATURE_MODE = featureMode;
       if (agentMode !== initialAgentMode) updates.IMESSAGE_AGENT_MODE = agentMode;
-      if (allowedChats !== initialAllowedChats) updates.IMESSAGE_ALLOWED_CHATS = allowedChats;
       if (ownerPhone !== initialOwnerPhone) updates.IMESSAGE_OWNER_PHONE = ownerPhone;
       if (ownerAppleId !== initialOwnerAppleId) updates.IMESSAGE_OWNER_APPLE_ID = ownerAppleId;
-      if (bbServerUrl !== initialBbServerUrl) updates.BLUEBUBBLES_SERVER_URL = bbServerUrl;
-      if (bbPassword !== initialBbPassword) updates.BLUEBUBBLES_PASSWORD = bbPassword;
-      if (bbWebhookPort !== initialBbWebhookPort) updates.BLUEBUBBLES_WEBHOOK_PORT = bbWebhookPort;
-      if (bbReadReceipts !== initialBbReadReceipts)
-        updates.BLUEBUBBLES_READ_RECEIPTS = bbReadReceipts ? "true" : "";
-      if (photonServerUrl !== initialPhotonServerUrl) updates.PHOTON_SERVER_URL = photonServerUrl;
-      if (photonApiKey !== initialPhotonApiKey) updates.PHOTON_API_KEY = photonApiKey;
+
+      if (Object.keys(updates).length === 0) {
+        setSaving(false);
+        return;
+      }
 
       const res = await fetch("/api/env", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(updates),
       });
+      if (!res.ok) throw new Error(await res.text());
 
-      if (!res.ok) {
-        const data = await res.json();
-        addToast(data.error ?? "Failed to save", "error");
-        return;
-      }
-
+      setInitialEnabled(enabled);
+      setInitialFeatureMode(featureMode);
+      setInitialAgentMode(agentMode);
+      setInitialOwnerPhone(ownerPhone);
+      setInitialOwnerAppleId(ownerAppleId);
       addToast("Messages.app settings saved", "success");
-      await loadData();
-      // Auto-trigger ingestion for iMessage
-      fetch("/api/ingestion", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ platform: "imessage", action: "trigger-ingest" }),
-      }).catch(() => {});
     } catch (err) {
-      console.error("Failed to save iMessage settings:", err);
+      console.error(err);
       addToast("Failed to save settings", "error");
     } finally {
       setSaving(false);
@@ -211,419 +132,289 @@ export default function IMessageSettingsPage() {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
-        <div className="w-6 h-6 border-2 border-mauve border-t-transparent rounded-full animate-spin" />
+        <RefreshCw className="animate-spin" size={24} />
       </div>
     );
   }
 
   return (
-    <div className="max-w-2xl">
-      <div className="flex items-center gap-3 mb-1">
-        <h1 className="text-2xl font-bold text-text">Messages.app</h1>
-        <DirtyIndicator isDirty={isDirty} />
-      </div>
-      <div className="flex items-center gap-3 mb-8">
-        <p className="text-sm text-overlay0">Configure Messages.app integration</p>
-        <a
-          href="https://github.com/project-nomos/nomos/blob/main/docs/integrations/imessage.md"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="inline-flex items-center gap-1 text-xs text-blue hover:text-blue/80"
-        >
-          Setup Guide <ExternalLink size={10} />
-        </a>
+    <div className="max-w-3xl">
+      <div className="flex items-start justify-between mb-1">
+        <div>
+          <h1 className="text-2xl font-bold text-text">Messages.app (iMessage)</h1>
+          <p className="text-sm text-overlay0 mt-1">
+            Read, watch, and send iMessages via the <code className="text-mauve">imsg</code> CLI.
+          </p>
+        </div>
+        <StatusBadge
+          status={enabled && imsgInstalled === true ? "connected" : "not_configured"}
+          label={enabled ? (imsgInstalled ? "Active" : "imsg not installed") : "Disabled"}
+        />
       </div>
 
-      {/* Connection Status */}
-      <section className="mb-8 rounded-xl border border-surface0 bg-mantle p-5">
-        <h2 className="text-sm font-semibold text-subtext1 uppercase tracking-wider mb-4">
-          Connection Status
+      {/* imsg CLI status */}
+      <section className="mt-6 mb-6 rounded-xl border border-surface0 bg-mantle p-5">
+        <h2 className="text-sm font-semibold text-subtext1 uppercase tracking-wider mb-3">
+          imsg CLI
         </h2>
+        {imsgInstalled === true ? (
+          <div className="flex items-center gap-2 text-sm">
+            <CheckCircle size={16} className="text-green" />
+            <span className="text-text">Installed</span>
+            {imsgVersion && <span className="text-overlay0 font-mono text-xs">{imsgVersion}</span>}
+          </div>
+        ) : (
+          <div className="space-y-3">
+            <div className="flex items-center gap-2 text-sm">
+              <XCircle size={16} className="text-red" />
+              <span className="text-text">Not installed</span>
+            </div>
+            <div className="rounded-lg bg-base/50 border border-surface0 p-3">
+              <p className="text-xs text-subtext0 mb-2">Install with Homebrew:</p>
+              <code className="block text-xs font-mono text-mauve">
+                brew install steipete/tap/imsg
+              </code>
+            </div>
+            <a
+              href="https://github.com/openclaw/imsg"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 text-xs text-blue hover:text-blue/80"
+            >
+              imsg docs <ExternalLink size={10} />
+            </a>
+          </div>
+        )}
+      </section>
+
+      {/* Enable toggle */}
+      <section className="mb-6 rounded-xl border border-surface0 bg-mantle p-5">
         <div className="flex items-center justify-between">
-          <span className="text-sm text-text">Messages.app</span>
-          <StatusBadge
-            status={enabled ? "connected" : "not_configured"}
-            label={
-              enabled
-                ? `Enabled (${mode === "bluebubbles" ? "BlueBubbles" : "chat.db"} / ${agentMode})`
-                : "Disabled"
-            }
-          />
+          <div>
+            <h2 className="text-sm font-semibold text-text">Enable Messages.app integration</h2>
+            <p className="text-xs text-overlay0 mt-0.5">
+              Watch chat.db for new messages and send via Messages.app.
+            </p>
+          </div>
+          <label className="relative inline-flex cursor-pointer items-center">
+            <input
+              type="checkbox"
+              checked={enabled}
+              onChange={(e) => setEnabled(e.target.checked)}
+              className="peer sr-only"
+            />
+            <div className="peer h-5 w-9 rounded-full bg-surface1 after:absolute after:left-[2px] after:top-[2px] after:h-4 after:w-4 after:rounded-full after:bg-overlay0 after:transition-all after:content-[''] peer-checked:bg-mauve peer-checked:after:translate-x-full peer-checked:after:bg-crust" />
+          </label>
         </div>
       </section>
 
-      {/* Enable/Disable */}
-      <section className="mb-8 rounded-xl border border-surface0 bg-mantle p-5">
-        <h2 className="text-sm font-semibold text-subtext1 uppercase tracking-wider mb-4">
-          Integration
-        </h2>
-        <label className="flex items-center gap-3 cursor-pointer">
-          <input
-            type="checkbox"
-            checked={enabled}
-            onChange={(e) => setEnabled(e.target.checked)}
-            className="accent-mauve w-4 h-4 rounded"
-          />
-          <div>
-            <span className="text-sm font-medium text-text">Enable Messages.app</span>
-            <p className="text-xs text-overlay0">
-              Connect to Messages.app via local database or BlueBubbles server.
-            </p>
-          </div>
-        </label>
-      </section>
-
-      {/* Agent Mode Selector */}
       {enabled && (
-        <section className="mb-8 rounded-xl border border-surface0 bg-mantle p-5">
-          <h2 className="text-sm font-semibold text-subtext1 uppercase tracking-wider mb-4">
-            Agent Mode
-          </h2>
-          <div className="space-y-3">
-            <label
-              className={`flex items-start gap-3 cursor-pointer p-3 rounded-lg border transition-colors ${
-                agentMode === "passive"
-                  ? "border-mauve/50 bg-mauve/5"
-                  : "border-surface1 hover:border-mauve/50"
-              }`}
-            >
-              <input
-                type="radio"
-                name="agent-mode"
-                value="passive"
-                checked={agentMode === "passive"}
-                onChange={() => setAgentMode("passive")}
-                className="accent-mauve mt-0.5"
-              />
-              <div className="flex-1">
-                <div className="flex items-center gap-2">
-                  <Eye size={14} className="text-blue" />
-                  <span className="text-sm font-medium text-text">Passive</span>
-                </div>
-                <p className="text-xs text-overlay0 mt-1">
-                  Listens to all incoming messages, drafts responses, and suggests them in your
-                  default Slack channel for approval before sending. Safe for monitoring
-                  conversations without risking unintended replies.
-                </p>
-              </div>
-            </label>
-
-            <label
-              className={`flex items-start gap-3 cursor-pointer p-3 rounded-lg border transition-colors ${
-                agentMode === "agent"
-                  ? "border-mauve/50 bg-mauve/5"
-                  : "border-surface1 hover:border-mauve/50"
-              }`}
-            >
-              <input
-                type="radio"
-                name="agent-mode"
-                value="agent"
-                checked={agentMode === "agent"}
-                onChange={() => setAgentMode("agent")}
-                className="accent-mauve mt-0.5"
-              />
-              <div className="flex-1">
-                <div className="flex items-center gap-2">
-                  <Shield size={14} className="text-green" />
-                  <span className="text-sm font-medium text-text">Agent Client</span>
-                </div>
-                <p className="text-xs text-overlay0 mt-1">
-                  Chat directly with the agent via Messages.app. Only responds to messages from your
-                  phone number and Apple ID -- all other messages are ignored. Use this to interact
-                  with your agent from your iPhone.
-                </p>
-              </div>
-            </label>
-          </div>
-        </section>
-      )}
-
-      {/* Owner Identity (agent mode only) */}
-      {enabled && agentMode === "agent" && (
-        <section className="mb-8 rounded-xl border border-surface0 bg-mantle p-5">
-          <h2 className="text-sm font-semibold text-subtext1 uppercase tracking-wider mb-4">
-            Owner Identity
-          </h2>
-          <p className="text-xs text-overlay0 mb-4">
-            In agent mode, only messages from these identifiers will be processed. At least one is
-            required.
-          </p>
-          <div className="space-y-4">
-            <div className="space-y-1.5">
-              <label className="block text-sm font-medium text-subtext1">Phone Number</label>
-              <input
-                type="text"
-                value={ownerPhone}
-                onChange={(e) => setOwnerPhone(e.target.value)}
-                placeholder="+15551234567"
-                className="w-full rounded-lg border border-surface1 bg-surface0 px-3 py-2 text-sm text-text placeholder:text-overlay0 focus:outline-none focus:border-mauve focus:ring-1 focus:ring-mauve/30 font-mono"
-              />
-              <p className="text-xs text-overlay0">
-                Your phone number in international format (e.g., +1 for US).
-              </p>
-            </div>
-            <div className="space-y-1.5">
-              <label className="block text-sm font-medium text-subtext1">Apple ID</label>
-              <input
-                type="text"
-                value={ownerAppleId}
-                onChange={(e) => setOwnerAppleId(e.target.value)}
-                placeholder="you@icloud.com"
-                className="w-full rounded-lg border border-surface1 bg-surface0 px-3 py-2 text-sm text-text placeholder:text-overlay0 focus:outline-none focus:border-mauve focus:ring-1 focus:ring-mauve/30 font-mono"
-              />
-              <p className="text-xs text-overlay0">
-                Your Apple ID email address used for iMessage.
-              </p>
-            </div>
-          </div>
-        </section>
-      )}
-
-      {/* Connection Mode */}
-      {enabled && (
-        <section className="mb-8 rounded-xl border border-surface0 bg-mantle p-5">
-          <h2 className="text-sm font-semibold text-subtext1 uppercase tracking-wider mb-4">
-            Connection Mode
-          </h2>
-          <div className="space-y-3">
-            <label className="flex items-start gap-3 cursor-pointer p-3 rounded-lg border border-surface1 hover:border-mauve/50 transition-colors">
-              <input
-                type="radio"
-                name="imessage-mode"
-                value="chatdb"
-                checked={mode === "chatdb"}
-                onChange={() => setMode("chatdb")}
-                className="accent-mauve mt-0.5"
-              />
-              <div>
-                <span className="text-sm font-medium text-text">Local chat.db</span>
-                <p className="text-xs text-overlay0 mt-0.5">
-                  Reads directly from ~/Library/Messages/chat.db and sends via AppleScript. Zero
-                  setup, but macOS-only. Requires Full Disk Access.
-                </p>
-              </div>
-            </label>
-
-            <label className="flex items-start gap-3 cursor-pointer p-3 rounded-lg border border-surface1 hover:border-mauve/50 transition-colors">
-              <input
-                type="radio"
-                name="imessage-mode"
-                value="bluebubbles"
-                checked={mode === "bluebubbles"}
-                onChange={() => setMode("bluebubbles")}
-                className="accent-mauve mt-0.5"
-              />
-              <div>
-                <span className="text-sm font-medium text-text">BlueBubbles Server</span>
-                <p className="text-xs text-overlay0 mt-0.5">
-                  Connects to a BlueBubbles macOS server via REST API + webhooks. Supports sending,
-                  reactions, typing indicators, and read receipts. Works cross-platform.
-                </p>
-                <a
-                  href="https://bluebubbles.app"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1 text-xs text-blue hover:text-blue/80 mt-1"
-                >
-                  bluebubbles.app <ExternalLink size={10} />
-                </a>
-              </div>
-            </label>
-
-            <label className="flex items-start gap-3 cursor-pointer p-3 rounded-lg border border-surface1 hover:border-mauve/50 transition-colors">
-              <input
-                type="radio"
-                name="imessage-mode"
-                value="photon"
-                checked={mode === "photon"}
-                onChange={() => setMode("photon")}
-                className="accent-mauve mt-0.5"
-              />
-              <div>
-                <span className="text-sm font-medium text-text">Photon Server</span>
-                <p className="text-xs text-overlay0 mt-0.5">
-                  Connects to a Photon iMessage server for full-featured support: reactions,
-                  tapbacks, typing indicators, message effects, scheduled messages, contact cards,
-                  and rich link previews.
-                </p>
-                <a
-                  href="https://github.com/photon-hq/advanced-imessage-kit"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1 text-xs text-blue hover:text-blue/80 mt-1"
-                >
-                  photon-hq/advanced-imessage-kit <ExternalLink size={10} />
-                </a>
-              </div>
-            </label>
-          </div>
-        </section>
-      )}
-
-      {/* BlueBubbles Config */}
-      {enabled && mode === "bluebubbles" && (
-        <section className="mb-8 rounded-xl border border-surface0 bg-mantle p-5">
-          <h2 className="text-sm font-semibold text-subtext1 uppercase tracking-wider mb-4">
-            BlueBubbles Server
-          </h2>
-          <div className="space-y-4">
-            <div className="space-y-1.5">
-              <label className="block text-sm font-medium text-subtext1">Server URL</label>
-              <input
-                type="text"
-                value={bbServerUrl}
-                onChange={(e) => setBbServerUrl(e.target.value)}
-                placeholder="http://192.168.1.100:1234"
-                className="w-full rounded-lg border border-surface1 bg-surface0 px-3 py-2 text-sm text-text placeholder:text-overlay0 focus:outline-none focus:border-mauve focus:ring-1 focus:ring-mauve/30 font-mono"
-              />
-              <p className="text-xs text-overlay0">
-                The URL of your BlueBubbles server (e.g., http://your-mac-ip:1234).
-              </p>
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="block text-sm font-medium text-subtext1">Server Password</label>
-              <input
-                type="password"
-                value={bbPassword}
-                onChange={(e) => setBbPassword(e.target.value)}
-                placeholder="BlueBubbles server password"
-                className="w-full rounded-lg border border-surface1 bg-surface0 px-3 py-2 text-sm text-text placeholder:text-overlay0 focus:outline-none focus:border-mauve focus:ring-1 focus:ring-mauve/30 font-mono"
-              />
-              <p className="text-xs text-overlay0">
-                Found in BlueBubbles &gt; Settings &gt; API/Web Settings.
-              </p>
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="block text-sm font-medium text-subtext1">Webhook Port</label>
-              <input
-                type="text"
-                value={bbWebhookPort}
-                onChange={(e) => setBbWebhookPort(e.target.value)}
-                placeholder="8803"
-                className="w-full rounded-lg border border-surface1 bg-surface0 px-3 py-2 text-sm text-text placeholder:text-overlay0 focus:outline-none focus:border-mauve focus:ring-1 focus:ring-mauve/30 font-mono max-w-32"
-              />
-              <p className="text-xs text-overlay0">
-                Port for receiving webhooks from BlueBubbles (default: 8803).
-              </p>
-            </div>
-
-            <label className="flex items-center gap-3 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={bbReadReceipts}
-                onChange={(e) => setBbReadReceipts(e.target.checked)}
-                className="accent-mauve w-4 h-4 rounded"
-              />
-              <div>
-                <span className="text-sm font-medium text-text">Send read receipts</span>
-                <p className="text-xs text-overlay0">Mark messages as read when processed.</p>
-              </div>
-            </label>
-
-            {/* Test Connection */}
-            <div className="flex items-center gap-3 pt-2">
-              <button
-                onClick={testConnection}
-                disabled={pinging || !bbServerUrl || !bbPassword}
-                className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border border-surface1 bg-surface0 text-sm text-text hover:border-mauve/50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+        <>
+          {/* Feature mode */}
+          <section className="mb-6 rounded-xl border border-surface0 bg-mantle p-5">
+            <h2 className="text-sm font-semibold text-subtext1 uppercase tracking-wider mb-3">
+              Feature Mode
+            </h2>
+            <div className="space-y-2">
+              <label
+                className={`flex items-start gap-3 rounded-lg border p-3 cursor-pointer transition-colors ${
+                  featureMode === "basic"
+                    ? "border-mauve/50 bg-mauve/5"
+                    : "border-surface0 bg-base hover:border-surface1"
+                }`}
               >
-                {pinging && <RefreshCw size={14} className="animate-spin" />}
-                Test Connection
-              </button>
-              {pingResult !== null && (
-                <span className="inline-flex items-center gap-1 text-sm">
-                  {pingResult ? (
-                    <>
-                      <CheckCircle size={14} className="text-green" />
-                      <span className="text-green">Connected</span>
-                    </>
-                  ) : (
-                    <>
-                      <XCircle size={14} className="text-red" />
-                      <span className="text-red">Failed</span>
-                    </>
+                <input
+                  type="radio"
+                  name="featureMode"
+                  value="basic"
+                  checked={featureMode === "basic"}
+                  onChange={() => setFeatureMode("basic")}
+                  className="accent-mauve mt-0.5"
+                />
+                <div className="flex-1">
+                  <div className="flex items-center gap-2">
+                    <Shield size={14} className="text-green" />
+                    <span className="text-sm font-medium text-text">Basic (recommended)</span>
+                  </div>
+                  <p className="text-xs text-overlay0 mt-1">
+                    Read messages, send text and files, standard tapbacks (👍❤️😂‼️❓👎). No system
+                    modifications needed.
+                  </p>
+                </div>
+              </label>
+
+              <label
+                className={`flex items-start gap-3 rounded-lg border p-3 cursor-pointer transition-colors ${
+                  featureMode === "advanced"
+                    ? "border-peach/50 bg-peach/5"
+                    : "border-surface0 bg-base hover:border-surface1"
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="featureMode"
+                  value="advanced"
+                  checked={featureMode === "advanced"}
+                  onChange={() => setFeatureMode("advanced")}
+                  className="accent-peach mt-0.5"
+                />
+                <div className="flex-1">
+                  <div className="flex items-center gap-2">
+                    <AlertTriangle size={14} className="text-peach" />
+                    <span className="text-sm font-medium text-text">
+                      Advanced (requires SIP disabled)
+                    </span>
+                  </div>
+                  <p className="text-xs text-overlay0 mt-1">
+                    Adds: edit, unsend, typing indicators, effects, custom emoji reactions, group
+                    management.
+                  </p>
+                  {featureMode === "advanced" && (
+                    <div className="mt-3 rounded-lg bg-peach/10 border border-peach/30 p-3">
+                      <p className="text-xs text-peach font-semibold mb-2 flex items-center gap-1">
+                        <AlertTriangle size={12} />
+                        Security trade-off
+                      </p>
+                      <p className="text-xs text-subtext0 leading-relaxed mb-2">
+                        Advanced features require disabling System Integrity Protection (SIP), which
+                        removes a core macOS security boundary. Only do this if you understand the
+                        implications.
+                      </p>
+                      <ol className="text-xs text-subtext0 list-decimal list-inside space-y-0.5">
+                        <li>Boot into Recovery Mode (hold ⌘R on startup)</li>
+                        <li>
+                          Open Terminal and run: <code className="text-mauve">csrutil disable</code>
+                        </li>
+                        <li>Reboot normally</li>
+                        <li>
+                          Run: <code className="text-mauve">imsg launch</code>
+                        </li>
+                      </ol>
+                    </div>
                   )}
-                </span>
-              )}
+                </div>
+              </label>
             </div>
-          </div>
-        </section>
+          </section>
+
+          {/* Agent mode */}
+          <section className="mb-6 rounded-xl border border-surface0 bg-mantle p-5">
+            <h2 className="text-sm font-semibold text-subtext1 uppercase tracking-wider mb-3">
+              Agent Mode
+            </h2>
+            <div className="space-y-2">
+              <label
+                className={`flex items-start gap-3 rounded-lg border p-3 cursor-pointer transition-colors ${
+                  agentMode === "passive"
+                    ? "border-mauve/50 bg-mauve/5"
+                    : "border-surface0 bg-base hover:border-surface1"
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="agentMode"
+                  value="passive"
+                  checked={agentMode === "passive"}
+                  onChange={() => setAgentMode("passive")}
+                  className="accent-mauve mt-0.5"
+                />
+                <div>
+                  <div className="flex items-center gap-2">
+                    <Eye size={14} className="text-blue" />
+                    <span className="text-sm font-medium text-text">Passive (default)</span>
+                  </div>
+                  <p className="text-xs text-overlay0 mt-1">
+                    Watch all conversations, draft responses for your approval before sending.
+                  </p>
+                </div>
+              </label>
+
+              <label
+                className={`flex items-start gap-3 rounded-lg border p-3 cursor-pointer transition-colors ${
+                  agentMode === "agent"
+                    ? "border-mauve/50 bg-mauve/5"
+                    : "border-surface0 bg-base hover:border-surface1"
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="agentMode"
+                  value="agent"
+                  checked={agentMode === "agent"}
+                  onChange={() => setAgentMode("agent")}
+                  className="accent-mauve mt-0.5"
+                />
+                <div>
+                  <span className="text-sm font-medium text-text">Agent (owner only)</span>
+                  <p className="text-xs text-overlay0 mt-1">
+                    Only respond to messages from you. Acts as a personal agent client.
+                  </p>
+                </div>
+              </label>
+            </div>
+
+            {agentMode === "agent" && (
+              <div className="mt-4 space-y-3 pt-4 border-t border-surface0">
+                <div>
+                  <label className="block text-xs font-medium text-subtext1 mb-1">
+                    Owner Phone (with country code)
+                  </label>
+                  <input
+                    type="tel"
+                    value={ownerPhone}
+                    onChange={(e) => setOwnerPhone(e.target.value)}
+                    placeholder="+15551234567"
+                    className="w-full rounded-lg border border-surface1 bg-surface0 px-3 py-2 text-sm text-text placeholder:text-overlay0 focus:outline-none focus:border-mauve focus:ring-1 focus:ring-mauve/30 font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-subtext1 mb-1">
+                    Owner Apple ID
+                  </label>
+                  <input
+                    type="email"
+                    value={ownerAppleId}
+                    onChange={(e) => setOwnerAppleId(e.target.value)}
+                    placeholder="you@icloud.com"
+                    className="w-full rounded-lg border border-surface1 bg-surface0 px-3 py-2 text-sm text-text placeholder:text-overlay0 focus:outline-none focus:border-mauve focus:ring-1 focus:ring-mauve/30 font-mono"
+                  />
+                </div>
+              </div>
+            )}
+          </section>
+
+          {/* Permissions reminder */}
+          <section className="mb-6 rounded-xl border border-surface0 bg-mantle p-5">
+            <h2 className="text-sm font-semibold text-subtext1 uppercase tracking-wider mb-3">
+              macOS Permissions Required
+            </h2>
+            <ul className="text-xs text-subtext0 space-y-1.5 list-disc list-inside">
+              <li>
+                <strong>Full Disk Access</strong> for your terminal (to read chat.db)
+              </li>
+              <li>
+                <strong>Automation</strong> permission for Messages.app (to send)
+              </li>
+              <li>
+                <strong>Contacts</strong> permission (optional, for name resolution)
+              </li>
+            </ul>
+          </section>
+        </>
       )}
 
-      {/* Photon Config */}
-      {enabled && mode === "photon" && (
-        <section className="mb-8 rounded-xl border border-surface0 bg-mantle p-5">
-          <h2 className="text-sm font-semibold text-subtext1 uppercase tracking-wider mb-4">
-            Photon Server
-          </h2>
-          <div className="space-y-4">
-            <div className="space-y-1.5">
-              <label className="block text-sm font-medium text-subtext1">Server URL</label>
-              <input
-                type="text"
-                value={photonServerUrl}
-                onChange={(e) => setPhotonServerUrl(e.target.value)}
-                placeholder="http://localhost:1234"
-                className="w-full rounded-lg border border-surface1 bg-surface0 px-3 py-2 text-sm text-text placeholder:text-overlay0 focus:outline-none focus:border-mauve focus:ring-1 focus:ring-mauve/30 font-mono"
-              />
-              <p className="text-xs text-overlay0">The URL of your Photon iMessage server.</p>
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="block text-sm font-medium text-subtext1">API Key</label>
-              <input
-                type="password"
-                value={photonApiKey}
-                onChange={(e) => setPhotonApiKey(e.target.value)}
-                placeholder="Photon API key (optional)"
-                className="w-full rounded-lg border border-surface1 bg-surface0 px-3 py-2 text-sm text-text placeholder:text-overlay0 focus:outline-none focus:border-mauve focus:ring-1 focus:ring-mauve/30 font-mono"
-              />
-              <p className="text-xs text-overlay0">
-                API key for authentication (if configured on the server).
-              </p>
-            </div>
-          </div>
-        </section>
-      )}
-
-      {/* Access Control (passive mode -- filter which chats to listen to) */}
-      {enabled && agentMode === "passive" && (
-        <section className="mb-8 rounded-xl border border-surface0 bg-mantle p-5">
-          <h2 className="text-sm font-semibold text-subtext1 uppercase tracking-wider mb-4">
-            Access Control
-          </h2>
-          <div className="space-y-1.5">
-            <label className="block text-sm font-medium text-subtext1">Allowed Chats</label>
-            <input
-              type="text"
-              value={allowedChats}
-              onChange={(e) => setAllowedChats(e.target.value)}
-              placeholder="+15551234567, user@example.com, chat123456789"
-              className="w-full rounded-lg border border-surface1 bg-surface0 px-3 py-2 text-sm text-text placeholder:text-overlay0 focus:outline-none focus:border-mauve focus:ring-1 focus:ring-mauve/30 font-mono"
-            />
-            <p className="text-xs text-overlay0">
-              Comma-separated phone numbers, emails, or chat identifiers. Leave empty to listen to
-              all conversations.
-            </p>
-          </div>
-        </section>
-      )}
-
-      {/* Sync Progress */}
-      {enabled && <SyncProgress platform="imessage" />}
-
-      {/* Save */}
-      <button
-        onClick={save}
-        disabled={saving || !isDirty}
-        className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-mauve text-crust text-sm font-medium hover:bg-mauve/90 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-      >
-        {saving && <RefreshCw size={14} className="animate-spin" />}
-        Save
-      </button>
+      {/* Save button */}
+      <div className="flex items-center justify-end gap-3 sticky bottom-4 mt-6">
+        <DirtyIndicator isDirty={isDirty} />
+        <button
+          onClick={save}
+          disabled={!isDirty || saving}
+          className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-mauve text-crust text-sm font-medium hover:bg-mauve/90 transition-colors disabled:opacity-40"
+        >
+          {saving ? <RefreshCw size={14} className="animate-spin" /> : null}
+          Save
+        </button>
+      </div>
     </div>
   );
 }

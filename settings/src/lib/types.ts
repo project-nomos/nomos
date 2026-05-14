@@ -34,8 +34,10 @@ export interface IntegrationStatus {
   };
   imessage: {
     configured: boolean;
-    mode: string;
+    featureMode: string;
     agentMode: string;
+    imsgInstalled?: boolean;
+    imsgVersion?: string;
   };
 }
 

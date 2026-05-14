@@ -25,11 +25,24 @@ export async function GET() {
       "TELEGRAM_BOT_TOKEN",
       "WHATSAPP_ENABLED",
       "IMESSAGE_ENABLED",
-      "IMESSAGE_MODE",
+      "IMESSAGE_FEATURE_MODE",
       "IMESSAGE_AGENT_MODE",
     ],
     sql,
   );
+
+  // Check if imsg CLI is installed
+  let imsgInstalled = false;
+  let imsgVersion = "";
+  try {
+    const { execFile } = await import("node:child_process");
+    const { promisify } = await import("node:util");
+    const { stdout } = await promisify(execFile)("imsg", ["--version"], { timeout: 5000 });
+    imsgInstalled = true;
+    imsgVersion = stdout.trim();
+  } catch {
+    // not installed
+  }
 
   // Slack status
   let slackWorkspaces: { teamId: string; teamName: string; userId: string }[] = [];
@@ -117,8 +130,10 @@ export async function GET() {
     },
     imessage: {
       configured: env.IMESSAGE_ENABLED === "true" || env.IMESSAGE_ENABLED === "1",
-      mode: env.IMESSAGE_MODE ?? "chatdb",
+      featureMode: env.IMESSAGE_FEATURE_MODE ?? "basic",
       agentMode: env.IMESSAGE_AGENT_MODE ?? "passive",
+      imsgInstalled,
+      imsgVersion,
     },
   };
 

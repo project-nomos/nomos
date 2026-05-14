@@ -1589,14 +1589,18 @@ export function createMemoryMcpServer(): McpSdkServerConfigWithInstance {
             content: [
               {
                 type: "text" as const,
-                text: "iMessage sending requires macOS. Use Photon or BlueBubbles mode for cross-platform.",
+                text: "iMessage sending requires macOS.",
               },
             ],
           };
         }
 
-        const { sendIMessage } = await import("../daemon/channels/imessage-sender.ts");
-        await sendIMessage(args.recipient, args.text);
+        const { promisify } = await import("node:util");
+        const { execFile } = await import("node:child_process");
+        const execFileAsync = promisify(execFile);
+        await execFileAsync("imsg", ["send", "--to", args.recipient, "--text", args.text], {
+          timeout: 30_000,
+        });
 
         return {
           content: [{ type: "text" as const, text: `iMessage sent to ${args.recipient}.` }],
@@ -1612,54 +1616,85 @@ export function createMemoryMcpServer(): McpSdkServerConfigWithInstance {
 
   const imessageReadTool = tool(
     "imessage_read",
-    "Read recent iMessages from a contact. Use this to check message history before responding. Requires iMessage to be configured in Photon mode.",
+    "Read recent iMessages from a contact. Use this to check message history before responding. Requires `imsg` CLI installed on macOS (brew install steipete/tap/imsg).",
     {
       contact: z.string().describe("Phone number (+1...) or email address of the contact"),
       limit: z.number().optional().describe("Maximum messages to return (default: 20)"),
     },
     async (args) => {
       try {
-        const { PhotonAdapter } = await import("../daemon/channels/imessage-photon.ts");
-        const serverUrl = process.env.PHOTON_SERVER_URL;
-        if (!serverUrl) {
+        if (process.platform !== "darwin") {
           return {
-            content: [
-              {
-                type: "text" as const,
-                text: "iMessage Photon server not configured. Set PHOTON_SERVER_URL.",
-              },
-            ],
+            content: [{ type: "text" as const, text: "iMessage read requires macOS." }],
           };
         }
 
-        const adapter = new PhotonAdapter(
-          { serverUrl, apiKey: process.env.PHOTON_API_KEY },
-          () => {},
-        );
-        await adapter.start();
+        const { promisify } = await import("node:util");
+        const { execFile } = await import("node:child_process");
+        const execFileAsync = promisify(execFile);
 
-        // Find the chat for this contact
-        const chats = await adapter.getChats();
+        // Find the chat for this contact via `imsg chats --json`
+        const { stdout: chatsOut } = await execFileAsync(
+          "imsg",
+          ["chats", "--limit", "100", "--json"],
+          {
+            timeout: 10_000,
+          },
+        );
+        const chats = chatsOut
+          .trim()
+          .split("\n")
+          .filter((line) => line.startsWith("{"))
+          .map(
+            (line) =>
+              JSON.parse(line) as {
+                id: number;
+                identifier: string;
+                display_name?: string;
+                contact_name?: string;
+              },
+          );
+
+        const contactLower = args.contact.toLowerCase();
         const chat = chats.find(
           (c) =>
-            c.identifier.includes(args.contact) ||
-            c.displayName.toLowerCase().includes(args.contact.toLowerCase()),
+            c.identifier.toLowerCase().includes(contactLower) ||
+            c.display_name?.toLowerCase().includes(contactLower) ||
+            c.contact_name?.toLowerCase().includes(contactLower),
         );
 
         if (!chat) {
-          await adapter.stop();
           return {
             content: [{ type: "text" as const, text: `No chat found for ${args.contact}` }],
           };
         }
 
-        const messages = await adapter.getMessages(chat.guid, { limit: args.limit ?? 20 });
-        await adapter.stop();
+        const limit = args.limit ?? 20;
+        const { stdout: histOut } = await execFileAsync(
+          "imsg",
+          ["history", "--chat-id", String(chat.id), "--limit", String(limit), "--json"],
+          { timeout: 15_000 },
+        );
+
+        const messages = histOut
+          .trim()
+          .split("\n")
+          .filter((line) => line.startsWith("{"))
+          .map(
+            (line) =>
+              JSON.parse(line) as {
+                sender: string;
+                sender_name?: string;
+                is_from_me: boolean;
+                text: string;
+                created_at: string;
+              },
+          );
 
         const formatted = messages
           .map((m) => {
-            const from = m.isFromMe ? "Me" : (m.handle?.address ?? "Unknown");
-            const ts = new Date(m.dateCreated).toLocaleString();
+            const from = m.is_from_me ? "Me" : (m.sender_name ?? m.sender);
+            const ts = new Date(m.created_at).toLocaleString();
             return `[${ts}] ${from}: ${m.text ?? "(attachment)"}`;
           })
           .reverse()

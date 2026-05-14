@@ -1,26 +1,23 @@
 /**
- * Thin iMessage channel adapter for the daemon.
+ * iMessage channel adapter for the daemon.
  *
- * Supports two connection modes:
- * - "chatdb" (default): macOS only. Reads from ~/Library/Messages/chat.db,
- *   sends via AppleScript. Zero setup, but macOS-only.
- * - "bluebubbles": Connects to a BlueBubbles server via REST + webhooks.
- *   Works cross-platform -- the daemon can run anywhere while a Mac relays.
+ * Powered by the `imsg` CLI (https://github.com/openclaw/imsg) -- a local-first
+ * iMessage tool that reads chat.db directly and sends through Messages.app.
  *
- * Supports two agent modes:
- * - "passive": Listens to all incoming messages, processes them through the
- *   agent, but routes responses through DraftManager for approval before sending.
- * - "agent": Only processes messages from the owner (phone number / Apple ID),
- *   responds directly. Acts as a personal agent client.
+ * Two feature modes (controlled by IMESSAGE_FEATURE_MODE env var or settings):
+ * - "basic" (default): read/watch/send/standard tapbacks/attachments. No setup
+ *   beyond Full Disk Access + Automation permission.
+ * - "advanced": adds edit, unsend, typing indicators, custom emoji reactions,
+ *   group management, effects. Requires SIP disabled and `imsg launch`.
  *
- * Mode is selected via IMESSAGE_AGENT_MODE env var or Settings UI.
+ * Two agent modes (controlled by IMESSAGE_AGENT_MODE):
+ * - "passive": drafts responses for approval via DraftManager (default)
+ * - "agent": only processes messages from the owner, responds directly
+ *
+ * Install:  brew install steipete/tap/imsg
  */
 
-import { randomUUID } from "node:crypto";
-import { IMessageReceiver } from "./imessage-receiver.ts";
-import { sendIMessage } from "./imessage-sender.ts";
-import { BlueBubblesAdapter, type BlueBubblesConfig } from "./imessage-bluebubbles.ts";
-import { PhotonAdapter, type PhotonConfig } from "./imessage-photon.ts";
+import { ImsgAdapter, type ImsgFeatureMode } from "./imessage-imsg.ts";
 import type { ChannelAdapter, IncomingMessage, OutgoingMessage } from "../types.ts";
 import type { DraftManager } from "../draft-manager.ts";
 
@@ -44,22 +41,15 @@ function chunk(text: string): string[] {
   return chunks;
 }
 
-/** Chat style: 45 = group chat (43 = 1:1, handled as the else case). */
-const STYLE_GROUP = 45;
-
-export type IMessageMode = "chatdb" | "bluebubbles" | "photon";
 export type IMessageAgentMode = "passive" | "agent";
-
-interface ChatMeta {
-  chatGuid: string;
-  chatStyle: number;
-  handleIdentifier: string;
-}
+export type { ImsgFeatureMode as IMessageFeatureMode };
 
 export interface IMessageAdapterOptions {
   onMessage: (msg: IncomingMessage) => void;
   /** Agent mode: "passive" drafts responses for approval, "agent" responds directly to owner only */
   agentMode?: IMessageAgentMode;
+  /** Feature mode: "basic" (default) or "advanced" (SIP disabled required) */
+  featureMode?: ImsgFeatureMode;
   /** Owner identities for agent mode -- only messages from these are processed */
   ownerIdentities?: Set<string>;
   /** Draft manager for passive mode -- routes responses through approval flow */
@@ -68,23 +58,12 @@ export interface IMessageAdapterOptions {
 
 export class IMessageAdapter implements ChannelAdapter {
   readonly platform = "imessage";
-  private imessageMode: IMessageMode;
   private agentMode: IMessageAgentMode;
+  private featureMode: ImsgFeatureMode;
   private ownerIdentities: Set<string>;
   private onMessage: (msg: IncomingMessage) => void;
   private draftManager?: DraftManager;
-
-  // chatdb mode
-  private receiver: IMessageReceiver | null = null;
-  private chatMeta = new Map<string, ChatMeta>();
-
-  // bluebubbles mode
-  private bbAdapter: BlueBubblesAdapter | null = null;
-  /** Map chatIdentifier -> chatGuid for BlueBubbles send routing. */
-  private bbChatGuids = new Map<string, string>();
-
-  // photon mode
-  private photonAdapter: PhotonAdapter | null = null;
+  private imsg: ImsgAdapter | null = null;
 
   // Cache last incoming message per channel so send() can include originalMessage in drafts
   private lastIncomingContext = new Map<string, Record<string, unknown>>();
@@ -93,8 +72,9 @@ export class IMessageAdapter implements ChannelAdapter {
     this.onMessage = options.onMessage;
     this.agentMode =
       options.agentMode ?? ((process.env.IMESSAGE_AGENT_MODE as IMessageAgentMode) || "passive");
+    this.featureMode =
+      options.featureMode ?? ((process.env.IMESSAGE_FEATURE_MODE as ImsgFeatureMode) || "basic");
     this.draftManager = options.draftManager;
-    this.imessageMode = (process.env.IMESSAGE_MODE as IMessageMode) || "chatdb";
 
     // Build owner identity set from options or env
     this.ownerIdentities = options.ownerIdentities ?? new Set<string>();
@@ -107,6 +87,16 @@ export class IMessageAdapter implements ChannelAdapter {
   }
 
   async start(): Promise<void> {
+    if (process.platform !== "darwin") {
+      throw new Error("iMessage requires macOS. The imsg CLI is macOS-only for sending.");
+    }
+
+    // Verify imsg CLI is installed
+    const check = await ImsgAdapter.isInstalled();
+    if (!check.installed) {
+      throw new Error("imsg CLI is not installed. Install it with: brew install steipete/tap/imsg");
+    }
+
     if (this.agentMode === "agent" && this.ownerIdentities.size === 0) {
       console.warn(
         "[imessage-adapter] Agent mode requires owner phone or Apple ID. " +
@@ -115,177 +105,33 @@ export class IMessageAdapter implements ChannelAdapter {
     }
 
     console.log(
-      `[imessage-adapter] Starting in ${this.agentMode} mode` +
-        (this.agentMode === "agent" ? ` (owner: ${[...this.ownerIdentities].join(", ")})` : ""),
+      `[imessage-adapter] Starting (agent: ${this.agentMode}, features: ${this.featureMode}, imsg: ${check.version})` +
+        (this.agentMode === "agent" ? `, owner: ${[...this.ownerIdentities].join(", ")}` : ""),
     );
 
-    if (this.imessageMode === "photon") {
-      await this.startPhoton();
-    } else if (this.imessageMode === "bluebubbles") {
-      await this.startBlueBubbles();
-    } else {
-      await this.startChatDb();
-    }
-  }
-
-  private async startChatDb(): Promise<void> {
-    if (process.platform !== "darwin") {
-      throw new Error(
-        "iMessage chat.db mode requires macOS. Use IMESSAGE_MODE=bluebubbles for cross-platform.",
-      );
-    }
-
-    const allowedChats = process.env.IMESSAGE_ALLOWED_CHATS
-      ? new Set(process.env.IMESSAGE_ALLOWED_CHATS.split(",").map((s) => s.trim()))
-      : null;
-
-    this.receiver = new IMessageReceiver((msg) => {
-      // Agent mode: only process messages from owner
-      if (this.agentMode === "agent") {
-        if (!this.isOwner(msg.handleIdentifier)) return;
-      }
-
-      // Passive mode with allowed chats filter
-      if (this.agentMode === "passive" && allowedChats) {
-        const allowed =
-          allowedChats.has(msg.handleIdentifier) || allowedChats.has(msg.chatIdentifier);
-        if (!allowed) return;
-      }
-
-      this.chatMeta.set(msg.chatIdentifier, {
-        chatGuid: msg.chatGuid,
-        chatStyle: msg.chatStyle,
-        handleIdentifier: msg.handleIdentifier,
-      });
-
-      const senderName = msg.chatDisplayName || msg.handleIdentifier;
-
-      // Cache incoming context so send() can include originalMessage in draft notifications
-      const prevCtx = this.lastIncomingContext.get(msg.chatIdentifier);
-      const prevOriginal =
-        prevCtx?.senderName === senderName ? (prevCtx.originalMessage as string) : "";
-      this.lastIncomingContext.set(msg.chatIdentifier, {
-        senderName,
-        messageType: "dm",
-        originalMessage: prevOriginal ? `${prevOriginal}\n${msg.text}` : msg.text,
-      });
-
-      this.onMessage({
-        id: randomUUID(),
-        platform: "imessage",
-        channelId: msg.chatIdentifier,
-        userId: msg.handleIdentifier,
-        content: msg.text,
-        timestamp: new Date(),
-        metadata: { senderName, messageType: "dm", handleIdentifier: msg.handleIdentifier },
-      });
+    this.imsg = new ImsgAdapter({
+      featureMode: this.featureMode,
+      ownerOnly: this.agentMode === "agent",
+      ownerIdentities: this.ownerIdentities,
+      onMessage: (msg) => this.handleIncoming(msg),
     });
 
-    this.receiver.start();
-    console.log(
-      `[imessage-adapter] Started in chat.db mode (${this.agentMode}) -- watching for incoming messages`,
-    );
-  }
-
-  private async startBlueBubbles(): Promise<void> {
-    const serverUrl = process.env.BLUEBUBBLES_SERVER_URL;
-    const password = process.env.BLUEBUBBLES_PASSWORD;
-
-    if (!serverUrl || !password) {
-      throw new Error("BlueBubbles mode requires BLUEBUBBLES_SERVER_URL and BLUEBUBBLES_PASSWORD");
-    }
-
-    const allowedChats = process.env.IMESSAGE_ALLOWED_CHATS
-      ? new Set(process.env.IMESSAGE_ALLOWED_CHATS.split(",").map((s) => s.trim()))
-      : undefined;
-
-    const config: BlueBubblesConfig = {
-      serverUrl,
-      password,
-      webhookPort: process.env.BLUEBUBBLES_WEBHOOK_PORT
-        ? Number.parseInt(process.env.BLUEBUBBLES_WEBHOOK_PORT)
-        : 8803,
-      webhookPassword: process.env.BLUEBUBBLES_WEBHOOK_PASSWORD ?? password,
-      sendReadReceipts: process.env.BLUEBUBBLES_READ_RECEIPTS === "true",
-      allowedChats,
-    };
-
-    this.bbAdapter = new BlueBubblesAdapter(config, (msg) => {
-      // Agent mode: only process messages from owner
-      if (this.agentMode === "agent") {
-        if (!this.isOwner(msg.userId)) return;
-      }
-
-      // Track chat GUID for send routing
-      this.bbChatGuids.set(msg.channelId, `iMessage;+;${msg.channelId}`);
-      this.onMessage(msg);
-    });
-
-    // Verify connectivity
-    const reachable = await this.bbAdapter.ping();
-    if (!reachable) {
-      console.warn(
-        `[imessage-adapter] BlueBubbles server at ${serverUrl} is not reachable. Will retry on message send.`,
-      );
-    }
-
-    await this.bbAdapter.startWebhook();
-    console.log(
-      `[imessage-adapter] Started in BlueBubbles mode (${this.agentMode}) -- server: ${serverUrl}`,
-    );
-  }
-
-  private async startPhoton(): Promise<void> {
-    const serverUrl = process.env.PHOTON_SERVER_URL;
-    if (!serverUrl) {
-      throw new Error("Photon mode requires PHOTON_SERVER_URL");
-    }
-
-    const config: PhotonConfig = {
-      serverUrl,
-      apiKey: process.env.PHOTON_API_KEY,
-    };
-
-    this.photonAdapter = new PhotonAdapter(config, (msg) => {
-      // Agent mode: only process messages from owner
-      if (this.agentMode === "agent") {
-        if (!this.isOwner(msg.userId)) return;
-      }
-
-      this.onMessage(msg);
-    });
-
-    await this.photonAdapter.start();
-    console.log(
-      `[imessage-adapter] Started in Photon mode (${this.agentMode}) -- server: ${serverUrl}`,
-    );
+    await this.imsg.start();
   }
 
   async stop(): Promise<void> {
-    if (this.imessageMode === "photon" && this.photonAdapter) {
-      await this.photonAdapter.stop();
-      this.photonAdapter = null;
-    } else if (this.imessageMode === "bluebubbles" && this.bbAdapter) {
-      await this.bbAdapter.stop();
-      this.bbAdapter = null;
-      this.bbChatGuids.clear();
-    } else {
-      if (this.receiver) {
-        this.receiver.stop();
-        this.receiver = null;
-      }
-      this.chatMeta.clear();
+    if (this.imsg) {
+      await this.imsg.stop();
+      this.imsg = null;
     }
+    this.lastIncomingContext.clear();
   }
 
   async send(message: OutgoingMessage): Promise<void> {
     // Passive mode: route through draft manager for approval
     if (this.agentMode === "passive" && this.draftManager) {
-      // Merge cached incoming context (senderName, originalMessage)
       const cachedCtx = this.lastIncomingContext.get(message.channelId) ?? {};
-      const meta = this.chatMeta.get(message.channelId);
-      const senderName =
-        (cachedCtx.senderName as string) ?? meta?.handleIdentifier ?? message.channelId;
+      const senderName = (cachedCtx.senderName as string) ?? message.channelId;
       await this.draftManager.createDraft(message, "imessage-passive", {
         messageType: "dm",
         senderName,
@@ -293,7 +139,6 @@ export class IMessageAdapter implements ChannelAdapter {
         agentMode: "passive",
         ...cachedCtx,
       });
-      // Clear cache after use
       this.lastIncomingContext.delete(message.channelId);
       return;
     }
@@ -303,72 +148,71 @@ export class IMessageAdapter implements ChannelAdapter {
   }
 
   /**
-   * Send a message directly, bypassing draft approval.
-   * Used by DraftManager after a draft is approved, and by agent mode.
+   * Send directly, bypassing draft approval. Called by DraftManager after approval
+   * and by agent mode.
    */
   async sendDirect(message: OutgoingMessage): Promise<void> {
-    if (this.imessageMode === "photon") {
-      await this.sendPhoton(message);
-    } else if (this.imessageMode === "bluebubbles") {
-      await this.sendBlueBubbles(message);
-    } else {
-      await this.sendChatDb(message);
+    if (!this.imsg) {
+      throw new Error("imsg adapter not started");
     }
-  }
-
-  private async sendPhoton(message: OutgoingMessage): Promise<void> {
-    if (!this.photonAdapter) {
-      throw new Error("Photon adapter not initialized");
-    }
-    await this.photonAdapter.sendToContact(message.channelId, message.content);
-  }
-
-  private async sendChatDb(message: OutgoingMessage): Promise<void> {
-    const meta = this.chatMeta.get(message.channelId);
-    if (!meta) {
-      throw new Error(
-        `No cached chat metadata for ${message.channelId} -- cannot send. The chat must have an incoming message first.`,
-      );
-    }
-
-    const target = meta.chatStyle === STYLE_GROUP ? meta.chatGuid : meta.handleIdentifier;
 
     const chunks = chunk(message.content);
     for (const text of chunks) {
-      await sendIMessage(target, text);
+      await this.imsg.sendText(message.channelId, text);
     }
   }
 
-  private async sendBlueBubbles(message: OutgoingMessage): Promise<void> {
-    if (!this.bbAdapter) {
-      console.warn("[imessage-adapter] BlueBubbles adapter not initialized");
-      return;
-    }
-
-    // Resolve chat GUID -- BlueBubbles needs the full GUID
-    let chatGuid = this.bbChatGuids.get(message.channelId);
-    if (!chatGuid) {
-      // For 1:1 chats, construct the GUID from the handle
-      chatGuid = `iMessage;-;${message.channelId}`;
-    }
-
-    try {
-      await this.bbAdapter.sendMessage(chatGuid, message.content);
-    } catch (err) {
-      console.error("[imessage-adapter] BlueBubbles send failed:", err);
-    }
+  /** Send a standard tapback reaction. */
+  async react(
+    chatId: string,
+    reaction: "love" | "like" | "dislike" | "laugh" | "emphasis" | "question",
+  ): Promise<void> {
+    if (!this.imsg) throw new Error("imsg adapter not started");
+    await this.imsg.react(chatId, reaction);
   }
 
-  /** Check if a handle identifier matches any owner identity. */
-  private isOwner(handleIdentifier: string): boolean {
-    if (this.ownerIdentities.size === 0) return false;
-    // Direct match
-    if (this.ownerIdentities.has(handleIdentifier)) return true;
-    // Normalize: strip spaces/dashes from phone, lowercase email
-    const normalized = handleIdentifier.replace(/[\s-]/g, "").toLowerCase();
-    for (const identity of this.ownerIdentities) {
-      if (identity.replace(/[\s-]/g, "").toLowerCase() === normalized) return true;
-    }
-    return false;
+  /** Send a file attachment. */
+  async sendFile(handle: string, filePath: string): Promise<void> {
+    if (!this.imsg) throw new Error("imsg adapter not started");
+    await this.imsg.sendFile(handle, filePath);
+  }
+
+  /** Show typing indicator (advanced mode only). */
+  async showTyping(handle: string, durationSec = 5): Promise<void> {
+    if (!this.imsg) throw new Error("imsg adapter not started");
+    await this.imsg.typing(handle, durationSec);
+  }
+
+  /** Edit a sent message (advanced mode only). */
+  async editMessage(messageGuid: string, newText: string): Promise<void> {
+    if (!this.imsg) throw new Error("imsg adapter not started");
+    await this.imsg.editMessage(messageGuid, newText);
+  }
+
+  /** Unsend a message (advanced mode only). */
+  async unsendMessage(messageGuid: string): Promise<void> {
+    if (!this.imsg) throw new Error("imsg adapter not started");
+    await this.imsg.unsendMessage(messageGuid);
+  }
+
+  /** Send a custom emoji tapback (advanced mode only). */
+  async customTapback(messageGuid: string, emoji: string): Promise<void> {
+    if (!this.imsg) throw new Error("imsg adapter not started");
+    await this.imsg.customTapback(messageGuid, emoji);
+  }
+
+  private handleIncoming(msg: IncomingMessage): void {
+    // Cache context so send() can enrich drafts with sender info / original message
+    const prevCtx = this.lastIncomingContext.get(msg.channelId);
+    const senderName = (msg.metadata?.senderName as string) ?? msg.userId;
+    const prevOriginal =
+      prevCtx?.senderName === senderName ? (prevCtx.originalMessage as string) : "";
+    this.lastIncomingContext.set(msg.channelId, {
+      senderName,
+      messageType: msg.metadata?.messageType ?? "dm",
+      originalMessage: prevOriginal ? `${prevOriginal}\n${msg.content}` : msg.content,
+    });
+
+    this.onMessage(msg);
   }
 }
