@@ -118,42 +118,28 @@ class Nomos < Formula
     # The launchctl restart below is what actually swaps the running binary.
     plist_path.write(plist_content) unless plist_path.exist?
 
-    # (Re)load the LaunchAgent and force-restart it.
-    # Upgrades are tricky: the old plist's ProgramArguments points at a path
-    # in the old Cellar (e.g. /opt/homebrew/Cellar/nomos/0.1.37/...) which gets
-    # deleted by `brew cleanup`. The old daemon process keeps running against
-    # files that no longer exist, so the Settings UI fails with "ENOENT" until
-    # the user manually restarts.
+    # Restart the daemon so it picks up the new binary.
     #
-    # Sequence:
-    # 1. Kill any process from the old plist (by label, in case its file is gone)
-    # 2. Bootout the old plist file path (if still loaded)
-    # 3. Bootstrap the new plist
-    # 4. Kickstart -k to force a fresh process from the new plist
+    # The plist's ProgramArguments points at #{opt_bin}/nomos -- an opt
+    # symlink Homebrew updates atomically to the current Cellar. The
+    # plist itself never needs to change between versions.
+    #
+    # Brew's post_install sandbox blocks `launchctl bootstrap` on the
+    # GUI session, so we can't bootout/bootstrap from here. Instead we
+    # just kill the running daemon; launchd's KeepAlive=true respawns
+    # it from the (now updated) opt symlink. This works on both fresh
+    # installs (after we bootstrap once below) and upgrades.
     uid = Process.uid
     label = "com.projectnomos.daemon"
     domain = "gui/#{uid}"
 
-    # Use quiet_system: Homebrew's Formula#system raises on non-zero exit,
-    # and these launchctl commands routinely exit non-zero (killing a dead
-    # process, booting out an unloaded plist, etc.). quiet_system swallows
-    # both the exit code and the output, so the chain always runs to step 4.
-
-    # 1. Forcibly kill the existing daemon (matches by label, not file path).
-    quiet_system "launchctl", "kill", "TERM", "#{domain}/#{label}"
-    sleep 1
-    quiet_system "launchctl", "kill", "KILL", "#{domain}/#{label}"
-
-    # 2. Unload the old plist (file path) if still loaded.
-    quiet_system "launchctl", "bootout", domain, plist_path.to_s
-    # Also try unloading by label in case the file path differs.
-    quiet_system "launchctl", "bootout", "#{domain}/#{label}"
-
-    # 3. Load the new plist.
+    # Ensure the agent is loaded. On fresh install bootstrap succeeds;
+    # on upgrade it errors "service already loaded" which we ignore.
     quiet_system "launchctl", "bootstrap", domain, plist_path.to_s
 
-    # 4. Force-restart so the daemon spawns fresh from the new plist's paths.
-    quiet_system "launchctl", "kickstart", "-k", "#{domain}/#{label}"
+    # Kill the running daemon (if any) so KeepAlive respawns it from
+    # the updated opt_bin symlink. quiet_system tolerates "not found".
+    quiet_system "launchctl", "kill", "KILL", "#{domain}/#{label}"
   end
 
   def caveats
