@@ -13,11 +13,16 @@ class Nomos < Formula
   end
 
   depends_on "node@22"
-  # iMessage integration CLI -- read/watch/send via chat.db + AppleScript.
-  # Auto-taps steipete/tap. Optional at runtime (the imessage adapter only
-  # starts when the user enables it in Settings), but bundling here makes
-  # `brew install nomos` a one-step install for the common case.
-  depends_on "steipete/tap/imsg"
+  depends_on macos: :sonoma # for bundled imsg binary (read/watch/send iMessage)
+
+  # iMessage integration CLI. We bundle the pre-built binary directly from
+  # openclaw's releases instead of `depends_on "steipete/tap/imsg"` because
+  # cross-tap deps don't reliably auto-tap on `brew install`, which forced
+  # a manual `brew tap steipete/tap` step. Resource keeps it one command.
+  resource "imsg" do
+    url "https://github.com/openclaw/imsg/releases/download/v0.8.2/imsg-macos.zip"
+    sha256 "d0d749934599ed2568a656c1d7f26d9ebc7b63aaada20c224277479b9c5b8bf8"
+  end
 
   # Native Node.js addons (.node files) must not be relinked by Homebrew
   skip_clean "libexec"
@@ -48,6 +53,18 @@ class Nomos < Formula
     # Create wrapper script
     (bin/"nomos").write_env_script libexec/"dist/index.js",
       PATH: "#{Formula["node@22"].opt_bin}:$PATH"
+
+    # Install the bundled imsg binary + helper dylib + bundles to libexec
+    # and expose `imsg` on PATH. Mirrors steipete/homebrew-tap's formula
+    # so behavior matches `brew install steipete/tap/imsg`.
+    resource("imsg").stage do
+      (libexec/"imsg-cli").install "imsg"
+      (libexec/"imsg-cli").install "imsg-bridge-helper.dylib" if File.exist?("imsg-bridge-helper.dylib")
+      Dir["*.bundle"].each do |bundle|
+        (libexec/"imsg-cli").install bundle
+      end
+    end
+    bin.write_exec_script libexec/"imsg-cli/imsg"
   end
 
   def post_install
@@ -155,10 +172,10 @@ class Nomos < Formula
         - Channel integrations (Slack, Discord, iMessage, etc.)
         - Personality and skills
 
-      iMessage integration uses `imsg` (auto-installed as a dependency).
-      If `brew upgrade` reports a missing tap for `steipete/tap/imsg`, run:
-        brew tap steipete/tap
-      ...then retry the upgrade.
+      iMessage integration uses the bundled `imsg` CLI. To enable iMessage,
+      grant Full Disk Access + Automation permission to your terminal:
+        System Settings > Privacy & Security > Full Disk Access
+        System Settings > Privacy & Security > Automation
 
       Service management:
         nomos service status         # show daemon + service state
