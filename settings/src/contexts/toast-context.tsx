@@ -27,7 +27,12 @@ export function ToastProvider({ children }: { children: ReactNode }) {
 
   const addToast = useCallback(
     (message: string, type: ToastType) => {
-      const id = crypto.randomUUID();
+      // crypto.randomUUID is only available in secure contexts (HTTPS/localhost);
+      // fall back when accessed via LAN IP or .local hostname over HTTP.
+      const id =
+        typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+          ? crypto.randomUUID()
+          : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
       setToasts((prev) => [...prev, { id, message, type }]);
       setTimeout(() => removeToast(id), 4000);
     },
