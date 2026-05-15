@@ -131,8 +131,18 @@ export class AgentRuntime {
   async initialize(): Promise<void> {
     if (this.initialized) return;
 
-    // Run DB migrations
-    await runMigrations();
+    // Run DB migrations. On a fresh install the database doesn't exist yet,
+    // so we degrade gracefully — the Settings UI's setup wizard creates it
+    // on first run. Anything that touches the DB at runtime will surface
+    // its own error if the DB is still missing.
+    try {
+      await runMigrations();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn(
+        `[agent-runtime] DB migrations skipped (${msg}). Continuing without DB so the setup wizard can configure it.`,
+      );
+    }
 
     // Load config
     this.config = loadEnvConfig();

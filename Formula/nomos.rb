@@ -84,86 +84,27 @@ class Nomos < Formula
     # mkdir under arbitrary HOME paths. The daemon creates them on startup,
     # and launchd auto-creates parent dirs for the plist's log redirection.
 
-    # Auto-install + start a user LaunchAgent so the Settings UI is immediately
-    # accessible. We can't use `brew services` from within post_install (it
-    # deadlocks on brew's own lockfile), so write the plist directly.
-    plist_dir = Pathname.new("#{Dir.home}/Library/LaunchAgents")
-    plist_dir.mkpath
-    plist_path = plist_dir/"com.projectnomos.daemon.plist"
-    plist_content = <<~PLIST
-      <?xml version="1.0" encoding="UTF-8"?>
-      <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-      <plist version="1.0">
-      <dict>
-        <key>Label</key>
-        <string>com.projectnomos.daemon</string>
-        <key>ProgramArguments</key>
-        <array>
-          <string>#{opt_bin}/nomos</string>
-          <string>daemon</string>
-          <string>run</string>
-        </array>
-        <key>EnvironmentVariables</key>
-        <dict>
-          <key>HOME</key>
-          <string>#{Dir.home}</string>
-          <key>PATH</key>
-          <string>#{Formula["node@22"].opt_bin}:#{HOMEBREW_PREFIX}/bin:/usr/local/bin:/usr/bin:/bin</string>
-          <key>DAEMON_WITH_SETTINGS</key>
-          <string>true</string>
-          <key>SETTINGS_PORT</key>
-          <string>3456</string>
-        </dict>
-        <key>RunAtLoad</key>
-        <true/>
-        <key>KeepAlive</key>
-        <true/>
-        <key>StandardOutPath</key>
-        <string>#{Dir.home}/.nomos/logs/daemon.log</string>
-        <key>StandardErrorPath</key>
-        <string>#{Dir.home}/.nomos/logs/daemon.log</string>
-        <key>WorkingDirectory</key>
-        <string>#{Dir.home}</string>
-        <key>ProcessType</key>
-        <string>Background</string>
-      </dict>
-      </plist>
-    PLIST
-    # Only write the plist on first install. On upgrades, brew's sandbox
-    # denies file-write-data and unlink on ~/Library/LaunchAgents, so we
-    # can't touch the file. That's fine: ProgramArguments points to
-    # `#{opt_bin}/nomos` (an opt symlink Homebrew updates automatically),
-    # so the existing plist still points at the new version after upgrade.
-    # The launchctl restart below is what actually swaps the running binary.
-    plist_path.write(plist_content) unless plist_path.exist?
-
-    # Restart the daemon so it picks up the new binary.
-    #
-    # The plist's ProgramArguments points at #{opt_bin}/nomos -- an opt
-    # symlink Homebrew updates atomically to the current Cellar. The
-    # plist itself never needs to change between versions.
-    #
-    # Brew's post_install sandbox blocks `launchctl bootstrap` on the
-    # GUI session, so we can't bootout/bootstrap from here. Instead we
-    # just kill the running daemon; launchd's KeepAlive=true respawns
-    # it from the (now updated) opt symlink. This works on both fresh
-    # installs (after we bootstrap once below) and upgrades.
+    # We intentionally do NOT write the LaunchAgent plist here. Brew's
+    # post_install sandbox denies file writes to ~/Library/LaunchAgents,
+    # so the user installs the service themselves with `nomos service
+    # install`. On upgrades, the existing plist already points at
+    # #{opt_bin}/nomos -- an opt symlink Homebrew refreshes -- and the
+    # running daemon picks up the new binary on next restart. We just
+    # try to kill it; launchd's KeepAlive respawns from the new path.
     uid = Process.uid
     label = "com.projectnomos.daemon"
     domain = "gui/#{uid}"
-
-    # Ensure the agent is loaded. On fresh install bootstrap succeeds;
-    # on upgrade it errors "service already loaded" which we ignore.
-    quiet_system "launchctl", "bootstrap", domain, plist_path.to_s
-
-    # Kill the running daemon (if any) so KeepAlive respawns it from
-    # the updated opt_bin symlink. quiet_system tolerates "not found".
     quiet_system "launchctl", "kill", "KILL", "#{domain}/#{label}"
   end
 
   def caveats
     <<~EOS
-      Nomos is now running in the background. Open the Settings UI to finish setup:
+      To start Nomos, run:
+
+        nomos service install
+
+      This installs a user LaunchAgent (~/Library/LaunchAgents) and starts
+      the daemon. Then open the Settings UI to finish setup:
 
         http://localhost:3456
 

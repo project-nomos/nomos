@@ -15,7 +15,11 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: false, error: "DATABASE_URL is required" }, { status: 400 });
   }
 
-  // Test connection
+  // Test connection. If the target database doesn't exist yet (Postgres
+  // error 3D000) we try to create it by connecting to the cluster-default
+  // "postgres" database and issuing `CREATE DATABASE`. On a fresh nomos
+  // install this is the common case — the user has Postgres running but
+  // no `nomos` database yet.
   let sql: postgres.Sql | null = null;
   try {
     sql = postgres(databaseUrl, {
@@ -27,13 +31,61 @@ export async function POST(request: Request) {
 
     await sql`SELECT 1`;
   } catch (err) {
-    try {
-      await sql?.end();
-    } catch {
-      /* ignore */
+    const pgErr = err as { code?: string };
+    if (pgErr?.code === "3D000") {
+      try {
+        await sql?.end();
+      } catch {
+        /* ignore */
+      }
+      try {
+        const parsed = new URL(databaseUrl);
+        const targetDb = parsed.pathname.replace(/^\//, "");
+        if (!targetDb || !/^[a-zA-Z_][\w]*$/.test(targetDb)) {
+          throw new Error(`Refusing to auto-create database with unsafe name: ${targetDb}`);
+        }
+        parsed.pathname = "/postgres";
+        const admin = postgres(parsed.toString(), {
+          max: 1,
+          connect_timeout: 10,
+          idle_timeout: 5,
+          onnotice: () => {},
+        });
+        try {
+          await admin.unsafe(`CREATE DATABASE "${targetDb}"`);
+        } finally {
+          await admin.end().catch(() => {});
+        }
+        // Reconnect to the now-existing database
+        sql = postgres(databaseUrl, {
+          max: 1,
+          connect_timeout: 10,
+          idle_timeout: 5,
+          onnotice: () => {},
+        });
+        await sql`SELECT 1`;
+      } catch (createErr) {
+        try {
+          await sql?.end();
+        } catch {
+          /* ignore */
+        }
+        const message =
+          createErr instanceof Error ? createErr.message : "Failed to auto-create database";
+        return NextResponse.json(
+          { ok: false, error: `Database does not exist and auto-create failed: ${message}` },
+          { status: 400 },
+        );
+      }
+    } else {
+      try {
+        await sql?.end();
+      } catch {
+        /* ignore */
+      }
+      const message = err instanceof Error ? err.message : "Connection failed";
+      return NextResponse.json({ ok: false, error: message }, { status: 400 });
     }
-    const message = err instanceof Error ? err.message : "Connection failed";
-    return NextResponse.json({ ok: false, error: message }, { status: 400 });
   }
 
   // Check for pgvector extension (required)
@@ -85,6 +137,18 @@ export async function POST(request: Request) {
 
   // Set process.env so the shared getDb() picks it up for subsequent requests
   process.env.DATABASE_URL = databaseUrl;
+
+  // Signal the parent daemon (if we're a child of it) to re-initialize.
+  // On fresh installs the daemon boots in "setup-only" mode when the DB
+  // is missing. After the wizard creates the DB, we ask the parent to
+  // exit so launchd's KeepAlive respawns it and the full runtime comes up.
+  if (process.ppid && process.ppid !== 1) {
+    try {
+      process.kill(process.ppid, "SIGTERM");
+    } catch {
+      // Parent may not exist, may not be our daemon, or we lack perms — non-fatal.
+    }
+  }
 
   return NextResponse.json({
     ok: true,

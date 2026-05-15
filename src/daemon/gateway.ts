@@ -134,8 +134,47 @@ export class Gateway {
     // Install signal handlers for graceful shutdown
     installSignalHandlers(() => this.stop());
 
-    // Initialize agent runtime (loads config, runs migrations)
-    await this.runtime.initialize();
+    // Start the Settings UI as early as possible so the setup wizard is
+    // reachable even if the rest of the boot fails (e.g. the DB doesn't
+    // exist yet on a fresh install). The wizard creates the DB and writes
+    // env vars; the next daemon restart picks them up and finishes booting.
+    if (this.options.withSettings) {
+      try {
+        await this.startSettingsServer();
+      } catch (err) {
+        console.warn(
+          "[gateway] Settings UI failed to start early:",
+          err instanceof Error ? err.message : err,
+        );
+      }
+    }
+
+    // Initialize agent runtime (loads config, runs migrations). If the DB
+    // is unreachable (e.g. database does not exist yet), log a warning but
+    // keep the daemon alive — the Settings UI we just started gives the
+    // user a place to configure it.
+    let runtimeReady = true;
+    try {
+      await this.runtime.initialize();
+    } catch (err) {
+      runtimeReady = false;
+      console.warn(
+        "[gateway] Agent runtime failed to initialize:",
+        err instanceof Error ? err.message : err,
+      );
+      console.warn(
+        "[gateway] Daemon is running in setup-only mode. Finish setup at http://localhost:" +
+          (this.options.settingsPort ?? 3456),
+      );
+    }
+
+    // If the runtime didn't come up, skip the rest of the boot. We keep
+    // the Settings UI + signal handlers alive so the user can configure
+    // and the daemon restart picks it up.
+    if (!runtimeReady) {
+      console.log("[gateway] Daemon is running (setup-only)");
+      return;
+    }
 
     // Sync config files (SOUL.md, TOOLS.md, IDENTITY.md, skills) disk <-> DB
     try {
@@ -512,6 +551,9 @@ export class Gateway {
 
   /** Start the Settings UI (Next.js) as a managed child process. */
   private async startSettingsServer(): Promise<void> {
+    // Idempotent — start() may call this twice (early, then again after runtime init).
+    if (this.settingsProcess) return;
+
     const settingsDir = this.findSettingsDir();
     if (!settingsDir) {
       console.warn("[gateway] Settings directory not found — skipping Settings UI");
