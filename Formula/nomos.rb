@@ -54,17 +54,20 @@ class Nomos < Formula
     (bin/"nomos").write_env_script libexec/"dist/index.js",
       PATH: "#{Formula["node@22"].opt_bin}:$PATH"
 
-    # Install the bundled imsg binary + helper dylib + bundles to libexec
-    # and expose `imsg` on PATH. Mirrors steipete/homebrew-tap's formula
-    # so behavior matches `brew install steipete/tap/imsg`.
+    # Install the bundled imsg binary + helper dylib + bundles, and expose
+    # `imsg` on PATH. Mirrors steipete/homebrew-tap so behavior matches
+    # `brew install steipete/tap/imsg`.
+    imsg_dir = libexec/"imsg"
+    imsg_dir.mkpath
     resource("imsg").stage do
-      (libexec/"imsg-cli").install "imsg"
-      (libexec/"imsg-cli").install "imsg-bridge-helper.dylib" if File.exist?("imsg-bridge-helper.dylib")
-      Dir["*.bundle"].each do |bundle|
-        (libexec/"imsg-cli").install bundle
-      end
+      staged = Pathname.pwd
+      cp staged/"imsg", imsg_dir/"imsg"
+      chmod 0755, imsg_dir/"imsg"
+      helper = staged/"imsg-bridge-helper.dylib"
+      cp helper, imsg_dir/"imsg-bridge-helper.dylib" if helper.exist?
+      Dir[staged/"*.bundle"].each { |bundle| cp_r bundle, imsg_dir }
     end
-    bin.write_exec_script libexec/"imsg-cli/imsg"
+    bin.write_exec_script imsg_dir/"imsg"
   end
 
   def post_install
