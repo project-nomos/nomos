@@ -77,10 +77,9 @@ class Nomos < Formula
       staging.delete
     end
 
-    # Ensure directories exist
-    mkdir_p "#{Dir.home}/.nomos"
-    mkdir_p "#{Dir.home}/.nomos/logs"
-    mkdir_p var/"log/nomos"
+    # Don't pre-create ~/.nomos/* here: brew's post_install sandbox denies
+    # mkdir under arbitrary HOME paths. The daemon creates them on startup,
+    # and launchd auto-creates parent dirs for the plist's log redirection.
 
     # Auto-install + start a user LaunchAgent so the Settings UI is immediately
     # accessible. We can't use `brew services` from within post_install (it
