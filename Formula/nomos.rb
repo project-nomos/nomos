@@ -110,11 +110,13 @@ class Nomos < Formula
       </dict>
       </plist>
     PLIST
-    # Use File.write instead of plist_path.write: Homebrew monkey-patches
-    # Pathname#write to refuse overwriting, and Pathname#delete fails with
-    # EPERM on ~/Library/LaunchAgents under brew's sandbox. File.write
-    # bypasses both restrictions and overwrites the file atomically.
-    File.write(plist_path.to_s, plist_content)
+    # Only write the plist on first install. On upgrades, brew's sandbox
+    # denies file-write-data and unlink on ~/Library/LaunchAgents, so we
+    # can't touch the file. That's fine: ProgramArguments points to
+    # `#{opt_bin}/nomos` (an opt symlink Homebrew updates automatically),
+    # so the existing plist still points at the new version after upgrade.
+    # The launchctl restart below is what actually swaps the running binary.
+    plist_path.write(plist_content) unless plist_path.exist?
 
     # (Re)load the LaunchAgent and force-restart it.
     # Upgrades are tricky: the old plist's ProgramArguments points at a path
