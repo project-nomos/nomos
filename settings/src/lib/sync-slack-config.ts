@@ -8,6 +8,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import { decryptSecret } from "@/lib/encryption";
 import os from "node:os";
 import { getDb } from "./db";
 
@@ -39,12 +40,10 @@ export async function syncSlackConfigToFile(): Promise<void> {
     const meta = row.metadata as Record<string, unknown>;
     let secrets: Record<string, string>;
     try {
-      secrets =
-        typeof row.secrets === "string"
-          ? (JSON.parse(row.secrets) as Record<string, string>)
-          : (row.secrets as Record<string, string>);
+      const raw = typeof row.secrets === "string" ? row.secrets : JSON.stringify(row.secrets ?? {});
+      const decrypted = decryptSecret(raw);
+      secrets = JSON.parse(decrypted) as Record<string, string>;
     } catch {
-      // Secrets are encrypted — skip this workspace in the config file
       continue;
     }
 

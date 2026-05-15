@@ -1,5 +1,8 @@
 import { NextResponse } from "next/server";
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
+import os from "node:os";
 import { readEnv, writeEnv, maskToken } from "@/lib/env";
 import { validateOrigin } from "@/lib/validate-request";
 import { getDb } from "@/lib/db";
@@ -284,11 +287,29 @@ async function readDbValue(
   return undefined;
 }
 
-/** Load the encryption key from env or .env file */
+/** Load the encryption key. Priority: env -> .env file -> ~/.nomos/encryption.key.
+ * The last fallback matches the daemon's `ensureEncryptionKey()` so the
+ * Settings UI encrypts with the same key whether it runs as a daemon
+ * child (env set) or standalone in dev (only the keyfile is available).
+ */
 function getEncryptionKey(): string | undefined {
   if (process.env.ENCRYPTION_KEY) return process.env.ENCRYPTION_KEY;
   const env = readEnv();
-  return env.ENCRYPTION_KEY || undefined;
+  if (env.ENCRYPTION_KEY) return env.ENCRYPTION_KEY;
+  try {
+    const keyFile = path.join(os.homedir(), ".nomos", "encryption.key");
+    if (fs.existsSync(keyFile)) {
+      const key = fs.readFileSync(keyFile, "utf-8").trim();
+      if (key.length === 64) {
+        // Cache in process.env so subsequent lookups are cheap.
+        process.env.ENCRYPTION_KEY = key;
+        return key;
+      }
+    }
+  } catch {
+    // ignore — fall through to undefined
+  }
+  return undefined;
 }
 
 export async function GET() {

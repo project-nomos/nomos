@@ -11,6 +11,8 @@ interface TokenInputProps {
   helperText?: React.ReactNode;
   /** Show a "Configured" badge next to the label */
   configured?: boolean;
+  /** Disable input + buttons (e.g. when an alternative auth method is active) */
+  disabled?: boolean;
 }
 
 export function TokenInput({
@@ -20,6 +22,7 @@ export function TokenInput({
   placeholder,
   helperText,
   configured,
+  disabled,
 }: TokenInputProps) {
   const [visible, setVisible] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -42,18 +45,20 @@ export function TokenInput({
           </span>
         )}
       </label>
-      <div className="flex gap-2">
+      <div className={`flex gap-2 ${disabled ? "opacity-40 pointer-events-none" : ""}`}>
         <div className="relative flex-1">
           <input
             type={visible ? "text" : "password"}
             value={value}
             onChange={(e) => onChange(e.target.value)}
             placeholder={placeholder}
-            className="w-full rounded-lg border border-surface1 bg-surface0 px-3 py-2 text-sm text-text placeholder:text-overlay0 focus:outline-none focus:border-mauve focus:ring-1 focus:ring-mauve/30 font-mono"
+            disabled={disabled}
+            className="w-full rounded-lg border border-surface1 bg-surface0 px-3 py-2 text-sm text-text placeholder:text-overlay0 focus:outline-none focus:border-mauve focus:ring-1 focus:ring-mauve/30 font-mono disabled:cursor-not-allowed"
           />
           <button
             type="button"
             onClick={() => setVisible(!visible)}
+            disabled={disabled}
             className="absolute right-2 top-1/2 -translate-y-1/2 text-overlay0 hover:text-text transition-colors"
           >
             {visible ? <EyeOff size={14} /> : <Eye size={14} />}
@@ -62,7 +67,7 @@ export function TokenInput({
         <button
           type="button"
           onClick={handleCopy}
-          disabled={!value}
+          disabled={!value || disabled}
           className="px-2.5 rounded-lg border border-surface1 bg-surface0 text-overlay0 hover:text-text hover:border-surface2 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
         >
           {copied ? <Check size={14} className="text-green" /> : <Copy size={14} />}

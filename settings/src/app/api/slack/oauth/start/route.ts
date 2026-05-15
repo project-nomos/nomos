@@ -6,6 +6,7 @@ import { readConfig } from "@/lib/env";
 import { getDb } from "@/lib/db";
 import { syncSlackConfigToFile } from "@/lib/sync-slack-config";
 import { notifyDaemonReload } from "@/lib/notify-daemon";
+import { encryptSecret } from "@/lib/encryption";
 
 // Track active OAuth server so we can clean up
 let activeServer: https.Server | null = null;
@@ -176,7 +177,7 @@ export async function POST() {
       // Store in DB
       const sql = getDb();
       const name = `slack-ws:${teamId}`;
-      const secrets = JSON.stringify({ access_token: accessToken });
+      const secrets = encryptSecret(JSON.stringify({ access_token: accessToken }));
       const metadataObj = {
         team_name: teamName,
         user_id: userId,

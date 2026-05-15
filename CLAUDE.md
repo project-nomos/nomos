@@ -42,6 +42,16 @@ When the service is installed, it runs the Homebrew-installed `nomos` binary. Fo
 
 Logs: `~/.nomos/logs/daemon.log`
 
+### Dev-mode iMessage prerequisite
+
+`brew install nomos` bundles the `imsg` binary via the formula's `resource` block, but `pnpm daemon:dev` runs against the source tree — there's no formula in play, so `imsg` must be on PATH separately for the iMessage adapter to start:
+
+```bash
+brew install steipete/tap/imsg
+```
+
+Without this the daemon logs `[channel-manager] Failed to start imessage: imsg CLI is not installed` on boot. Non-fatal — other channels still come up.
+
 Run a single test:
 
 ```bash

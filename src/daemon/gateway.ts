@@ -584,7 +584,7 @@ export class Gateway {
       child = spawn(process.execPath, [standaloneServer], {
         cwd: settingsDir,
         stdio: ["ignore", "pipe", "pipe"],
-        env: { ...process.env, PORT: port, HOSTNAME: "0.0.0.0" },
+        env: { ...process.env, PORT: port, HOSTNAME: "0.0.0.0", NOMOS_PARENT_DAEMON: "1" },
       });
     } else {
       // Fallback: find the next binary
@@ -600,7 +600,7 @@ export class Gateway {
       child = spawn(nextBin, ["start", "--port", port], {
         cwd: settingsDir,
         stdio: ["ignore", "pipe", "pipe"],
-        env: { ...process.env, PORT: port },
+        env: { ...process.env, PORT: port, NOMOS_PARENT_DAEMON: "1" },
       });
     }
 

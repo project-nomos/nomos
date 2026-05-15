@@ -572,7 +572,9 @@ export default function AssistantSettingsPage() {
           <div className="mt-4 pt-4 border-t border-surface0">
             <div className="flex items-center justify-between mb-2">
               <label className="block text-sm font-medium text-subtext1">API Key</label>
-              {hasApiKey ? (
+              {useSubscription ? (
+                <span className="text-xs text-mauve font-medium">Using subscription</span>
+              ) : hasApiKey ? (
                 <span className="text-xs text-green font-medium">Key configured</span>
               ) : (
                 <span className="text-xs text-red font-medium">Key required</span>
@@ -587,6 +589,7 @@ export default function AssistantSettingsPage() {
               }}
               placeholder={hasApiKey ? "Configured -- enter new value to replace" : "sk-ant-..."}
               helperText="Your Anthropic API key"
+              disabled={useSubscription}
             />
             <div className="mt-4 flex items-center justify-between rounded-lg border border-surface0 bg-base px-3 py-2.5">
               <div>

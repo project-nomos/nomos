@@ -4,6 +4,7 @@ import { getDb } from "@/lib/db";
 import { validateOrigin } from "@/lib/validate-request";
 import { syncSlackConfigToFile } from "@/lib/sync-slack-config";
 import { notifyDaemonReload } from "@/lib/notify-daemon";
+import { encryptSecret, decryptSecret } from "@/lib/encryption";
 
 export async function GET() {
   try {
@@ -82,7 +83,7 @@ export async function POST(request: Request) {
   try {
     const sql = getDb();
     const name = `slack-ws:${teamId}`;
-    const secrets = JSON.stringify({ access_token: token });
+    const secrets = encryptSecret(JSON.stringify({ access_token: token }));
     const metadataObj = { team_name: teamName, user_id: userId, scopes: "" };
 
     const [row] = await sql`
@@ -139,10 +140,9 @@ export async function DELETE(request: Request) {
 
     if (ws?.secrets) {
       try {
-        const raw = ws.secrets as string;
-        // Only attempt revocation if secrets look like JSON (not encrypted)
-        if (raw.startsWith("{")) {
-          const secrets = JSON.parse(raw);
+        const decrypted = decryptSecret(ws.secrets as string);
+        if (decrypted.startsWith("{")) {
+          const secrets = JSON.parse(decrypted);
           if (secrets.access_token && !secrets.access_token.startsWith("xoxc-")) {
             // Only revoke xoxp- tokens; xoxc- browser tokens can't be revoked via API
             const revokeClient = new WebClient(secrets.access_token);
@@ -150,7 +150,7 @@ export async function DELETE(request: Request) {
           }
         }
       } catch {
-        // Token may already be invalid, encrypted, or not parseable
+        // Token may already be invalid or not parseable
       }
     }
 

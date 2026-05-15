@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import { validateOrigin } from "@/lib/validate-request";
+import { decryptSecret } from "@/lib/encryption";
 
 export async function POST(request: Request) {
   const forbidden = validateOrigin(request);
@@ -28,7 +29,7 @@ export async function POST(request: Request) {
 
     let accessToken: string | undefined;
     try {
-      const secrets = JSON.parse(ws.secrets as string);
+      const secrets = JSON.parse(decryptSecret(ws.secrets as string));
       accessToken = secrets.access_token;
     } catch {
       return NextResponse.json({

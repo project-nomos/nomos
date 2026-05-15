@@ -142,11 +142,14 @@ export async function POST(request: Request) {
   // On fresh installs the daemon boots in "setup-only" mode when the DB
   // is missing. After the wizard creates the DB, we ask the parent to
   // exit so launchd's KeepAlive respawns it and the full runtime comes up.
-  if (process.ppid && process.ppid !== 1) {
+  // NOMOS_PARENT_DAEMON is set by the daemon when it spawns Settings UI,
+  // so we only signal when we're actually a daemon child (not pnpm/zsh
+  // in dev mode).
+  if (process.env.NOMOS_PARENT_DAEMON === "1" && process.ppid && process.ppid !== 1) {
     try {
       process.kill(process.ppid, "SIGTERM");
     } catch {
-      // Parent may not exist, may not be our daemon, or we lack perms — non-fatal.
+      // Parent may not exist or we lack perms — non-fatal.
     }
   }
 
