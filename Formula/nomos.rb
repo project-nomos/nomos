@@ -13,6 +13,11 @@ class Nomos < Formula
   end
 
   depends_on "node@22"
+  # iMessage integration CLI -- read/watch/send via chat.db + AppleScript.
+  # Auto-taps steipete/tap. Optional at runtime (the imessage adapter only
+  # starts when the user enables it in Settings), but bundling here makes
+  # `brew install nomos` a one-step install for the common case.
+  depends_on "steipete/tap/imsg"
 
   # Native Node.js addons (.node files) must not be relinked by Homebrew
   skip_clean "libexec"

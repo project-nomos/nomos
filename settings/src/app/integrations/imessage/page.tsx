@@ -170,9 +170,11 @@ export default function IMessageSettingsPage() {
               <span className="text-text">Not installed</span>
             </div>
             <div className="rounded-lg bg-base/50 border border-surface0 p-3">
-              <p className="text-xs text-subtext0 mb-2">Install with Homebrew:</p>
+              <p className="text-xs text-subtext0 mb-2">
+                imsg ships as a Homebrew dependency of nomos. Reinstall or repair with:
+              </p>
               <code className="block text-xs font-mono text-mauve">
-                brew install steipete/tap/imsg
+                brew reinstall steipete/tap/imsg
               </code>
             </div>
             <a

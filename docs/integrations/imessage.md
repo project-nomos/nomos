@@ -29,10 +29,14 @@ The integration has two configuration axes:
 
 ### 1. Install the `imsg` CLI
 
+`imsg` is auto-installed as a Homebrew dependency of nomos, so `brew install nomos`
+already installed it. Verify:
+
 ```bash
-brew install steipete/tap/imsg
 imsg --version
 ```
+
+(Standalone install if needed: `brew install steipete/tap/imsg`.)
 
 ### 2. Grant macOS permissions
 
