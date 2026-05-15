@@ -125,23 +125,27 @@ class Nomos < Formula
     uid = Process.uid
     label = "com.projectnomos.daemon"
     domain = "gui/#{uid}"
-    null_out = [:out, :err] => "/dev/null"
+
+    # Use quiet_system: Homebrew's Formula#system raises on non-zero exit,
+    # and these launchctl commands routinely exit non-zero (killing a dead
+    # process, booting out an unloaded plist, etc.). quiet_system swallows
+    # both the exit code and the output, so the chain always runs to step 4.
 
     # 1. Forcibly kill the existing daemon (matches by label, not file path).
-    system "launchctl", "kill", "TERM", "#{domain}/#{label}", null_out
+    quiet_system "launchctl", "kill", "TERM", "#{domain}/#{label}"
     sleep 1
-    system "launchctl", "kill", "KILL", "#{domain}/#{label}", null_out
+    quiet_system "launchctl", "kill", "KILL", "#{domain}/#{label}"
 
     # 2. Unload the old plist (file path) if still loaded.
-    system "launchctl", "bootout", domain, plist_path.to_s, null_out
+    quiet_system "launchctl", "bootout", domain, plist_path.to_s
     # Also try unloading by label in case the file path differs.
-    system "launchctl", "bootout", "#{domain}/#{label}", null_out
+    quiet_system "launchctl", "bootout", "#{domain}/#{label}"
 
     # 3. Load the new plist.
-    system "launchctl", "bootstrap", domain, plist_path.to_s, null_out
+    quiet_system "launchctl", "bootstrap", domain, plist_path.to_s
 
     # 4. Force-restart so the daemon spawns fresh from the new plist's paths.
-    system "launchctl", "kickstart", "-k", "#{domain}/#{label}"
+    quiet_system "launchctl", "kickstart", "-k", "#{domain}/#{label}"
   end
 
   def caveats
