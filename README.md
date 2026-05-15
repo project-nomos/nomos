@@ -668,7 +668,7 @@ Configuration is loaded with the following precedence: **Database > environment 
 | `DISCORD_BOT_TOKEN`       | Discord bot token                                                                | --        |
 | `TELEGRAM_BOT_TOKEN`      | Telegram bot token from @BotFather                                               | --        |
 | `WHATSAPP_ENABLED`        | Set to `true` to enable WhatsApp                                                 | --        |
-| `IMESSAGE_ENABLED`        | Set to `true` to enable Messages.app (requires `brew install steipete/tap/imsg`) | --        |
+| `IMESSAGE_ENABLED`        | Set to `true` to enable Messages.app (`imsg` CLI ships as a Homebrew dependency) | --        |
 | `IMESSAGE_FEATURE_MODE`   | `basic` (default, no setup) or `advanced` (requires SIP disabled)                | `basic`   |
 | `IMESSAGE_AGENT_MODE`     | `passive` (draft) or `agent` (direct)                                            | `passive` |
 | `IMESSAGE_OWNER_PHONE`    | Owner phone for agent mode                                                       | --        |
