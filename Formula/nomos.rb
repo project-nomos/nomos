@@ -20,8 +20,8 @@ class Nomos < Formula
   # cross-tap deps don't reliably auto-tap on `brew install`, which forced
   # a manual `brew tap steipete/tap` step. Resource keeps it one command.
   resource "imsg" do
-    url "https://github.com/project-nomos/nomos/releases/download/v0.1.46/nomos-0.1.46-homebrew.tar.gz"
-    sha256 "1cf870a1095289871ea3f5273bac7ce46b145ee7960d1a429180876895697bd1"
+    url "https://github.com/openclaw/imsg/releases/download/v0.8.2/imsg-macos.zip"
+    sha256 "d0d749934599ed2568a656c1d7f26d9ebc7b63aaada20c224277479b9c5b8bf8"
   end
 
   # Native Node.js addons (.node files) must not be relinked by Homebrew

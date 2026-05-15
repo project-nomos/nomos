@@ -199,8 +199,11 @@ jobs:
           # Point Homebrew formula at the self-contained release asset (includes node_modules)
           TARBALL_URL="https://github.com/${{ github.repository }}/releases/download/${RELEASE_VERSION}/nomos-${VERSION}-homebrew.tar.gz"
           SHA256=$(curl -sL "$TARBALL_URL" | sha256sum | cut -d' ' -f1)
-          sed -i "s|url \".*\"|url \"${TARBALL_URL}\"|" Formula/nomos.rb
-          sed -i "s|sha256 \".*\"|sha256 \"${SHA256}\"|" Formula/nomos.rb
+          # Only rewrite the top-level url/sha256 (those start with 2 spaces of indent).
+          # Resource blocks (e.g. `resource "imsg" do ... end`) have 4-space indent
+          # and must NOT be clobbered.
+          sed -i "s|^  url \".*\"|  url \"${TARBALL_URL}\"|" Formula/nomos.rb
+          sed -i "s|^  sha256 \".*\"|  sha256 \"${SHA256}\"|" Formula/nomos.rb
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Create pull request for formula update
