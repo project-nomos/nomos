@@ -10,7 +10,11 @@ interface DatabaseStepProps {
 const DOCKER_COMMAND =
   "docker run -d --name nomos-db \\\n  -e POSTGRES_USER=nomos -e POSTGRES_PASSWORD=nomos \\\n  -e POSTGRES_DB=nomos -p 5432:5432 \\\n  pgvector/pgvector:pg17";
 
-const DEFAULT_URL = "postgresql://nomos:nomos@localhost:5432/nomos";
+// No user/password by default — Postgres falls back to the OS user, which is
+// what local `brew install postgresql` and `initdb` configure out of the box.
+// Users running the suggested Docker container should change this to
+// postgresql://nomos:nomos@localhost:5432/nomos (matches POSTGRES_USER above).
+const DEFAULT_URL = "postgresql://localhost:5432/nomos";
 
 export function DatabaseStep({ onComplete }: DatabaseStepProps) {
   const [url, setUrl] = useState(DEFAULT_URL);
