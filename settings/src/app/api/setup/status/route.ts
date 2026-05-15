@@ -26,9 +26,19 @@ export async function GET() {
     // DB not connected
   }
 
-  // 2. Check API key — from DB or .env
-  const env = await readConfig(["ANTHROPIC_API_KEY", "CLAUDE_CODE_USE_VERTEX"], sql);
-  if (env.ANTHROPIC_API_KEY || env.CLAUDE_CODE_USE_VERTEX === "1") {
+  // 2. Check API provider — from DB or .env. Three valid configurations:
+  //    - ANTHROPIC_API_KEY set (direct API)
+  //    - CLAUDE_CODE_USE_VERTEX=1 (Vertex AI)
+  //    - NOMOS_USE_SUBSCRIPTION=true (Claude Max OAuth, no API key needed)
+  const env = await readConfig(
+    ["ANTHROPIC_API_KEY", "CLAUDE_CODE_USE_VERTEX", "NOMOS_USE_SUBSCRIPTION"],
+    sql,
+  );
+  if (
+    env.ANTHROPIC_API_KEY ||
+    env.CLAUDE_CODE_USE_VERTEX === "1" ||
+    env.NOMOS_USE_SUBSCRIPTION === "true"
+  ) {
     checks.apiKey = true;
   }
 
