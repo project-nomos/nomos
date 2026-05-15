@@ -110,10 +110,11 @@ class Nomos < Formula
       </dict>
       </plist>
     PLIST
-    # Pathname#write is monkey-patched by Homebrew to refuse overwriting, so
-    # delete any existing plist before writing the new one (upgrades hit this).
-    plist_path.delete if plist_path.exist?
-    plist_path.write(plist_content)
+    # Use File.write instead of plist_path.write: Homebrew monkey-patches
+    # Pathname#write to refuse overwriting, and Pathname#delete fails with
+    # EPERM on ~/Library/LaunchAgents under brew's sandbox. File.write
+    # bypasses both restrictions and overwrites the file atomically.
+    File.write(plist_path.to_s, plist_content)
 
     # (Re)load the LaunchAgent and force-restart it.
     # Upgrades are tricky: the old plist's ProgramArguments points at a path
@@ -165,6 +166,11 @@ class Nomos < Formula
         - API provider (Anthropic key, OpenRouter, Vertex AI, or Claude Max subscription)
         - Channel integrations (Slack, Discord, iMessage, etc.)
         - Personality and skills
+
+      iMessage integration uses `imsg` (auto-installed as a dependency).
+      If `brew upgrade` reports a missing tap for `steipete/tap/imsg`, run:
+        brew tap steipete/tap
+      ...then retry the upgrade.
 
       Service management:
         nomos service status         # show daemon + service state
