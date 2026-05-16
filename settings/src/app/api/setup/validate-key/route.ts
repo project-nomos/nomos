@@ -13,29 +13,51 @@ export async function POST(request: Request) {
   };
 
   if (body.provider === "anthropic-subscription") {
-    // Check if Claude Code is logged in (~/.claude/.credentials.json exists with valid OAuth)
+    // Validate the OAuth credentials file the SDK reads at runtime. We used
+    // to shell out to `claude auth status`, but that requires the Claude
+    // Code CLI to be installed on the machine running nomos — confusing for
+    // users who only have it locally. The credentials file is what the
+    // Anthropic SDK actually consumes, so checking it directly is more
+    // accurate AND removes a dependency.
     try {
-      const { execFile } = await import("node:child_process");
-      const { promisify } = await import("node:util");
-      const execFileAsync = promisify(execFile);
-      const { stdout } = await execFileAsync("claude", ["auth", "status"], { timeout: 5000 });
-      const data = JSON.parse(stdout);
-      if (data.loggedIn) {
+      const fs = await import("node:fs");
+      const os = await import("node:os");
+      const path = await import("node:path");
+      const credsPath = path.join(os.homedir(), ".claude", ".credentials.json");
+      if (!fs.existsSync(credsPath)) {
         return NextResponse.json({
-          valid: true,
-          warning: `Signed in as ${data.email ?? "unknown"} (${data.subscriptionType ?? "subscription"})`,
+          valid: false,
+          error:
+            "No Claude OAuth credentials found at ~/.claude/.credentials.json. Run `claude login` on this machine, or copy the file from a machine where you're already signed in.",
         });
       }
+      const raw = JSON.parse(fs.readFileSync(credsPath, "utf-8")) as {
+        claudeAiOauth?: {
+          accessToken?: string;
+          refreshToken?: string;
+          expiresAt?: number;
+          subscriptionType?: string;
+        };
+      };
+      const oauth = raw.claudeAiOauth;
+      if (!oauth?.accessToken || !oauth?.refreshToken) {
+        return NextResponse.json({
+          valid: false,
+          error:
+            "~/.claude/.credentials.json is present but missing OAuth tokens. Re-run `claude login`.",
+        });
+      }
+      const expiresAt = oauth.expiresAt ?? 0;
+      const expired = expiresAt > 0 && expiresAt < Date.now();
       return NextResponse.json({
-        valid: false,
-        error: "Not signed in to Claude. Run `claude login` in a terminal first.",
+        valid: true,
+        warning: expired
+          ? `Access token expired; SDK will refresh on first use (${oauth.subscriptionType ?? "subscription"}).`
+          : `Signed in via OAuth (${oauth.subscriptionType ?? "subscription"}).`,
       });
-    } catch {
-      return NextResponse.json({
-        valid: false,
-        error:
-          "Claude Code CLI not found. Install it (npm i -g @anthropic-ai/claude-code) and run `claude login`.",
-      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to read credentials";
+      return NextResponse.json({ valid: false, error: message });
     }
   }
 
