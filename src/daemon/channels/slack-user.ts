@@ -60,6 +60,9 @@ export class SlackUserAdapter implements ChannelAdapter {
 
   // All known user IDs for the owner across workspaces (loaded once on start)
   private ownUserIds = new Set<string>();
+  // Owner email derived from `users.info(self)` — used to recognize foreign
+  // workspace user IDs surfaced by Slack Connect DMs.
+  private ownerEmail: string | null = null;
 
   get platform(): string {
     return `slack-user:${this.teamId}`;
@@ -122,6 +125,22 @@ export class SlackUserAdapter implements ChannelAdapter {
       console.log(`[slack-user-adapter] Own user IDs: ${[...this.ownUserIds].join(", ")}`);
     } catch {
       // integrations not available
+    }
+
+    // Resolve the owner's email so we can match cross-workspace user IDs.
+    // Slack Connect DMs surface messages with the sender's home-workspace
+    // user ID, which won't appear in our static ownUserIds set; comparing
+    // by email lets us recognize them dynamically.
+    if (this.userId) {
+      try {
+        const info = await this.userClient.users.info({ user: this.userId });
+        const email = info.user?.profile?.email;
+        if (typeof email === "string" && email) {
+          this.ownerEmail = email.toLowerCase();
+        }
+      } catch {
+        // users.info may lack scope on the user token; non-fatal.
+      }
     }
 
     // Load default notification channel
@@ -439,6 +458,11 @@ export class SlackUserAdapter implements ChannelAdapter {
     channel: string;
   }): Promise<void> {
     const senderName = await this.lookupUserName(e.user!);
+    // lookupUserName may have just learned this is one of our own user IDs
+    // (Slack Connect surfaces foreign-workspace IDs). Don't draft against ourselves.
+    if (e.user && this.ownUserIds.has(e.user)) {
+      return;
+    }
     const wrappedContent = [
       `[Slack DM from ${senderName}]`,
       "",
@@ -538,6 +562,12 @@ export class SlackUserAdapter implements ChannelAdapter {
       if (!client) continue;
       try {
         const result = await (client as WebClient).users.info({ user: userId });
+        // If this user's email matches the owner's, they're us (Slack Connect
+        // surfaces the home-workspace user_id); remember so future drafting skips.
+        const email = result.user?.profile?.email?.toLowerCase();
+        if (this.ownerEmail && email && email === this.ownerEmail) {
+          this.ownUserIds.add(userId);
+        }
         const name = result.user?.real_name ?? result.user?.name ?? userId;
         if (name !== userId) {
           this.userNameCache.set(userId, name);
@@ -555,7 +585,10 @@ export class SlackUserAdapter implements ChannelAdapter {
       return name;
     }
 
-    return userId;
+    // Final fallback: friendlier than dumping a raw user_id at the user.
+    const label = `external Slack user (${userId})`;
+    this.userNameCache.set(userId, label);
+    return label;
   }
 
   /**

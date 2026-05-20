@@ -916,7 +916,7 @@ packages:
     engines: {node: '>=14'}
 
   '@project-nomos/cate-sdk@0.0.1':
-    resolution: {integrity: sha512-2yh4JwJgY7Pq70UfWMmP9oPUElJNDsTtWlDF8EPLxuei0Kg/xQFT1g2XTxTrkQWYMrzch7YVqiKGbHWPbIZuDg==, tarball: https://npm.pkg.github.com/download/@project-nomos/cate-sdk/0.0.1/0e8b5571bb661e945a4085bc647870e7f178ab22}
+    resolution: {integrity: sha512-Wzx0HQftE+8gfuIvrxVDvMqn/1a+kqKy1rXCYehct7aAolfWj+Fbalg4mPe1WorbLjHCaMYtab+1x1+OOFuP5g==}
 
   '@protobufjs/aspromise@1.1.2':
     resolution: {integrity: sha512-j+gKExEuLmKwvz3OgROXtrJ2UG2x8Ch2YZUxahh+s1F2HZ+wAceUNLkvy6zKCPVRkU++ZWQrdxsUeQXmcg4uoQ==}

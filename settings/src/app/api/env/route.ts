@@ -3,7 +3,7 @@ import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
-import { readEnv, writeEnv, maskToken } from "@/lib/env";
+import { readEnv, writeEnv, maskToken, readConfig } from "@/lib/env";
 import { validateOrigin } from "@/lib/validate-request";
 import { getDb } from "@/lib/db";
 
@@ -467,6 +467,46 @@ export async function PUT(request: Request) {
   }
   if (Object.keys(envUpdates).length > 0) {
     writeEnv(envUpdates);
+  }
+
+  // If any of the Google OAuth credentials changed, also rewrite
+  // ~/.config/gws/client_secret.json so the @googleworkspace/cli picks up
+  // the new Client ID / Secret / Project ID without requiring a full
+  // re-authorization. Saving the Project ID alone is enough now -- before
+  // this, a stale project_id silently broke every Gmail/Calendar/Drive
+  // call with "Project 'projects/<placeholder>' not found or deleted".
+  const gwsKeys = new Set([
+    "GOOGLE_OAUTH_CLIENT_ID",
+    "GOOGLE_OAUTH_CLIENT_SECRET",
+    "GOOGLE_CLOUD_PROJECT",
+  ]);
+  const touchedGws = Object.keys(updates).some((k) => gwsKeys.has(k));
+  if (touchedGws) {
+    try {
+      const { writeGwsClientSecret } = await import("@/lib/sync-gws-client-secret");
+      // Read the current canonical values (DB > .env), since the user may
+      // have only changed one of the three fields.
+      let gwsSql: ReturnType<typeof getDb> | undefined;
+      try {
+        gwsSql = getDb();
+      } catch {
+        gwsSql = undefined;
+      }
+      const env = await readConfig(
+        ["GOOGLE_OAUTH_CLIENT_ID", "GOOGLE_OAUTH_CLIENT_SECRET", "GOOGLE_CLOUD_PROJECT"],
+        gwsSql,
+      );
+      writeGwsClientSecret({
+        clientId: env.GOOGLE_OAUTH_CLIENT_ID ?? "",
+        clientSecret: env.GOOGLE_OAUTH_CLIENT_SECRET ?? "",
+        projectId: env.GOOGLE_CLOUD_PROJECT ?? "",
+      });
+    } catch (err) {
+      console.warn(
+        "[env] Failed to sync gws client_secret.json:",
+        err instanceof Error ? err.message : err,
+      );
+    }
   }
 
   return NextResponse.json({
