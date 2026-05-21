@@ -66,6 +66,10 @@ export class SlackPollingAdapter implements ChannelAdapter {
   private botUserId: string | null = null;
   // All known user IDs for the owner across workspaces
   private ownUserIds = new Set<string>();
+  // Owner email derived from `users.info(self)` — used to match foreign-workspace
+  // user IDs that appear on Slack Connect DMs (Slack tags messages with the
+  // sender's home-workspace user ID, which won't be in our static ownUserIds set).
+  private ownerEmail: string | null = null;
   private static readonly CHANNEL_REFRESH_INTERVAL_MS = 30 * 60 * 1000; // 30 minutes
   private static readonly INTER_CALL_DELAY_MS = 3000; // ~20 req/min, conservative for Tier 3
   private static readonly FULL_SCAN_DELAY_MS = 5000; // Slower during full scans
@@ -162,6 +166,22 @@ export class SlackPollingAdapter implements ChannelAdapter {
       }
     } catch {
       // integrations not available
+    }
+
+    // Resolve the owner's email so we can match cross-workspace user IDs.
+    // Slack Connect DMs surface messages with the sender's home-workspace
+    // user ID, which won't appear in our static ownUserIds set; comparing
+    // by email lets us recognize them dynamically.
+    if (this.userId) {
+      try {
+        const info = await this.client.users.info({ user: this.userId });
+        const email = info.user?.profile?.email;
+        if (typeof email === "string" && email) {
+          this.ownerEmail = email.toLowerCase();
+        }
+      } catch {
+        // users.info may lack scope on the user token; non-fatal.
+      }
     }
 
     // Load default notification channel -- messages there are treated like DMs
@@ -630,6 +650,14 @@ export class SlackPollingAdapter implements ChannelAdapter {
     const senderName = await this.lookupUserName(e.user);
     const isDefaultChannel = e.channel === this.defaultChannelId;
 
+    // lookupUserName may have just learned this is one of our own user IDs
+    // (Slack Connect surfaces the sender's home-workspace user_id, which
+    // wouldn't be in ownUserIds at the static skip-check). Re-check here
+    // and bail before we draft a response to our own outgoing message.
+    if (!isDefaultChannel && this.ownUserIds.has(e.user)) {
+      return;
+    }
+
     // Default channel: the user is chatting directly with the agent.
     // Pass the raw message -- no draft framing.
     // Other DMs: wrap with draft instructions so the agent drafts a
@@ -730,6 +758,12 @@ export class SlackPollingAdapter implements ChannelAdapter {
       if (!client) continue;
       try {
         const result = await (client as WebClient).users.info({ user: userId });
+        // If this user's email matches the owner's, they're us (Slack Connect
+        // surfaces home-workspace IDs); remember and skip drafting next time.
+        const email = result.user?.profile?.email?.toLowerCase();
+        if (this.ownerEmail && email && email === this.ownerEmail) {
+          this.ownUserIds.add(userId);
+        }
         const name =
           result.user?.profile?.display_name ||
           result.user?.real_name ||
@@ -741,10 +775,52 @@ export class SlackPollingAdapter implements ChannelAdapter {
         }
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
-        console.warn(`[slack-polling] ${label} client failed to resolve user ${userId}: ${msg}`);
+        // user_not_found is expected for Slack Connect / cross-workspace users;
+        // only warn for unexpected failures.
+        if (!msg.includes("user_not_found")) {
+          console.warn(`[slack-polling] ${label} client failed to resolve user ${userId}: ${msg}`);
+        }
       }
     }
-    return userId;
+
+    // Fall back to checking other connected workspace tokens — common in
+    // Slack Connect where the sender lives in a different team.
+    try {
+      const { listIntegrationsByPrefix } = await import("../../db/integrations.ts");
+      const workspaces = await listIntegrationsByPrefix("slack-ws:");
+      for (const ws of workspaces) {
+        if (ws.name === `slack-ws:${this.teamId}`) continue;
+        const token = ws.secrets?.access_token;
+        if (!token) continue;
+        try {
+          const altClient = new WebClient(token as string);
+          const result = await altClient.users.info({ user: userId });
+          const email = result.user?.profile?.email?.toLowerCase();
+          if (this.ownerEmail && email && email === this.ownerEmail) {
+            this.ownUserIds.add(userId);
+          }
+          const name =
+            result.user?.profile?.display_name ||
+            result.user?.real_name ||
+            result.user?.name ||
+            null;
+          if (name) {
+            this.userNameCache.set(userId, name);
+            return name;
+          }
+        } catch {
+          // not found in this workspace either
+        }
+      }
+    } catch {
+      // integrations not available
+    }
+
+    // Final fallback: label as external rather than dumping the raw ID, which
+    // looks like a system glitch to the user. Cache so we don't re-query.
+    const label = `external Slack user (${userId})`;
+    this.userNameCache.set(userId, label);
+    return label;
   }
 
   private async lookupChannelName(channelId: string): Promise<string> {

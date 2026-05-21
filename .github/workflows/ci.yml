@@ -34,7 +34,6 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: "pnpm"
-          registry-url: "https://npm.pkg.github.com"
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -59,7 +58,6 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: "pnpm"
-          registry-url: "https://npm.pkg.github.com"
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -84,7 +82,6 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: "pnpm"
-          registry-url: "https://npm.pkg.github.com"
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -109,7 +106,6 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: "pnpm"
-          registry-url: "https://npm.pkg.github.com"
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -135,7 +131,6 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: "pnpm"
-          registry-url: "https://npm.pkg.github.com"
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile

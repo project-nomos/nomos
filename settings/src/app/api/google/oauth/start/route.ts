@@ -2,9 +2,6 @@ import { NextResponse } from "next/server";
 import { readConfig } from "@/lib/env";
 import { getDb } from "@/lib/db";
 import { syncGoogleAccountsToDb } from "@/lib/sync-google-accounts";
-import fs from "node:fs";
-import path from "node:path";
-import os from "node:os";
 import { spawn, type ChildProcess } from "node:child_process";
 
 // Keep the child process alive at module level so it can receive the OAuth callback
@@ -54,26 +51,16 @@ export async function POST() {
   // Clean up any previous auth process
   cleanup();
 
-  // Write a valid client_secret.json (with project_id) for the CLI flow
-  const gwsConfigDir = path.join(os.homedir(), ".config", "gws");
-  const clientSecretPath = path.join(gwsConfigDir, "client_secret.json");
-
-  // Use the configured GCP project ID, or fall back to the project number from the Client ID
-  const projectId = gcpProjectId || "google-workspace-cli";
-
-  const clientSecretData = {
-    installed: {
-      client_id: clientId,
-      client_secret: clientSecret,
-      project_id: projectId,
-      auth_uri: "https://accounts.google.com/o/oauth2/auth",
-      token_uri: "https://oauth2.googleapis.com/token",
-      redirect_uris: ["http://localhost"],
-    },
-  };
-
-  fs.mkdirSync(gwsConfigDir, { recursive: true });
-  fs.writeFileSync(clientSecretPath, JSON.stringify(clientSecretData, null, 2));
+  // Write a valid client_secret.json (with project_id) for the CLI flow.
+  // Same helper /api/env uses on save, so the two paths can't drift.
+  const { writeGwsClientSecret, gwsClientSecretPath } =
+    await import("@/lib/sync-gws-client-secret");
+  writeGwsClientSecret({
+    clientId,
+    clientSecret,
+    projectId: gcpProjectId ?? "",
+  });
+  const clientSecretPath = gwsClientSecretPath();
 
   // Build args for gws auth login with explicit scopes.
   // Using --scopes ensures Gmail/Calendar are included even if the gws CLI

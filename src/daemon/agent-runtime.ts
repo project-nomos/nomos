@@ -919,8 +919,12 @@ export class AgentRuntime {
           costUsd = msg.total_cost_usd ?? 0;
           inputTokens = msg.usage?.input_tokens ?? 0;
           outputTokens = msg.usage?.output_tokens ?? 0;
-          if ("result" in msg) {
-            fullText += msg.result;
+          // Don't append msg.result -- it's the same final text we already
+          // accumulated from the `assistant` block.text events, so adding it
+          // again would double the response. Use it only as a fallback when
+          // we somehow missed every assistant event (rare; e.g. compaction).
+          if ("result" in msg && !fullText && typeof msg.result === "string") {
+            fullText = msg.result;
           }
           emit({
             type: "result",

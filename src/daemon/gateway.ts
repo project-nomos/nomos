@@ -67,6 +67,7 @@ export class Gateway {
   private draftManager: DraftManager;
   private settingsProcess: ChildProcess | null = null;
   private cateIntegration: CATEIntegration | null = null;
+  private notifyListener: { unlisten: () => Promise<void> } | null = null;
   private ingestScheduler: IngestScheduler;
   // Removed: pendingSlackIngest -- bulk ingestion retired in favor of agent conversation learning
   private options: GatewayOptions;
@@ -202,34 +203,31 @@ export class Gateway {
     await this.grpcServer.start();
 
     // Register command handler for hot-reload and ingestion triggers
-    this.grpcServer.onCommand(async (command) => {
-      if (command === "reload-slack-workspaces") {
-        const added = await this.reloadSlackWorkspaces();
-        return added.length > 0
-          ? `Loaded ${added.length} workspace(s): ${added.join(", ")}`
-          : "No new workspaces to load";
-      }
+    this.grpcServer.onCommand((command) => this.handleCommand(command));
 
-      // trigger-ingest:<platform> -- start full ingestion
-      if (command.startsWith("trigger-ingest:")) {
-        const platform = command.slice("trigger-ingest:".length);
-        const sub = IngestScheduler.platformToSubcommand(platform);
-        if (!sub) return `Unknown platform: ${platform}`;
-        this.ingestScheduler.triggerFull(platform, "history", sub);
-        return `Full ingestion triggered for ${platform}`;
-      }
-
-      // trigger-delta:<platform> -- start delta sync
-      if (command.startsWith("trigger-delta:")) {
-        const platform = command.slice("trigger-delta:".length);
-        const sub = IngestScheduler.platformToSubcommand(platform);
-        if (!sub) return `Unknown platform: ${platform}`;
-        this.ingestScheduler.triggerDelta(platform, "history", sub);
-        return `Delta sync triggered for ${platform}`;
-      }
-
-      return `Unknown command: ${command}`;
-    });
+    // Subscribe to Postgres LISTEN/NOTIFY so the Settings UI can trigger
+    // the same handlers without a separate IPC channel. The Settings UI
+    // issues NOTIFY nomos_reload, '<payload>' (see settings/src/lib/notify-daemon.ts).
+    try {
+      const { getDb } = await import("../db/client.ts");
+      const sql = getDb();
+      // `sql.listen` uses its own connection internally; we keep the handle
+      // so we can unlisten on shutdown.
+      const listener = await sql.listen("nomos_reload", (payload) => {
+        if (!payload) return;
+        // Map the "reload-slack-workspaces" UI payload to the canonical command
+        const cmd = payload === "slack-workspaces" ? "reload-slack-workspaces" : payload;
+        this.handleCommand(cmd).catch((err) => {
+          console.warn("[gateway] NOTIFY handler failed for", payload, err);
+        });
+      });
+      this.notifyListener = listener;
+    } catch (err) {
+      console.warn(
+        "[gateway] Could not start NOTIFY listener (settings reloads will be best-effort):",
+        err instanceof Error ? err.message : err,
+      );
+    }
 
     // Register and start channel adapters
     if (!this.options.skipChannels) {
@@ -389,6 +387,10 @@ export class Gateway {
     console.log("[gateway] Stopping daemon...");
 
     // Stop in reverse order
+    if (this.notifyListener) {
+      await this.notifyListener.unlisten().catch(() => {});
+      this.notifyListener = null;
+    }
     if (this.cateIntegration) {
       await stopCATEIntegration(this.cateIntegration);
     }
@@ -400,6 +402,38 @@ export class Gateway {
     await closeBrowser();
 
     console.log("[gateway] Daemon stopped");
+  }
+
+  /**
+   * Dispatch a command from either gRPC `Command` RPC or a Postgres
+   * NOTIFY on the `nomos_reload` channel. Routes to reload / ingest /
+   * delta handlers.
+   */
+  async handleCommand(command: string): Promise<string> {
+    if (command === "reload-slack-workspaces") {
+      const added = await this.reloadSlackWorkspaces();
+      return added.length > 0
+        ? `Loaded ${added.length} workspace(s): ${added.join(", ")}`
+        : "No new workspaces to load";
+    }
+
+    if (command.startsWith("trigger-ingest:")) {
+      const platform = command.slice("trigger-ingest:".length);
+      const sub = IngestScheduler.platformToSubcommand(platform);
+      if (!sub) return `Unknown platform: ${platform}`;
+      this.ingestScheduler.triggerFull(platform, "history", sub);
+      return `Full ingestion triggered for ${platform}`;
+    }
+
+    if (command.startsWith("trigger-delta:")) {
+      const platform = command.slice("trigger-delta:".length);
+      const sub = IngestScheduler.platformToSubcommand(platform);
+      if (!sub) return `Unknown platform: ${platform}`;
+      this.ingestScheduler.triggerDelta(platform, "history", sub);
+      return `Delta sync triggered for ${platform}`;
+    }
+
+    return `Unknown command: ${command}`;
   }
 
   /**

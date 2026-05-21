@@ -96,10 +96,18 @@ export function ReadyStep({ checks }: ReadyStepProps) {
         </div>
       </div>
 
-      {/* Actions */}
+      {/* Actions
+       * prefetch={false}: Next.js otherwise prefetches the destination as soon
+       * as this component mounts, which happens BEFORE the wizard's env writes
+       * propagate. The prefetch hits middleware, gets a 307 to /setup, and
+       * caches that response — so when the user clicks, the cached redirect
+       * fires and they bounce right back. A hard refresh bypasses the cache,
+       * which is exactly why "refresh and click again" worked.
+       */}
       <div className="flex gap-3">
         <Link
           href="/integrations"
+          prefetch={false}
           className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg border border-surface1 text-sm font-medium text-subtext0 hover:text-text hover:border-surface2 transition-colors"
         >
           <Settings size={16} />
@@ -107,6 +115,7 @@ export function ReadyStep({ checks }: ReadyStepProps) {
         </Link>
         <Link
           href="/dashboard"
+          prefetch={false}
           className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-mauve text-crust text-sm font-medium hover:bg-mauve/90 transition-colors"
         >
           Go to Dashboard

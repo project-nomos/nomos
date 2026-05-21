@@ -37,6 +37,9 @@ export default function GoogleSettingsPage() {
   const [hasClientId, setHasClientId] = useState(false);
   const [hasClientSecret, setHasClientSecret] = useState(false);
   const [gcpProjectNumber, setGcpProjectNumber] = useState<string | null>(null);
+  const [projectId, setProjectId] = useState("");
+  const [initialProjectId, setInitialProjectId] = useState("");
+  const [projectIdDirty, setProjectIdDirty] = useState(false);
   const [clientIdDirty, setClientIdDirty] = useState(false);
   const [clientSecretDirty, setClientSecretDirty] = useState(false);
   const [services, setServices] = useState("all");
@@ -58,7 +61,8 @@ export default function GoogleSettingsPage() {
   const [authorizing, setAuthorizing] = useState(false);
   const [removeTarget, setRemoveTarget] = useState<string | null>(null);
 
-  const isDirty = clientIdDirty || clientSecretDirty || services !== initialServices;
+  const isDirty =
+    clientIdDirty || clientSecretDirty || projectIdDirty || services !== initialServices;
   useUnsavedChanges(isDirty);
 
   const selectedServices =
@@ -99,6 +103,10 @@ export default function GoogleSettingsPage() {
       setClientSecret("");
       setClientIdDirty(false);
       setClientSecretDirty(false);
+      const loadedProjectId = envData.GOOGLE_CLOUD_PROJECT ?? "";
+      setProjectId(loadedProjectId);
+      setInitialProjectId(loadedProjectId);
+      setProjectIdDirty(false);
       setGwsInstalled(statusData.gwsInstalled ?? false);
       setGwsVersion(statusData.gwsVersion ?? "");
       setAccounts(statusData.accounts ?? []);
@@ -124,6 +132,7 @@ export default function GoogleSettingsPage() {
       const updates: Record<string, string> = {};
       if (clientIdDirty) updates.GOOGLE_OAUTH_CLIENT_ID = clientId;
       if (clientSecretDirty) updates.GOOGLE_OAUTH_CLIENT_SECRET = clientSecret;
+      if (projectIdDirty) updates.GOOGLE_CLOUD_PROJECT = projectId.trim();
       updates.GWS_SERVICES = services;
 
       const res = await fetch("/api/env", {
@@ -479,6 +488,31 @@ export default function GoogleSettingsPage() {
             helperText="OAuth 2.0 Client Secret"
             configured={hasClientSecret}
           />
+          <div className="space-y-1.5">
+            <label className="flex items-center gap-2 text-sm font-medium text-subtext1">
+              GCP Project ID
+              {initialProjectId && (
+                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs bg-green/10 text-green">
+                  Set
+                </span>
+              )}
+            </label>
+            <input
+              type="text"
+              value={projectId}
+              onChange={(e) => {
+                setProjectId(e.target.value);
+                setProjectIdDirty(true);
+              }}
+              placeholder="my-project-12345"
+              className="w-full rounded-lg border border-surface1 bg-surface0 px-3 py-2 text-sm text-text placeholder:text-overlay0 focus:outline-none focus:border-mauve focus:ring-1 focus:ring-mauve/30 font-mono"
+            />
+            <p className="text-xs text-overlay0">
+              The GCP project that owns the OAuth client above. The CLI writes this into{" "}
+              <code className="bg-surface0 px-1 rounded">~/.config/gws/client_secret.json</code> and
+              Google rejects API calls (404 &quot;Project not found&quot;) when it&apos;s missing.
+            </p>
+          </div>
         </div>
       </section>
 
