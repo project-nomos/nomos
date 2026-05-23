@@ -5,11 +5,8 @@ RUN corepack enable && corepack prepare pnpm@10.23.0 --activate
 
 WORKDIR /app
 
-# Install dependencies (GitHub Packages requires auth for @project-nomos scope)
-COPY package.json pnpm-lock.yaml .npmrc ./
-RUN --mount=type=secret,id=NODE_AUTH_TOKEN \
-    echo "//npm.pkg.github.com/:_authToken=$(cat /run/secrets/NODE_AUTH_TOKEN)" >> .npmrc && \
-    pnpm install --frozen-lockfile --ignore-scripts
+COPY package.json pnpm-lock.yaml ./
+RUN pnpm install --frozen-lockfile --ignore-scripts
 
 # Copy source and build
 COPY . .
@@ -22,10 +19,8 @@ RUN corepack enable && corepack prepare pnpm@10.23.0 --activate
 
 WORKDIR /app
 
-COPY package.json pnpm-lock.yaml .npmrc ./
-RUN --mount=type=secret,id=NODE_AUTH_TOKEN \
-    echo "//npm.pkg.github.com/:_authToken=$(cat /run/secrets/NODE_AUTH_TOKEN)" >> .npmrc && \
-    pnpm install --frozen-lockfile --prod --ignore-scripts
+COPY package.json pnpm-lock.yaml ./
+RUN pnpm install --frozen-lockfile --prod --ignore-scripts
 
 # Copy built artifacts and runtime files
 COPY --from=base /app/dist ./dist
