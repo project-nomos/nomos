@@ -18,7 +18,7 @@ import { loadSkills, formatSkillsForPrompt } from "../skills/loader.ts";
 import { showBanner } from "./banner.ts";
 import { checkForUpgrade, getInstalledVersion } from "../config/version.ts";
 import type { McpServerConfig } from "../sdk/session.ts";
-import { App } from "./components/App.tsx";
+import { App } from "./components/app.tsx";
 import type { GrpcClient } from "./grpc-client.ts";
 
 export interface ReplOptions {

@@ -1,42 +1,119 @@
 /**
  * Proactive feature scheduler.
  *
- * Registers cron jobs for:
- * - Commitment reminders (every hour)
- * - Priority triage digest (daily)
- * - Overdue commitment expiration (daily)
+ * Registers cron jobs for inbox/calendar/morning-briefing autonomy and the
+ * existing commitment + triage helpers. Idempotent — upserts on each call,
+ * matching the pattern in `delta-sync.ts`. Triggered from gateway startup.
+ *
+ * Inbox/calendar/morning-briefing jobs route results to the default
+ * notification channel via the cron engine's `announce` mode. The agent
+ * uses a `[NOACTION]` sentinel to suppress noise on quiet runs.
  */
 
-import { getDb } from "../db/client.ts";
+import { CronStore } from "../cron/store.ts";
+import type { CronJobUpdate } from "../cron/types.ts";
 import {
   getCommitmentsForReminder,
   markReminded,
   expireOverdueCommitments,
 } from "./commitment-tracker.ts";
 import { generateTriage } from "./priority-triage.ts";
+import { inboxScanJobSpec, type ProactiveJobSpec } from "./inbox-watcher.ts";
+import { calendarScanJobSpec } from "./calendar-watcher.ts";
+import { morningBriefingJobSpec, DEFAULT_BRIEFING_CRON } from "./morning-briefing.ts";
+import { loadEnvConfigAsync } from "../config/env.ts";
+import { getNotificationDefault } from "../db/notification-defaults.ts";
+
+const INBOX_JOB_NAME = "proactive:inbox-watcher";
+const CALENDAR_JOB_NAME = "proactive:calendar-watcher";
+const BRIEFING_JOB_NAME = "proactive:morning-briefing";
 
 /**
- * Register proactive cron jobs.
- * Called during daemon startup from gateway.ts.
+ * Register (or update, or remove) the proactive cron jobs based on current
+ * config. Called during daemon startup and after the user toggles autonomy.
  */
 export async function registerProactiveJobs(): Promise<void> {
-  const sql = getDb();
+  const config = await loadEnvConfigAsync();
+  const store = new CronStore();
+  const target = await getNotificationDefault();
 
-  // Check if proactive features are enabled
-  const [config] = await sql<{ value: string }[]>`
-    SELECT value FROM config WHERE key = 'app.proactiveEnabled'
-  `;
+  const autonomy = config.inboxAutonomy;
+  const inboxInterval = config.inboxScanInterval ?? "15m";
+  const calendarInterval = config.calendarScanInterval ?? "5m";
+  const briefingCron = config.briefingCron ?? DEFAULT_BRIEFING_CRON;
 
-  const enabled = config?.value === '"true"';
-  if (!enabled) {
-    console.log("[proactive] Proactive features disabled (set app.proactiveEnabled to enable)");
+  let changed = false;
+
+  if (autonomy === "off") {
+    // Disable all proactive jobs (don't delete — preserve run history).
+    for (const name of [INBOX_JOB_NAME, CALENDAR_JOB_NAME, BRIEFING_JOB_NAME]) {
+      const existing = await store.getJobByName(name);
+      if (existing?.enabled) {
+        await store.updateJob(existing.id, { enabled: false });
+        changed = true;
+        console.log(`[proactive] Disabled ${name} (inbox autonomy is off)`);
+      }
+    }
+    if (changed) process.emit("cron:refresh" as never);
     return;
   }
 
-  console.log("[proactive] Registering proactive jobs");
+  if (!target) {
+    console.warn(
+      "[proactive] No default notification channel configured — proactive jobs not registered. Set one via the Settings UI.",
+    );
+    return;
+  }
 
-  // These will be picked up by CronEngine on next refresh
-  // For now, they run on daemon startup check
+  // Upsert each job. The cron engine routes the prompt through AgentRuntime
+  // (which has google-workspace MCP + DraftManager); `announce` mode posts
+  // the agent's reply to the default channel.
+  changed = (await upsertJob(store, inboxScanJobSpec(autonomy, inboxInterval), target)) || changed;
+  changed = (await upsertJob(store, calendarScanJobSpec(calendarInterval), target)) || changed;
+  changed = (await upsertJob(store, morningBriefingJobSpec(briefingCron), target)) || changed;
+
+  if (changed) process.emit("cron:refresh" as never);
+}
+
+async function upsertJob(
+  store: CronStore,
+  spec: ProactiveJobSpec,
+  target: { platform: string; channelId: string },
+): Promise<boolean> {
+  const existing = await store.getJobByName(spec.name);
+
+  if (!existing) {
+    await store.createJob({
+      name: spec.name,
+      schedule: spec.schedule,
+      scheduleType: spec.scheduleType,
+      sessionTarget: "isolated",
+      deliveryMode: "announce",
+      prompt: spec.prompt,
+      platform: target.platform,
+      channelId: target.channelId,
+      enabled: true,
+      errorCount: 0,
+    });
+    console.log(`[proactive] Registered ${spec.name} (${spec.schedule})`);
+    return true;
+  }
+
+  // Compute minimal diff to avoid no-op writes.
+  const updates: CronJobUpdate = {};
+  if (existing.schedule !== spec.schedule) updates.schedule = spec.schedule;
+  if (existing.scheduleType !== spec.scheduleType) updates.scheduleType = spec.scheduleType;
+  if (existing.prompt !== spec.prompt) updates.prompt = spec.prompt;
+  if (existing.platform !== target.platform) updates.platform = target.platform;
+  if (existing.channelId !== target.channelId) updates.channelId = target.channelId;
+  if (existing.deliveryMode !== "announce") updates.deliveryMode = "announce";
+  if (!existing.enabled) updates.enabled = true;
+
+  if (Object.keys(updates).length === 0) return false;
+
+  await store.updateJob(existing.id, updates);
+  console.log(`[proactive] Updated ${spec.name} (${Object.keys(updates).join(", ")})`);
+  return true;
 }
 
 /**
@@ -47,11 +124,9 @@ export async function runCommitmentReminders(): Promise<{
   reminded: number;
   expired: number;
 }> {
-  // Get commitments due for reminder
   const due = await getCommitmentsForReminder();
 
   if (due.length > 0) {
-    // Format reminder message
     const reminders = due
       .map((c) => {
         const deadline = c.deadline ? ` (due: ${c.deadline.toLocaleDateString()})` : "";
@@ -60,12 +135,9 @@ export async function runCommitmentReminders(): Promise<{
       .join("\n");
 
     console.log(`[proactive] Commitment reminders:\n${reminders}`);
-
-    // Mark as reminded
     await markReminded(due.map((c) => c.id));
   }
 
-  // Expire overdue commitments
   const expired = await expireOverdueCommitments();
 
   return { reminded: due.length, expired };
@@ -82,13 +154,13 @@ export async function runTriageDigest(): Promise<string> {
     return "No new messages requiring attention.";
   }
 
-  const lines = ["📋 Daily Triage Summary\n"];
+  const lines = ["*Daily triage*\n"];
 
   const highPriority = triage.items.filter((i) => i.urgency === "high");
   const mediumPriority = triage.items.filter((i) => i.urgency === "medium");
 
   if (highPriority.length > 0) {
-    lines.push("**High Priority:**");
+    lines.push("*High priority:*");
     for (const item of highPriority) {
       lines.push(
         `- ${item.contactName ?? item.contact} (${item.platform}): ${item.messageCount} msg(s) — ${item.reason}`,
@@ -98,7 +170,7 @@ export async function runTriageDigest(): Promise<string> {
   }
 
   if (mediumPriority.length > 0) {
-    lines.push("**Needs Attention:**");
+    lines.push("*Needs attention:*");
     for (const item of mediumPriority) {
       lines.push(
         `- ${item.contactName ?? item.contact} (${item.platform}): ${item.messageCount} msg(s)`,

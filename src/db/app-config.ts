@@ -33,6 +33,10 @@ const CONFIG_KEY_MAP: Record<string, keyof NomosConfig> = {
   "app.videoGenerationModel": "videoGenerationModel",
   "app.useSubscription": "useSubscription",
   "app.gcpProject": "googleCloudProject",
+  "app.inboxAutonomy": "inboxAutonomy",
+  "app.briefingCron": "briefingCron",
+  "app.inboxScanInterval": "inboxScanInterval",
+  "app.calendarScanInterval": "calendarScanInterval",
 };
 
 /** Reverse map: NomosConfig field → config table key */

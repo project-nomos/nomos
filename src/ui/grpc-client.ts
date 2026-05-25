@@ -1,8 +1,7 @@
 /**
  * gRPC client for connecting the terminal UI to the daemon.
  *
- * Provides the same interface as GatewayClient (WebSocket):
- * send a message, receive a stream of events.
+ * Sends a message and receives a stream of events.
  */
 
 import { existsSync } from "node:fs";

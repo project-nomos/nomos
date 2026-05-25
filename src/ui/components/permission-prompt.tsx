@@ -7,7 +7,7 @@
 import React, { useState } from "react";
 import { Box, Text, useInput } from "ink";
 import { theme } from "../theme.ts";
-import { StructuredDiff, parseUnifiedDiff } from "./StructuredDiff.tsx";
+import { StructuredDiff, parseUnifiedDiff } from "./structured-diff.tsx";
 
 export interface PermissionRequest {
   /** Type of operation */
