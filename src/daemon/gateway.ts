@@ -433,6 +433,11 @@ export class Gateway {
       return `Delta sync triggered for ${platform}`;
     }
 
+    if (command === "reload-proactive") {
+      await registerProactiveJobs();
+      return "Proactive jobs reloaded";
+    }
+
     return `Unknown command: ${command}`;
   }
 

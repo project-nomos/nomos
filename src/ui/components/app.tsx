@@ -12,19 +12,19 @@ import { loadHeartbeatFile, isHeartbeatEmpty } from "../../auto-reply/heartbeat.
 import type { GrpcClient, ConnectionState } from "../grpc-client.ts";
 import type { AgentEvent } from "../../daemon/types.ts";
 import { theme } from "../theme.ts";
-import { UserMessage } from "./UserMessage.tsx";
-import { NomosMessage } from "./NomosMessage.tsx";
-import { ToolBlock } from "./ToolBlock.tsx";
-import { ThinkingBlock } from "./ThinkingBlock.tsx";
-import { CostLine } from "./CostLine.tsx";
-import { SystemMessage } from "./SystemMessage.tsx";
-import { StatusLine } from "./StatusLine.tsx";
-import { CommandInput } from "./CommandInput.tsx";
-import { StalledSpinner } from "./StalledSpinner.tsx";
-import { CopyModeIndicator } from "./CopyModeIndicator.tsx";
-import { ScrollableView } from "./ScrollableView.tsx";
+import { UserMessage } from "./user-message.tsx";
+import { NomosMessage } from "./nomos-message.tsx";
+import { ToolBlock } from "./tool-block.tsx";
+import { ThinkingBlock } from "./thinking-block.tsx";
+import { CostLine } from "./cost-line.tsx";
+import { SystemMessage } from "./system-message.tsx";
+import { StatusLine } from "./status-line.tsx";
+import { CommandInput } from "./command-input.tsx";
+import { StalledSpinner } from "./stalled-spinner.tsx";
+import { CopyModeIndicator } from "./copy-mode-indicator.tsx";
+import { ScrollableView } from "./scrollable-view.tsx";
 import { stripUnsafeCharacters } from "../text-utils.ts";
-import { useAlternateBuffer } from "../hooks/useAlternateBuffer.ts";
+import { useAlternateBuffer } from "../hooks/use-alternate-buffer.ts";
 import { TheoryOfMindTracker } from "../../memory/theory-of-mind.ts";
 
 /** A finalized item displayed in the Static section. */

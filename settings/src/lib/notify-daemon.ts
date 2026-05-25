@@ -36,3 +36,8 @@ export function notifyDaemonTriggerIngest(platform: string): void {
 export function notifyDaemonTriggerDelta(platform: string): void {
   void notify(`trigger-delta:${platform}`);
 }
+
+/** Re-register proactive (inbox/calendar/briefing) cron jobs after a config change. */
+export function notifyDaemonReloadProactive(): void {
+  void notify("reload-proactive");
+}

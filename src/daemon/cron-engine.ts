@@ -128,8 +128,15 @@ export class CronEngine {
         this.broadcast(event),
       );
 
-      // If job has a delivery channel, send the result
-      if (job.deliveryMode === "announce" && job.platform && job.channelId) {
+      // If job has a delivery channel, send the result — but suppress
+      // when the agent returned the NOACTION sentinel (used by inbox/
+      // calendar/morning-briefing jobs to skip noise on quiet runs).
+      if (
+        job.deliveryMode === "announce" &&
+        job.platform &&
+        job.channelId &&
+        !result.content.trimStart().startsWith("[NOACTION]")
+      ) {
         await this.channelManager.send(result);
       }
 

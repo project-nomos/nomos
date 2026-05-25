@@ -120,6 +120,7 @@ describe("validateConfig", () => {
       imageGeneration: false,
       videoGeneration: false,
       useSubscription: false,
+      inboxAutonomy: "off",
     };
 
     const errors = validateConfig(config);
@@ -156,6 +157,7 @@ describe("validateConfig", () => {
       imageGeneration: false,
       videoGeneration: false,
       useSubscription: false,
+      inboxAutonomy: "off",
     };
 
     const errors = validateConfig(config);

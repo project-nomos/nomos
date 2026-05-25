@@ -1,7 +1,7 @@
 import React from "react";
 import { Box, Text } from "ink";
 import { theme } from "../theme.ts";
-import { MarkdownDisplay } from "./MarkdownDisplay.tsx";
+import { MarkdownDisplay } from "./markdown-display.tsx";
 
 interface NomosMessageProps {
   content: string;

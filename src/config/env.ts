@@ -82,6 +82,20 @@ export interface NomosConfig {
   videoGenerationModel?: string;
   /** Use Claude subscription (Max/Pro) instead of API key for agent sessions (default: false) */
   useSubscription: boolean;
+  /**
+   * Inbox/calendar autonomy level for proactive Gmail + Calendar management.
+   * - "off": no automatic inbox or calendar work
+   * - "passive": summarize urgent items, no drafts
+   * - "active": summarize + create reply drafts via DraftManager
+   * - "aggressive": auto-send low-stakes replies (confirmations, RSVPs)
+   */
+  inboxAutonomy: "off" | "passive" | "active" | "aggressive";
+  /** Cron expression for the morning briefing (default: "0 8 * * *" — 8am daily). */
+  briefingCron?: string;
+  /** Interval for inbox scanning (default: "15m"). Used only when inboxAutonomy !== "off". */
+  inboxScanInterval?: string;
+  /** Interval for calendar scanning (default: "5m"). Used only when inboxAutonomy !== "off". */
+  calendarScanInterval?: string;
 }
 
 export function loadEnvConfig(): NomosConfig {
@@ -151,6 +165,10 @@ export function loadEnvConfig(): NomosConfig {
     videoGeneration: process.env.NOMOS_VIDEO_GENERATION === "true",
     videoGenerationModel: process.env.NOMOS_VIDEO_GENERATION_MODEL,
     useSubscription: process.env.NOMOS_USE_SUBSCRIPTION === "true",
+    inboxAutonomy: (process.env.NOMOS_INBOX_AUTONOMY as NomosConfig["inboxAutonomy"]) ?? "off",
+    briefingCron: process.env.NOMOS_BRIEFING_CRON,
+    inboxScanInterval: process.env.NOMOS_INBOX_SCAN_INTERVAL,
+    calendarScanInterval: process.env.NOMOS_CALENDAR_SCAN_INTERVAL,
   };
 }
 

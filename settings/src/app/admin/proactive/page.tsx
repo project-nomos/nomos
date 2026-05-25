@@ -22,8 +22,59 @@ interface Commitment {
   created_at: string;
 }
 
+type InboxAutonomy = "off" | "passive" | "active" | "aggressive";
+type BriefingDays = "everyday" | "weekdays" | "custom";
+
+/**
+ * Parse a cron expression into a (time, days) pair if it matches our
+ * supported simple patterns. Returns `null` for unsupported expressions
+ * (the UI then falls back to a raw text input).
+ */
+function parseBriefingCron(cron: string): { time: string; days: BriefingDays } | null {
+  const parts = cron.trim().split(/\s+/);
+  if (parts.length !== 5) return null;
+  const [min, hour, dom, month, dow] = parts;
+  if (dom !== "*" || month !== "*") return null;
+  if (!/^\d{1,2}$/.test(min) || !/^\d{1,2}$/.test(hour)) return null;
+  const m = parseInt(min, 10);
+  const h = parseInt(hour, 10);
+  if (m > 59 || h > 23) return null;
+  const time = `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+  if (dow === "*") return { time, days: "everyday" };
+  if (dow === "1-5") return { time, days: "weekdays" };
+  return null;
+}
+
+function formatBriefingCron(time: string, days: BriefingDays): string {
+  const [hStr, mStr] = time.split(":");
+  const h = parseInt(hStr, 10);
+  const m = parseInt(mStr, 10);
+  const dow = days === "weekdays" ? "1-5" : "*";
+  return `${m} ${h} * * ${dow}`;
+}
+
+const AUTONOMY_OPTIONS: Array<{ value: InboxAutonomy; label: string; description: string }> = [
+  { value: "off", label: "Off", description: "No automatic inbox or calendar work." },
+  { value: "passive", label: "Passive", description: "Summarize urgent items only. No drafts." },
+  {
+    value: "active",
+    label: "Active",
+    description: "Summarize + stage reply drafts for your approval.",
+  },
+  {
+    value: "aggressive",
+    label: "Aggressive",
+    description: "Auto-send low-stakes replies (RSVPs, confirms). Drafts for anything ambiguous.",
+  },
+];
+
 export default function ProactivePage() {
   const [enabled, setEnabled] = useState(false);
+  const [autonomy, setAutonomy] = useState<InboxAutonomy>("off");
+  const [briefingCron, setBriefingCron] = useState("0 8 * * *");
+  const [inboxInterval, setInboxInterval] = useState("15m");
+  const [calendarInterval, setCalendarInterval] = useState("5m");
+  const [savingAutonomy, setSavingAutonomy] = useState(false);
   const [commitments, setCommitments] = useState<Commitment[]>([]);
   const [loading, setLoading] = useState(true);
   const { addToast } = useToast();
@@ -34,14 +85,27 @@ export default function ProactivePage() {
       const configRes = await fetch("/api/config");
       const configData = await configRes.json();
       if (configData.config) {
-        const proactiveVal = configData.config.find(
-          (c: { key: string }) => c.key === "app.proactiveEnabled",
-        );
-        setEnabled(proactiveVal?.value === "true");
+        const get = (k: string) =>
+          configData.config.find((c: { key: string }) => c.key === k)?.value;
+
+        const proactiveVal = get("app.proactiveEnabled");
+        setEnabled(proactiveVal === "true" || proactiveVal === true);
+
+        const autonomyVal = get("app.inboxAutonomy");
+        if (typeof autonomyVal === "string") setAutonomy(autonomyVal as InboxAutonomy);
+
+        const cronVal = get("app.briefingCron");
+        if (typeof cronVal === "string" && cronVal) setBriefingCron(cronVal);
+
+        const inboxVal = get("app.inboxScanInterval");
+        if (typeof inboxVal === "string" && inboxVal) setInboxInterval(inboxVal);
+
+        const calVal = get("app.calendarScanInterval");
+        if (typeof calVal === "string" && calVal) setCalendarInterval(calVal);
       }
 
       // Fetch commitments from DB
-      const dbRes = await fetch("/api/admin/database/table?table=commitments&limit=20");
+      const dbRes = await fetch("/api/admin/database/table?name=commitments&limit=20");
       const dbData = await dbRes.json();
       if (dbData.rows) {
         setCommitments(dbData.rows);
@@ -72,6 +136,44 @@ export default function ProactivePage() {
     } catch {
       addToast("Failed to toggle", "error");
     }
+  };
+
+  const saveAutonomyConfig = async (next: {
+    autonomy?: InboxAutonomy;
+    briefingCron?: string;
+    inboxInterval?: string;
+    calendarInterval?: string;
+  }) => {
+    setSavingAutonomy(true);
+    try {
+      const body: Record<string, string> = {};
+      if (next.autonomy !== undefined) body["app.inboxAutonomy"] = next.autonomy;
+      if (next.briefingCron !== undefined) body["app.briefingCron"] = next.briefingCron;
+      if (next.inboxInterval !== undefined) body["app.inboxScanInterval"] = next.inboxInterval;
+      if (next.calendarInterval !== undefined)
+        body["app.calendarScanInterval"] = next.calendarInterval;
+
+      const res = await fetch("/api/config", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) throw new Error("save failed");
+
+      // Re-register cron jobs in the running daemon.
+      await fetch("/api/admin/proactive/reload", { method: "POST" }).catch(() => {});
+
+      addToast("Inbox autonomy saved", "success");
+    } catch {
+      addToast("Failed to save", "error");
+    } finally {
+      setSavingAutonomy(false);
+    }
+  };
+
+  const handleAutonomyChange = (value: InboxAutonomy) => {
+    setAutonomy(value);
+    void saveAutonomyConfig({ autonomy: value });
   };
 
   if (loading) {
@@ -124,6 +226,87 @@ export default function ProactivePage() {
           </p>
         </div>
       )}
+
+      {/* Inbox / calendar autonomy */}
+      <div className="rounded-xl border border-white/10 bg-white/5 p-5 space-y-4">
+        <div>
+          <h2 className="text-lg font-semibold text-white">Inbox & Calendar Autonomy</h2>
+          <p className="text-xs text-gray-400 mt-1">
+            Controls how aggressively the agent handles Gmail and Calendar. Results post to your
+            default notification channel. Requires Google Workspace to be connected.
+          </p>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
+          {AUTONOMY_OPTIONS.map((opt) => {
+            const selected = autonomy === opt.value;
+            return (
+              <button
+                key={opt.value}
+                onClick={() => handleAutonomyChange(opt.value)}
+                disabled={savingAutonomy}
+                className={`text-left rounded-lg border p-3 transition ${
+                  selected
+                    ? "border-blue-400/60 bg-blue-400/10"
+                    : "border-white/10 bg-white/[0.02] hover:bg-white/5"
+                } disabled:opacity-50`}
+              >
+                <div
+                  className={`text-sm font-semibold ${selected ? "text-blue-200" : "text-white"}`}
+                >
+                  {opt.label}
+                </div>
+                <div className="text-xs text-gray-400 mt-1 leading-snug">{opt.description}</div>
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2">
+          <BriefingScheduleControl
+            value={briefingCron}
+            disabled={savingAutonomy || autonomy === "off"}
+            onChange={(next) => {
+              setBriefingCron(next);
+              void saveAutonomyConfig({ briefingCron: next });
+            }}
+          />
+
+          <label className="text-xs text-gray-400 flex flex-col gap-1">
+            <span>Inbox scan interval</span>
+            <input
+              type="text"
+              value={inboxInterval}
+              onChange={(e) => setInboxInterval(e.target.value)}
+              onBlur={() => saveAutonomyConfig({ inboxInterval })}
+              placeholder="15m"
+              disabled={savingAutonomy || autonomy === "off"}
+              className="rounded-md bg-black/30 border border-white/10 px-2 py-1.5 text-sm text-white font-mono disabled:opacity-50 focus:outline-none focus:border-blue-400/60"
+            />
+            <span className="text-[10px] text-gray-500">E.g. 5m, 15m, 1h.</span>
+          </label>
+
+          <label className="text-xs text-gray-400 flex flex-col gap-1">
+            <span>Calendar scan interval</span>
+            <input
+              type="text"
+              value={calendarInterval}
+              onChange={(e) => setCalendarInterval(e.target.value)}
+              onBlur={() => saveAutonomyConfig({ calendarInterval })}
+              placeholder="5m"
+              disabled={savingAutonomy || autonomy === "off"}
+              className="rounded-md bg-black/30 border border-white/10 px-2 py-1.5 text-sm text-white font-mono disabled:opacity-50 focus:outline-none focus:border-blue-400/60"
+            />
+            <span className="text-[10px] text-gray-500">
+              Briefs meetings starting in roughly this window.
+            </span>
+          </label>
+        </div>
+
+        {autonomy === "off" && (
+          <p className="text-xs text-gray-500">Select a level above to register the cron jobs.</p>
+        )}
+      </div>
 
       {/* Feature cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -200,6 +383,104 @@ export default function ProactivePage() {
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+function BriefingScheduleControl({
+  value,
+  disabled,
+  onChange,
+}: {
+  value: string;
+  disabled: boolean;
+  onChange: (cron: string) => void;
+}) {
+  const parsed = parseBriefingCron(value);
+
+  // `forceCustom` lets the user opt into the raw-cron input even when the
+  // current value would parse cleanly (e.g., they want monthly schedules).
+  const [forceCustom, setForceCustom] = useState(false);
+  const isCustom = parsed === null || forceCustom;
+
+  // Local state for the raw-cron textbox so typing doesn't fire onChange
+  // on every keystroke. Commits on blur.
+  const [rawCron, setRawCron] = useState(value);
+  useEffect(() => setRawCron(value), [value]);
+
+  // Defaults for the simple controls when the existing value is custom.
+  const time = parsed?.time ?? "08:00";
+  const days: BriefingDays = parsed?.days ?? "everyday";
+
+  const inputClass =
+    "rounded-md bg-black/30 border border-white/10 px-2 py-1.5 text-sm text-white disabled:opacity-50 focus:outline-none focus:border-blue-400/60";
+
+  const handleDaysChange = (next: string) => {
+    if (next === "custom") {
+      setForceCustom(true);
+      return;
+    }
+    onChange(formatBriefingCron(time, next as BriefingDays));
+  };
+
+  return (
+    <div className="text-xs text-gray-400 flex flex-col gap-1 sm:col-span-1">
+      <span>Morning briefing</span>
+
+      {!isCustom && (
+        <div className="flex gap-2">
+          <input
+            type="time"
+            value={time}
+            onChange={(e) => onChange(formatBriefingCron(e.target.value || "08:00", days))}
+            disabled={disabled}
+            className={`${inputClass} flex-1`}
+          />
+          <select
+            value={days}
+            onChange={(e) => handleDaysChange(e.target.value)}
+            disabled={disabled}
+            className={`${inputClass} flex-1`}
+          >
+            <option value="everyday">Every day</option>
+            <option value="weekdays">Weekdays</option>
+            <option value="custom">Custom…</option>
+          </select>
+        </div>
+      )}
+
+      {isCustom && (
+        <div className="flex flex-col gap-1">
+          <input
+            type="text"
+            value={rawCron}
+            onChange={(e) => setRawCron(e.target.value)}
+            onBlur={() => {
+              if (rawCron !== value) onChange(rawCron);
+            }}
+            placeholder="0 8 * * *"
+            disabled={disabled}
+            className={`${inputClass} font-mono`}
+          />
+          <button
+            type="button"
+            onClick={() => {
+              setForceCustom(false);
+              if (!parseBriefingCron(rawCron)) {
+                onChange("0 8 * * *");
+              }
+            }}
+            disabled={disabled}
+            className="text-[10px] text-blue-400 hover:text-blue-300 text-left disabled:opacity-50"
+          >
+            ← back to simple picker
+          </button>
+        </div>
+      )}
+
+      <span className="text-[10px] text-gray-500">
+        {isCustom ? "Custom cron expression." : "Daily push to your default channel."}
+      </span>
     </div>
   );
 }
