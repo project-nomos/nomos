@@ -1,6 +1,9 @@
 import { execSync } from "node:child_process";
 import { loadSkills } from "./loader.ts";
 import type { Skill } from "./types.ts";
+import { createLogger } from "../lib/logger.ts";
+
+const log = createLogger("skill-installer");
 
 /**
  * Structured representation of an install command
@@ -198,7 +201,7 @@ async function main() {
   const checkOnly = args.includes("--check");
   const doInstall = args.includes("--install");
 
-  console.log("Scanning skills...\n");
+  log.info("Scanning skills...\n");
 
   const skills = loadSkills();
   const installer = new SkillInstaller(process.env.SKILL_INSTALL_DRY_RUN === "true");
@@ -213,54 +216,57 @@ async function main() {
 
     if (missing.length > 0) {
       skillsWithMissingDeps.push({ skill, missing });
-      console.log(`❌ ${skill.name}: missing ${missing.join(", ")}`);
+      log.info({ skill: skill.name, missing }, `❌ ${skill.name}: missing ${missing.join(", ")}`);
       if (available.length > 0) {
-        console.log(`   ✅ available: ${available.join(", ")}`);
+        log.info({ available }, `   ✅ available: ${available.join(", ")}`);
       }
       if (skill.install) {
-        console.log(`   📦 install: ${skill.install.join(" && ")}`);
+        log.info({ install: skill.install }, `   📦 install: ${skill.install.join(" && ")}`);
       }
-      console.log();
+      log.info("");
     }
   }
 
   if (skillsWithMissingDeps.length === 0) {
-    console.log("✅ All skill dependencies are satisfied!\n");
+    log.info("✅ All skill dependencies are satisfied!\n");
     return;
   }
 
-  console.log(`Found ${skillsWithMissingDeps.length} skill(s) with missing dependencies.\n`);
+  log.info(
+    { count: skillsWithMissingDeps.length },
+    `Found ${skillsWithMissingDeps.length} skill(s) with missing dependencies.\n`,
+  );
 
   if (checkOnly) {
-    console.log("Check complete (use --install to install).\n");
+    log.info("Check complete (use --install to install).\n");
     return;
   }
 
   if (!doInstall) {
-    console.log("Run with --install to install missing dependencies.\n");
+    log.info("Run with --install to install missing dependencies.\n");
     return;
   }
 
-  console.log("Installing missing dependencies...\n");
+  log.info("Installing missing dependencies...\n");
 
   for (const { skill, missing } of skillsWithMissingDeps) {
-    console.log(`Installing ${skill.name} (${missing.join(", ")})...`);
+    log.info({ skill: skill.name, missing }, `Installing ${skill.name} (${missing.join(", ")})...`);
     const result = await installer.install(skill);
 
     if (result.success) {
-      console.log(`✅ Success\n`);
+      log.info(`✅ Success\n`);
     } else {
-      console.log(`❌ Failed:\n${result.output}\n`);
+      log.info({ output: result.output }, `❌ Failed:\n${result.output}\n`);
     }
   }
 
-  console.log("Installation complete.\n");
+  log.info("Installation complete.\n");
 }
 
 // Run CLI if executed directly
 if (import.meta.url === `file://${process.argv[1]}`) {
   main().catch((error) => {
-    console.error("Error:", error);
+    log.error({ err: error }, "Error");
     process.exit(1);
   });
 }

@@ -20,6 +20,9 @@
 import { ImsgAdapter, type ImsgFeatureMode } from "./imessage-imsg.ts";
 import type { ChannelAdapter, IncomingMessage, OutgoingMessage } from "../types.ts";
 import type { DraftManager } from "../draft-manager.ts";
+import { createLogger } from "../../lib/logger.ts";
+
+const log = createLogger("imessage");
 
 const MAX_LENGTH = 4000;
 
@@ -98,14 +101,14 @@ export class IMessageAdapter implements ChannelAdapter {
     }
 
     if (this.agentMode === "agent" && this.ownerIdentities.size === 0) {
-      console.warn(
-        "[imessage-adapter] Agent mode requires owner phone or Apple ID. " +
+      log.warn(
+        "Agent mode requires owner phone or Apple ID. " +
           "Set IMESSAGE_OWNER_PHONE or IMESSAGE_OWNER_APPLE_ID, or use passive mode.",
       );
     }
 
-    console.log(
-      `[imessage-adapter] Starting (agent: ${this.agentMode}, features: ${this.featureMode}, imsg: ${check.version})` +
+    log.info(
+      `Starting (agent: ${this.agentMode}, features: ${this.featureMode}, imsg: ${check.version})` +
         (this.agentMode === "agent" ? `, owner: ${[...this.ownerIdentities].join(", ")}` : ""),
     );
 

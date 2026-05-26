@@ -54,6 +54,9 @@ import {
   type Persona,
 } from "../config/personas.ts";
 import { ShadowObserver } from "../memory/shadow-observer.ts";
+import { createLogger } from "../lib/logger.ts";
+
+const log = createLogger("agent-runtime");
 
 export class AgentRuntime {
   // Cached at startup
@@ -119,11 +122,9 @@ export class AgentRuntime {
         userId: ws.user_id,
       }));
 
-      console.log(
-        `[agent-runtime] Reloaded ${Object.keys(wsServers).length} workspace MCP server(s)`,
-      );
+      log.info(`Reloaded ${Object.keys(wsServers).length} workspace MCP server(s)`);
     } catch (err) {
-      console.error("[agent-runtime] Failed to reload workspace MCPs:", err);
+      log.error({ err }, "Failed to reload workspace MCPs");
     }
   }
 
@@ -139,8 +140,8 @@ export class AgentRuntime {
       await runMigrations();
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      console.warn(
-        `[agent-runtime] DB migrations skipped (${msg}). Continuing without DB so the setup wizard can configure it.`,
+      log.warn(
+        `DB migrations skipped (${msg}). Continuing without DB so the setup wizard can configure it.`,
       );
     }
 
@@ -172,8 +173,8 @@ export class AgentRuntime {
     // Load plugins (ensure defaults are installed on first run)
     const newlyInstalled = await ensureDefaultPlugins();
     if (newlyInstalled.length > 0) {
-      console.log(
-        `[agent-runtime] Pre-installed ${newlyInstalled.length} default plugin(s): ${newlyInstalled.join(", ")}`,
+      log.info(
+        `Pre-installed ${newlyInstalled.length} default plugin(s): ${newlyInstalled.join(", ")}`,
       );
     }
     const loadedPlugins = await loadInstalledPlugins();
@@ -356,36 +357,34 @@ export class AgentRuntime {
     }
 
     this.initialized = true;
-    console.log("[agent-runtime] Initialized");
-    console.log(`[agent-runtime]   Model: ${this.config.model}`);
+    log.info("Initialized");
+    log.info(`  Model: ${this.config.model}`);
     if (this.config.teamMode) {
-      console.log(
-        `[agent-runtime]   Team mode: enabled (max ${this.config.maxTeamWorkers} workers)`,
-      );
+      log.info(`  Team mode: enabled (max ${this.config.maxTeamWorkers} workers)`);
     }
     if (this.config.adaptiveMemory) {
-      console.log(
-        `[agent-runtime]   Adaptive memory: enabled${userModel?.length ? ` (${userModel.length} model entries)` : ""}`,
+      log.info(
+        `  Adaptive memory: enabled${userModel?.length ? ` (${userModel.length} model entries)` : ""}`,
       );
     }
     if (this.config.shadowMode) {
       const stats = this.shadowObserver!.getStats();
-      console.log(
-        `[agent-runtime]   Shadow mode: enabled (${stats.tools} tool obs, ${stats.corrections} corrections)`,
+      log.info(
+        `  Shadow mode: enabled (${stats.tools} tool obs, ${stats.corrections} corrections)`,
       );
     }
     if (this.config.anthropicBaseUrl) {
-      console.log(`[agent-runtime]   API base URL: ${this.config.anthropicBaseUrl}`);
+      log.info(`  API base URL: ${this.config.anthropicBaseUrl}`);
     }
-    console.log(`[agent-runtime]   Identity: ${this.identity.emoji ?? ""} ${this.identity.name}`);
-    console.log(`[agent-runtime]   MCP servers: ${Object.keys(this.mcpServers).join(", ")}`);
+    log.info(`  Identity: ${this.identity.emoji ?? ""} ${this.identity.name}`);
+    log.info(`  MCP servers: ${Object.keys(this.mcpServers).join(", ")}`);
     if (this.plugins.length > 0) {
       const pluginNames = this.plugins.map((p) => p.path.split("/").pop()).join(", ");
-      console.log(`[agent-runtime]   Plugins: ${pluginNames}`);
+      log.info(`  Plugins: ${pluginNames}`);
     }
     if (this.personas.length > 0) {
       const personaNames = this.personas.filter((p) => p.enabled).map((p) => p.name);
-      console.log(`[agent-runtime]   Personas: ${personaNames.join(", ")}`);
+      log.info(`  Personas: ${personaNames.join(", ")}`);
     }
   }
 
@@ -530,8 +529,8 @@ export class AgentRuntime {
     if (this.config.smartRouting) {
       const classification = classifyQuery(message.content);
       model = this.config.modelTiers[classification.tier];
-      console.log(
-        `[agent-runtime] Smart routing: "${classification.tier}" (confidence: ${classification.confidence.toFixed(2)}) → ${model}`,
+      log.info(
+        `Smart routing: "${classification.tier}" (confidence: ${classification.confidence.toFixed(2)}) → ${model}`,
       );
       // Show routing decision in the chat
       const shortModel = model.replace("claude-", "");
@@ -544,11 +543,9 @@ export class AgentRuntime {
 
     // Check for team mode trigger (/team prefix)
     const teamTask = this.teamRuntime ? stripTeamPrefix(message.content) : null;
-    console.log(
-      `[agent-runtime] Team check: teamRuntime=${!!this.teamRuntime}, teamTask=${!!teamTask}`,
-    );
+    log.info(`Team check: teamRuntime=${!!this.teamRuntime}, teamTask=${!!teamTask}`);
     if (teamTask && this.teamRuntime) {
-      console.log(`[agent-runtime] Executing team task: ${teamTask.slice(0, 100)}`);
+      log.info(`Executing team task: ${teamTask.slice(0, 100)}`);
 
       emit({
         type: "system",
@@ -578,7 +575,7 @@ export class AgentRuntime {
         );
 
         const content = result || "_(no response)_";
-        console.log(`[agent-runtime] Team result: ${content.length} chars`);
+        log.info(`Team result: ${content.length} chars`);
 
         // Store team result so subsequent turns have context
         const teamSummary =
@@ -706,8 +703,9 @@ export class AgentRuntime {
       };
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
-      console.error(
-        `[agent-runtime] SDK error (model: ${model ?? this.config.model}, resume: ${!!resumeId}): ${errMsg}`,
+      log.error(
+        { err: errMsg },
+        `SDK error (model: ${model ?? this.config.model}, resume: ${!!resumeId})`,
       );
 
       // If resume failed, retry without resume.
@@ -758,9 +756,7 @@ export class AgentRuntime {
             model !== this.config.modelTiers.moderate
           ) {
             const upgradeModel = this.config.modelTiers.moderate;
-            console.warn(
-              `[agent-runtime] Context too large for ${model}, upgrading to ${upgradeModel}`,
-            );
+            log.warn(`Context too large for ${model}, upgrading to ${upgradeModel}`);
             emit({
               type: "system",
               subtype: "status",
@@ -863,7 +859,7 @@ export class AgentRuntime {
       stderr: (data: string) => {
         // Log SDK subprocess stderr so we can diagnose crash reasons
         const trimmed = data.trim();
-        if (trimmed) console.error(`[agent-runtime:stderr] ${trimmed}`);
+        if (trimmed) log.error(`[stderr] ${trimmed}`);
       },
     });
 

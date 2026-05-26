@@ -14,6 +14,9 @@
 import { WebClient } from "@slack/web-api";
 import { listWorkspaces } from "../../db/slack-workspaces.ts";
 import type { IngestSource, IngestMessage, IngestOptions } from "../types.ts";
+import { createLogger } from "../../lib/logger.ts";
+
+const log = createLogger("ingest-slack");
 
 /** Delay between search pages (Tier 2: 20 req/min, we target ~6 req/min). */
 const PAGE_DELAY_MS = 10_000;
@@ -47,7 +50,7 @@ export class SlackIngestSource implements IngestSource {
       query += ` after:${dateStr}`;
     }
 
-    console.log(`[slack-ingest] Searching: ${query}`);
+    log.info({ query }, "Searching");
 
     let page = 1;
     let totalPages = 1;
@@ -65,7 +68,7 @@ export class SlackIngestSource implements IngestSource {
       if (!matches || matches.length === 0) break;
 
       totalPages = result.messages?.paging?.pages ?? 1;
-      console.log(`[slack-ingest] Page ${page}/${totalPages} -- ${matches.length} messages`);
+      log.info({ page, totalPages, messages: matches.length }, "Page");
 
       for (const match of matches) {
         if (!match.text) continue;

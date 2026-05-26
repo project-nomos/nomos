@@ -15,6 +15,9 @@ import { generateEmbeddings, isEmbeddingAvailable } from "../memory/embeddings.t
 import { storeMemoryChunk } from "../db/memory.ts";
 import { loadEnvConfig } from "../config/env.ts";
 import type { IncomingMessage, OutgoingMessage } from "./types.ts";
+import { createLogger } from "../lib/logger.ts";
+
+const log = createLogger("memory-indexer");
 
 /**
  * Index a conversation turn (user message + agent response) into vector memory.
@@ -51,7 +54,7 @@ export async function indexConversationTurn(
     try {
       embeddings = await generateEmbeddings(chunks.map((c) => c.text));
     } catch (err) {
-      console.debug("[memory-indexer] Embedding generation failed, storing text-only:", err);
+      log.debug({ err }, "Embedding generation failed, storing text-only");
     }
   }
 
@@ -76,18 +79,18 @@ export async function indexConversationTurn(
     });
   }
 
-  console.debug(`[memory-indexer] Indexed ${chunks.length} chunk(s) from ${sessionKey}`);
+  log.debug(`Indexed ${chunks.length} chunk(s) from ${sessionKey}`);
 
   // Adaptive memory: extract structured knowledge and score exemplars (fire-and-forget)
   const config = loadEnvConfig();
   if (config.adaptiveMemory) {
     extractAndStoreKnowledgeFromTurn(incoming, outgoing, sessionKey).catch((err) => {
-      console.debug("[memory-indexer] Knowledge extraction failed:", err);
+      log.debug({ err }, "Knowledge extraction failed");
     });
 
     // Score user message as a potential exemplar for few-shot personality priming
     scoreExemplarFromTurn(incoming, sessionKey).catch((err) => {
-      console.debug("[memory-indexer] Exemplar scoring failed:", err);
+      log.debug({ err }, "Exemplar scoring failed");
     });
   }
 }

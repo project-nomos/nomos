@@ -23,6 +23,9 @@ import { calendarScanJobSpec } from "./calendar-watcher.ts";
 import { morningBriefingJobSpec, DEFAULT_BRIEFING_CRON } from "./morning-briefing.ts";
 import { loadEnvConfigAsync } from "../config/env.ts";
 import { getNotificationDefault } from "../db/notification-defaults.ts";
+import { createLogger } from "../lib/logger.ts";
+
+const log = createLogger("proactive-scheduler");
 
 const INBOX_JOB_NAME = "proactive:inbox-watcher";
 const CALENDAR_JOB_NAME = "proactive:calendar-watcher";
@@ -51,7 +54,7 @@ export async function registerProactiveJobs(): Promise<void> {
       if (existing?.enabled) {
         await store.updateJob(existing.id, { enabled: false });
         changed = true;
-        console.log(`[proactive] Disabled ${name} (inbox autonomy is off)`);
+        log.info({ name }, "Disabled job (inbox autonomy is off)");
       }
     }
     if (changed) process.emit("cron:refresh" as never);
@@ -59,8 +62,8 @@ export async function registerProactiveJobs(): Promise<void> {
   }
 
   if (!target) {
-    console.warn(
-      "[proactive] No default notification channel configured — proactive jobs not registered. Set one via the Settings UI.",
+    log.warn(
+      "No default notification channel configured — proactive jobs not registered. Set one via the Settings UI.",
     );
     return;
   }
@@ -95,7 +98,7 @@ async function upsertJob(
       enabled: true,
       errorCount: 0,
     });
-    console.log(`[proactive] Registered ${spec.name} (${spec.schedule})`);
+    log.info({ name: spec.name, schedule: spec.schedule }, "Registered job");
     return true;
   }
 
@@ -112,7 +115,7 @@ async function upsertJob(
   if (Object.keys(updates).length === 0) return false;
 
   await store.updateJob(existing.id, updates);
-  console.log(`[proactive] Updated ${spec.name} (${Object.keys(updates).join(", ")})`);
+  log.info({ name: spec.name, updates: Object.keys(updates) }, "Updated job");
   return true;
 }
 
@@ -134,7 +137,7 @@ export async function runCommitmentReminders(): Promise<{
       })
       .join("\n");
 
-    console.log(`[proactive] Commitment reminders:\n${reminders}`);
+    log.info(`Commitment reminders:\n${reminders}`);
     await markReminded(due.map((c) => c.id));
   }
 
@@ -179,6 +182,6 @@ export async function runTriageDigest(): Promise<string> {
   }
 
   const summary = lines.join("\n");
-  console.log(`[proactive] ${summary}`);
+  log.info(summary);
   return summary;
 }

@@ -13,6 +13,9 @@
 import { GoogleAuth, OAuth2Client } from "google-auth-library";
 import { execFile } from "node:child_process";
 import type { IngestSource, IngestMessage, IngestOptions } from "../types.ts";
+import { createLogger } from "../../lib/logger.ts";
+
+const log = createLogger("ingest-gmail");
 
 const PAGE_DELAY_MS = 200; // Gmail: 250 quota units/sec
 const MAX_RESULTS = 100;
@@ -43,30 +46,51 @@ export class GmailIngestSource implements IngestSource {
 
   /**
    * Get an access token for Gmail API.
-   * Priority: gws CLI tokens > Application Default Credentials (gcloud/service account).
+   *
+   * Priority:
+   *   1. gws CLI tokens (the common Google Workspace OAuth path).
+   *   2. Application Default Credentials — ONLY when gws is not set up
+   *      at all. ADC tokens from `gcloud auth application-default login`
+   *      do not include Gmail scope, so falling back to ADC after a gws
+   *      failure just hides the real problem (you get a 403
+   *      ACCESS_TOKEN_SCOPE_INSUFFICIENT on the first Gmail call).
    */
   private async getAccessToken(): Promise<string> {
-    // 1. Try gws CLI (Google Workspace auth)
-    try {
-      const creds = await exportGwsCredentials();
-      if (creds) {
-        console.log("[ingest:gmail] Using gws CLI credentials for Gmail access");
+    const creds = await exportGwsCredentials();
+
+    if (creds) {
+      // gws is configured — its tokens are the only path that has Gmail
+      // scope. If refresh fails here, do NOT fall back to ADC; surface
+      // the real error so the user can re-authorize.
+      log.info("Using gws CLI credentials for Gmail access");
+      try {
         const oauth2 = new OAuth2Client(creds.client_id, creds.client_secret);
         oauth2.setCredentials({ refresh_token: creds.refresh_token });
         const { token } = await oauth2.getAccessToken();
         if (token) return token;
-        console.warn("[ingest:gmail] gws token refresh returned no token");
-      } else {
-        console.warn("[ingest:gmail] gws auth export returned no credentials");
+        throw new Error("gws token refresh returned no token");
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        const isInvalidClient = /invalid_client/i.test(message);
+        const isInvalidGrant = /invalid_grant/i.test(message);
+        const hint = isInvalidClient
+          ? "the gws keyring's refresh token was issued against a different OAuth client than the one currently in client_secret.json (usually after the client credentials were rotated or rewritten)"
+          : isInvalidGrant
+            ? "the refresh token is expired or has been revoked"
+            : "the gws OAuth refresh failed";
+        throw new Error(
+          `Gmail auth failed: ${message}. Cause: ${hint}. ` +
+            'Fix: in Settings UI → Integrations → Google, click "Remove" on the authorized account then "Authorize Account". ' +
+            "Or from a shell: `npx @googleworkspace/cli auth logout` then re-run the OAuth flow.",
+        );
       }
-    } catch (err) {
-      console.warn(
-        "[ingest:gmail] gws auth failed, falling back to ADC:",
-        err instanceof Error ? err.message : err,
-      );
     }
 
-    // 2. Fall back to Application Default Credentials (Vertex AI / service account)
+    // gws is not set up — try Application Default Credentials. This path
+    // only works if the user has explicitly granted Gmail scope to ADC
+    // (uncommon — `gcloud auth application-default login` gives only
+    // cloud-platform scope by default). If you see a 403
+    // ACCESS_TOKEN_SCOPE_INSUFFICIENT after this, use gws instead.
     const auth = new GoogleAuth({
       scopes: ["https://www.googleapis.com/auth/gmail.readonly"],
     });
@@ -74,8 +98,8 @@ export class GmailIngestSource implements IngestSource {
     const tokenResponse = await client.getAccessToken();
     if (!tokenResponse.token) {
       throw new Error(
-        "Failed to obtain Gmail access token. Either authorize via Settings > Google Workspace, " +
-          "or run: gcloud auth application-default login",
+        "No Gmail access token available. Authorize via Settings UI → Integrations → Google " +
+          "(this uses the gws CLI under the hood and is the recommended path).",
       );
     }
     return tokenResponse.token;
@@ -249,7 +273,7 @@ function exportGwsCredentials(): Promise<GwsCredentials | null> {
       { timeout: 15_000 },
       (err, stdout, stderr) => {
         if (err) {
-          console.warn("[ingest:gmail] gws auth export failed:", err.message, stderr?.trim());
+          log.warn({ err: err.message, stderr: stderr?.trim() }, "gws auth export failed");
           resolve(null);
           return;
         }

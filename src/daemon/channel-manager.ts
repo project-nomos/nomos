@@ -5,6 +5,9 @@
 
 import type { ChannelAdapter, IncomingMessage, OutgoingMessage } from "./types.ts";
 import { MessageHookPipeline, type MessageHook } from "./message-hooks.ts";
+import { createLogger } from "../lib/logger.ts";
+
+const log = createLogger("channel-manager");
 
 export class ChannelManager {
   private adapters = new Map<string, ChannelAdapter>();
@@ -34,7 +37,7 @@ export class ChannelManager {
 
     const hookList = this.hooks.listHooks();
     if (hookList.length > 0) {
-      console.log(`[channel-manager] Loaded ${hookList.length} message hook(s)`);
+      log.info(`Loaded ${hookList.length} message hook(s)`);
     }
 
     // Group adapters by rate-limit domain (platform prefix before ":").
@@ -61,9 +64,9 @@ export class ChannelManager {
           }
           try {
             await adapter.start();
-            console.log(`[channel-manager] Started: ${adapter.platform}`);
+            log.info(`Started: ${adapter.platform}`);
           } catch (err) {
-            console.error(`[channel-manager] Failed to start ${adapter.platform}:`, err);
+            log.error({ err }, `Failed to start ${adapter.platform}`);
           }
         }
       }),
@@ -71,9 +74,7 @@ export class ChannelManager {
 
     const failures = results.filter((r) => r.status === "rejected");
     if (failures.length > 0) {
-      console.warn(
-        `[channel-manager] ${failures.length}/${this.adapters.size} adapter group(s) failed to start`,
-      );
+      log.warn(`${failures.length}/${this.adapters.size} adapter group(s) failed to start`);
     }
   }
 
@@ -86,9 +87,9 @@ export class ChannelManager {
       [...this.adapters.values()].map(async (adapter) => {
         try {
           await adapter.stop();
-          console.log(`[channel-manager] Stopped: ${adapter.platform}`);
+          log.info(`Stopped: ${adapter.platform}`);
         } catch (err) {
-          console.error(`[channel-manager] Error stopping ${adapter.platform}:`, err);
+          log.error({ err }, `Error stopping ${adapter.platform}`);
         }
       }),
     );
@@ -112,7 +113,7 @@ export class ChannelManager {
 
     const adapter = this.adapters.get(transformed.platform);
     if (!adapter) {
-      console.warn(`[channel-manager] No adapter for platform "${transformed.platform}"`);
+      log.warn(`No adapter for platform "${transformed.platform}"`);
       return;
     }
     await adapter.send(transformed);
@@ -134,9 +135,9 @@ export class ChannelManager {
     this.adapters.set(adapter.platform, adapter);
     try {
       await adapter.start();
-      console.log(`[channel-manager] Hot-loaded: ${adapter.platform}`);
+      log.info(`Hot-loaded: ${adapter.platform}`);
     } catch (err) {
-      console.error(`[channel-manager] Failed to hot-load ${adapter.platform}:`, err);
+      log.error({ err }, `Failed to hot-load ${adapter.platform}`);
       this.adapters.delete(adapter.platform);
     }
   }
@@ -147,7 +148,7 @@ export class ChannelManager {
     if (!adapter) return false;
     try {
       await adapter.stop();
-      console.log(`[channel-manager] Removed: ${platform}`);
+      log.info(`Removed: ${platform}`);
     } catch {
       // Ignore stop errors
     }

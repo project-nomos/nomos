@@ -24,6 +24,9 @@ import path from "node:path";
 import { runSession, type McpServerConfig, type SdkPluginConfig } from "../sdk/session.ts";
 import { getTeamMailbox } from "./team-mailbox.ts";
 import { getTaskManager } from "./task-manager.ts";
+import { createLogger } from "../lib/logger.ts";
+
+const log = createLogger("team-runtime");
 
 const execFileAsync = promisify(execFile);
 
@@ -330,11 +333,9 @@ export class TeamRuntime {
         maxTurns: 2,
         plugins: task.plugins,
       });
-      console.log(
-        `[team-runtime] Coordinator output (${output.length} chars): ${output.slice(0, 300)}`,
-      );
+      log.info(`Coordinator output (${output.length} chars): ${output.slice(0, 300)}`);
     } catch (err) {
-      console.error("[team-runtime] Coordinator decomposition failed:", err);
+      log.error({ err }, "Coordinator decomposition failed");
       // Fallback: treat entire task as single subtask
       return [{ id: randomUUID(), description: task.prompt }];
     }
@@ -343,13 +344,13 @@ export class TeamRuntime {
     // The coordinator may wrap it in ```json ... ``` fences or add text after.
     const descriptions = this.extractJsonArray(output);
     if (!descriptions) {
-      console.error(
-        `[team-runtime] Coordinator did not return valid JSON array. Output (${output.length} chars): ${output.slice(0, 500)}`,
+      log.error(
+        `Coordinator did not return valid JSON array. Output (${output.length} chars): ${output.slice(0, 500)}`,
       );
       return [{ id: randomUUID(), description: task.prompt }];
     }
 
-    console.log(`[team-runtime] Coordinator decomposed into ${descriptions.length} subtask(s)`);
+    log.info(`Coordinator decomposed into ${descriptions.length} subtask(s)`);
     return descriptions
       .slice(0, this.config.maxWorkers)
       .map((desc) => ({ id: randomUUID(), description: desc }));
@@ -406,8 +407,9 @@ export class TeamRuntime {
               return parsed;
             }
           } catch (err) {
-            console.error(
-              `[team-runtime] Balanced bracket extraction failed: ${err instanceof Error ? err.message : err}`,
+            log.error(
+              { err: err instanceof Error ? err.message : err },
+              `Balanced bracket extraction failed`,
             );
           }
           break;
@@ -643,9 +645,7 @@ Verify the workers' changes are correct. Run builds, tests, linters, and adversa
         plugins: task.plugins,
       });
 
-      console.log(
-        `[team-runtime] Verification output (${output.length} chars): ${output.slice(0, 500)}`,
-      );
+      log.info(`Verification output (${output.length} chars): ${output.slice(0, 500)}`);
 
       // Parse verdict — if verification didn't complete (no VERDICT line), treat as PASS
       // rather than penalizing with PARTIAL (the agent ran out of turns, not a real failure)
@@ -669,7 +669,7 @@ Verify the workers' changes are correct. Run builds, tests, linters, and adversa
         checks,
       };
     } catch (err) {
-      console.error("[team-runtime] Verification agent failed:", err);
+      log.error({ err }, "Verification agent failed");
       return {
         verdict: "PARTIAL",
         summary: "Verification agent failed to complete",
@@ -716,7 +716,7 @@ Verify the workers' changes are correct. Run builds, tests, linters, and adversa
         plugins: task.plugins,
       });
     } catch (err) {
-      console.error("[team-runtime] Synthesis agent failed, returning raw results:", err);
+      log.error({ err }, "Synthesis agent failed, returning raw results");
       // Fallback: return worker outputs directly
       return results
         .map((r, i) => {
@@ -744,8 +744,8 @@ Verify the workers' changes are correct. Run builds, tests, linters, and adversa
     },
     emit?: (event: { type: string; message: string }) => void,
   ): Promise<string> {
-    console.log(
-      `[team-runtime] Running agent (model: ${options.model ?? "default"}${options.cwd ? `, cwd: ${options.cwd}` : ""})...`,
+    log.info(
+      `Running agent (model: ${options.model ?? "default"}${options.cwd ? `, cwd: ${options.cwd}` : ""})...`,
     );
 
     const stderrChunks: string[] = [];
@@ -766,7 +766,7 @@ Verify the workers' changes are correct. Run builds, tests, linters, and adversa
         if (trimmed) {
           stderrChunks.push(trimmed);
           if (stderrChunks.length > 50) stderrChunks.shift();
-          console.error(`[team-runtime:stderr] ${trimmed}`);
+          log.error(`[stderr] ${trimmed}`);
           // Also write to file for debugging
           try {
             fs.appendFileSync(stderrLogFile, trimmed + "\n");
@@ -804,25 +804,23 @@ Verify the workers' changes are correct. Run builds, tests, linters, and adversa
       }
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
-      console.error(`[team-runtime] Agent failed: ${errMsg}`);
+      log.error({ err: errMsg }, `Agent failed`);
 
       // If we captured text output before the process crashed, it likely
       // contains the real error message (e.g. "model not available").
       // Return it instead of throwing a generic "exited with code 1".
       if (fullText.trim()) {
-        console.error(
-          `[team-runtime] Returning captured output (${fullText.length} chars) despite exit error`,
-        );
+        log.error(`Returning captured output (${fullText.length} chars) despite exit error`);
         return fullText;
       }
 
       if (stderrChunks.length > 0) {
-        console.error(`[team-runtime] stderr output:\n${stderrChunks.join("\n")}`);
+        log.error(`stderr output:\n${stderrChunks.join("\n")}`);
       }
       throw err;
     }
 
-    console.log(`[team-runtime] Agent finished (${fullText.length} chars)`);
+    log.info(`Agent finished (${fullText.length} chars)`);
     return fullText;
   }
 }

@@ -16,6 +16,9 @@ import * as os from "node:os";
 import { randomUUID } from "node:crypto";
 import type { ChannelAdapter, IncomingMessage, OutgoingMessage } from "../types.ts";
 import type { DraftManager } from "../draft-manager.ts";
+import { createLogger } from "../../lib/logger.ts";
+
+const log = createLogger("whatsapp");
 
 const MAX_LENGTH = 4096;
 
@@ -94,7 +97,7 @@ export class WhatsAppAdapter implements ChannelAdapter {
             await connectToWhatsApp();
           }
         } else if (connection === "open") {
-          console.log(`[whatsapp-adapter] Connected as ${this.sock?.user?.id}`);
+          log.info(`Connected as ${this.sock?.user?.id}`);
         }
       });
 

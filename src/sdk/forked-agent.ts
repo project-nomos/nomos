@@ -11,6 +11,9 @@
 
 import { runSession, type RunSessionParams } from "./session.ts";
 import { getCostTracker } from "./cost-tracker.ts";
+import { createLogger } from "../lib/logger.ts";
+
+const log = createLogger("forked-agent");
 
 /** Default model for background subagents (cheap + fast). */
 const DEFAULT_FORK_MODEL = "claude-haiku-4-5";
@@ -60,7 +63,7 @@ export async function runForkedAgent(options: ForkedAgentOptions): Promise<Forke
   const label = options.label ?? "fork";
   const start = Date.now();
 
-  console.log(`[forked-agent] Starting ${label} (model: ${model})...`);
+  log.info({ label, model }, "Starting fork");
 
   // Check if subscription mode is enabled (reads env at call time)
   const useSubscription = process.env.NOMOS_USE_SUBSCRIPTION === "true";
@@ -74,7 +77,7 @@ export async function runForkedAgent(options: ForkedAgentOptions): Promise<Forke
     useSubscription,
     stderr: (data: string) => {
       const trimmed = data.trim();
-      if (trimmed) console.error(`[forked-agent:stderr:${label}] ${trimmed}`);
+      if (trimmed) log.error({ label, stream: "stderr" }, trimmed);
     },
   };
 
@@ -119,8 +122,9 @@ export async function runForkedAgent(options: ForkedAgentOptions): Promise<Forke
     );
   }
 
-  console.log(
-    `[forked-agent] ${label} complete (${durationMs}ms, ${fullText.length} chars, $${totalCostUsd.toFixed(4)})`,
+  log.info(
+    { label, durationMs, chars: fullText.length, costUsd: totalCostUsd },
+    `${label} complete (${durationMs}ms, ${fullText.length} chars, $${totalCostUsd.toFixed(4)})`,
   );
 
   return {

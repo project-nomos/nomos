@@ -12,6 +12,9 @@ import type { PolicyConfig } from "@project-nomos/cate-sdk/types";
 import { NomosKeystore } from "./nomos-keystore.ts";
 import { NomosTransport } from "./nomos-transport.ts";
 import { getDb } from "../db/client.ts";
+import { createLogger } from "../lib/logger.ts";
+
+const log = createLogger("cate-integration");
 
 const AGENT_KEY_ID = "nomos-agent";
 const USER_KEY_ID = "nomos-user";
@@ -43,14 +46,14 @@ export async function initCATEIntegration(options?: {
   let agentKey = await keystore.getKey(AGENT_KEY_ID);
   if (!agentKey) {
     agentKey = await keystore.generateKey(AGENT_KEY_ID);
-    console.log("[cate] Generated new agent key pair");
+    log.info("Generated new agent key pair");
   }
 
   // Create or load user key (for VC issuance)
   let userKey = await keystore.getKey(USER_KEY_ID);
   if (!userKey) {
     userKey = await keystore.generateKey(USER_KEY_ID);
-    console.log("[cate] Generated new user key pair");
+    log.info("Generated new user key pair");
   }
 
   const agentDid = createDIDKey(agentKey.publicKey);
@@ -102,18 +105,23 @@ export async function initCATEIntegration(options?: {
     identity: { did: agentDid, keystore },
     policy: policyConfig,
     onMessage: async (envelope, context) => {
-      console.log(
-        `[cate] Received envelope from ${context.senderDid} (${context.trustTier}, ${context.policyAction})`,
+      log.info(
+        {
+          senderDid: context.senderDid,
+          trustTier: context.trustTier,
+          policyAction: context.policyAction,
+        },
+        "Received envelope",
       );
       await options?.onMessage?.(envelope);
     },
     onError: (error) => {
-      console.error(`[cate] Error: ${error.message}`);
+      log.error({ err: error }, "Error");
     },
   });
 
   await server.listen({ transport });
-  console.log(`[cate] Server started on port ${port} (DID: ${agentDid})`);
+  log.info({ port, agentDid }, "Server started");
 
   return { server, agentDid, agentCard, keystore, transport };
 }
@@ -168,5 +176,5 @@ async function loadPolicyConfig(): Promise<PolicyConfig> {
  */
 export async function stopCATEIntegration(integration: CATEIntegration): Promise<void> {
   await integration.server.close();
-  console.log("[cate] Server stopped");
+  log.info("Server stopped");
 }

@@ -20,6 +20,9 @@ import { randomUUID } from "node:crypto";
 import { createInterface } from "node:readline";
 import { promisify } from "node:util";
 import type { IncomingMessage } from "../types.ts";
+import { createLogger } from "../../lib/logger.ts";
+
+const log = createLogger("imessage-imsg");
 
 const execFileAsync = promisify(execFile);
 
@@ -98,11 +101,11 @@ export class ImsgAdapter {
     if (this.featureMode === "advanced") {
       try {
         await execFileAsync("imsg", ["launch"], { timeout: 15_000 });
-        console.log("[imsg-adapter] Advanced IMCore bridge loaded");
+        log.info("Advanced IMCore bridge loaded");
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
-        console.warn(
-          `[imsg-adapter] Advanced mode requested but launch failed: ${msg}. ` +
+        log.warn(
+          `Advanced mode requested but launch failed: ${msg}. ` +
             "Disable SIP (csrutil disable in Recovery Mode) to use edit/unsend/typing.",
         );
       }
@@ -115,12 +118,12 @@ export class ImsgAdapter {
     });
 
     this.watchProc.on("error", (err) => {
-      console.error("[imsg-adapter] Watch process error:", err.message);
+      log.error({ err: err.message }, "Watch process error");
     });
 
     this.watchProc.on("exit", (code) => {
       if (!this.stopping) {
-        console.warn(`[imsg-adapter] Watch process exited with code ${code}`);
+        log.warn(`Watch process exited with code ${code}`);
       }
       this.watchProc = null;
     });
@@ -132,10 +135,10 @@ export class ImsgAdapter {
     // Log stderr (progress + warnings)
     this.watchProc.stderr?.on("data", (chunk: Buffer) => {
       const text = chunk.toString().trim();
-      if (text) console.log(`[imsg-adapter:stderr] ${text}`);
+      if (text) log.info({ stderr: text }, "imsg stderr");
     });
 
-    console.log(`[imsg-adapter] Started in ${this.featureMode} mode (watching chat.db)`);
+    log.info(`Started in ${this.featureMode} mode (watching chat.db)`);
   }
 
   async stop(): Promise<void> {
@@ -213,7 +216,7 @@ export class ImsgAdapter {
       const msg = JSON.parse(trimmed) as ImsgMessage;
       this.processMessage(msg);
     } catch (err) {
-      console.warn("[imsg-adapter] Failed to parse JSON line:", err);
+      log.warn({ err }, "Failed to parse JSON line");
     }
   }
 

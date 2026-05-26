@@ -9,6 +9,9 @@ import type { ChannelAdapter, IncomingMessage, OutgoingMessage } from "../types.
 import type { DraftManager } from "../draft-manager.ts";
 import { chunkResponse } from "../response-chunker.ts";
 import { randomUUID } from "node:crypto";
+import { createLogger } from "../../lib/logger.ts";
+
+const log = createLogger("slack");
 
 // CJS/ESM interop
 const slackBoltModule = SlackBolt as typeof import("@slack/bolt") & {
@@ -112,7 +115,7 @@ export class SlackAdapter implements ChannelAdapter {
     }
 
     await this.app.start();
-    console.log(`[slack-adapter] Running (bot: ${this.botUserId})`);
+    log.info(`Running (bot: ${this.botUserId})`);
   }
 
   async stop(): Promise<void> {

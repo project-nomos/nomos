@@ -24,6 +24,9 @@ import { runForkedAgent } from "../sdk/forked-agent.ts";
 import { upsertArticle, getArticle, listArticles } from "../db/wiki.ts";
 import { syncToDisk } from "./wiki-sync.ts";
 import { syncFileToDb } from "../config/file-sync.ts";
+import { createLogger } from "../lib/logger.ts";
+
+const log = createLogger("knowledge-compiler");
 
 const LOCK_FILE = path.join(homedir(), ".nomos", "wiki-compiler.lock");
 const WIKI_DIR = path.join(homedir(), ".nomos", "wiki");
@@ -102,11 +105,7 @@ export async function compileKnowledge(options?: { force?: boolean }): Promise<C
     const entries = userModelEntries as unknown as ModelEntry[];
     const contactRows = contacts as unknown as ContactRow[];
 
-    const knowledgeSummary = buildKnowledgeSummary(
-      entries,
-      contactRows,
-      existingArticles.map((a) => a.path),
-    );
+    const knowledgeSummary = buildKnowledgeSummary(entries, contactRows);
 
     const planResult = await runForkedAgent({
       prompt: `You are a knowledge wiki curator. Based on the user's accumulated knowledge, decide which wiki articles to create or update.
@@ -144,11 +143,11 @@ Maximum ${MAX_ARTICLES_PER_RUN} articles. Return [] if nothing is worth compilin
     }
 
     if (plans.length === 0) {
-      console.log("[knowledge-compiler] No articles to compile");
+      log.info("No articles to compile");
       return result;
     }
 
-    console.log(`[knowledge-compiler] Planning ${plans.length} article(s)`);
+    log.info({ count: plans.length }, "Planning articles");
 
     // 3. Compile each article
     for (const plan of plans) {
@@ -199,9 +198,7 @@ Maximum ${MAX_ARTICLES_PER_RUN} articles. Return [] if nothing is worth compilin
     // 6. Backup wiki articles to managed_files table
     await backupWikiToDb();
 
-    console.log(
-      `[knowledge-compiler] Done: ${result.articlesCreated} created, ${result.articlesUpdated} updated`,
-    );
+    log.info({ created: result.articlesCreated, updated: result.articlesUpdated }, "Done");
   } finally {
     if (fs.existsSync(LOCK_FILE)) {
       fs.writeFileSync(LOCK_FILE, new Date().toISOString());
@@ -309,7 +306,6 @@ async function backupWikiToDb(): Promise<void> {
 function buildKnowledgeSummary(
   entries: Array<{ category: string; key: string; value: string; confidence: number }>,
   contacts: Array<{ id: string; name: string; identities: unknown[] }>,
-  existingPaths: string[],
 ): string {
   const lines: string[] = [];
 

@@ -16,6 +16,9 @@
  */
 
 import type { ForkedAgentResult } from "../sdk/forked-agent.ts";
+import { createLogger } from "../lib/logger.ts";
+
+const log = createLogger("theory-of-mind");
 
 // ── Types ──
 
@@ -217,10 +220,7 @@ export class TheoryOfMindTracker {
         }
       })
       .catch((err) => {
-        console.warn(
-          "[theory-of-mind] LLM assessment failed:",
-          err instanceof Error ? err.message : err,
-        );
+        log.warn({ err: err instanceof Error ? err.message : err }, "LLM assessment failed");
       })
       .finally(() => {
         this.llmInFlight = false;

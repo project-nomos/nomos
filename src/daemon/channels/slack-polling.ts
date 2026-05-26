@@ -20,6 +20,9 @@ import type { ChannelAdapter, IncomingMessage, OutgoingMessage } from "../types.
 import type { DraftManager } from "../draft-manager.ts";
 import { randomUUID } from "node:crypto";
 import { markdownToSlackMrkdwn } from "./slack-mrkdwn.ts";
+import { createLogger } from "../../lib/logger.ts";
+
+const log = createLogger("slack-polling");
 
 export interface SlackPollingAdapterOptions {
   token: string;
@@ -124,7 +127,7 @@ export class SlackPollingAdapter implements ChannelAdapter {
 
     const userName = (auth.user as string) ?? this.userId;
     this.teamName = (auth.team as string) ?? this.teamId;
-    console.log(`[slack-polling] Running (user: ${userName}, team: ${this.teamId})`);
+    log.info(`Running (user: ${userName}, team: ${this.teamId})`);
 
     this.running = true;
 
@@ -147,9 +150,9 @@ export class SlackPollingAdapter implements ChannelAdapter {
       try {
         const botAuth = await this.botClient.auth.test();
         this.botUserId = (botAuth.user_id as string) ?? null;
-        console.log(`[slack-polling] Bot identity loaded (${this.botUserId})`);
+        log.info(`Bot identity loaded (${this.botUserId})`);
       } catch {
-        console.warn(`[slack-polling] Bot token auth failed -- agent will post as user`);
+        log.warn(`Bot token auth failed -- agent will post as user`);
         this.botClient = null;
       }
     }
@@ -190,9 +193,7 @@ export class SlackPollingAdapter implements ChannelAdapter {
       const nd = await getNotificationDefault();
       if (nd && nd.platform === this.platform) {
         this.defaultChannelId = nd.channelId;
-        console.log(
-          `[slack-polling] Default channel: ${nd.channelId} (${nd.label ?? "unlabeled"})`,
-        );
+        log.info(`Default channel: ${nd.channelId} (${nd.label ?? "unlabeled"})`);
       }
     } catch {
       // notification defaults not available
@@ -204,23 +205,21 @@ export class SlackPollingAdapter implements ChannelAdapter {
     // Start polling after optional stagger delay (prevents burst of API calls
     // when multiple workspaces start simultaneously)
     const startPolling = () => {
-      console.log(
-        `[slack-polling] Polling started for team ${this.teamId} (every ${Math.round(this.pollIntervalMs / 1000)}s)`,
+      log.info(
+        `Polling started for team ${this.teamId} (every ${Math.round(this.pollIntervalMs / 1000)}s)`,
       );
       // Run first poll immediately, then on interval
-      this.poll().catch((err) =>
-        console.error(`[slack-polling] Poll error (team ${this.teamId}):`, err),
-      );
+      this.poll().catch((err) => log.error({ err }, `Poll error (team ${this.teamId})`));
       this.pollTimer = setInterval(() => {
         this.poll().catch((err) => {
-          console.error(`[slack-polling] Poll error (team ${this.teamId}):`, err);
+          log.error({ err }, `Poll error (team ${this.teamId})`);
         });
       }, this.pollIntervalMs);
     };
 
     if (this.startDelayMs > 0) {
-      console.log(
-        `[slack-polling] Delaying poll start by ${Math.round(this.startDelayMs / 1000)}s for team ${this.teamId}`,
+      log.info(
+        `Delaying poll start by ${Math.round(this.startDelayMs / 1000)}s for team ${this.teamId}`,
       );
       setTimeout(startPolling, this.startDelayMs);
     } else {
@@ -375,13 +374,13 @@ export class SlackPollingAdapter implements ChannelAdapter {
       if (this.defaultChannelId) {
         this.lastSeenTs.set(this.defaultChannelId, nowTs);
       }
-      console.log(
-        `[slack-polling] Baseline set for ${dmChannels.length} DMs` +
+      log.info(
+        `Baseline set for ${dmChannels.length} DMs` +
           (this.defaultChannelId ? ` + default channel` : "") +
           ` (using current time)`,
       );
     } catch (err) {
-      console.warn("[slack-polling] Failed to initialize baselines:", err);
+      log.warn({ err }, "Failed to initialize baselines");
     }
   }
 
@@ -517,8 +516,8 @@ export class SlackPollingAdapter implements ChannelAdapter {
       }
 
       if (isFullScan) {
-        console.log(
-          `[slack-polling] Full scan: ${dmsToPoll.length}/${dmChannels.length} DMs polled (team ${this.teamId})`,
+        log.info(
+          `Full scan: ${dmsToPoll.length}/${dmChannels.length} DMs polled (team ${this.teamId})`,
         );
         // Decay active set -- full scan re-adds any with messages
         this.activeChannels.clear();
@@ -533,7 +532,7 @@ export class SlackPollingAdapter implements ChannelAdapter {
         this.consecutiveErrors++;
         if (!this.authErrorFired && this.consecutiveErrors >= 3) {
           this.authErrorFired = true;
-          console.error(`[slack-polling] Token expired for team ${this.teamId} — stopping polling`);
+          log.error(`Token expired for team ${this.teamId} — stopping polling`);
           this.onAuthError?.(this.teamId, this.teamName ?? this.teamId);
           await this.stop();
         }
@@ -581,7 +580,7 @@ export class SlackPollingAdapter implements ChannelAdapter {
       if (messages.length === 0) return false;
 
       if (channelId === this.defaultChannelId) {
-        console.log(`[slack-polling] Default channel has ${messages.length} new message(s)`);
+        log.info(`Default channel has ${messages.length} new message(s)`);
       }
 
       // Update last seen to newest message
@@ -634,7 +633,7 @@ export class SlackPollingAdapter implements ChannelAdapter {
       // Log errors for the default channel (important), skip others silently
       if (channelId === this.defaultChannelId) {
         const msg = err instanceof Error ? err.message : String(err);
-        console.error(`[slack-polling] Error polling default channel ${channelId}: ${msg}`);
+        log.error({ err: msg }, `Error polling default channel ${channelId}`);
       }
       return false;
     }
@@ -778,7 +777,7 @@ export class SlackPollingAdapter implements ChannelAdapter {
         // user_not_found is expected for Slack Connect / cross-workspace users;
         // only warn for unexpected failures.
         if (!msg.includes("user_not_found")) {
-          console.warn(`[slack-polling] ${label} client failed to resolve user ${userId}: ${msg}`);
+          log.warn({ err: msg }, `${label} client failed to resolve user ${userId}`);
         }
       }
     }

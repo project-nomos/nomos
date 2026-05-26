@@ -10,6 +10,9 @@
  */
 
 import { getIngestJobByPlatform, getLastCompletedJob } from "./pipeline.ts";
+import { createLogger } from "../lib/logger.ts";
+
+const log = createLogger("ingest-scheduler");
 
 /** Default lookback for auto-triggered full ingests (30 days). */
 const DEFAULT_LOOKBACK_DAYS = 30;
@@ -58,9 +61,7 @@ export class IngestScheduler {
 
       const since = new Date();
       since.setDate(since.getDate() - DEFAULT_LOOKBACK_DAYS);
-      console.log(
-        `[ingest-scheduler] Starting full ingest for ${platform} (last ${DEFAULT_LOOKBACK_DAYS} days)`,
-      );
+      log.info({ platform, lookbackDays: DEFAULT_LOOKBACK_DAYS }, "Starting full ingest");
       await this.spawnFn(
         subcommand,
         ["--run-type", "full", "--since", since.toISOString()],
@@ -104,7 +105,7 @@ export class IngestScheduler {
         extraArgs.push("--since", new Date(lastCompleted.last_successful_at).toISOString());
       }
 
-      console.log(`[ingest-scheduler] Starting delta sync for ${platform}`);
+      log.info({ platform }, "Starting delta sync");
       await this.spawnFn(subcommand, extraArgs, `${platform} (delta)`);
 
       // Clear dedupe after completion so cron-triggered deltas still work later
@@ -162,7 +163,7 @@ export class IngestScheduler {
 
   private enqueue(task: () => Promise<void>): void {
     this.ingestQueue = this.ingestQueue.then(task).catch((err) => {
-      console.error("[ingest-scheduler] Task failed:", err);
+      log.error({ err }, "Task failed");
     });
   }
 }

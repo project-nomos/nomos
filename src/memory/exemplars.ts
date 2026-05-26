@@ -11,6 +11,9 @@ import { storeMemoryChunk, searchMemoryByVector, searchMemoryByText } from "../d
 import { generateEmbedding, isEmbeddingAvailable } from "./embeddings.ts";
 import { runSession } from "../sdk/session.ts";
 import { loadEnvConfig } from "../config/env.ts";
+import { createLogger } from "../lib/logger.ts";
+
+const log = createLogger("exemplars");
 
 /** Context tags for exemplar classification. */
 export type ExemplarContext =
@@ -186,9 +189,7 @@ export async function scoreAndStoreExemplar(
   if (scored) {
     await storeExemplar(scored, platform, sessionKey);
     if (scored.score >= 0.6) {
-      console.debug(
-        `[exemplars] Stored exemplar (score: ${scored.score}, context: ${scored.context})`,
-      );
+      log.debug({ score: scored.score, context: scored.context }, "Stored exemplar");
     }
   }
 }
@@ -234,7 +235,7 @@ export async function retrieveExemplars(
       platform: ((r.metadata as Record<string, unknown>)?.platform as string) ?? "unknown",
     }));
   } catch (err) {
-    console.debug("[exemplars] Retrieval failed:", err);
+    log.debug({ err }, "Retrieval failed");
     return [];
   }
 }

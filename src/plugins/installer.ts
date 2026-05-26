@@ -13,7 +13,6 @@ import { readInstalledManifest } from "./loader.ts";
 
 const PLUGINS_DIR = join(homedir(), ".nomos", "plugins");
 const MANIFEST_PATH = join(PLUGINS_DIR, "installed.json");
-const MARKETPLACE_BASE = join(homedir(), ".claude", "plugins", "marketplaces");
 const KNOWN_MARKETPLACES_PATH = join(homedir(), ".claude", "plugins", "known_marketplaces.json");
 
 interface KnownMarketplaces {

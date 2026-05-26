@@ -5,6 +5,9 @@
  */
 
 import { createTransport, type Transporter } from "nodemailer";
+import { createLogger } from "../../lib/logger.ts";
+
+const log = createLogger("email-smtp");
 
 export interface SmtpConfig {
   host: string;
@@ -38,7 +41,7 @@ export class SmtpClient {
 
     // Verify connection
     await this.transporter.verify();
-    console.log(`[email-smtp] Connected to ${this.config.host}`);
+    log.info(`Connected to ${this.config.host}`);
   }
 
   async send(opts: {
@@ -61,7 +64,7 @@ export class SmtpClient {
       references: opts.references?.join(" "),
     });
 
-    console.log(`[email-smtp] Sent to ${opts.to}: ${info.messageId}`);
+    log.info({ to: opts.to, messageId: info.messageId }, `Sent to ${opts.to}`);
     return info.messageId;
   }
 

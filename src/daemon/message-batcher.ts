@@ -12,6 +12,9 @@
 
 import type { IncomingMessage } from "./types.ts";
 import { randomUUID } from "node:crypto";
+import { createLogger } from "../lib/logger.ts";
+
+const log = createLogger("message-batcher");
 
 /** Default debounce window: 8 seconds of silence before processing. */
 const DEFAULT_DEBOUNCE_MS = 8_000;
@@ -75,7 +78,10 @@ export class MessageBatcher {
 
   /** Immediately flush all pending buffers (e.g., on shutdown). */
   flushAll(): void {
-    for (const key of [...this.buffers.keys()]) {
+    // Snapshot keys: flush() deletes from this.buffers, so iterating the live
+    // map would skip entries.
+    const keys = Array.from(this.buffers.keys());
+    for (const key of keys) {
       this.flush(key);
     }
   }
@@ -118,9 +124,7 @@ export class MessageBatcher {
       },
     };
 
-    console.log(
-      `[message-batcher] Combined ${messages.length} messages from ${first.userId} in ${first.channelId}`,
-    );
+    log.info(`Combined ${messages.length} messages from ${first.userId} in ${first.channelId}`);
 
     this.onReady(combined);
   }

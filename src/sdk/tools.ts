@@ -5,6 +5,9 @@ import {
 } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod/v4";
 import { handleBootstrapComplete } from "../ui/bootstrap.ts";
+import { createLogger } from "../lib/logger.ts";
+
+const log = createLogger("sdk-tools");
 import {
   fetchRenderedPage,
   validateUrl,
@@ -65,9 +68,7 @@ export function createMemoryMcpServer(): McpSdkServerConfigWithInstance {
             results = await hybridSearch(args.query, embedding, args.limit ?? 5, args.category);
           } catch {
             // Fall back to text-only search if embedding generation fails
-            console.warn(
-              "\x1b[2mEmbedding generation failed, falling back to text-only search\x1b[0m",
-            );
+            log.warn("Embedding generation failed, falling back to text-only search");
             results = await textOnlySearch(args.query, args.limit ?? 5, args.category);
           }
         }

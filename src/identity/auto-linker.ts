@@ -9,6 +9,9 @@
 
 import { getDb } from "../db/client.ts";
 import { mergeContacts } from "./contacts.ts";
+import { createLogger } from "../lib/logger.ts";
+
+const log = createLogger("auto-linker");
 
 interface LinkCandidate {
   contact_id_a: string;
@@ -107,8 +110,13 @@ export async function findLinkCandidates(autoMergeThreshold = 0.9): Promise<Link
     ) {
       await mergeContacts(candidate.contact_id_a, candidate.contact_id_b);
       autoMerged.push(candidate.contact_id_b);
-      console.log(
-        `[auto-linker] Merged "${candidate.display_name_b}" into "${candidate.display_name_a}" (${candidate.reason})`,
+      log.info(
+        {
+          from: candidate.display_name_b,
+          into: candidate.display_name_a,
+          reason: candidate.reason,
+        },
+        "Merged contact",
       );
     }
   }
@@ -131,8 +139,9 @@ export async function runAutoLinker(): Promise<{ merged: number; candidates: num
     SELECT COUNT(*)::int AS count FROM contacts
   `;
 
-  console.log(
-    `[auto-linker] ${totalContacts} contacts, ${candidates.length} potential merge candidates remaining`,
+  log.info(
+    { totalContacts, candidates: candidates.length },
+    "Contacts and potential merge candidates remaining",
   );
 
   return { merged: 0, candidates: candidates.length };

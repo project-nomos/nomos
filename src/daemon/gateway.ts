@@ -41,6 +41,9 @@ import {
 } from "../cate/integration.ts";
 import type { IncomingMessage, AgentEvent } from "./types.ts";
 import type { DraftRow } from "../db/drafts.ts";
+import { createLogger } from "../lib/logger.ts";
+
+const log = createLogger("gateway");
 
 export interface GatewayOptions {
   /** WebSocket server port (default: 8765) */
@@ -127,7 +130,7 @@ export class Gateway {
 
   /** Start the daemon. */
   async start(): Promise<void> {
-    console.log("[gateway] Starting daemon...");
+    log.info("Starting daemon...");
 
     // Write PID file
     writePidFile();
@@ -143,9 +146,9 @@ export class Gateway {
       try {
         await this.startSettingsServer();
       } catch (err) {
-        console.warn(
-          "[gateway] Settings UI failed to start early:",
-          err instanceof Error ? err.message : err,
+        log.warn(
+          { err: err instanceof Error ? err.message : err },
+          "Settings UI failed to start early",
         );
       }
     }
@@ -159,12 +162,12 @@ export class Gateway {
       await this.runtime.initialize();
     } catch (err) {
       runtimeReady = false;
-      console.warn(
-        "[gateway] Agent runtime failed to initialize:",
-        err instanceof Error ? err.message : err,
+      log.warn(
+        { err: err instanceof Error ? err.message : err },
+        "Agent runtime failed to initialize",
       );
-      console.warn(
-        "[gateway] Daemon is running in setup-only mode. Finish setup at http://localhost:" +
+      log.warn(
+        "Daemon is running in setup-only mode. Finish setup at http://localhost:" +
           (this.options.settingsPort ?? 3456),
       );
     }
@@ -173,7 +176,7 @@ export class Gateway {
     // the Settings UI + signal handlers alive so the user can configure
     // and the daemon restart picks it up.
     if (!runtimeReady) {
-      console.log("[gateway] Daemon is running (setup-only)");
+      log.info("Daemon is running (setup-only)");
       return;
     }
 
@@ -182,7 +185,7 @@ export class Gateway {
       const { syncAllFiles } = await import("../config/file-sync.ts");
       await syncAllFiles();
     } catch (err) {
-      console.warn("[gateway] File sync failed:", err instanceof Error ? err.message : err);
+      log.warn({ err: err instanceof Error ? err.message : err }, "File sync failed");
     }
 
     // Verify LLM access before starting services
@@ -193,7 +196,7 @@ export class Gateway {
       const { seedAutonomousLoops } = await import("./autonomous.ts");
       await seedAutonomousLoops();
     } catch (err) {
-      console.warn("[gateway] Failed to seed autonomous loops:", err);
+      log.warn({ err }, "Failed to seed autonomous loops");
     }
 
     // Start WebSocket server
@@ -218,14 +221,14 @@ export class Gateway {
         // Map the "reload-slack-workspaces" UI payload to the canonical command
         const cmd = payload === "slack-workspaces" ? "reload-slack-workspaces" : payload;
         this.handleCommand(cmd).catch((err) => {
-          console.warn("[gateway] NOTIFY handler failed for", payload, err);
+          log.warn({ payload, err }, "NOTIFY handler failed");
         });
       });
       this.notifyListener = listener;
     } catch (err) {
-      console.warn(
-        "[gateway] Could not start NOTIFY listener (settings reloads will be best-effort):",
-        err instanceof Error ? err.message : err,
+      log.warn(
+        { err: err instanceof Error ? err.message : err },
+        "Could not start NOTIFY listener (settings reloads will be best-effort)",
       );
     }
 
@@ -254,7 +257,7 @@ export class Gateway {
       try {
         await this.cronEngine.start();
       } catch (err) {
-        console.warn("[gateway] Cron engine failed to start:", err);
+        log.warn({ err }, "Cron engine failed to start");
       }
     }
 
@@ -262,14 +265,14 @@ export class Gateway {
     try {
       await registerDeltaSyncJobs();
     } catch (err) {
-      console.warn("[gateway] Delta sync registration failed:", err);
+      log.warn({ err }, "Delta sync registration failed");
     }
 
     // Register proactive feature cron jobs
     try {
       await registerProactiveJobs();
     } catch (err) {
-      console.warn("[gateway] Proactive jobs registration failed:", err);
+      log.warn({ err }, "Proactive jobs registration failed");
     }
 
     // Register wiki compilation cron job (compile knowledge every 6 hours)
@@ -288,11 +291,11 @@ export class Gateway {
           enabled: true,
           errorCount: 0,
         });
-        console.log("[gateway] Registered wiki compilation cron job (every 6h)");
+        log.info("Registered wiki compilation cron job (every 6h)");
         process.emit("cron:refresh" as never);
       }
     } catch (err) {
-      console.warn("[gateway] Wiki cron registration failed:", err);
+      log.warn({ err }, "Wiki cron registration failed");
     }
 
     // Start CATE protocol server (agent-to-agent trust layer)
@@ -328,7 +331,7 @@ export class Gateway {
         },
       });
     } catch (err) {
-      console.warn("[gateway] CATE integration failed to start:", err);
+      log.warn({ err }, "CATE integration failed to start");
     }
 
     // Listen for ingest trigger events (from cron engine delta-sync)
@@ -373,18 +376,18 @@ export class Gateway {
     const wsPort = this.options.port ?? 8765;
     const grpcPort = this.options.grpcPort ?? wsPort + 1;
     const settingsPort = this.options.settingsPort ?? 3456;
-    console.log("[gateway] Daemon is running");
-    console.log(`[gateway]   gRPC:      localhost:${grpcPort}`);
-    console.log(`[gateway]   WebSocket: ws://localhost:${wsPort}`);
+    log.info("Daemon is running");
+    log.info(`  gRPC:      localhost:${grpcPort}`);
+    log.info(`  WebSocket: ws://localhost:${wsPort}`);
     if (this.settingsProcess) {
-      console.log(`[gateway]   Settings:  http://localhost:${settingsPort}`);
+      log.info(`  Settings:  http://localhost:${settingsPort}`);
     }
-    console.log(`[gateway]   Channels: ${platforms.length > 0 ? platforms.join(", ") : "none"}`);
+    log.info(`  Channels: ${platforms.length > 0 ? platforms.join(", ") : "none"}`);
   }
 
   /** Stop the daemon gracefully. */
   async stop(): Promise<void> {
-    console.log("[gateway] Stopping daemon...");
+    log.info("Stopping daemon...");
 
     // Stop in reverse order
     if (this.notifyListener) {
@@ -401,7 +404,7 @@ export class Gateway {
     await this.wsServer.stop();
     await closeBrowser();
 
-    console.log("[gateway] Daemon stopped");
+    log.info("Daemon stopped");
   }
 
   /**
@@ -494,16 +497,16 @@ export class Gateway {
                 await this.channelManager.send(result);
               }
               indexConversationTurn(msg, result).catch((err) =>
-                console.error("[gateway] Memory indexing failed:", err),
+                log.error({ err }, "Memory indexing failed"),
               );
             })
             .catch(async (err) => {
               await responder?.finalize("Sorry, an error occurred.");
-              console.error(`[gateway] Failed to process message from ${msg.platform}:`, err);
+              log.error({ err }, `Failed to process message from ${msg.platform}`);
             });
         })
         .catch((err) => {
-          console.error(`[gateway] Incoming hook transform failed:`, err);
+          log.error({ err }, `Incoming hook transform failed`);
         });
     };
 
@@ -546,7 +549,7 @@ export class Gateway {
     try {
       await this.runtime.reloadSlackWorkspaceMcps();
     } catch (err) {
-      console.error("[gateway] Failed to reload workspace MCP servers:", err);
+      log.error({ err }, "Failed to reload workspace MCP servers");
     }
 
     // Auto-set default notification channel if none exists
@@ -561,14 +564,14 @@ export class Gateway {
           channelId: ws.user_id,
           label: `DM in ${ws.team_name}`,
         });
-        console.log(`[gateway] Auto-set notification default: DM in ${ws.team_name}`);
+        log.info(`Auto-set notification default: DM in ${ws.team_name}`);
       }
     } catch {
       // Non-critical
     }
 
     if (changes.length > 0) {
-      console.log(`[gateway] Slack workspace sync: ${changes.join(", ")}`);
+      log.info(`Slack workspace sync: ${changes.join(", ")}`);
     }
 
     return changes;
@@ -595,7 +598,7 @@ export class Gateway {
 
     const settingsDir = this.findSettingsDir();
     if (!settingsDir) {
-      console.warn("[gateway] Settings directory not found — skipping Settings UI");
+      log.warn("Settings directory not found — skipping Settings UI");
       return;
     }
 
@@ -604,7 +607,7 @@ export class Gateway {
     // Check if .next build exists
     const buildId = path.join(settingsDir, ".next", "BUILD_ID");
     if (!fs.existsSync(buildId)) {
-      console.warn("[gateway] Settings UI not built — run `cd settings && pnpm build`");
+      log.warn("Settings UI not built — run `cd settings && pnpm build`");
       return;
     }
 
@@ -633,7 +636,7 @@ export class Gateway {
       ];
       const nextBin = nextBinCandidates.find((p) => fs.existsSync(p));
       if (!nextBin) {
-        console.warn("[gateway] Next.js binary not found — skipping Settings UI");
+        log.warn("Next.js binary not found — skipping Settings UI");
         return;
       }
       child = spawn(nextBin, ["start", "--port", port], {
@@ -645,29 +648,29 @@ export class Gateway {
 
     child.stdout?.on("data", (data: Buffer) => {
       const line = data.toString().trim();
-      if (line) console.log(`[settings] ${line}`);
+      if (line) log.info(`[settings] ${line}`);
     });
 
     child.stderr?.on("data", (data: Buffer) => {
       const line = data.toString().trim();
-      if (line) console.error(`[settings] ${line}`);
+      if (line) log.error(`[settings] ${line}`);
     });
 
     child.on("exit", (code, signal) => {
       if (this.settingsProcess === child) {
-        console.warn(`[gateway] Settings UI exited (code=${code}, signal=${signal})`);
+        log.warn(`Settings UI exited (code=${code}, signal=${signal})`);
         this.settingsProcess = null;
       }
     });
 
     this.settingsProcess = child;
-    console.log(`[gateway] Settings UI starting on port ${port}`);
+    log.info(`Settings UI starting on port ${port}`);
   }
 
   /** Stop the Settings UI child process. */
   private stopSettingsServer(): void {
     if (this.settingsProcess) {
-      console.log("[gateway] Stopping Settings UI...");
+      log.info("Stopping Settings UI...");
       this.settingsProcess.kill("SIGTERM");
       this.settingsProcess = null;
     }
@@ -675,19 +678,19 @@ export class Gateway {
 
   /** Verify LLM API access works before starting services. */
   private async checkLlmAccess(): Promise<void> {
-    console.log("[gateway] Checking LLM access...");
+    log.info("Checking LLM access...");
 
     const apiKey = process.env.ANTHROPIC_API_KEY;
     const baseUrl = process.env.ANTHROPIC_BASE_URL || "https://api.anthropic.com";
     const useVertex = process.env.CLAUDE_CODE_USE_VERTEX === "1";
 
     if (useVertex) {
-      console.log("[gateway] Using Vertex AI — skipping API key check");
+      log.info("Using Vertex AI — skipping API key check");
       return;
     }
 
     if (!apiKey) {
-      console.warn("[gateway] ⚠ No ANTHROPIC_API_KEY set — LLM calls will fail");
+      log.warn("⚠ No ANTHROPIC_API_KEY set — LLM calls will fail");
       return;
     }
 
@@ -707,17 +710,17 @@ export class Gateway {
       });
 
       if (res.ok) {
-        console.log("[gateway] LLM access verified");
+        log.info("LLM access verified");
       } else {
         const body = await res.text();
-        console.error(`[gateway] LLM access check failed (${res.status}): ${body}`);
-        console.error("[gateway] Verify ANTHROPIC_API_KEY and model configuration in .env");
-        console.warn("[gateway] ⚠ Daemon starting without verified LLM access");
+        log.error(`LLM access check failed (${res.status}): ${body}`);
+        log.error("Verify ANTHROPIC_API_KEY and model configuration in .env");
+        log.warn("⚠ Daemon starting without verified LLM access");
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      console.error(`[gateway] LLM access check failed: ${message}`);
-      console.warn("[gateway] ⚠ Daemon starting without verified LLM access");
+      log.error({ err: message }, `LLM access check failed`);
+      log.warn("⚠ Daemon starting without verified LLM access");
     }
   }
 
@@ -756,13 +759,13 @@ export class Gateway {
 
         // Fire-and-forget: index conversation turn into vector memory
         indexConversationTurn(msg, result).catch((err) =>
-          console.error("[gateway] Memory indexing failed:", err),
+          log.error({ err }, "Memory indexing failed"),
         );
       })
       .catch(async (err) => {
         // Update placeholder with error if possible
         await responder?.finalize("Sorry, an error occurred.");
-        console.error(`[gateway] Failed to process message from ${msg.platform}:`, err);
+        log.error({ err }, `Failed to process message from ${msg.platform}`);
       });
   }
 
@@ -797,9 +800,7 @@ export class Gateway {
 
           // Observe mode: index without agent response
           if (adapter?.mode === "observe") {
-            observeMessage(msg).catch((err) =>
-              console.error("[gateway] Observe indexing failed:", err),
-            );
+            observeMessage(msg).catch((err) => log.error({ err }, "Observe indexing failed"));
             return;
           }
 
@@ -812,7 +813,7 @@ export class Gateway {
               const consent = await getConsentMode(msg.platform);
               if (consent === "notify_only") {
                 this.postNotifyOnlyToDefaultChannel(msg).catch((err) =>
-                  console.error("[gateway] Notify-only notification failed:", err),
+                  log.error({ err }, "Notify-only notification failed"),
                 );
                 return; // don't process through agent
               }
@@ -831,7 +832,7 @@ export class Gateway {
           batcher.add(msg);
         })
         .catch((err) => {
-          console.error(`[gateway] Incoming hook transform failed:`, err);
+          log.error({ err }, `Incoming hook transform failed`);
         });
     };
 
@@ -849,7 +850,7 @@ export class Gateway {
         try {
           await syncSlackConfigToFile();
         } catch (err) {
-          console.warn("[gateway] Failed to sync Slack config to file:", err);
+          log.warn({ err }, "Failed to sync Slack config to file");
         }
       }
 
@@ -894,9 +895,7 @@ export class Gateway {
           // when an xapp- token is available. Polling for everything else.
           if (isDefaultWorkspace && slackAppToken) {
             usingSocketMode = true;
-            console.log(
-              `[gateway] Using Socket Mode for workspace ${ws.team_id} (default channel)`,
-            );
+            log.info(`Using Socket Mode for workspace ${ws.team_id} (default channel)`);
             const adapter = new SlackUserAdapter({
               userToken: ws.access_token,
               appToken: slackAppToken,
@@ -1109,12 +1108,12 @@ export class Gateway {
         entryScript = path.resolve(srcDir, "../index.js");
       }
       if (!fs.existsSync(entryScript)) {
-        console.warn(`[gateway] Cannot find CLI entry script for ingestion subprocess`);
+        log.warn(`Cannot find CLI entry script for ingestion subprocess`);
         resolve();
         return;
       }
 
-      console.log(`[gateway] Starting ingestion for ${label} (subprocess)...`);
+      log.info(`Starting ingestion for ${label} (subprocess)...`);
       this.broadcast({
         type: "system",
         subtype: "ingest_start",
@@ -1137,20 +1136,20 @@ export class Gateway {
       child.stdout?.on("data", (data: Buffer) => {
         for (const line of data.toString().split("\n")) {
           const trimmed = line.trim();
-          if (trimmed) console.log(`[ingest:${subcommand}] ${trimmed}`);
+          if (trimmed) log.info(`[ingest:${subcommand}] ${trimmed}`);
         }
       });
 
       child.stderr?.on("data", (data: Buffer) => {
         for (const line of data.toString().split("\n")) {
           const trimmed = line.trim();
-          if (trimmed) console.error(`[ingest:${subcommand}] ${trimmed}`);
+          if (trimmed) log.error(`[ingest:${subcommand}] ${trimmed}`);
         }
       });
 
       child.on("exit", (code) => {
         if (code === 0) {
-          console.log(`[gateway] Ingestion complete for ${label}`);
+          log.info(`Ingestion complete for ${label}`);
           this.broadcast({
             type: "system",
             subtype: "ingest_complete",
@@ -1160,7 +1159,7 @@ export class Gateway {
           // Re-register delta sync cron jobs in case a new full ingest completed
           registerDeltaSyncJobs().catch(() => {});
         } else {
-          console.error(`[gateway] Ingestion for ${label} exited with code ${code}`);
+          log.error(`Ingestion for ${label} exited with code ${code}`);
           this.broadcast({
             type: "system",
             subtype: "ingest_complete",
@@ -1172,7 +1171,7 @@ export class Gateway {
       });
 
       child.on("error", (err) => {
-        console.error(`[gateway] Failed to spawn ingestion for ${label}:`, err.message);
+        log.error({ err: err.message }, `Failed to spawn ingestion for ${label}`);
         this.broadcast({
           type: "system",
           subtype: "ingest_complete",
