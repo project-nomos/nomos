@@ -16,6 +16,9 @@ import type { ChannelAdapter, IncomingMessage, OutgoingMessage } from "../types.
 import type { DraftManager } from "../draft-manager.ts";
 import { randomUUID } from "node:crypto";
 import { markdownToSlackMrkdwn } from "./slack-mrkdwn.ts";
+import { createLogger } from "../../lib/logger.ts";
+
+const log = createLogger("slack-user");
 
 // CJS/ESM interop (same pattern as slack.ts)
 const slackBoltModule = SlackBolt as typeof import("@slack/bolt") & {
@@ -103,9 +106,9 @@ export class SlackUserAdapter implements ChannelAdapter {
       try {
         const botAuth = await this.botClient.auth.test();
         this.botUserId = (botAuth.user_id as string) ?? null;
-        console.log(`[slack-user-adapter] Bot identity loaded (${this.botUserId})`);
+        log.info(`Bot identity loaded (${this.botUserId})`);
       } catch {
-        console.warn(`[slack-user-adapter] Bot token auth failed -- agent will post as user`);
+        log.warn(`Bot token auth failed -- agent will post as user`);
         this.botClient = null;
       }
     }
@@ -122,7 +125,7 @@ export class SlackUserAdapter implements ChannelAdapter {
         const uid = (ws.metadata as Record<string, unknown>)?.user_id;
         if (typeof uid === "string") this.ownUserIds.add(uid);
       }
-      console.log(`[slack-user-adapter] Own user IDs: ${[...this.ownUserIds].join(", ")}`);
+      log.info(`Own user IDs: ${[...this.ownUserIds].join(", ")}`);
     } catch {
       // integrations not available
     }
@@ -149,9 +152,7 @@ export class SlackUserAdapter implements ChannelAdapter {
       const nd = await getNotificationDefault();
       if (nd && nd.platform === this.platform) {
         this.defaultChannelId = nd.channelId;
-        console.log(
-          `[slack-user-adapter] Default channel: ${nd.channelId} (${nd.label ?? "unlabeled"})`,
-        );
+        log.info(`Default channel: ${nd.channelId} (${nd.label ?? "unlabeled"})`);
       }
     } catch {
       // notification defaults not available
@@ -189,8 +190,8 @@ export class SlackUserAdapter implements ChannelAdapter {
         return;
       }
 
-      console.log(
-        `[slack-user-adapter] Processing message: user=${e.user}, channel=${e.channel}, type=${e.channel_type}, isDefault=${isDefaultChannel}, myUserId=${this.userId}`,
+      log.info(
+        `Processing message: user=${e.user}, channel=${e.channel}, type=${e.channel_type}, isDefault=${isDefaultChannel}, myUserId=${this.userId}`,
       );
 
       if (isDefaultChannel) {
@@ -299,8 +300,8 @@ export class SlackUserAdapter implements ChannelAdapter {
     });
 
     await this.app.start();
-    console.log(
-      `[slack-user-adapter] Running via Socket Mode (user: ${this.userId}, bot: ${this.botUserId}, team: ${this.teamId}, defaultChannel: ${this.defaultChannelId})`,
+    log.info(
+      `Running via Socket Mode (user: ${this.userId}, bot: ${this.botUserId}, team: ${this.teamId}, defaultChannel: ${this.defaultChannelId})`,
     );
   }
 
@@ -555,10 +556,7 @@ export class SlackUserAdapter implements ChannelAdapter {
     if (cached) return cached;
 
     // Try bot client first (more likely to have users:read scope), then user client
-    for (const [label, client] of [
-      ["bot", this.botClient],
-      ["user", this.userClient],
-    ] as const) {
+    for (const client of [this.botClient, this.userClient]) {
       if (!client) continue;
       try {
         const result = await (client as WebClient).users.info({ user: userId });

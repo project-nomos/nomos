@@ -7,6 +7,9 @@
 
 import { ImapFlow, type FetchMessageObject } from "imapflow";
 import { simpleParser, type ParsedMail } from "mailparser";
+import { createLogger } from "../../lib/logger.ts";
+
+const log = createLogger("email-imap");
 
 export interface ImapConfig {
   host: string;
@@ -55,7 +58,7 @@ export class ImapClient {
     });
 
     await this.client.connect();
-    console.log(`[email-imap] Connected to ${this.config.host}`);
+    log.info(`Connected to ${this.config.host}`);
 
     // Select INBOX and start IDLE
     const lock = await this.client.getMailboxLock("INBOX");
@@ -98,7 +101,7 @@ export class ImapClient {
           lock.release();
         }
       } catch (err) {
-        console.warn("[email-imap] IDLE error:", err);
+        log.warn({ err }, "IDLE error");
       }
 
       // Re-enter IDLE after timeout

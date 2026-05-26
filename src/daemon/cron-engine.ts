@@ -10,6 +10,9 @@ import { createCronSystem, type CronSystem, type CronJob } from "../cron/index.t
 import type { MessageQueue } from "./message-queue.ts";
 import type { ChannelManager } from "./channel-manager.ts";
 import type { AgentEvent } from "./types.ts";
+import { createLogger } from "../lib/logger.ts";
+
+const log = createLogger("cron-engine");
 
 export class CronEngine {
   private cronSystem: CronSystem | null = null;
@@ -39,11 +42,11 @@ export class CronEngine {
 
     // Listen for refresh events from MCP tools (schedule_task, delete_scheduled_task)
     process.on("cron:refresh" as never, () => {
-      this.refresh().catch((err) => console.error("[cron-engine] Refresh failed:", err));
+      this.refresh().catch((err) => log.error({ err }, "Refresh failed"));
     });
 
     const jobs = await this.cronSystem.store.listJobs({ enabled: true });
-    console.log(`[cron-engine] Started with ${jobs.length} job(s)`);
+    log.info(`Started with ${jobs.length} job(s)`);
   }
 
   /** Stop the cron system. */
@@ -66,31 +69,28 @@ export class CronEngine {
     // instead of the agent message queue.
     if (job.prompt.startsWith("__delta_sync__:")) {
       const platform = job.prompt.slice("__delta_sync__:".length);
-      console.log(`[cron-engine] Firing delta sync for ${platform}`);
+      log.info(`Firing delta sync for ${platform}`);
       process.emit("ingest:trigger" as never, { platform, runType: "delta" } as never);
       return;
     }
 
     // Intercept wiki compilation sentinel -- run compiler directly
     if (job.prompt === "__wiki_compile__") {
-      console.log("[cron-engine] Firing wiki compilation");
+      log.info("Firing wiki compilation");
       import("../memory/knowledge-compiler.ts")
         .then(({ compileKnowledge }) => compileKnowledge())
         .then((result) => {
-          console.log(
-            `[cron-engine] Wiki compilation: ${result.articlesCreated} created, ${result.articlesUpdated} updated`,
+          log.info(
+            `Wiki compilation: ${result.articlesCreated} created, ${result.articlesUpdated} updated`,
           );
         })
         .catch((err) => {
-          console.error(
-            "[cron-engine] Wiki compilation failed:",
-            err instanceof Error ? err.message : err,
-          );
+          log.error({ err: err instanceof Error ? err.message : err }, "Wiki compilation failed");
         });
       return;
     }
 
-    console.log(`[cron-engine] Triggering job: ${job.name} (${job.id})`);
+    log.info(`Triggering job: ${job.name} (${job.id})`);
 
     const sessionKey =
       job.sessionTarget === "isolated" ? `cron:${job.id}:${Date.now()}` : `cron:${job.id}`;
@@ -119,7 +119,7 @@ export class CronEngine {
       try {
         runId = await this.cronSystem.store.recordRunStart(job.id, job.name, sessionKey);
       } catch (err) {
-        console.error("[cron-engine] Failed to record run start:", err);
+        log.error({ err }, "Failed to record run start");
       }
     }
 
@@ -165,7 +165,7 @@ export class CronEngine {
       }
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
-      console.error(`[cron-engine] Job ${job.id} failed:`, errMsg);
+      log.error({ err: errMsg }, `Job ${job.id} failed`);
 
       const durationMs = Date.now() - startTime;
 

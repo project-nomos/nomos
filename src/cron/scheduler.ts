@@ -1,5 +1,8 @@
 import { CronExpressionParser } from "cron-parser";
 import type { CronJob } from "./types.ts";
+import { createLogger } from "../lib/logger.ts";
+
+const log = createLogger("cron-scheduler");
 
 export type CronCallback = (job: CronJob) => Promise<void>;
 
@@ -98,7 +101,7 @@ export class CronScheduler {
 
       this.timers.set(job.id, timer);
     } catch (error) {
-      console.error(`Failed to schedule job ${job.id}:`, error);
+      log.error({ err: error, jobId: job.id }, "Failed to schedule job");
     }
   }
 
@@ -130,7 +133,7 @@ export class CronScheduler {
     try {
       await this.callback(job);
     } catch (error) {
-      console.error(`Error executing cron job ${job.id}:`, error);
+      log.error({ err: error, jobId: job.id }, "Error executing cron job");
     }
   }
 }

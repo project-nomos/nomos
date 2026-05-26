@@ -9,6 +9,9 @@ import fs from "node:fs";
 import path from "node:path";
 import { homedir } from "node:os";
 import { listArticles, upsertArticle } from "../db/wiki.ts";
+import { createLogger } from "../lib/logger.ts";
+
+const log = createLogger("wiki-sync");
 
 const WIKI_DIR = path.join(homedir(), ".nomos", "wiki");
 
@@ -27,7 +30,7 @@ export async function syncToDisk(): Promise<number> {
     count++;
   }
 
-  console.log(`[wiki-sync] Synced ${count} articles to disk`);
+  log.info({ count }, "Synced articles to disk");
   return count;
 }
 
@@ -51,7 +54,7 @@ export async function syncToDb(): Promise<number> {
   }
 
   if (count > 0) {
-    console.log(`[wiki-sync] Synced ${count} files from disk to DB`);
+    log.info({ count }, "Synced files from disk to DB");
   }
   return count;
 }
@@ -63,7 +66,7 @@ export async function reconcileOnStartup(): Promise<void> {
     // No articles in DB — try loading from disk
     const diskCount = await syncToDb();
     if (diskCount > 0) {
-      console.log("[wiki-sync] Loaded wiki from disk into DB");
+      log.info("Loaded wiki from disk into DB");
     }
     return;
   }

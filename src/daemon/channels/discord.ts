@@ -16,6 +16,9 @@ import { chunkResponse } from "../response-chunker.ts";
 import { randomUUID } from "node:crypto";
 import { Buffer } from "node:buffer";
 import { AttachmentBuilder } from "discord.js";
+import { createLogger } from "../../lib/logger.ts";
+
+const log = createLogger("discord");
 
 export interface DiscordAdapterOptions {
   onMessage: (msg: IncomingMessage) => void;
@@ -57,7 +60,7 @@ export class DiscordAdapter implements ChannelAdapter {
     });
 
     this.client.once(Events.ClientReady, (c) => {
-      console.log(`[discord-adapter] Logged in as ${c.user.tag}`);
+      log.info(`Logged in as ${c.user.tag}`);
     });
 
     this.client.on(Events.MessageCreate, (message) => {

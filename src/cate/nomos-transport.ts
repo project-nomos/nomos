@@ -13,6 +13,9 @@ import {
   type TransportOptions,
   type TransportEvents,
 } from "@project-nomos/cate-sdk/transport";
+import { createLogger } from "../lib/logger.ts";
+
+const log = createLogger("cate-transport");
 
 export class NomosTransport extends Transport {
   private server?: { close: () => void };
@@ -62,7 +65,7 @@ export class NomosTransport extends Transport {
 
     await new Promise<void>((resolve) => {
       server.listen(this.port, () => {
-        console.log(`[cate] Transport listening on port ${this.port}`);
+        log.info({ port: this.port }, "Transport listening");
         resolve();
       });
     });

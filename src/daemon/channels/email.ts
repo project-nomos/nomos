@@ -10,6 +10,9 @@ import type { ChannelAdapter, IncomingMessage, OutgoingMessage } from "../types.
 import type { DraftManager } from "../draft-manager.ts";
 import { ImapClient, type ImapConfig, type ParsedEmail } from "./email-imap.ts";
 import { SmtpClient, type SmtpConfig } from "./email-smtp.ts";
+import { createLogger } from "../../lib/logger.ts";
+
+const log = createLogger("email");
 
 export interface EmailAdapterOptions {
   imap: ImapConfig;
@@ -60,7 +63,7 @@ export class EmailAdapter implements ChannelAdapter {
       });
     });
 
-    console.log(`[email-adapter] Running (${this.userEmail})`);
+    log.info(`Running (${this.userEmail})`);
   }
 
   async stop(): Promise<void> {

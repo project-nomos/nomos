@@ -17,18 +17,19 @@
 export function markdownToSlackMrkdwn(text: string): string {
   let result = text;
 
-  // Protect code blocks from conversion (extract, convert around them, re-insert)
+  // Protect code blocks from conversion (extract, convert around them, re-insert).
+  //  is in the Unicode Private Use Area, so it won't collide with real text.
   const codeBlocks: string[] = [];
   result = result.replace(/```[\s\S]*?```/g, (match) => {
     codeBlocks.push(match);
-    return `\x00CODEBLOCK${codeBlocks.length - 1}\x00`;
+    return `CODEBLOCK${codeBlocks.length - 1}`;
   });
 
   // Protect inline code
   const inlineCode: string[] = [];
   result = result.replace(/`[^`]+`/g, (match) => {
     inlineCode.push(match);
-    return `\x00INLINE${inlineCode.length - 1}\x00`;
+    return `INLINE${inlineCode.length - 1}`;
   });
 
   // Headers: # Heading -> *Heading* (bold)
@@ -55,10 +56,10 @@ export function markdownToSlackMrkdwn(text: string): string {
   result = result.replace(/^[-*]{3,}$/gm, "———");
 
   // Restore inline code
-  result = result.replace(/\x00INLINE(\d+)\x00/g, (_, i) => inlineCode[Number(i)]);
+  result = result.replace(/INLINE(\d+)/g, (_, i) => inlineCode[Number(i)]);
 
   // Restore code blocks
-  result = result.replace(/\x00CODEBLOCK(\d+)\x00/g, (_, i) => codeBlocks[Number(i)]);
+  result = result.replace(/CODEBLOCK(\d+)/g, (_, i) => codeBlocks[Number(i)]);
 
   return result;
 }

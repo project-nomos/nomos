@@ -27,18 +27,12 @@ export async function POST() {
     // DB not available
   }
   const env = await readConfig(
-    [
-      "GOOGLE_OAUTH_CLIENT_ID",
-      "GOOGLE_OAUTH_CLIENT_SECRET",
-      "GWS_SERVICES",
-      "GOOGLE_CLOUD_PROJECT",
-    ],
+    ["GOOGLE_OAUTH_CLIENT_ID", "GOOGLE_OAUTH_CLIENT_SECRET", "GOOGLE_CLOUD_PROJECT"],
     sql,
   );
 
   const clientId = env.GOOGLE_OAUTH_CLIENT_ID;
   const clientSecret = env.GOOGLE_OAUTH_CLIENT_SECRET;
-  const gwsServices = env.GWS_SERVICES;
   const gcpProjectId = env.GOOGLE_CLOUD_PROJECT;
 
   if (!clientId || !clientSecret) {
@@ -53,14 +47,12 @@ export async function POST() {
 
   // Write a valid client_secret.json (with project_id) for the CLI flow.
   // Same helper /api/env uses on save, so the two paths can't drift.
-  const { writeGwsClientSecret, gwsClientSecretPath } =
-    await import("@/lib/sync-gws-client-secret");
+  const { writeGwsClientSecret } = await import("@/lib/sync-gws-client-secret");
   writeGwsClientSecret({
     clientId,
     clientSecret,
     projectId: gcpProjectId ?? "",
   });
-  const clientSecretPath = gwsClientSecretPath();
 
   // Build args for gws auth login with explicit scopes.
   // Using --scopes ensures Gmail/Calendar are included even if the gws CLI

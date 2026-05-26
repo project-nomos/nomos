@@ -9,6 +9,9 @@
 
 import { indexConversationTurn } from "./memory-indexer.ts";
 import type { IncomingMessage, OutgoingMessage } from "./types.ts";
+import { createLogger } from "../lib/logger.ts";
+
+const log = createLogger("observer");
 
 /**
  * Process an observed message — store in memory without agent response.
@@ -29,9 +32,9 @@ export async function observeMessage(message: IncomingMessage): Promise<void> {
   try {
     await indexConversationTurn(message, syntheticOutgoing);
   } catch (err) {
-    console.warn(
-      `[observer] Failed to index observed message from ${message.platform}:`,
-      err instanceof Error ? err.message : err,
+    log.warn(
+      { err: err instanceof Error ? err.message : err },
+      `Failed to index observed message from ${message.platform}`,
     );
   }
 }

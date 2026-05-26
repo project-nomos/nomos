@@ -11,6 +11,9 @@ import type { IncomingMessage as HttpRequest } from "node:http";
 import type { MessageQueue } from "./message-queue.ts";
 import type { DraftManager } from "./draft-manager.ts";
 import type { ClientMessage, AgentEvent, IncomingMessage } from "./types.ts";
+import { createLogger } from "../lib/logger.ts";
+
+const log = createLogger("websocket-server");
 
 const HEARTBEAT_INTERVAL_MS = 30_000;
 
@@ -40,12 +43,12 @@ export class DaemonWebSocketServer {
       this.wss = new WebSocketServer({ port: this.port });
 
       this.wss.on("listening", () => {
-        console.log(`[ws-server] Listening on ws://localhost:${this.port}`);
+        log.info(`Listening on ws://localhost:${this.port}`);
         resolve();
       });
 
       this.wss.on("error", (err) => {
-        console.error("[ws-server] Server error:", err);
+        log.error({ err }, "Server error");
         reject(err);
       });
 
@@ -57,7 +60,7 @@ export class DaemonWebSocketServer {
       this.heartbeatTimer = setInterval(() => {
         for (const client of this.clients.values()) {
           if (!client.alive) {
-            console.log(`[ws-server] Client ${client.id} timed out`);
+            log.info(`Client ${client.id} timed out`);
             client.ws.terminate();
             this.clients.delete(client.id);
             continue;
@@ -107,7 +110,7 @@ export class DaemonWebSocketServer {
         try {
           client.ws.send(data);
         } catch (err) {
-          console.error(`[ws-server] Failed to broadcast to client ${client.id}:`, err);
+          log.error({ err }, `Failed to broadcast to client ${client.id}`);
         }
       }
     }
@@ -121,7 +124,7 @@ export class DaemonWebSocketServer {
     try {
       client.ws.send(JSON.stringify(event));
     } catch (err) {
-      console.error(`[ws-server] Failed to send to client ${clientId}:`, err);
+      log.error({ err }, `Failed to send to client ${clientId}`);
     }
   }
 
@@ -130,7 +133,7 @@ export class DaemonWebSocketServer {
     const client: ConnectedClient = { id: clientId, ws, alive: true };
     this.clients.set(clientId, client);
 
-    console.log(`[ws-server] Client connected: ${clientId}`);
+    log.info(`Client connected: ${clientId}`);
 
     ws.on("pong", () => {
       client.alive = true;
@@ -150,12 +153,12 @@ export class DaemonWebSocketServer {
     });
 
     ws.on("close", () => {
-      console.log(`[ws-server] Client disconnected: ${clientId}`);
+      log.info(`Client disconnected: ${clientId}`);
       this.clients.delete(clientId);
     });
 
     ws.on("error", (err) => {
-      console.error(`[ws-server] Client ${clientId} error:`, err);
+      log.error({ err }, `Client ${clientId} error`);
       this.clients.delete(clientId);
     });
 

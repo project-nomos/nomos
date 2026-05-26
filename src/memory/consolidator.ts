@@ -13,6 +13,9 @@
 import { sql, type SqlBool } from "kysely";
 import { getKysely } from "../db/client.ts";
 import { loadEnvConfig } from "../config/env.ts";
+import { createLogger } from "../lib/logger.ts";
+
+const log = createLogger("consolidator");
 
 export interface ConsolidationResult {
   merged: number;
@@ -322,14 +325,12 @@ async function llmConsolidate(): Promise<number> {
     }
 
     if (changeCount > 0) {
-      console.log(
-        `[consolidator] LLM review: ${changeCount} changes from ${decisions.length} decisions`,
-      );
+      log.info({ changeCount, decisionsCount: decisions.length }, "LLM review");
     }
 
     return changeCount;
   } catch (err) {
-    console.debug("[consolidator] LLM consolidation failed:", err);
+    log.debug({ err }, "LLM consolidation failed");
     return 0;
   }
 }

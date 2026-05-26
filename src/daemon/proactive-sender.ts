@@ -7,6 +7,9 @@
  */
 
 import type { ChannelManager } from "./channel-manager.ts";
+import { createLogger } from "../lib/logger.ts";
+
+const log = createLogger("proactive-sender");
 
 export interface ProactiveMessage {
   /** Target platform (e.g., "slack-user:T074HACEZ2L") */
@@ -29,7 +32,7 @@ export async function sendProactiveMessage(
 ): Promise<boolean> {
   const adapter = channelManager.getAdapter(message.platform);
   if (!adapter) {
-    console.warn(`[proactive] No adapter for platform: ${message.platform}`);
+    log.warn(`No adapter for platform: ${message.platform}`);
     return false;
   }
 
@@ -45,12 +48,12 @@ export async function sendProactiveMessage(
         content: message.content,
       });
     }
-    console.log(
-      `[proactive] Message sent to ${message.platform}/${message.channelId} (${message.content.length} chars)`,
+    log.info(
+      `Message sent to ${message.platform}/${message.channelId} (${message.content.length} chars)`,
     );
     return true;
   } catch (err) {
-    console.error("[proactive] Failed to send message:", err);
+    log.error({ err }, "Failed to send message");
     return false;
   }
 }

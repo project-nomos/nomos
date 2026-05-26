@@ -16,6 +16,9 @@ import type { MessageQueue } from "./message-queue.ts";
 import type { DraftManager } from "./draft-manager.ts";
 import type { AgentEvent, IncomingMessage } from "./types.ts";
 import { indexConversationTurn } from "./memory-indexer.ts";
+import { createLogger } from "../lib/logger.ts";
+
+const log = createLogger("grpc-server");
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 // In dev (tsx): __dirname = src/daemon/ → ../../proto works
@@ -84,11 +87,11 @@ export class GrpcServer {
         grpc.ServerCredentials.createInsecure(),
         (err, boundPort) => {
           if (err) {
-            console.error("[grpc-server] Failed to bind:", err);
+            log.error({ err }, "Failed to bind");
             reject(err);
             return;
           }
-          console.log(`[grpc-server] Listening on 0.0.0.0:${boundPort}`);
+          log.info(`Listening on 0.0.0.0:${boundPort}`);
           resolve();
         },
       );
@@ -131,7 +134,7 @@ export class GrpcServer {
       try {
         stream.call.write(payload);
       } catch (err) {
-        console.error(`[grpc-server] Failed to broadcast to stream ${stream.id}:`, err);
+        log.error({ err }, `Failed to broadcast to stream ${stream.id}`);
       }
     }
   }
@@ -190,7 +193,7 @@ export class GrpcServer {
       .then((result) => {
         // Fire-and-forget: index conversation turn into vector memory
         indexConversationTurn(incoming, result).catch((err) =>
-          console.error("[grpc-server] Memory indexing failed:", err),
+          log.error({ err }, "Memory indexing failed"),
         );
         call.end();
         this.activeStreams.delete(streamId);

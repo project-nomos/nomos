@@ -13,6 +13,9 @@ import os from "node:os";
 import path from "node:path";
 import { getKysely } from "../db/client.ts";
 import { parseFrontmatter } from "../skills/frontmatter.ts";
+import { createLogger } from "../lib/logger.ts";
+
+const log = createLogger("autonomous");
 
 interface AutonomousLoop {
   name: string;
@@ -159,9 +162,9 @@ export async function seedAutonomousLoops(): Promise<void> {
   }
 
   if (seeded > 0) {
-    console.log(`[autonomous] Seeded ${seeded} autonomous loop(s)`);
+    log.info(`Seeded ${seeded} autonomous loop(s)`);
   } else {
-    console.log(`[autonomous] All ${loops.length} autonomous loops already seeded`);
+    log.info(`All ${loops.length} autonomous loops already seeded`);
   }
 }
 

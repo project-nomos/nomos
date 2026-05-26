@@ -10,6 +10,9 @@
  */
 
 import { createHash } from "node:crypto";
+import { createLogger } from "../lib/logger.ts";
+
+const log = createLogger("cache-break-detection");
 
 /**
  * Components tracked for cache break detection.
@@ -86,7 +89,7 @@ export class PromptCacheTracker {
     this.breakCount += 1;
 
     const summary = `Cache break #${this.breakCount}: ${changes.join(", ")} changed`;
-    console.warn(`[cache-tracker] ${summary}`);
+    log.warn({ breakCount: this.breakCount, changes }, summary);
 
     return { broken: true, changes, summary };
   }

@@ -19,8 +19,6 @@ export async function POST() {
   try {
     // Trigger wiki compilation via daemon gRPC command
     const { exec } = await import("node:child_process");
-    const { promisify } = await import("node:util");
-    const execAsync = promisify(exec);
 
     // Use the notify-daemon pattern to trigger compilation
     const path = await import("node:path");

@@ -5,6 +5,9 @@
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
+import { createLogger } from "../lib/logger.ts";
+
+const log = createLogger("lifecycle");
 
 const PID_DIR = path.join(os.homedir(), ".nomos");
 const PID_FILE = path.join(PID_DIR, "daemon.pid");
@@ -80,11 +83,11 @@ export function installSignalHandlers(onShutdown: () => Promise<void>): void {
     if (shuttingDown) return;
     shuttingDown = true;
 
-    console.log(`[daemon] Received ${signal}, shutting down...`);
+    log.info(`Received ${signal}, shutting down...`);
     try {
       await onShutdown();
     } catch (err) {
-      console.error("[daemon] Error during shutdown:", err);
+      log.error({ err }, "Error during shutdown");
     }
     removePidFile();
     process.exit(0);
@@ -96,7 +99,7 @@ export function installSignalHandlers(onShutdown: () => Promise<void>): void {
 
   // Handle uncaught errors
   process.on("uncaughtException", (err) => {
-    console.error("[daemon] Uncaught exception:", err);
+    log.error({ err }, "Uncaught exception");
     removePidFile();
     process.exit(1);
   });
@@ -107,6 +110,6 @@ export function installSignalHandlers(onShutdown: () => Promise<void>): void {
     if (reason instanceof Error && reason.message.includes("ProcessTransport is not ready")) {
       return;
     }
-    console.error("[daemon] Unhandled rejection:", reason);
+    log.error({ err: reason }, "Unhandled rejection");
   });
 }

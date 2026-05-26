@@ -14,6 +14,9 @@ import fs from "node:fs";
 import path from "node:path";
 import { createHash } from "node:crypto";
 import { getKysely } from "../db/client.ts";
+import { createLogger } from "../lib/logger.ts";
+
+const log = createLogger("file-sync");
 
 // ── Paths ──
 
@@ -42,11 +45,9 @@ async function syncOne(file: ManagedFile): Promise<string | null> {
 
   // Check disk (first path that exists wins)
   let diskContent: string | null = null;
-  let diskPath: string | null = null;
   for (const p of file.diskPaths) {
     if (fs.existsSync(p)) {
       diskContent = fs.readFileSync(p, "utf-8");
-      diskPath = p;
       break;
     }
   }
@@ -85,7 +86,7 @@ async function syncOne(file: ManagedFile): Promise<string | null> {
     const dir = path.dirname(restorePath);
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(restorePath, row.content, "utf-8");
-    console.log(`[file-sync] Restored ${file.dbPath} -> ${restorePath}`);
+    log.info({ dbPath: file.dbPath, restorePath }, "Restored");
     return row.content;
   }
 
@@ -112,10 +113,7 @@ export async function syncFileToDb(dbPath: string, content: string): Promise<voi
       )
       .execute();
   } catch (err) {
-    console.warn(
-      `[file-sync] Failed to sync ${dbPath} to DB:`,
-      err instanceof Error ? err.message : err,
-    );
+    log.warn({ dbPath, err: err instanceof Error ? err.message : err }, "Failed to sync to DB");
   }
 }
 
@@ -246,9 +244,9 @@ export async function syncAllFiles(): Promise<void> {
   restored += restoredPersonal;
 
   if (synced > 0 || restored > 0) {
-    console.log(
-      `[file-sync] Synced ${synced} file(s) to DB` +
-        (restored > 0 ? `, restored ${restored} from DB` : ""),
+    log.info(
+      { synced, restored },
+      `Synced ${synced} file(s) to DB` + (restored > 0 ? `, restored ${restored} from DB` : ""),
     );
   }
 }

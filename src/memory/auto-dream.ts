@@ -18,6 +18,9 @@
 import { readFile, writeFile, unlink, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { homedir } from "node:os";
+import { createLogger } from "../lib/logger.ts";
+
+const log = createLogger("auto-dream");
 
 /** Minimum time between consolidation runs (1 hour). */
 const MIN_INTERVAL_MS = 60 * 60 * 1000;
@@ -214,12 +217,12 @@ export async function autoDream(
   // Acquire lock
   const locked = await acquireLock();
   if (!locked) {
-    console.log("[auto-dream] Another consolidation is in progress, skipping");
+    log.info("Another consolidation is in progress, skipping");
     return null;
   }
 
   try {
-    console.log("[auto-dream] Starting background consolidation...");
+    log.info("Starting background consolidation...");
     const start = Date.now();
 
     const result = await runConsolidation();
@@ -232,13 +235,19 @@ export async function autoDream(
     state.totalRuns += 1;
     await saveState(state);
 
-    console.log(
-      `[auto-dream] Consolidation complete: ${result.newChunks} new, ${result.merged} merged, ${result.pruned} pruned (${result.durationMs}ms)`,
+    log.info(
+      {
+        newChunks: result.newChunks,
+        merged: result.merged,
+        pruned: result.pruned,
+        durationMs: result.durationMs,
+      },
+      "Consolidation complete",
     );
 
     return result;
   } catch (err) {
-    console.error("[auto-dream] Consolidation failed:", err);
+    log.error({ err }, "Consolidation failed");
     return null;
   } finally {
     await releaseLock();
@@ -355,8 +364,14 @@ export async function reRankValues(reflection: {
   }
 
   if (result.boosted + result.decreased + result.added + result.refined > 0) {
-    console.log(
-      `[auto-dream] Value re-ranking: ${result.boosted} boosted, ${result.decreased} decreased, ${result.added} new, ${result.refined} refined`,
+    log.info(
+      {
+        boosted: result.boosted,
+        decreased: result.decreased,
+        added: result.added,
+        refined: result.refined,
+      },
+      "Value re-ranking",
     );
   }
 

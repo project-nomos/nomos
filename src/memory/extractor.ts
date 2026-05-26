@@ -11,6 +11,9 @@ import { runSession } from "../sdk/session.ts";
 import { storeMemoryChunk } from "../db/memory.ts";
 import { generateEmbedding, isEmbeddingAvailable } from "./embeddings.ts";
 import { loadEnvConfig } from "../config/env.ts";
+import { createLogger } from "../lib/logger.ts";
+
+const log = createLogger("extractor");
 
 export interface ExtractedFact {
   text: string;
@@ -150,7 +153,7 @@ export async function extractKnowledge(
       values: Array.isArray(parsed.values) ? parsed.values : [],
     };
   } catch (err) {
-    console.debug("[extractor] Knowledge extraction failed:", err);
+    log.debug({ err }, "Knowledge extraction failed");
     return empty;
   }
 }
@@ -328,7 +331,7 @@ export async function extractAndStoreKnowledge(
   }
 
   if (chunkIds.length > 0) {
-    console.debug(`[extractor] Stored ${chunkIds.length} knowledge chunk(s) from ${sessionKey}`);
+    log.debug({ count: chunkIds.length, sessionKey }, "Stored knowledge chunks");
   }
 
   return { knowledge, chunkIds };

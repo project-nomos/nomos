@@ -4,6 +4,9 @@ import { homedir } from "node:os";
 import { config } from "dotenv";
 import { buildProgram } from "./cli/program.ts";
 import { ensureEncryptionKey } from "./db/encryption.ts";
+import { createLogger } from "./lib/logger.ts";
+
+const log = createLogger("nomos");
 
 // Load env vars: cwd first, then ~/.nomos/ as fallback for Homebrew installs
 const nomosDir = join(homedir(), ".nomos");
@@ -19,7 +22,7 @@ process.on("unhandledRejection", (reason) => {
   if (reason instanceof Error && reason.message.includes("ProcessTransport is not ready")) {
     return;
   }
-  console.error("Unhandled rejection:", reason);
+  log.error({ err: reason }, "Unhandled rejection");
   process.exit(1);
 });
 

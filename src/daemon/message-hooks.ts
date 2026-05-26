@@ -18,6 +18,9 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import type { IncomingMessage, OutgoingMessage } from "./types.ts";
+import { createLogger } from "../lib/logger.ts";
+
+const log = createLogger("message-hooks");
 
 export interface MessageHook {
   /** Unique hook name for logging and debugging. */
@@ -83,16 +86,14 @@ export class MessageHookPipeline {
         };
 
         if (!hook.transformIncoming && !hook.transformOutgoing) {
-          console.warn(
-            `[hooks] Skipping ${entry}: no transformIncoming or transformOutgoing exported`,
-          );
+          log.warn(`Skipping ${entry}: no transformIncoming or transformOutgoing exported`);
           continue;
         }
 
         this.hooks.push(hook);
-        console.log(`[hooks] Loaded: ${hook.name} (priority: ${hook.priority})`);
+        log.info(`Loaded: ${hook.name} (priority: ${hook.priority})`);
       } catch (err) {
-        console.error(`[hooks] Failed to load ${entry}:`, err);
+        log.error({ err }, `Failed to load ${entry}`);
       }
     }
 
@@ -113,7 +114,7 @@ export class MessageHookPipeline {
       try {
         result = await hook.transformIncoming(result);
       } catch (err) {
-        console.error(`[hooks] ${hook.name}.transformIncoming failed:`, err);
+        log.error({ err }, `${hook.name}.transformIncoming failed`);
         // Continue with the unmodified message on error
       }
     }
@@ -135,7 +136,7 @@ export class MessageHookPipeline {
       try {
         result = await hook.transformOutgoing(result);
       } catch (err) {
-        console.error(`[hooks] ${hook.name}.transformOutgoing failed:`, err);
+        log.error({ err }, `${hook.name}.transformOutgoing failed`);
       }
     }
 

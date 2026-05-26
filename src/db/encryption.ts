@@ -5,13 +5,17 @@
  * Format: "iv_hex.ciphertext_hex.tag_hex"
  *
  * If ENCRYPTION_KEY is not set, secrets are stored as plaintext
- * with a console.warn (dev convenience).
+ * with a warning (dev convenience).
  */
 
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
+
+import { createLogger } from "../lib/logger.ts";
+
+const log = createLogger("encryption");
 
 const ALGORITHM = "aes-256-gcm";
 const IV_LENGTH = 12; // 96-bit IV for GCM
@@ -41,7 +45,7 @@ export function encrypt(plaintext: string): string {
   const key = getKey();
   if (!key) {
     if (!warnedOnce) {
-      console.warn("[encryption] ENCRYPTION_KEY not set — secrets stored as plaintext");
+      log.warn("ENCRYPTION_KEY not set, secrets stored as plaintext");
       warnedOnce = true;
     }
     return plaintext;

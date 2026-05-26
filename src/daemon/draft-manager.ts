@@ -21,6 +21,9 @@ import type { DraftRow } from "../db/drafts.ts";
 import type { OutgoingMessage, AgentEvent } from "./types.ts";
 import { findContactByIdentity } from "../identity/identities.ts";
 import { getConsentMode, type ConsentMode } from "../db/consent-config.ts";
+import { createLogger } from "../lib/logger.ts";
+
+const log = createLogger("draft-manager");
 
 export interface DraftManagerOptions {
   /** Broadcast a system event to all connected clients (gRPC + WebSocket). */
@@ -102,7 +105,7 @@ export class DraftManager {
     }
 
     if (autonomy === "silent") {
-      console.log(`[draft-manager] Discarded message to ${message.channelId} (autonomy: silent)`);
+      log.info(`Discarded message to ${message.channelId} (autonomy: silent)`);
       this.notifyWs?.({
         type: "system",
         subtype: "message_silenced",
@@ -144,11 +147,11 @@ export class DraftManager {
     // Post to default Slack channel with Approve/Edit/Decline buttons
     if (this.notifyDefaultChannel) {
       this.notifyDefaultChannel(draft, context).catch((err) =>
-        console.error("[draft-manager] Failed to post to default channel:", err),
+        log.error({ err }, "Failed to post to default channel"),
       );
     }
 
-    console.log(`[draft-manager] Draft created: ${draft.id.slice(0, 8)} for ${userId}`);
+    log.info(`Draft created: ${draft.id.slice(0, 8)} for ${userId}`);
     return draft;
   }
 
@@ -177,14 +180,11 @@ export class DraftManager {
         data: { draftId: draft.id },
       });
 
-      console.log(`[draft-manager] Draft approved and sent: ${draft.id.slice(0, 8)}`);
+      log.info(`Draft approved and sent: ${draft.id.slice(0, 8)}`);
       return { success: true };
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
-      console.error(
-        `[draft-manager] Failed to send approved draft ${draft.id.slice(0, 8)}:`,
-        errMsg,
-      );
+      log.error({ err: errMsg }, `Failed to send approved draft ${draft.id.slice(0, 8)}`);
       return { success: false, error: `Send failed: ${errMsg}` };
     }
   }
@@ -208,8 +208,8 @@ export class DraftManager {
 
     try {
       // Send the EDITED content, not the original draft
-      console.log(
-        `[draft-manager] Sending edited draft ${draft.id.slice(0, 8)} to ${draft.platform}:${draft.channel_id}`,
+      log.info(
+        `Sending edited draft ${draft.id.slice(0, 8)} to ${draft.platform}:${draft.channel_id}`,
       );
       await sendFn(draft.channel_id, editedContent, draft.thread_id ?? undefined);
       await markDraftSent(draft.id);
@@ -226,11 +226,11 @@ export class DraftManager {
         data: { draftId: draft.id, edited: true },
       });
 
-      console.log(`[draft-manager] Draft approved (edited) and sent: ${draft.id.slice(0, 8)}`);
+      log.info(`Draft approved (edited) and sent: ${draft.id.slice(0, 8)}`);
       return { success: true };
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
-      console.error(`[draft-manager] Failed to send edited draft ${draft.id.slice(0, 8)}:`, errMsg);
+      log.error({ err: errMsg }, `Failed to send edited draft ${draft.id.slice(0, 8)}`);
       return { success: false, error: `Send failed: ${errMsg}` };
     }
   }
@@ -251,7 +251,7 @@ export class DraftManager {
       data: { draftId: draft.id },
     });
 
-    console.log(`[draft-manager] Draft rejected: ${draft.id.slice(0, 8)}`);
+    log.info(`Draft rejected: ${draft.id.slice(0, 8)}`);
     return { success: true };
   }
 
@@ -267,7 +267,7 @@ export class DraftManager {
     const sendFn = this.sendFns.get(message.platform);
     if (sendFn) {
       await sendFn(message.channelId, message.content, message.threadId);
-      console.log(`[draft-manager] Auto-sent to ${message.channelId} on ${message.platform}`);
+      log.info(`Auto-sent to ${message.channelId} on ${message.platform}`);
 
       this.notifyWs?.({
         type: "system",
@@ -287,9 +287,7 @@ export class DraftManager {
           message.channelId,
           message.content,
           context,
-        ).catch((err) =>
-          console.error("[draft-manager] Failed to post FYI to default channel:", err),
-        );
+        ).catch((err) => log.error({ err }, "Failed to post FYI to default channel"));
       }
     }
     return null;
@@ -348,12 +346,9 @@ export class DraftManager {
         },
         [],
       );
-      console.log(`[draft-manager] Draft edit captured as learning signal`);
+      log.info(`Draft edit captured as learning signal`);
     } catch (err) {
-      console.warn(
-        "[draft-manager] Failed to capture draft edit:",
-        err instanceof Error ? err.message : err,
-      );
+      log.warn({ err: err instanceof Error ? err.message : err }, "Failed to capture draft edit");
     }
   }
 }

@@ -10,6 +10,9 @@
 
 import { getKysely } from "../db/client.ts";
 import { CronStore } from "../cron/store.ts";
+import { createLogger } from "../lib/logger.ts";
+
+const log = createLogger("delta-sync");
 
 /**
  * Register delta sync cron jobs for all platforms with completed full ingests.
@@ -41,7 +44,7 @@ export async function registerDeltaSyncJobs(): Promise<void> {
       const schedule = job.delta_schedule || "6h";
       if (existing.schedule !== schedule) {
         await store.updateJob(existing.id, { schedule });
-        console.log(`[delta-sync] Updated schedule for ${cronName}: ${schedule}`);
+        log.info({ cronName, schedule }, "Updated schedule");
       }
       continue;
     }
@@ -57,9 +60,7 @@ export async function registerDeltaSyncJobs(): Promise<void> {
       errorCount: 0,
     });
 
-    console.log(
-      `[delta-sync] Registered cron job: ${cronName} every ${job.delta_schedule || "6h"}`,
-    );
+    log.info({ cronName, schedule: job.delta_schedule || "6h" }, "Registered cron job");
   }
 
   // Signal the cron engine to reload jobs

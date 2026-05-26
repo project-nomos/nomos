@@ -8,6 +8,9 @@ import type { DraftManager } from "../draft-manager.ts";
 import { chunkResponse } from "../response-chunker.ts";
 import { randomUUID } from "node:crypto";
 import { Buffer } from "node:buffer";
+import { createLogger } from "../../lib/logger.ts";
+
+const log = createLogger("telegram");
 
 export interface TelegramAdapterOptions {
   onMessage: (msg: IncomingMessage) => void;
@@ -37,7 +40,7 @@ export class TelegramAdapter implements ChannelAdapter {
     this.bot = new Bot(token);
 
     const me = await this.bot.api.getMe();
-    console.log(`[telegram-adapter] Logged in as @${me.username}`);
+    log.info(`Logged in as @${me.username}`);
 
     this.bot.on("message:text", (ctx) => {
       const chat = ctx.chat;
