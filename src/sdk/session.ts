@@ -6,9 +6,17 @@ import {
   type SDKMessage,
   type SDKResultMessage,
   type SdkPluginConfig,
+  type OnElicitation,
 } from "@anthropic-ai/claude-agent-sdk";
 
-export type { Query, SDKMessage, SDKResultMessage, McpServerConfig, SdkPluginConfig };
+export type {
+  Query,
+  SDKMessage,
+  SDKResultMessage,
+  McpServerConfig,
+  SdkPluginConfig,
+  OnElicitation,
+};
 
 export interface RunSessionParams {
   /** The user prompt to send */
@@ -55,6 +63,14 @@ export interface RunSessionParams {
   plugins?: SdkPluginConfig[];
   /** Use Claude subscription (Max/Pro) instead of API key */
   useSubscription?: boolean;
+  /**
+   * Callback for MCP elicitation requests (e.g. our `ask_user` tool).
+   * The SDK calls this when an in-process MCP server invokes
+   * `extra.sendRequest({method: "elicitation/create", ...})`. Return an
+   * accept/decline/cancel response. If omitted, all elicitations are
+   * automatically declined.
+   */
+  onElicitation?: OnElicitation;
 }
 
 /**
@@ -122,6 +138,7 @@ export function runSession(params: RunSessionParams): Query {
       plugins: params.plugins,
       env,
       ...(params.cwd ? { cwd: params.cwd } : {}),
+      ...(params.onElicitation ? { onElicitation: params.onElicitation } : {}),
     },
   });
 }

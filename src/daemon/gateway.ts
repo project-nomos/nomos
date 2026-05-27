@@ -16,6 +16,7 @@ import { GrpcServer } from "./grpc-server.ts";
 import { ChannelManager } from "./channel-manager.ts";
 import { CronEngine } from "./cron-engine.ts";
 import { DraftManager } from "./draft-manager.ts";
+import { ElicitationManager } from "./elicitation-manager.ts";
 import { writePidFile, installSignalHandlers } from "./lifecycle.ts";
 import { SlackAdapter } from "./channels/slack.ts";
 import { SlackUserAdapter } from "./channels/slack-user.ts";
@@ -68,6 +69,7 @@ export class Gateway {
   private channelManager: ChannelManager;
   private cronEngine: CronEngine;
   private draftManager: DraftManager;
+  private elicitationManager!: ElicitationManager;
   private settingsProcess: ChildProcess | null = null;
   private cateIntegration: CATEIntegration | null = null;
   private notifyListener: { unlisten: () => Promise<void> } | null = null;
@@ -115,6 +117,13 @@ export class Gateway {
 
     // 5. Create channel manager
     this.channelManager = new ChannelManager();
+
+    // 5b. Elicitation manager — handles `ask_user` (and any other MCP
+    // elicitation) by rendering questions on the active channel and
+    // resolving when the user clicks/replies. Hand it to the runtime so
+    // its `onElicitation` callback can dispatch through here.
+    this.elicitationManager = new ElicitationManager(this.channelManager);
+    this.runtime.setElicitationManager(this.elicitationManager);
 
     // 6. Create cron engine with broadcast to connected clients
     this.cronEngine = new CronEngine(this.messageQueue, this.channelManager, (event) => {
@@ -784,6 +793,23 @@ export class Gateway {
         .then(async (msg) => {
           const adapter = this.channelManager.getAdapter(msg.platform);
 
+          // If there's a pending ask_user elicitation on this channel and
+          // the message text matches one of its options, consume the
+          // message as an answer and skip agent processing. This is the
+          // generic text-reply path; Slack buttons go through the action
+          // handler in slack-user.ts and never reach here.
+          const consumed = this.elicitationManager.tryConsumeTextReply(
+            { platform: msg.platform, channelId: msg.channelId, threadId: msg.threadId },
+            msg.content,
+          );
+          if (consumed) {
+            log.info(
+              { platform: msg.platform, channelId: msg.channelId },
+              "Consumed message as ask_user reply",
+            );
+            return;
+          }
+
           // Notify connected clients about the incoming message
           this.broadcast({
             type: "system",
@@ -904,6 +930,7 @@ export class Gateway {
               onMessage: enqueue,
               draftManager: this.draftManager,
             });
+            adapter.setElicitationManager(this.elicitationManager);
             this.channelManager.register(adapter);
             this.draftManager.registerSendFn(adapter.platform, (channelId, text, threadId) =>
               adapter.sendAsUser(channelId, text, threadId),
@@ -947,6 +974,7 @@ export class Gateway {
           onMessage: enqueue,
           draftManager: this.draftManager,
         });
+        adapter.setElicitationManager(this.elicitationManager);
         this.channelManager.register(adapter);
         this.draftManager.registerSendFn(adapter.platform, (channelId, text, threadId) =>
           adapter.sendAsUser(channelId, text, threadId),

@@ -50,6 +50,14 @@ export class SlackUserAdapter implements ChannelAdapter {
   private teamName: string | null = null;
   private onMessage: (msg: IncomingMessage) => void;
   private draftManager: DraftManager;
+  // Optional elicitation manager — wired in by gateway after construction.
+  // Used by the ask_user button action handler to resolve pending requests.
+  private elicitationManager?: import("../elicitation-manager.ts").ElicitationManager;
+
+  /** Inject the elicitation manager. Called by gateway after adapter creation. */
+  setElicitationManager(mgr: import("../elicitation-manager.ts").ElicitationManager): void {
+    this.elicitationManager = mgr;
+  }
 
   // Default channel -- the user's direct chat channel with the agent
   private defaultChannelId: string | null = null;
@@ -263,6 +271,25 @@ export class SlackUserAdapter implements ChannelAdapter {
       });
     });
 
+    // ask_user button clicks. action_id is `ask_user_option:<index>`;
+    // value is `<elicitation-id>::<option-index>`. The elicitation
+    // manager resolves the pending request and we replace the original
+    // question with a "you chose X" acknowledgement.
+    this.app.action(/^ask_user_option:\d+$/, async ({ action, ack, respond }) => {
+      await ack();
+      const value = (action as { value?: string }).value;
+      if (!value) return;
+      const mgr = this.elicitationManager;
+      if (!mgr) return;
+      const { resolved, label } = mgr.resolveByButton(value);
+      if (resolved && label) {
+        await respond({
+          replace_original: true,
+          text: `:white_check_mark: You chose: *${label}*`,
+        });
+      }
+    });
+
     // Edit draft: open a modal with the draft content for editing
     this.app.action("edit_draft", async ({ action, ack, body }) => {
       await ack();
@@ -424,6 +451,32 @@ export class SlackUserAdapter implements ChannelAdapter {
     const result = await client.chat.postMessage({
       channel: channelId,
       text: markdownToSlackMrkdwn(text),
+      thread_ts: threadId,
+    });
+    return result.ts;
+  }
+
+  /**
+   * Post a message with Block Kit blocks. Used by the elicitation manager
+   * to render `ask_user` questions with interactive buttons. Falls back to
+   * plain text on platforms that ignore blocks. Same default-channel
+   * guard as postMessage — we only render interactive UIs in the channel
+   * the user actually watches.
+   */
+  async postBlocks(
+    channelId: string,
+    fallbackText: string,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    blocks: any[],
+    threadId?: string,
+  ): Promise<string | undefined> {
+    if (channelId !== this.defaultChannelId) return undefined;
+    const client = this.clientFor(channelId);
+    if (!client) return undefined;
+    const result = await client.chat.postMessage({
+      channel: channelId,
+      text: fallbackText,
+      blocks,
       thread_ts: threadId,
     });
     return result.ts;
