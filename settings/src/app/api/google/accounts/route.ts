@@ -74,16 +74,18 @@ export async function GET() {
                 const info = await userRes.json();
                 if (info.email) {
                   accounts.push({ email: info.email, default: true });
-                  // Persist to DB
+                  // Persist to DB. Use `sql.json()` so the value lands as
+                  // a real JSONB object — not the double-encoded JSONB
+                  // string that breaks `metadata->>'is_default'`.
                   try {
                     const sql = getDb();
                     const name = `google-ws:${info.email}`;
-                    const metadata = JSON.stringify({ is_default: true });
+                    const metadataJson = sql.json({ is_default: true });
                     await sql`
                       INSERT INTO integrations (name, enabled, config, secrets, metadata)
-                      VALUES (${name}, true, '{}', '{}', ${metadata}::jsonb)
+                      VALUES (${name}, true, '{}', '{}', ${metadataJson})
                       ON CONFLICT (name) DO UPDATE SET
-                        metadata = ${metadata}::jsonb,
+                        metadata = ${metadataJson},
                         updated_at = now()
                     `;
                   } catch {
@@ -179,18 +181,24 @@ export async function PATCH(request: NextRequest) {
   }
 
   // Mirror the change into the DB so other surfaces see it immediately.
+  // Overwrite metadata wholesale instead of `jsonb_set` — historical rows
+  // were stored as JSONB STRINGS (double-encoded), and `jsonb_set` is a
+  // no-op on non-object JSONB. Re-assigning via `sql.json()` writes a
+  // proper JSONB object and naturally self-heals the older bad rows.
   try {
     const sql = getDb();
+    const falseJson = sql.json({ is_default: false });
+    const trueJson = sql.json({ is_default: true });
     await sql`
       UPDATE integrations
-      SET metadata = jsonb_set(coalesce(metadata, '{}'::jsonb), '{is_default}', 'false'::jsonb),
+      SET metadata = ${falseJson},
           updated_at = now()
       WHERE name LIKE 'google-ws:%'
     `;
     const name = `google-ws:${email}`;
     await sql`
       UPDATE integrations
-      SET metadata = jsonb_set(coalesce(metadata, '{}'::jsonb), '{is_default}', 'true'::jsonb),
+      SET metadata = ${trueJson},
           updated_at = now()
       WHERE name = ${name}
     `;

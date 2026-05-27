@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Activity, Layers, MessageSquare, Wrench, Brain, Sparkles, User } from "lucide-react";
+import { listModels, formatContextWindow } from "@/lib/model-capabilities";
 
 interface ContextSection {
   label: string;
@@ -13,6 +14,10 @@ interface ContextSection {
 
 interface ContextData {
   contextWindow: number;
+  /** Current model id (from app.model). */
+  currentModel?: string;
+  /** Active betas (from app.betas) — affects whether 1M context unlocks. */
+  betas?: string[];
   sections: ContextSection[];
   totalUsed: number;
   remaining: number;
@@ -176,20 +181,40 @@ export default function ContextPage() {
         Model Context Limits
       </h2>
       <div className="rounded-xl border border-surface0 bg-mantle p-5">
-        <div className="grid grid-cols-3 gap-4 text-sm">
-          <div>
-            <span className="text-overlay0">Haiku 4.5</span>
-            <span className="text-text font-medium ml-2">200K</span>
-          </div>
-          <div>
-            <span className="text-overlay0">Sonnet 4.6</span>
-            <span className="text-text font-medium ml-2">200K</span>
-          </div>
-          <div>
-            <span className="text-overlay0">Opus 4.6</span>
-            <span className="text-text font-medium ml-2">200K</span>
-          </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 text-sm">
+          {listModels().map((m) => {
+            const isCurrent = data.currentModel === m.id;
+            return (
+              <div
+                key={m.id}
+                className={`flex items-baseline gap-2 rounded-lg px-3 py-2 border ${
+                  isCurrent ? "border-mauve/40 bg-mauve/5" : "border-surface0"
+                }`}
+              >
+                <span className="text-overlay0">{m.label.replace(/^Claude /, "")}</span>
+                <span className="text-text font-medium">
+                  {formatContextWindow(m.contextWindow)}
+                </span>
+                {isCurrent && (
+                  <span className="text-[10px] text-mauve ml-auto font-medium">in use</span>
+                )}
+              </div>
+            );
+          })}
         </div>
+        <p className="text-xs text-overlay0 mt-4">
+          Opus 4.7, Opus 4.6, and Sonnet 4.6 ship with a 1M-token context window by default. Earlier
+          models stay at 200K. Source:{" "}
+          <a
+            href="https://docs.claude.com/en/docs/build-with-claude/context-windows"
+            target="_blank"
+            rel="noreferrer"
+            className="underline hover:text-text"
+          >
+            Anthropic docs
+          </a>
+          .
+        </p>
       </div>
     </div>
   );

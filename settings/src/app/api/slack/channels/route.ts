@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
+import { decryptSecret } from "@/lib/encryption";
 
 interface SlackChannel {
   id: string;
@@ -28,12 +29,21 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: "Workspace not found" }, { status: 404 });
     }
 
+    // The integrations table encrypts the `secrets` column at rest
+    // (AES-256-GCM via ENCRYPTION_KEY). We must decrypt before parsing.
+    // Same pattern as settings/src/lib/sync-slack-config.ts.
     let accessToken: string | undefined;
     try {
-      const secrets = JSON.parse(ws.secrets as string);
+      const raw = typeof ws.secrets === "string" ? ws.secrets : JSON.stringify(ws.secrets ?? {});
+      const decrypted = decryptSecret(raw);
+      const secrets = JSON.parse(decrypted) as Record<string, string>;
       accessToken = secrets.access_token;
-    } catch {
-      return NextResponse.json({ error: "Could not parse workspace secrets" }, { status: 500 });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return NextResponse.json(
+        { error: `Could not decrypt workspace secrets: ${message}` },
+        { status: 500 },
+      );
     }
 
     if (!accessToken) {

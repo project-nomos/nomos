@@ -530,12 +530,19 @@ export class Gateway {
         teamId: ws.team_id,
         onMessage: enqueue,
         draftManager: this.draftManager,
-        onAuthError: (teamId, teamName) => {
+        onAuthError: (teamId, teamName, info) => {
           const event = {
             type: "system" as const,
             subtype: "auth_error",
-            message: `Slack session expired for ${teamName} (${teamId}) — run \`nomos slack auth\` to reconnect`,
-            data: { platform: `slack-user:${teamId}`, teamId, teamName },
+            message:
+              info?.reason ??
+              `Slack session expired for ${teamName} (${teamId}) — run \`nomos slack auth\` to reconnect`,
+            data: {
+              platform: `slack-user:${teamId}`,
+              teamId,
+              teamName,
+              kind: info?.kind ?? "user",
+            },
           };
           this.wsServer.broadcast(event);
           this.grpcServer.broadcast(event);
@@ -931,6 +938,21 @@ export class Gateway {
               draftManager: this.draftManager,
             });
             adapter.setElicitationManager(this.elicitationManager);
+            adapter.setOnAuthError((teamId, teamName, info) => {
+              const event = {
+                type: "system" as const,
+                subtype: "auth_error",
+                message: info?.reason ?? `Slack auth error for ${teamName} (${teamId})`,
+                data: {
+                  platform: `slack-user:${teamId}`,
+                  teamId,
+                  teamName,
+                  kind: info?.kind ?? "user",
+                },
+              };
+              this.wsServer.broadcast(event);
+              this.grpcServer.broadcast(event);
+            });
             this.channelManager.register(adapter);
             this.draftManager.registerSendFn(adapter.platform, (channelId, text, threadId) =>
               adapter.sendAsUser(channelId, text, threadId),
@@ -946,12 +968,19 @@ export class Gateway {
               startDelayMs: staggerMs,
               onMessage: enqueue,
               draftManager: this.draftManager,
-              onAuthError: (teamId, teamName) => {
+              onAuthError: (teamId, teamName, info) => {
                 const event = {
                   type: "system" as const,
                   subtype: "auth_error",
-                  message: `Slack session expired for ${teamName} (${teamId}) — run \`nomos slack auth\` to reconnect`,
-                  data: { platform: `slack-user:${teamId}`, teamId, teamName },
+                  message:
+                    info?.reason ??
+                    `Slack session expired for ${teamName} (${teamId}) — run \`nomos slack auth\` to reconnect`,
+                  data: {
+                    platform: `slack-user:${teamId}`,
+                    teamId,
+                    teamName,
+                    kind: info?.kind ?? "user",
+                  },
                 };
                 this.wsServer.broadcast(event);
                 this.grpcServer.broadcast(event);

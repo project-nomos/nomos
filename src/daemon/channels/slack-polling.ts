@@ -33,8 +33,20 @@ export interface SlackPollingAdapterOptions {
   startDelayMs?: number;
   onMessage: (msg: IncomingMessage) => void;
   draftManager: DraftManager;
-  /** Called when the token becomes invalid (expired session). */
-  onAuthError?: (teamId: string, teamName: string) => void;
+  /**
+   * Called when a token becomes invalid. `kind` distinguishes the
+   * actor:
+   *   - `"user"` — user session expired (`nomos slack auth` fixes it)
+   *   - `"bot"` — Slack app is `account_inactive` in this workspace
+   *     (install/re-enable the app at api.slack.com/apps)
+   * The reason text is human-readable; the gateway uses it as the
+   * `auth_error` event message.
+   */
+  onAuthError?: (
+    teamId: string,
+    teamName: string,
+    info?: { kind: "user" | "bot"; reason: string },
+  ) => void;
 }
 
 export class SlackPollingAdapter implements ChannelAdapter {
@@ -47,7 +59,11 @@ export class SlackPollingAdapter implements ChannelAdapter {
   private teamName: string | null = null;
   private onMessage: (msg: IncomingMessage) => void;
   private draftManager: DraftManager;
-  private onAuthError?: (teamId: string, teamName: string) => void;
+  private onAuthError?: (
+    teamId: string,
+    teamName: string,
+    info?: { kind: "user" | "bot"; reason: string },
+  ) => void;
   private pollTimer: ReturnType<typeof setInterval> | null = null;
   private running = false;
   private polling = false;
@@ -151,8 +167,33 @@ export class SlackPollingAdapter implements ChannelAdapter {
         const botAuth = await this.botClient.auth.test();
         this.botUserId = (botAuth.user_id as string) ?? null;
         log.info(`Bot identity loaded (${this.botUserId})`);
-      } catch {
-        log.warn(`Bot token auth failed -- agent will post as user`);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        // `account_inactive` means the Nomos Slack app is disabled in
+        // this workspace — the global bot_token in integrations.slack
+        // wasn't installed here, or an admin disabled it. Polling still
+        // works (user token) but the agent can't post AS the bot, and
+        // if this workspace owns the default notification channel,
+        // draft notifications / streaming responses break.
+        if (/account_inactive/i.test(message)) {
+          log.error(
+            { teamId: this.teamId, message },
+            "Slack bot is INACTIVE in this workspace — the agent can't post as a bot " +
+              "here. Polling continues so received messages still flow, but " +
+              "Block-Kit drafts and streaming replies degrade to user-mode. " +
+              "Fix: install the Nomos Slack app in this workspace at " +
+              "https://api.slack.com/apps, then click 'Reconnect' in Settings → Slack.",
+          );
+          // Surface to UI clients via the existing auth_error channel so
+          // the Settings UI can render a banner instead of leaving the
+          // user staring at a silent log line.
+          this.onAuthError?.(this.teamId, this.teamName ?? this.teamId, {
+            kind: "bot",
+            reason: `Slack bot is inactive in ${this.teamName ?? this.teamId} — install/re-enable the Nomos app at api.slack.com/apps`,
+          });
+        } else {
+          log.warn(`Bot token auth failed (${message}) -- agent will post as user`);
+        }
         this.botClient = null;
       }
     }
@@ -533,7 +574,10 @@ export class SlackPollingAdapter implements ChannelAdapter {
         if (!this.authErrorFired && this.consecutiveErrors >= 3) {
           this.authErrorFired = true;
           log.error(`Token expired for team ${this.teamId} — stopping polling`);
-          this.onAuthError?.(this.teamId, this.teamName ?? this.teamId);
+          this.onAuthError?.(this.teamId, this.teamName ?? this.teamId, {
+            kind: "user",
+            reason: `Slack user session expired for ${this.teamName ?? this.teamId} — run \`nomos slack auth\` to reconnect`,
+          });
           await this.stop();
         }
       } else {

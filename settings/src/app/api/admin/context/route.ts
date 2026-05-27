@@ -2,8 +2,9 @@ import { NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import fs from "node:fs";
 import path from "node:path";
+import { getContextWindow } from "@/lib/model-capabilities";
+import { readConfig } from "@/lib/env";
 
-const CONTEXT_WINDOW = 200_000; // 200K tokens for current Claude models
 const CHARS_PER_TOKEN = 4; // rough estimate
 
 function estimateTokens(text: string): number {
@@ -13,6 +14,19 @@ function estimateTokens(text: string): number {
 export async function GET() {
   try {
     const sql = getDb();
+
+    // Resolve the context window from the *current* model + active
+    // betas, not a hardcoded 200K. Reads `app.model` and `app.betas`
+    // from the config table; falls back to Sonnet 4.6 / no betas if
+    // unset.
+    const env = await readConfig(["NOMOS_MODEL", "NOMOS_BETAS"], sql);
+    const currentModel = env.NOMOS_MODEL ?? "claude-sonnet-4-6";
+    const betas = env.NOMOS_BETAS
+      ? env.NOMOS_BETAS.split(",")
+          .map((b) => b.trim())
+          .filter(Boolean)
+      : [];
+    const CONTEXT_WINDOW = getContextWindow(currentModel, betas);
 
     // 1. System prompt: estimate from identity, SOUL.md, profile config
     let systemPromptChars = 0;
@@ -196,6 +210,8 @@ export async function GET() {
 
     return NextResponse.json({
       contextWindow: CONTEXT_WINDOW,
+      currentModel,
+      betas,
       sections,
       totalUsed,
       remaining,
@@ -203,11 +219,14 @@ export async function GET() {
     });
   } catch (err) {
     console.error("Failed to fetch context data:", err);
+    // Default fallback: assume 200K so the UI shows *something* sensible.
     return NextResponse.json({
-      contextWindow: CONTEXT_WINDOW,
+      contextWindow: 200_000,
+      currentModel: "claude-sonnet-4-6",
+      betas: [] as string[],
       sections: [],
       totalUsed: 0,
-      remaining: CONTEXT_WINDOW,
+      remaining: 200_000,
       usagePercent: 0,
     });
   }

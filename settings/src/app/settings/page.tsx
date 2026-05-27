@@ -8,12 +8,12 @@ import { DirtyIndicator } from "@/components/dirty-indicator";
 import { useToast } from "@/contexts/toast-context";
 import { useUnsavedChanges } from "@/hooks/use-unsaved-changes";
 
-const MODELS = [
-  { value: "claude-opus-4-7", label: "Claude Opus 4.7" },
-  { value: "claude-sonnet-4-6", label: "Claude Sonnet 4.6" },
-  { value: "claude-opus-4-6", label: "Claude Opus 4.6" },
-  { value: "claude-haiku-4-5", label: "Claude Haiku 4.5" },
-];
+// Derived from the central model registry so adding a new model in
+// `settings/src/lib/model-capabilities.ts` (and its main-package mirror)
+// lights it up everywhere — picker labels here, context-window cards on
+// /admin/context, etc.
+import { listModels } from "@/lib/model-capabilities";
+const MODELS = listModels().map((m) => ({ value: m.id, label: m.label }));
 
 const PERMISSION_MODES = [
   { value: "default", label: "Default", description: "Ask before running tools" },

@@ -32,12 +32,17 @@ export async function syncGoogleAccountsToDb(): Promise<
 
     for (const acct of manifest) {
       const name = `google-ws:${acct.email}`;
-      const metadata = JSON.stringify({ is_default: acct.isDefault });
+      // Use `sql.json()` so the value is inserted as a proper JSONB object
+      // (e.g. `{"is_default": true}`). Passing a `JSON.stringify(...)::jsonb`
+      // string causes postgres.js to wrap it again, producing a JSONB
+      // STRING like "{\"is_default\":true}" — the kind that breaks
+      // `metadata->>'is_default'` lookups everywhere downstream.
+      const metadataJson = sql.json({ is_default: acct.isDefault });
       await sql`
         INSERT INTO integrations (name, enabled, config, secrets, metadata)
-        VALUES (${name}, true, '{}', '{}', ${metadata}::jsonb)
+        VALUES (${name}, true, '{}', '{}', ${metadataJson})
         ON CONFLICT (name) DO UPDATE SET
-          metadata = ${metadata}::jsonb,
+          metadata = ${metadataJson},
           updated_at = now()
       `;
     }
@@ -114,13 +119,13 @@ export async function syncGoogleAccountsToDb(): Promise<
 
   const sql = getDb();
   const name = `google-ws:${email}`;
-  const metadata = JSON.stringify({ is_default: true });
+  const metadataJson = sql.json({ is_default: true });
 
   await sql`
     INSERT INTO integrations (name, enabled, config, secrets, metadata)
-    VALUES (${name}, true, '{}', '{}', ${metadata}::jsonb)
+    VALUES (${name}, true, '{}', '{}', ${metadataJson})
     ON CONFLICT (name) DO UPDATE SET
-      metadata = ${metadata}::jsonb,
+      metadata = ${metadataJson},
       updated_at = now()
   `;
 
