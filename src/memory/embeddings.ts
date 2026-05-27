@@ -36,44 +36,22 @@ async function generateEmbeddingsGemini(texts: string[]): Promise<number[][]> {
     if (batch.length === 1) {
       // Single text -- use embedContent
       const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:embedContent?key=${apiKey}`;
-      const response = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: `models/${model}`,
-          content: { parts: [{ text: batch[0] }] },
-          outputDimensionality: EMBEDDING_DIM,
-        }),
-      });
-
-      if (!response.ok) {
-        const body = await response.text();
-        throw new Error(`Gemini embedding error ${response.status}: ${body}`);
-      }
-
-      const data = (await response.json()) as GeminiEmbeddingResponse;
+      const data = (await fetchGeminiWithRetry(url, {
+        model: `models/${model}`,
+        content: { parts: [{ text: batch[0] }] },
+        outputDimensionality: EMBEDDING_DIM,
+      })) as GeminiEmbeddingResponse;
       results.push(data.embedding.values);
     } else {
       // Batch -- use batchEmbedContents
       const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:batchEmbedContents?key=${apiKey}`;
-      const response = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          requests: batch.map((text) => ({
-            model: `models/${model}`,
-            content: { parts: [{ text }] },
-            outputDimensionality: EMBEDDING_DIM,
-          })),
-        }),
-      });
-
-      if (!response.ok) {
-        const body = await response.text();
-        throw new Error(`Gemini batch embedding error ${response.status}: ${body}`);
-      }
-
-      const data = (await response.json()) as GeminiBatchResponse;
+      const data = (await fetchGeminiWithRetry(url, {
+        requests: batch.map((text) => ({
+          model: `models/${model}`,
+          content: { parts: [{ text }] },
+          outputDimensionality: EMBEDDING_DIM,
+        })),
+      })) as GeminiBatchResponse;
       for (const emb of data.embeddings) {
         results.push(emb.values);
       }
@@ -81,6 +59,60 @@ async function generateEmbeddingsGemini(texts: string[]): Promise<number[][]> {
   }
 
   return results;
+}
+
+/**
+ * POST to a Gemini embedding endpoint with 429 retry. Free-tier quota
+ * is 100 embed requests/min/project — easy to hit during bulk ingest.
+ * Google returns `retryDelay` in the error response body; we honor it,
+ * cap at 60s, and retry up to 5 times before giving up.
+ */
+async function fetchGeminiWithRetry(url: string, body: unknown, maxAttempts = 5): Promise<unknown> {
+  let attempt = 0;
+  while (true) {
+    attempt++;
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+
+    if (response.ok) {
+      return response.json();
+    }
+
+    const bodyText = await response.text();
+
+    if (response.status === 429 && attempt < maxAttempts) {
+      const delayMs = parseGeminiRetryDelay(bodyText) ?? Math.min(2 ** attempt * 1000, 60_000);
+      console.warn(
+        `[embeddings] Gemini 429 (attempt ${attempt}/${maxAttempts}); sleeping ${Math.round(delayMs / 1000)}s`,
+      );
+      await new Promise((r) => setTimeout(r, delayMs + Math.random() * 500));
+      continue;
+    }
+
+    throw new Error(`Gemini embedding error ${response.status}: ${bodyText}`);
+  }
+}
+
+/** Parse the `retryDelay` string (e.g. "32s") from Gemini's 429 body. */
+function parseGeminiRetryDelay(body: string): number | null {
+  try {
+    const parsed = JSON.parse(body);
+    const details = parsed?.error?.details;
+    if (!Array.isArray(details)) return null;
+    for (const d of details) {
+      const delay = d?.retryDelay;
+      if (typeof delay === "string") {
+        const m = delay.match(/^(\d+(?:\.\d+)?)s$/);
+        if (m) return Math.ceil(parseFloat(m[1]) * 1000);
+      }
+    }
+  } catch {
+    // not JSON or unexpected shape
+  }
+  return null;
 }
 
 // ── Vertex AI backend (legacy) ──

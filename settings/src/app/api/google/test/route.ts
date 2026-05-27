@@ -56,12 +56,41 @@ export async function POST() {
       });
     } catch (apiErr) {
       const errMsg = apiErr instanceof Error ? apiErr.message : String(apiErr);
+
+      // invalid_client: refresh_token was issued against a different
+      // OAuth client than what's now in client_secret.json (usually
+      // after credentials were rotated or rewritten). Re-auth required.
+      if (/invalid_client/i.test(errMsg)) {
+        return NextResponse.json({
+          ok: false,
+          message: `gws ${version} keyring is out of sync with client_secret.json (invalid_client). Click "Remove" on the authorized account then "Authorize Account" to re-link.`,
+        });
+      }
+
+      // invalid_grant: refresh token expired or revoked.
+      if (/invalid_grant/i.test(errMsg)) {
+        return NextResponse.json({
+          ok: false,
+          message: `gws ${version} refresh token is expired or revoked. Click "Remove" then "Authorize Account" to renew.`,
+        });
+      }
+
+      // 403 with insufficient scope: the granted scopes don't cover the
+      // service being called. Re-auth with the right scopes.
+      if (/insufficientPermissions|ACCESS_TOKEN_SCOPE_INSUFFICIENT/i.test(errMsg)) {
+        return NextResponse.json({
+          ok: false,
+          message: `gws ${version} access token does not include Gmail scope. Re-authorize via "Remove" then "Authorize Account" (the OAuth flow requests all scopes explicitly).`,
+        });
+      }
+
       if (errMsg.includes("401") || errMsg.includes("credentials") || errMsg.includes("auth")) {
         return NextResponse.json({
           ok: false,
           message: `gws ${version} has credentials but tokens are invalid. Re-authorize by clicking "Authorize Account".`,
         });
       }
+
       // Non-auth error (API not enabled, project mismatch, etc.) -- auth itself is fine
       return NextResponse.json({
         ok: true,

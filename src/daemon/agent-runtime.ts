@@ -227,8 +227,21 @@ export class AgentRuntime {
       this.mcpServers["nomos-telegram"] = createTelegramMcpServer();
     }
     if (await isGoogleWorkspaceConfiguredAsync()) {
-      // gws CLI is used via Bash (not MCP) -- no MCP server to register.
-      // Sync authorized accounts from gws CLI to DB and load for system prompt
+      // Register the in-process Google Workspace MCP (gmail_*, calendar_*,
+      // etc.). Tools shell out to the `gws` CLI under the hood with the
+      // right per-account `GOOGLE_WORKSPACE_CLI_CONFIG_DIR`, so the agent
+      // gets typed tools and native multi-account in one server.
+      try {
+        const { createGoogleWorkspaceMcpServer } = await import("../sdk/google-workspace-mcp.ts");
+        this.mcpServers["nomos-google-workspace"] = createGoogleWorkspaceMcpServer();
+      } catch (err) {
+        log.warn(
+          { err: err instanceof Error ? err.message : err },
+          "Failed to register google-workspace MCP",
+        );
+      }
+
+      // Load authorized accounts for the system prompt.
       try {
         const { syncGoogleAccountsFromGws } = await import("../db/google-accounts.ts");
         const accounts = await syncGoogleAccountsFromGws();

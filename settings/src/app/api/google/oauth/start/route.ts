@@ -2,10 +2,24 @@ import { NextResponse } from "next/server";
 import { readConfig } from "@/lib/env";
 import { getDb } from "@/lib/db";
 import { syncGoogleAccountsToDb } from "@/lib/sync-google-accounts";
+import {
+  pendingAuthDir,
+  newPendingToken,
+  writeClientSecretToDir,
+  promotePendingDir,
+  cleanupPendingDir,
+} from "@/lib/gws-accounts";
 import { spawn, type ChildProcess } from "node:child_process";
 
-// Keep the child process alive at module level so it can receive the OAuth callback
-let activeChild: ChildProcess | null = null;
+// Keep the child process alive at module level so it can receive the OAuth
+// callback (which fires asynchronously after the user finishes the browser
+// flow). We also stash the pending token on the child so the exit handler
+// can promote the working dir to its final per-account home.
+interface ActiveAuth {
+  child: ChildProcess;
+  pendingToken: string;
+}
+let active: ActiveAuth | null = null;
 let killTimer: ReturnType<typeof setTimeout> | null = null;
 
 function cleanup() {
@@ -13,9 +27,10 @@ function cleanup() {
     clearTimeout(killTimer);
     killTimer = null;
   }
-  if (activeChild) {
-    activeChild.kill();
-    activeChild = null;
+  if (active) {
+    active.child.kill();
+    cleanupPendingDir(active.pendingToken);
+    active = null;
   }
 }
 
@@ -45,20 +60,22 @@ export async function POST() {
   // Clean up any previous auth process
   cleanup();
 
-  // Write a valid client_secret.json (with project_id) for the CLI flow.
-  // Same helper /api/env uses on save, so the two paths can't drift.
-  const { writeGwsClientSecret } = await import("@/lib/sync-gws-client-secret");
-  writeGwsClientSecret({
+  // Each auth run gets its own pending working dir under
+  // `~/.config/gws/.pending-<token>/`. We don't know the email yet — it
+  // comes back with the OAuth token — so we keep the dir anonymous until
+  // success, then rename to `~/.config/gws/<email>/` and register in the
+  // manifest. This works for both first-time auth and re-auth.
+  const pendingToken = newPendingToken();
+  const pendingDir = pendingAuthDir(pendingToken);
+  writeClientSecretToDir(pendingDir, {
     clientId,
     clientSecret,
     projectId: gcpProjectId ?? "",
   });
 
-  // Build args for gws auth login with explicit scopes.
-  // Using --scopes ensures Gmail/Calendar are included even if the gws CLI
-  // doesn't map service names to scopes correctly.
-  // All Google Workspace scopes -- pass explicitly since the gws CLI's
-  // -s flag doesn't reliably map service names to OAuth scopes.
+  // Build args for `gws auth login`. We pass all scopes we'll ever need
+  // — the OAuth consent screen in GCP must already include them; otherwise
+  // Google silently drops the un-registered ones at request time.
   const ALL_SCOPES = [
     "https://www.googleapis.com/auth/gmail.readonly",
     "https://www.googleapis.com/auth/gmail.send",
@@ -75,75 +92,81 @@ export async function POST() {
   ].join(",");
   const args = ["@googleworkspace/cli", "auth", "login", "--scopes", ALL_SCOPES];
 
-  // Spawn gws auth login with piped stdout/stderr so we can capture the OAuth URL
   try {
     const child = spawn("npx", args, {
       stdio: ["ignore", "pipe", "pipe"],
       env: {
         ...process.env,
+        // CRITICAL: scope this gws invocation to the pending dir so it
+        // doesn't blow away any other account already authorized.
+        GOOGLE_WORKSPACE_CLI_CONFIG_DIR: pendingDir,
         GOOGLE_WORKSPACE_CLI_CLIENT_ID: clientId,
         GOOGLE_WORKSPACE_CLI_CLIENT_SECRET: clientSecret,
       },
     });
 
-    activeChild = child;
+    active = { child, pendingToken };
 
     // Kill the process after 120s if auth isn't completed
     killTimer = setTimeout(() => {
-      if (activeChild === child) {
+      if (active?.child === child) {
         child.kill();
-        activeChild = null;
+        cleanupPendingDir(pendingToken);
+        active = null;
       }
       killTimer = null;
     }, 120_000);
 
-    // Clean up references when the process exits naturally
-    child.on("exit", (code) => {
-      if (activeChild === child) {
-        activeChild = null;
-      }
+    // On exit code 0: resolve the email from the granted token, then move
+    // the pending dir to ~/.config/gws/<email>/ and register it in the
+    // manifest. The Settings UI polls /api/google/status to detect this.
+    child.on("exit", async (code) => {
+      if (active?.child === child) active = null;
       if (killTimer) {
         clearTimeout(killTimer);
         killTimer = null;
       }
-      // Sync accounts to DB after successful OAuth
-      if (code === 0) {
-        syncGoogleAccountsToDb().catch(() => {});
+      if (code !== 0) {
+        cleanupPendingDir(pendingToken);
+        return;
+      }
+
+      try {
+        const email = await resolveEmailFromPendingDir(pendingDir);
+        if (!email) {
+          cleanupPendingDir(pendingToken);
+          return;
+        }
+        promotePendingDir(pendingToken, email);
+        await syncGoogleAccountsToDb().catch(() => {});
+      } catch (err) {
+        console.error("[oauth/start] Failed to finalize auth:", err);
+        cleanupPendingDir(pendingToken);
       }
     });
 
-    // Read stdout to find the OAuth URL
+    // Read stdout/stderr to find the OAuth URL gws prints.
     const url = await new Promise<string | null>((resolve) => {
       let output = "";
       const urlPattern = /https:\/\/accounts\.google\.com\/o\/oauth2\/auth\S+/;
 
-      // Timeout if we don't get the URL within 15 seconds
       const timeout = setTimeout(() => resolve(null), 15_000);
 
-      child.stdout!.on("data", (chunk: Buffer) => {
+      const handleChunk = (chunk: Buffer) => {
         output += chunk.toString();
         const match = output.match(urlPattern);
         if (match) {
           clearTimeout(timeout);
           resolve(match[0]);
         }
-      });
+      };
 
-      child.stderr!.on("data", (chunk: Buffer) => {
-        output += chunk.toString();
-        // Some CLIs print the URL to stderr
-        const match = output.match(urlPattern);
-        if (match) {
-          clearTimeout(timeout);
-          resolve(match[0]);
-        }
-      });
-
+      child.stdout?.on("data", handleChunk);
+      child.stderr?.on("data", handleChunk);
       child.on("error", () => {
         clearTimeout(timeout);
         resolve(null);
       });
-
       child.on("exit", (code) => {
         clearTimeout(timeout);
         if (code !== 0) resolve(null);
@@ -161,10 +184,10 @@ export async function POST() {
       );
     }
 
-    // Inject openid+email scopes and force consent prompt.
-    // prompt=consent is required for Google Workspace accounts with
-    // re-authentication policies (RAPT) -- without it, token exchange
-    // fails with invalid_rapt even on fresh logins.
+    // Inject openid+email scopes and force consent prompt. prompt=consent
+    // is required for Google Workspace accounts with re-authentication
+    // policies (RAPT) — without it, token exchange fails with invalid_rapt
+    // even on fresh logins.
     let authUrl = url;
     try {
       const parsed = new URL(authUrl);
@@ -179,10 +202,85 @@ export async function POST() {
       // If URL parsing fails, use the original
     }
 
-    return NextResponse.json({ ok: true, url: authUrl });
+    return NextResponse.json({ ok: true, url: authUrl, pendingToken });
   } catch (err) {
     cleanup();
     const message = err instanceof Error ? err.message : String(err);
     return NextResponse.json({ error: `Failed to start gws auth: ${message}` }, { status: 500 });
   }
+}
+
+/**
+ * Pull the just-granted refresh token out of the pending dir, exchange it
+ * for an access token, then hit Google's userinfo endpoint to resolve the
+ * email. Returns null if any step fails (the dir is left intact for the
+ * caller to clean up).
+ */
+async function resolveEmailFromPendingDir(dir: string): Promise<string | null> {
+  const { execFile } = await import("node:child_process");
+  const { promisify } = await import("node:util");
+  const execFileAsync = promisify(execFile);
+
+  let creds: { client_id: string; client_secret: string; refresh_token: string };
+  try {
+    const { stdout } = await execFileAsync(
+      "npx",
+      ["@googleworkspace/cli", "auth", "export", "--unmasked"],
+      {
+        timeout: 10_000,
+        env: { ...process.env, GOOGLE_WORKSPACE_CLI_CONFIG_DIR: dir },
+      },
+    );
+    const jsonStart = stdout.search(/\{/);
+    if (jsonStart < 0) return null;
+    creds = JSON.parse(stdout.slice(jsonStart));
+  } catch (err) {
+    console.error("[oauth/start] auth export failed:", err);
+    return null;
+  }
+
+  if (!creds.refresh_token || !creds.client_id || !creds.client_secret) return null;
+
+  const tokenRes = await fetch("https://oauth2.googleapis.com/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      client_id: creds.client_id,
+      client_secret: creds.client_secret,
+      refresh_token: creds.refresh_token,
+      grant_type: "refresh_token",
+    }),
+  });
+  if (!tokenRes.ok) return null;
+
+  const tokenData = (await tokenRes.json()) as { access_token?: string };
+  if (!tokenData.access_token) return null;
+
+  // Try userinfo first (works if openid scope was granted).
+  try {
+    const userRes = await fetch("https://www.googleapis.com/oauth2/v2/userinfo", {
+      headers: { Authorization: `Bearer ${tokenData.access_token}` },
+    });
+    if (userRes.ok) {
+      const info = (await userRes.json()) as { email?: string };
+      if (info.email) return info.email;
+    }
+  } catch {
+    // openid not granted — fall through to Gmail profile.
+  }
+
+  // Fallback: Gmail profile (works if Gmail scope was granted).
+  try {
+    const profileRes = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/profile", {
+      headers: { Authorization: `Bearer ${tokenData.access_token}` },
+    });
+    if (profileRes.ok) {
+      const profile = (await profileRes.json()) as { emailAddress?: string };
+      if (profile.emailAddress) return profile.emailAddress;
+    }
+  } catch {
+    // Gmail scope not granted either — give up.
+  }
+
+  return null;
 }

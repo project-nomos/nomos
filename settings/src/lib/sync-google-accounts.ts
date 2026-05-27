@@ -1,26 +1,68 @@
 /**
- * Sync Google Workspace account from `gws auth status` into the DB.
+ * Sync Google Workspace accounts from the on-disk manifest
+ * (`~/.config/gws/accounts.json`) into the integrations table.
  *
- * The `gws` CLI owns OAuth tokens (~/.config/gws/). We persist account
- * metadata (email, default status) in the integrations table so the agent
- * can reference which Google accounts are available.
+ * The manifest, written by `src/lib/gws-accounts.ts` during the OAuth
+ * flow, is the source of truth. The DB just caches it so other surfaces
+ * (Settings UI status, agent system prompt) can read accounts without
+ * touching the filesystem.
  *
- * In gws v0.22.5+, there is at most one authenticated account.
+ * Falls back to single-account `gws auth status` for legacy installs
+ * whose manifest hasn't been populated yet — that path is removed once
+ * the first multi-account auth migrates the install.
  */
 
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { getDb } from "./db";
+import { listAccounts } from "./gws-accounts";
 
 const execFileAsync = promisify(execFile);
 
 export async function syncGoogleAccountsToDb(): Promise<
   Array<{ email: string; is_default: boolean }>
 > {
-  // Check if gws has a valid auth session
+  const manifest = listAccounts();
+
+  // Primary path: manifest-driven sync.
+  if (manifest.length > 0) {
+    const sql = getDb();
+
+    const manifestEmails = new Set(manifest.map((a) => a.email));
+
+    for (const acct of manifest) {
+      const name = `google-ws:${acct.email}`;
+      const metadata = JSON.stringify({ is_default: acct.isDefault });
+      await sql`
+        INSERT INTO integrations (name, enabled, config, secrets, metadata)
+        VALUES (${name}, true, '{}', '{}', ${metadata}::jsonb)
+        ON CONFLICT (name) DO UPDATE SET
+          metadata = ${metadata}::jsonb,
+          updated_at = now()
+      `;
+    }
+
+    // Drop stale DB rows for accounts no longer in the manifest.
+    const existing = await sql<{ name: string }[]>`
+      SELECT name FROM integrations WHERE name LIKE 'google-ws:%'
+    `;
+    for (const row of existing) {
+      const email = row.name.replace(/^google-ws:/, "");
+      if (!manifestEmails.has(email)) {
+        await sql`DELETE FROM integrations WHERE name = ${row.name}`;
+      }
+    }
+
+    return manifest.map((a) => ({ email: a.email, is_default: a.isDefault }));
+  }
+
+  // Legacy fallback: single-account gws auth status. Used by pre-migration
+  // installs until the first multi-account auth populates the manifest.
   let authenticated = false;
   try {
-    const { stdout } = await execFileAsync("npx", ["gws", "auth", "status"], { timeout: 10000 });
+    const { stdout } = await execFileAsync("npx", ["@googleworkspace/cli", "auth", "status"], {
+      timeout: 10_000,
+    });
     const status = JSON.parse(stdout);
     authenticated =
       status.auth_method !== "none" || status.token_cache_exists || status.storage !== "none";
@@ -30,13 +72,12 @@ export async function syncGoogleAccountsToDb(): Promise<
 
   if (!authenticated) return [];
 
-  // Try to resolve the email of the authenticated account
   let email: string | null = null;
   try {
     const { stdout: exportOut } = await execFileAsync(
       "npx",
-      ["gws", "auth", "export", "--unmasked"],
-      { timeout: 10000 },
+      ["@googleworkspace/cli", "auth", "export", "--unmasked"],
+      { timeout: 10_000 },
     );
     const creds = JSON.parse(exportOut);
     if (creds.refresh_token && creds.client_id && creds.client_secret) {
@@ -71,7 +112,6 @@ export async function syncGoogleAccountsToDb(): Promise<
 
   if (!email) return [];
 
-  // Upsert the account in DB
   const sql = getDb();
   const name = `google-ws:${email}`;
   const metadata = JSON.stringify({ is_default: true });

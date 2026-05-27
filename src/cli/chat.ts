@@ -10,7 +10,7 @@ import { isDiscordConfigured, createDiscordMcpServer } from "../sdk/discord-mcp.
 import { isTelegramConfigured, createTelegramMcpServer } from "../sdk/telegram-mcp.ts";
 import {
   isGoogleWorkspaceConfigured,
-  createGoogleWorkspaceMcpConfigs,
+  createGoogleWorkspaceMcpServer,
 } from "../sdk/google-workspace-mcp.ts";
 import { startRepl } from "../ui/repl.tsx";
 import { loadMcpConfig } from "./mcp-config.ts";
@@ -87,7 +87,7 @@ export function registerChatCommand(program: Command): void {
         mcpServers["nomos-telegram"] = createTelegramMcpServer();
       }
       if (isGoogleWorkspaceConfigured()) {
-        Object.assign(mcpServers, createGoogleWorkspaceMcpConfigs());
+        mcpServers["nomos-google-workspace"] = createGoogleWorkspaceMcpServer();
       }
 
       // Determine session key:

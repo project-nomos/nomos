@@ -14,6 +14,11 @@ import { GoogleAuth, OAuth2Client } from "google-auth-library";
 import { execFile } from "node:child_process";
 import type { IngestSource, IngestMessage, IngestOptions } from "../types.ts";
 import { createLogger } from "../../lib/logger.ts";
+import {
+  envForAccount,
+  getDefaultAccount,
+  listAccounts as listGwsManifestAccounts,
+} from "../../auth/gws-accounts.ts";
 
 const log = createLogger("ingest-gmail");
 
@@ -45,24 +50,23 @@ export class GmailIngestSource implements IngestSource {
   private latestHistoryId: string | null = null;
 
   /**
-   * Get an access token for Gmail API.
+   * Get an access token for Gmail API, scoped to a specific account.
    *
    * Priority:
-   *   1. gws CLI tokens (the common Google Workspace OAuth path).
-   *   2. Application Default Credentials — ONLY when gws is not set up
-   *      at all. ADC tokens from `gcloud auth application-default login`
-   *      do not include Gmail scope, so falling back to ADC after a gws
-   *      failure just hides the real problem (you get a 403
+   *   1. gws CLI tokens for the given account (the common path). If no
+   *      account is named and the multi-account manifest is empty, falls
+   *      back to whatever gws has in its default location.
+   *   2. Application Default Credentials — only when gws is not set up at
+   *      all. ADC tokens from `gcloud auth application-default login` do
+   *      not include Gmail scope, so falling back to ADC after a gws
+   *      failure just hides the real problem (403
    *      ACCESS_TOKEN_SCOPE_INSUFFICIENT on the first Gmail call).
    */
-  private async getAccessToken(): Promise<string> {
-    const creds = await exportGwsCredentials();
+  private async getAccessToken(account?: string): Promise<string> {
+    const creds = await exportGwsCredentials(account);
 
     if (creds) {
-      // gws is configured — its tokens are the only path that has Gmail
-      // scope. If refresh fails here, do NOT fall back to ADC; surface
-      // the real error so the user can re-authorize.
-      log.info("Using gws CLI credentials for Gmail access");
+      log.info({ account: account ?? "(default)" }, "Using gws CLI credentials for Gmail access");
       try {
         const oauth2 = new OAuth2Client(creds.client_id, creds.client_secret);
         oauth2.setCredentials({ refresh_token: creds.refresh_token });
@@ -79,9 +83,8 @@ export class GmailIngestSource implements IngestSource {
             ? "the refresh token is expired or has been revoked"
             : "the gws OAuth refresh failed";
         throw new Error(
-          `Gmail auth failed: ${message}. Cause: ${hint}. ` +
-            'Fix: in Settings UI → Integrations → Google, click "Remove" on the authorized account then "Authorize Account". ' +
-            "Or from a shell: `npx @googleworkspace/cli auth logout` then re-run the OAuth flow.",
+          `Gmail auth failed for ${account ?? "default account"}: ${message}. Cause: ${hint}. ` +
+            'Fix: in Settings UI → Integrations → Google, click "Remove" on this account then "Add another account" to re-authorize.',
         );
       }
     }
@@ -109,7 +112,30 @@ export class GmailIngestSource implements IngestSource {
     options: IngestOptions,
     cursor?: string,
   ): AsyncGenerator<IngestMessage, void, undefined> {
-    const accessToken = await this.getAccessToken();
+    // Resolve the set of accounts to ingest. If the caller named one,
+    // honor it. Otherwise read the manifest and iterate every account.
+    // The default-account-only fallback preserves single-account behavior
+    // when no manifest exists yet.
+    const accountsToIngest = this.resolveAccounts(options.account);
+
+    for (const account of accountsToIngest) {
+      yield* this.ingestAccount(account, options, cursor);
+    }
+  }
+
+  private resolveAccounts(named?: string): Array<string | undefined> {
+    if (named) return [named];
+    const manifest = listGwsManifestAccounts();
+    if (manifest.length === 0) return [undefined]; // legacy single-account path
+    return manifest.map((a) => a.email);
+  }
+
+  private async *ingestAccount(
+    account: string | undefined,
+    options: IngestOptions,
+    cursor?: string,
+  ): AsyncGenerator<IngestMessage, void, undefined> {
+    const accessToken = await this.getAccessToken(account);
 
     // Build query: sent folder only
     let query = "in:sent";
@@ -262,15 +288,26 @@ interface GwsCredentials {
 }
 
 /**
- * Export credentials from the gws CLI (`gws auth export`).
+ * Export credentials from the gws CLI (`gws auth export --unmasked`)
+ * scoped to a specific account via `GOOGLE_WORKSPACE_CLI_CONFIG_DIR`.
+ * If no account is named, uses the manifest's default account (or
+ * whatever gws has in its global location if the manifest is empty).
+ *
  * Returns null if gws is not available or not authenticated.
+ *
+ * `--unmasked` is required: without it, gws returns truncated values
+ * like `GOCS...I9oF` and `1//0...5y0w` for display purposes, which then
+ * fail token refresh with `invalid_client`.
  */
-function exportGwsCredentials(): Promise<GwsCredentials | null> {
+function exportGwsCredentials(account?: string): Promise<GwsCredentials | null> {
+  const target = account ?? getDefaultAccount()?.email;
+  const accountEnv = target ? envForAccount(target) : {};
+
   return new Promise((resolve) => {
     execFile(
       "npx",
-      ["@googleworkspace/cli", "auth", "export"],
-      { timeout: 15_000 },
+      ["@googleworkspace/cli", "auth", "export", "--unmasked"],
+      { timeout: 15_000, env: { ...process.env, ...accountEnv } as NodeJS.ProcessEnv },
       (err, stdout, stderr) => {
         if (err) {
           log.warn({ err: err.message, stderr: stderr?.trim() }, "gws auth export failed");
