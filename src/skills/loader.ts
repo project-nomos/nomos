@@ -2,6 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { parseFrontmatter } from "./frontmatter.ts";
+import { FEATURES } from "../config/mode.ts";
 import type { Skill } from "./types.ts";
 
 const MAX_SKILL_FILE_BYTES = 256_000;
@@ -9,26 +10,33 @@ const MAX_SKILL_FILE_BYTES = 256_000;
 /**
  * Load all skills from multiple source directories.
  * Precedence (highest wins): project > personal > bundled
+ *
+ * In hosted mode, only bundled skills are loaded — `~/.nomos/skills/` and
+ * `./skills/` paths are ignored so customers can't inject arbitrary skills
+ * into a multi-tenant container.
  */
 export function loadSkills(): Skill[] {
   const bundledDir = resolveBundledSkillsDir();
-  const personalDir = path.join(os.homedir(), ".nomos", "skills");
-  const projectDirs = [path.resolve("skills"), path.resolve(".nomos", "skills")];
-
   const merged = new Map<string, Skill>();
 
-  // Load in precedence order (lowest first, later overwrites)
+  // Bundled skills always load
   if (bundledDir) {
     for (const skill of loadSkillsFromDir(bundledDir, "bundled")) {
       merged.set(skill.name, skill);
     }
   }
-  for (const skill of loadSkillsFromDir(personalDir, "personal")) {
-    merged.set(skill.name, skill);
-  }
-  for (const dir of projectDirs) {
-    for (const skill of loadSkillsFromDir(dir, "project")) {
+
+  if (FEATURES.byoSkills()) {
+    const personalDir = path.join(os.homedir(), ".nomos", "skills");
+    const projectDirs = [path.resolve("skills"), path.resolve(".nomos", "skills")];
+
+    for (const skill of loadSkillsFromDir(personalDir, "personal")) {
       merged.set(skill.name, skill);
+    }
+    for (const dir of projectDirs) {
+      for (const skill of loadSkillsFromDir(dir, "project")) {
+        merged.set(skill.name, skill);
+      }
     }
   }
 

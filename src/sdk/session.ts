@@ -53,6 +53,8 @@ export interface RunSessionParams {
   fallbackModels?: string[];
   /** Tool names that are auto-allowed without prompting for permission */
   allowedTools?: string[];
+  /** Tool names that are blocked entirely (removed from the agent's tool list) */
+  disallowedTools?: string[];
   /** Enable SDK debug mode (verbose logging) */
   debug?: boolean;
   /** Callback for stderr output from the Claude Code process */
@@ -124,6 +126,7 @@ export function runSession(params: RunSessionParams): Query {
       systemPrompt,
       mcpServers: params.mcpServers,
       allowedTools: params.allowedTools,
+      disallowedTools: params.disallowedTools,
       thinking: params.thinking ?? { type: "adaptive" },
       resume: params.resume,
       maxTurns: params.maxTurns ?? 50,

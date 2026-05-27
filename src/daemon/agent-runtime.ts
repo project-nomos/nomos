@@ -28,6 +28,19 @@ import {
 } from "../sdk/telegram-mcp.ts";
 import { isGoogleWorkspaceConfiguredAsync } from "../sdk/google-workspace-mcp.ts";
 import { loadEnvConfig, type NomosConfig } from "../config/env.ts";
+import { FEATURES } from "../config/mode.ts";
+
+/**
+ * Built-in tools blocked when hosted-mode feature gates demand it. Centralized
+ * here so both single-agent and team-runtime call sites stay consistent.
+ */
+function getDisallowedTools(): string[] {
+  const blocked: string[] = [];
+  if (!FEATURES.bashTool()) {
+    blocked.push("Bash", "BashOutput", "KillBash");
+  }
+  return blocked;
+}
 import { classifyQuery } from "../routing/classifier.ts";
 import {
   loadUserProfile,
@@ -588,6 +601,7 @@ export class AgentRuntime {
             mcpServers: this.mcpServers,
             permissionMode: "bypassPermissions",
             allowedTools: Object.keys(this.mcpServers).map((name) => `mcp__${name}`),
+            disallowedTools: getDisallowedTools(),
             // Use smart-routed model (or default) — not the base config which may be haiku
             model,
             plugins: this.plugins,
@@ -909,6 +923,7 @@ export class AgentRuntime {
       // Use bypassPermissions so tools like filesystem search and web search work.
       permissionMode: "bypassPermissions",
       allowedTools,
+      disallowedTools: getDisallowedTools(),
       resume: resumeId,
       maxTurns: 50,
       anthropicBaseUrl: this.config.anthropicBaseUrl,

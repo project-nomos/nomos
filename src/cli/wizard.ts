@@ -4,6 +4,7 @@ import path from "node:path";
 import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
 import chalk from "chalk";
+import { FEATURES } from "../config/mode.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -220,8 +221,13 @@ async function waitForSetupComplete(port: number): Promise<void> {
 /**
  * Check if the setup wizard should run.
  * Returns true if .env is missing or lacks DATABASE_URL.
+ *
+ * In hosted mode, the wizard is replaced by the mobile onboarding flow +
+ * admin-side provisioning, so it never auto-runs.
  */
 export function shouldRunWizard(): boolean {
+  if (!FEATURES.setupWizard()) return false;
+
   const envPath = path.resolve(".env");
   if (!fs.existsSync(envPath)) return true;
 

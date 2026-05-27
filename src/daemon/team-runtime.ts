@@ -60,6 +60,8 @@ export interface TeamTask {
   permissionMode?: "default" | "acceptEdits" | "bypassPermissions" | "plan" | "dontAsk";
   /** Allowed tools (auto-approved without prompting) */
   allowedTools?: string[];
+  /** Disallowed tools (removed from agent's tool list) */
+  disallowedTools?: string[];
   /** Override model for this team run (e.g. from smart routing) */
   model?: string;
   /** Plugins to load into worker SDK sessions */
@@ -539,6 +541,7 @@ Execute this subtask thoroughly and provide your output.`;
             mcpServers: task.mcpServers,
             permissionMode: task.permissionMode,
             allowedTools: task.allowedTools,
+            disallowedTools: task.disallowedTools,
             maxTurns: this.config.workerMaxTurns,
             maxBudgetUsd: this.config.workerBudgetUsd,
             cwd: worktreePath,
@@ -736,6 +739,7 @@ Verify the workers' changes are correct. Run builds, tests, linters, and adversa
       mcpServers?: Record<string, McpServerConfig>;
       permissionMode?: "default" | "acceptEdits" | "bypassPermissions" | "plan" | "dontAsk";
       allowedTools?: string[];
+      disallowedTools?: string[];
       maxTurns?: number;
       maxBudgetUsd?: number;
       cwd?: string;
@@ -757,6 +761,7 @@ Verify the workers' changes are correct. Run builds, tests, linters, and adversa
       mcpServers: options.mcpServers,
       permissionMode: options.permissionMode ?? "bypassPermissions",
       allowedTools: options.allowedTools,
+      disallowedTools: options.disallowedTools,
       maxTurns: options.maxTurns ?? 20,
       maxBudgetUsd: options.maxBudgetUsd,
       plugins: options.plugins,
