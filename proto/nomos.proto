@@ -107,3 +107,37 @@ message DraftItem {
 message PongResponse {
   int64 timestamp = 1;
 }
+
+// ── OAuth Deposit ──
+// Used by the central Better Auth server to push OAuth tokens it obtained on
+// the customer's behalf into the customer's nomos instance. The call is
+// authenticated via mTLS (client cert signed by the central CA). Tokens are
+// stored encrypted in the customer's `integrations` / `google_accounts` /
+// `slack_workspaces` tables.
+
+service OAuthDeposit {
+  rpc Deposit (DepositRequest) returns (DepositResponse);
+}
+
+message DepositRequest {
+  // gmail | calendar | drive | slack | notion | ...
+  string provider = 1;
+  // Authenticated user inside the customer's instance (BA user.id).
+  // The instance enforces that this user_id is a member of NOMOS_ORG_ID.
+  string user_id = 2;
+  string access_token = 3;
+  string refresh_token = 4;
+  // Unix seconds.
+  int64 expires_at = 5;
+  // Comma-separated OAuth scopes granted.
+  string scopes = 6;
+  // Provider-specific extras (e.g., {"workspace_id": "T0123", "account_email": "x@y"}).
+  map<string, string> metadata = 7;
+}
+
+message DepositResponse {
+  bool success = 1;
+  string message = 2;
+  // Opaque integration id assigned by the customer instance (for revocation).
+  string integration_id = 3;
+}
