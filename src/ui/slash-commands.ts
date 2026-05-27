@@ -75,13 +75,29 @@ export interface CommandResult {
   passthrough?: string;
 }
 
-/** Available models for /model picker */
+/** Available models for the `/model` picker. Derived from the central
+ * registry so new releases (e.g. Opus 4.7 + 1M context) show up
+ * automatically — see `src/sdk/model-capabilities.ts`. */
 function getAvailableModels(): Array<{ id: string; label: string; desc: string }> {
-  return [
-    { id: "claude-opus-4-6", label: "Opus 4", desc: "most capable" },
-    { id: "claude-sonnet-4-6", label: "Sonnet 4", desc: "fast, balanced" },
-    { id: "claude-haiku-4-5", label: "Haiku 4", desc: "fastest, cheapest" },
-  ];
+  // Inline require so the slash command can run in environments where
+  // the model module isn't available (unlikely but safe).
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { listModels } =
+    require("../sdk/model-capabilities.ts") as typeof import("../sdk/model-capabilities.ts");
+  return listModels().map((m) => {
+    const has1m = m.contextWindow >= 1_000_000;
+    const desc =
+      m.family === "opus"
+        ? has1m
+          ? "most capable, 1M context"
+          : "most capable"
+        : m.family === "sonnet"
+          ? has1m
+            ? "fast, balanced, 1M context"
+            : "fast, balanced"
+          : "fastest, cheapest";
+    return { id: m.id, label: m.label.replace(/^Claude /, ""), desc };
+  });
 }
 
 /**

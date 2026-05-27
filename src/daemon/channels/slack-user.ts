@@ -59,6 +59,22 @@ export class SlackUserAdapter implements ChannelAdapter {
     this.elicitationManager = mgr;
   }
 
+  // Optional auth-error sink. Gateway pipes this into the WS/gRPC
+  // broadcast stream so the Settings UI can render a banner explaining
+  // *why* messages aren't flowing.
+  private onAuthError?: (
+    teamId: string,
+    teamName: string,
+    info?: { kind: "user" | "bot"; reason: string },
+  ) => void;
+
+  /** Wire the auth-error sink. Called by gateway right after construction. */
+  setOnAuthError(
+    cb: (teamId: string, teamName: string, info?: { kind: "user" | "bot"; reason: string }) => void,
+  ): void {
+    this.onAuthError = cb;
+  }
+
   // Default channel -- the user's direct chat channel with the agent
   private defaultChannelId: string | null = null;
 
@@ -104,6 +120,27 @@ export class SlackUserAdapter implements ChannelAdapter {
       throw new Error(`Could not resolve user ID from token for team ${this.teamId}`);
     }
 
+    // CRITICAL: verify the user token actually belongs to this workspace.
+    // OAuth/reconnect flows have historically written a token from the
+    // wrong workspace into a per-workspace row; the symptom is later
+    // `channel_not_found` errors when posting, because the token's real
+    // team can't see channels from the team we *think* it's for.
+    const tokenTeamId = (auth as { team_id?: string }).team_id;
+    if (tokenTeamId && tokenTeamId !== this.teamId) {
+      log.error(
+        { expectedTeamId: this.teamId, tokenTeamId, tokenUserId: this.userId },
+        "Slack user token belongs to a different workspace than its DB row claims. " +
+          "Cause: a previous OAuth/reconnect wrote the wrong access_token here. " +
+          "Fix: in Settings → Slack, Remove this workspace and Reconnect — the OAuth " +
+          "callback will write the correct token. Until fixed, every post to channels " +
+          "in this workspace will 404 with channel_not_found.",
+      );
+      this.onAuthError?.(this.teamId, this.teamName ?? this.teamId, {
+        kind: "user",
+        reason: `Slack user token for ${this.teamName ?? this.teamId} belongs to a different workspace (token's team: ${tokenTeamId}). Remove + Reconnect in Settings → Slack.`,
+      });
+    }
+
     // Validate the bot token BEFORE handing it to Bolt. Constructing
     // `new App({ token: <bad-bot-token>, ... })` triggers an internal
     // auth.test that fires unhandled rejections (e.g. account_inactive)
@@ -119,7 +156,31 @@ export class SlackUserAdapter implements ChannelAdapter {
         log.info(`Bot identity loaded (${this.botUserId})`);
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
-        log.warn(`Bot token auth failed (${message}) -- agent will post as user`);
+        // `account_inactive` means the entire Slack app has been disabled
+        // — usually by the workspace admin or via the Slack app dashboard.
+        // No token refresh fixes it; the user has to reinstall the app or
+        // re-enable it at api.slack.com/apps. Socket Mode events will not
+        // arrive while the bot is dead, so chat with the agent stops
+        // working too — surface a loud, actionable diagnostic.
+        const isInactive = /account_inactive/i.test(message);
+        if (isInactive) {
+          log.error(
+            { teamId: this.teamId, message },
+            "Slack bot is INACTIVE — Socket Mode events will not arrive; the agent " +
+              "won't receive any messages. Fix: reinstall the Nomos Slack app at " +
+              "https://api.slack.com/apps (or have a workspace admin re-enable it). " +
+              "After reinstalling, click 'Reconnect' in Settings → Integrations → Slack.",
+          );
+          // Surface to UI so the user sees this even if they aren't
+          // tailing the daemon log. Highest-priority because Socket
+          // Mode for this workspace = dead chat with the agent.
+          this.onAuthError?.(this.teamId, this.teamName ?? this.teamId, {
+            kind: "bot",
+            reason: `Slack bot is inactive in ${this.teamName ?? this.teamId} — agent can't receive messages here. Install/re-enable the Nomos app at api.slack.com/apps, then click Reconnect.`,
+          });
+        } else {
+          log.warn(`Bot token auth failed (${message}) -- agent will post as user`);
+        }
         this.botClient = null;
       }
     }
@@ -171,6 +232,48 @@ export class SlackUserAdapter implements ChannelAdapter {
       if (nd && nd.platform === this.platform) {
         this.defaultChannelId = nd.channelId;
         log.info(`Default channel: ${nd.channelId} (${nd.label ?? "unlabeled"})`);
+
+        // Probe both clients to surface the right diagnostic at boot.
+        // Three failure modes, all silent until you try to post:
+        //   - User can't see channel → wrong workspace token / stale
+        //     default → user has no fallback either
+        //   - Bot can't see channel → bot wasn't invited → falls back
+        //     to user-mode at post time (still works, but noisier)
+        //   - Both can't see it → completely wrong default channel
+        const userOk = await this.userClient!.conversations.info({
+          channel: this.defaultChannelId,
+        })
+          .then(() => true)
+          .catch(() => false);
+        const botOk = this.botClient
+          ? await this.botClient.conversations
+              .info({ channel: this.defaultChannelId })
+              .then(() => true)
+              .catch(() => false)
+          : null;
+
+        if (!userOk && botOk !== true) {
+          log.error(
+            { channelId: this.defaultChannelId, teamId: this.teamId, userOk, botOk },
+            "Default notification channel is unreachable from BOTH user and bot tokens " +
+              "in this workspace. The agent's replies will fail with channel_not_found. " +
+              "Fix options: (a) Settings → Notifications, pick a different default channel; " +
+              "(b) Settings → Slack, Remove + Reconnect this workspace to refresh the OAuth " +
+              "token; (c) verify the channel still exists and you're a member.",
+          );
+          this.onAuthError?.(this.teamId, this.teamName ?? this.teamId, {
+            kind: "user",
+            reason: `Default Slack channel (${nd.label ?? nd.channelId}) is unreachable from ${this.teamName ?? this.teamId}. Pick a different default channel in Settings → Notifications, or Reconnect the workspace.`,
+          });
+        } else if (botOk === false) {
+          // Bot isn't in the channel — posts will fall back to user-mode.
+          // Log it once at boot so the operator knows to invite the bot.
+          log.warn(
+            { channelId: this.defaultChannelId, teamId: this.teamId },
+            "Bot is not a member of the default channel. Agent will post as user " +
+              "until you run `/invite @<your bot app name>` in this channel.",
+          );
+        }
       }
     } catch {
       // notification defaults not available
@@ -413,13 +516,60 @@ export class SlackUserAdapter implements ChannelAdapter {
    * Falls back to user token if bot not configured.
    */
   async sendAsAgent(channelId: string, text: string, threadId?: string): Promise<void> {
-    const client = this.botClient ?? this.userClient;
-    if (!client) return;
-    await client.chat.postMessage({
-      channel: channelId,
-      text: markdownToSlackMrkdwn(text),
-      thread_ts: threadId,
-    });
+    const tryClient = async (client: WebClient) => {
+      await client.chat.postMessage({
+        channel: channelId,
+        text: markdownToSlackMrkdwn(text),
+        thread_ts: threadId,
+      });
+    };
+
+    // Prefer bot identity when available; fall back to user on failure.
+    if (this.botClient) {
+      try {
+        await tryClient(this.botClient);
+        return;
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        // channel_not_found from the BOT almost always means the bot
+        // user wasn't invited to the channel. The user-token can still
+        // post (the user is obviously in the channel — they're chatting
+        // in it). Fall through to the user client so the agent doesn't
+        // go dark.
+        if (/channel_not_found|not_in_channel/i.test(message)) {
+          log.warn(
+            { channelId, teamId: this.teamId, message },
+            "Bot isn't a member of this channel — falling back to user-mode for this post. " +
+              "Permanent fix: in Slack, run `/invite @Nomos` (or your bot's app name) " +
+              "inside this channel so the bot can post as itself.",
+          );
+          if (this.userClient) {
+            await tryClient(this.userClient);
+            return;
+          }
+        }
+        throw err;
+      }
+    }
+
+    // No bot — use user client directly.
+    if (this.userClient) {
+      try {
+        await tryClient(this.userClient);
+        return;
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        if (/channel_not_found/i.test(message)) {
+          log.error(
+            { channelId, teamId: this.teamId, usingClient: "user", message },
+            "User-token post failed: channel_not_found. The token can't see this channel. " +
+              "If this is the default notification channel, see the boot-time error for fix " +
+              "options (wrong workspace token or stale default).",
+          );
+        }
+        throw err;
+      }
+    }
   }
 
   /**

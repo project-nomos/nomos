@@ -187,6 +187,7 @@ const ENV_TO_DB: Record<string, DbMapping> = {
   WHATSAPP_ENABLED: { table: "integrations", dbKey: "whatsapp", field: "enabled" },
   WHATSAPP_ALLOWED_CHATS: { table: "integrations", dbKey: "whatsapp", field: "allowed_chats" },
   NOMOS_SMART_ROUTING: { table: "config", dbKey: "app.smartRouting" },
+  NOMOS_BETAS: { table: "config", dbKey: "app.betas" },
   NOMOS_MODEL_SIMPLE: { table: "config", dbKey: "app.modelSimple" },
   NOMOS_MODEL_MODERATE: { table: "config", dbKey: "app.modelModerate" },
   NOMOS_MODEL_COMPLEX: { table: "config", dbKey: "app.modelComplex" },

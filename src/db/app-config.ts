@@ -37,6 +37,7 @@ const CONFIG_KEY_MAP: Record<string, keyof NomosConfig> = {
   "app.briefingCron": "briefingCron",
   "app.inboxScanInterval": "inboxScanInterval",
   "app.calendarScanInterval": "calendarScanInterval",
+  "app.betas": "betas",
 };
 
 /** Reverse map: NomosConfig field → config table key */

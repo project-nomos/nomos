@@ -34,11 +34,23 @@ export async function GET() {
     // gws not available
   }
 
-  // Get accounts from DB
+  // Get accounts. Manifest is the source of truth — DB is a cache and
+  // can fall out of sync (especially when historical rows were stored
+  // double-encoded). Always prefer the manifest; fall back to DB only
+  // for legacy single-account installs that never populated it.
   const accounts: Array<{ email: string; default: boolean }> = [];
   let hasValidToken = false;
 
-  if (sql) {
+  try {
+    const { listAccounts } = await import("@/lib/gws-accounts");
+    for (const a of listAccounts()) {
+      accounts.push({ email: a.email, default: a.isDefault });
+    }
+  } catch {
+    // manifest helper unavailable
+  }
+
+  if (accounts.length === 0 && sql) {
     try {
       const rows = await sql`
         SELECT name, metadata FROM integrations
