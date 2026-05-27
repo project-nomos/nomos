@@ -63,31 +63,60 @@ export async function removeGoogleAccount(email: string): Promise<void> {
 }
 
 /**
- * Sync accounts from gws auth status into the DB.
- * In v0.22.5+, gws supports one account at a time.
- * We add it to the DB but don't remove old accounts (user may re-auth them later).
+ * Sync accounts from the on-disk gws multi-account manifest
+ * (`~/.config/gws/accounts.json`, managed by `src/auth/gws-accounts.ts`)
+ * into the DB. The manifest is the source of truth; the DB caches it so
+ * other surfaces (Settings UI, system prompt) can read accounts without
+ * touching the filesystem.
+ *
+ * Falls back to the legacy single-account `gws auth status` path if the
+ * manifest is empty (so existing single-account installs keep working
+ * until the next auth flow migrates them to the manifest).
  */
 export async function syncGoogleAccountsFromGws(): Promise<GoogleAccountRow[]> {
   try {
-    const { getGwsAuthStatus } = await import("../sdk/google-workspace-mcp.ts");
-    const status = await getGwsAuthStatus();
+    const { listAccounts } = await import("../auth/gws-accounts.ts");
+    const manifest = listAccounts();
 
-    if (status.authenticated && status.email) {
-      // Mark the current gws account as default, unmark others
+    if (manifest.length > 0) {
+      const manifestEmails = new Set(manifest.map((a) => a.email));
+
+      // Upsert every manifest account.
+      for (const acct of manifest) {
+        await upsertIntegration(integrationName(acct.email), {
+          metadata: { is_default: acct.isDefault },
+        });
+      }
+
+      // Drop DB rows for accounts that no longer exist in the manifest.
       const existing = await listGoogleAccounts();
-      for (const account of existing) {
-        if (account.is_default && account.email !== status.email) {
-          await upsertIntegration(integrationName(account.email), {
-            metadata: { is_default: false },
-          });
+      for (const acct of existing) {
+        if (!manifestEmails.has(acct.email)) {
+          await removeIntegration(integrationName(acct.email));
         }
       }
-      await upsertIntegration(integrationName(status.email), {
-        metadata: { is_default: true },
-      });
+    } else {
+      // No manifest yet — fall back to the legacy single-account path so
+      // pre-migration installs continue to work until the user runs the
+      // multi-account auth flow.
+      const { getGwsAuthStatus } = await import("../sdk/google-workspace-mcp.ts");
+      const status = await getGwsAuthStatus();
+      if (status.authenticated && status.email) {
+        const existing = await listGoogleAccounts();
+        for (const account of existing) {
+          if (account.is_default && account.email !== status.email) {
+            await upsertIntegration(integrationName(account.email), {
+              metadata: { is_default: false },
+            });
+          }
+        }
+        await upsertIntegration(integrationName(status.email), {
+          metadata: { is_default: true },
+        });
+      }
     }
   } catch {
-    // gws not available -- return current DB state
+    // Manifest/gws not available -- return current DB state
   }
 
   return listGoogleAccounts();

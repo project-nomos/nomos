@@ -8,21 +8,34 @@ const execFileAsync = promisify(execFile);
 export async function GET() {
   const accounts: Array<{ email: string; default: boolean }> = [];
 
-  // Read accounts from DB (integrations table, google-ws:* naming)
+  // Primary source: the on-disk multi-account manifest.
   try {
-    const sql = getDb();
-    const rows = await sql`
-      SELECT name, metadata FROM integrations
-      WHERE name LIKE 'google-ws:%' AND enabled = true
-      ORDER BY metadata->>'is_default' DESC, name
-    `;
-    for (const row of rows) {
-      const email = (row.name as string).replace(/^google-ws:/, "");
-      const meta = row.metadata as Record<string, unknown>;
-      accounts.push({ email, default: !!meta?.is_default });
+    const { listAccounts } = await import("@/lib/gws-accounts");
+    for (const a of listAccounts()) {
+      accounts.push({ email: a.email, default: a.isDefault });
     }
   } catch {
-    // DB not available
+    // helper unavailable
+  }
+
+  // Fallback: DB rows (used by legacy single-account installs whose
+  // manifest hasn't been populated yet).
+  if (accounts.length === 0) {
+    try {
+      const sql = getDb();
+      const rows = await sql`
+        SELECT name, metadata FROM integrations
+        WHERE name LIKE 'google-ws:%' AND enabled = true
+        ORDER BY metadata->>'is_default' DESC, name
+      `;
+      for (const row of rows) {
+        const email = (row.name as string).replace(/^google-ws:/, "");
+        const meta = row.metadata as Record<string, unknown>;
+        accounts.push({ email, default: !!meta?.is_default });
+      }
+    } catch {
+      // DB not available
+    }
   }
 
   // Also check gws auth status for the currently authenticated account
@@ -105,11 +118,30 @@ export async function DELETE(request: NextRequest) {
     return NextResponse.json({ error: "Email is required" }, { status: 400 });
   }
 
-  // Logout from gws (v0.22.5+ is single-account, no --account flag)
+  // Multi-account path: remove the per-account dir + manifest entry. This
+  // also nukes the gws-stored refresh_token for the account, so no need
+  // to call `gws auth logout` separately.
   try {
-    await execFileAsync("npx", ["@googleworkspace/cli", "auth", "logout"], { timeout: 10000 });
+    const { listAccounts, removeAccountFromManifest } = await import("@/lib/gws-accounts");
+    if (listAccounts().find((a) => a.email === email)) {
+      removeAccountFromManifest(email);
+    } else {
+      // Legacy single-account install — fall back to global logout.
+      try {
+        await execFileAsync("npx", ["@googleworkspace/cli", "auth", "logout"], {
+          timeout: 10_000,
+        });
+      } catch {
+        // Token may already be invalid
+      }
+    }
   } catch {
-    // Token may already be invalid
+    // gws-accounts helper unavailable — fall back to global logout.
+    try {
+      await execFileAsync("npx", ["@googleworkspace/cli", "auth", "logout"], { timeout: 10_000 });
+    } catch {
+      // Token may already be invalid
+    }
   }
 
   // Remove from DB
@@ -119,6 +151,51 @@ export async function DELETE(request: NextRequest) {
     await sql`DELETE FROM integrations WHERE name = ${name}`;
   } catch {
     // Non-blocking
+  }
+
+  return NextResponse.json({ ok: true });
+}
+
+/** PATCH /api/google/accounts — set the default account. */
+export async function PATCH(request: NextRequest) {
+  let body: { email?: string };
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: "Invalid request body" }, { status: 400 });
+  }
+
+  const email = body.email?.trim();
+  if (!email) {
+    return NextResponse.json({ error: "Email is required" }, { status: 400 });
+  }
+
+  try {
+    const { setDefaultAccount } = await import("@/lib/gws-accounts");
+    setDefaultAccount(email);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return NextResponse.json({ error: message }, { status: 400 });
+  }
+
+  // Mirror the change into the DB so other surfaces see it immediately.
+  try {
+    const sql = getDb();
+    await sql`
+      UPDATE integrations
+      SET metadata = jsonb_set(coalesce(metadata, '{}'::jsonb), '{is_default}', 'false'::jsonb),
+          updated_at = now()
+      WHERE name LIKE 'google-ws:%'
+    `;
+    const name = `google-ws:${email}`;
+    await sql`
+      UPDATE integrations
+      SET metadata = jsonb_set(coalesce(metadata, '{}'::jsonb), '{is_default}', 'true'::jsonb),
+          updated_at = now()
+      WHERE name = ${name}
+    `;
+  } catch {
+    // Non-blocking — manifest is the source of truth.
   }
 
   return NextResponse.json({ ok: true });

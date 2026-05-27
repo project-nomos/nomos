@@ -35,6 +35,12 @@ export interface IngestOptions {
   embeddingBatchSize?: number;
   /** Run type: full (initial) or delta (incremental) */
   runType?: "full" | "delta";
+  /**
+   * For sources that support multiple accounts (currently Gmail), restrict
+   * to a single account by email. If omitted, the source iterates every
+   * authorized account.
+   */
+  account?: string;
 }
 
 export interface IngestProgress {

@@ -81,16 +81,21 @@ export function registerIngestCommand(program: Command): void {
   // nomos ingest gmail
   ingest
     .command("gmail")
-    .description("Ingest sent emails from Gmail")
+    .description("Ingest sent emails from Gmail (iterates all accounts unless --account is set)")
     .option("--since <date>", "Only ingest messages after this date")
     .option("--run-type <type>", "Run type: full or delta", "full")
     .option("--contact <email>", "Filter to specific contact")
+    .option(
+      "--account <email>",
+      "Restrict to one authorized account. Omit to iterate every account in ~/.config/gws/accounts.json.",
+    )
     .option("--dry-run", "Count messages without storing")
     .action(async (opts) => {
       getDb();
       try {
         const source = new GmailIngestSource();
-        console.log(chalk.blue("Ingesting from Gmail (sent folder)..."));
+        const label = opts.account ? ` (${opts.account})` : " (all accounts)";
+        console.log(chalk.blue(`Ingesting from Gmail (sent folder)${label}...`));
         await runSource(source, opts);
       } finally {
         await closeDb();
@@ -207,13 +212,20 @@ export function registerIngestCommand(program: Command): void {
 
 async function runSource(
   source: IngestSource,
-  opts: { since?: string; contact?: string; dryRun?: boolean; runType?: string },
+  opts: {
+    since?: string;
+    contact?: string;
+    dryRun?: boolean;
+    runType?: string;
+    account?: string;
+  },
 ): Promise<void> {
   const options: IngestOptions = {
     since: opts.since ? new Date(opts.since) : undefined,
     contact: opts.contact,
     dryRun: opts.dryRun,
     runType: (opts.runType as "full" | "delta") ?? "full",
+    account: opts.account,
   };
 
   if (opts.dryRun) {
