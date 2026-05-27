@@ -1,27 +1,69 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import postgres from "postgres";
 import { getDb } from "./client.ts";
+import { applySchema, assertValidSchemaName, createSchema, dropSchema } from "./migrator.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-export async function runMigrations(): Promise<void> {
+/**
+ * Apply the canonical schema to the configured database. When `schemaName`
+ * is provided, scopes to that Postgres schema (creating it if needed);
+ * otherwise applies to whichever schema is on the connection's search_path
+ * (default `public`, or whatever `NOMOS_DB_SCHEMA` is set to).
+ */
+export async function runMigrations(schemaName?: string | null): Promise<void> {
   const sql = getDb();
+  const targetSchema = schemaName ?? process.env.NOMOS_DB_SCHEMA ?? null;
+  await applySchema(sql, targetSchema, resolveSchemaSql());
+}
 
-  // Read and execute the schema file
-  const schemaPath = path.join(__dirname, "schema.sql");
+/**
+ * Create a fresh per-customer schema. Idempotent. Used by the BA admin
+ * provisioning server when spinning up a new customer instance.
+ */
+export async function createCustomerSchema(schemaName: string): Promise<void> {
+  assertValidSchemaName(schemaName);
+  await createSchema(getDb(), schemaName);
+}
 
-  // In production (bundled), schema.sql won't exist at the same path.
-  // We inline the schema as a fallback.
-  let schema: string;
+/**
+ * Drop a per-customer schema and ALL its data. Destructive.
+ */
+export async function dropCustomerSchema(schemaName: string): Promise<void> {
+  assertValidSchemaName(schemaName);
+  await dropSchema(getDb(), schemaName);
+}
+
+/**
+ * Convenience for the admin server: open a temporary connection via the
+ * provided URL, create+migrate the schema, then close. Useful when the
+ * admin server's own `getDb()` is pointed at the central BA database and we
+ * need to target a different (per-customer) database or connection
+ * altogether.
+ */
+export async function provisionWithConnection(
+  databaseUrl: string,
+  schemaName: string,
+): Promise<void> {
+  const sql = postgres(databaseUrl, { max: 2 });
   try {
-    schema = fs.readFileSync(schemaPath, "utf-8");
-  } catch {
-    schema = getInlineSchema();
+    assertValidSchemaName(schemaName);
+    await createSchema(sql, schemaName);
+    await applySchema(sql, schemaName, resolveSchemaSql());
+  } finally {
+    await sql.end();
   }
+}
 
-  // Split by statement and execute (postgres.js handles transactions)
-  await sql.unsafe(schema);
+function resolveSchemaSql(): string {
+  const schemaPath = path.join(__dirname, "schema.sql");
+  try {
+    return fs.readFileSync(schemaPath, "utf-8");
+  } catch {
+    return getInlineSchema();
+  }
 }
 
 function getInlineSchema(): string {
