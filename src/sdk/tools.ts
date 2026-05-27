@@ -6,6 +6,7 @@ import {
 import { z } from "zod/v4";
 import { handleBootstrapComplete } from "../ui/bootstrap.ts";
 import { createLogger } from "../lib/logger.ts";
+import { createAskUserTool } from "./ask-user.ts";
 
 const log = createLogger("sdk-tools");
 import {
@@ -1305,6 +1306,10 @@ export function createMemoryMcpServer(): McpSdkServerConfigWithInstance {
 
   // ── Plan Mode Tool ──
 
+  // Multi-choice user prompt that routes through MCP elicitation. The
+  // actual rendering happens host-side in `src/daemon/elicitation-manager.ts`.
+  const askUserTool = createAskUserTool();
+
   const proposePlanTool = tool(
     "propose_plan",
     "Propose an implementation plan for the user to review before execution. Use this for complex, multi-step tasks where you want to align with the user before making changes. The plan is stored and the user can approve, modify, or reject it. Only propose plans for significant changes — don't use this for simple tasks.",
@@ -1955,6 +1960,8 @@ export function createMemoryMcpServer(): McpSdkServerConfigWithInstance {
       checkWorkerMessagesTool,
       // Plan mode
       proposePlanTool,
+      // Multi-choice user prompt via MCP elicitation
+      askUserTool,
       // LSP code intelligence
       lspGoToDefinitionTool,
       lspFindReferencesTool,

@@ -91,7 +91,21 @@ export class AgentRuntime {
   private slackWorkspaces?: Array<{ teamId: string; teamName: string; userId: string }>;
   private notificationDefault?: { platform: string; channelId: string; label?: string };
 
+  // Optional elicitation manager (set by gateway). When present, the SDK's
+  // `onElicitation` callback routes ask_user requests through it.
+  private elicitationManager?: import("./elicitation-manager.ts").ElicitationManager;
+
   private initialized = false;
+
+  /** Wire in the elicitation manager. Called by the gateway after construction. */
+  setElicitationManager(mgr: import("./elicitation-manager.ts").ElicitationManager): void {
+    this.elicitationManager = mgr;
+  }
+
+  /** Expose the elicitation manager so channel adapters can resolve answers. */
+  getElicitationManager(): import("./elicitation-manager.ts").ElicitationManager | undefined {
+    return this.elicitationManager;
+  }
 
   /** Get the configured model name. */
   getModel(): string {
@@ -685,6 +699,11 @@ export class AgentRuntime {
         sessionKey,
         userState,
         personaPrompt,
+        {
+          platform: message.platform,
+          channelId: message.channelId,
+          threadId: message.threadId,
+        },
       );
 
       // Cache the new SDK session ID
@@ -746,6 +765,11 @@ export class AgentRuntime {
             sessionKey,
             userState,
             personaPrompt,
+            {
+              platform: message.platform,
+              channelId: message.channelId,
+              threadId: message.threadId,
+            },
           );
 
           if (result.sessionId) {
@@ -785,6 +809,11 @@ export class AgentRuntime {
                 sessionKey,
                 userState,
                 personaPrompt,
+                {
+                  platform: message.platform,
+                  channelId: message.channelId,
+                  threadId: message.threadId,
+                },
               );
               if (upgraded.sessionId) {
                 this.sdkSessionIds.set(sessionKey, upgraded.sessionId);
@@ -824,6 +853,12 @@ export class AgentRuntime {
     sessionKey?: string,
     userState?: string,
     personaPrompt?: string,
+    /**
+     * Source channel of the incoming message — used so the elicitation
+     * manager renders `ask_user` questions back on the user's active
+     * channel. Optional so non-message runs (cron, internal) keep working.
+     */
+    source?: { platform: string; channelId: string; threadId?: string },
   ): Promise<{
     text: string;
     sessionId?: string;
@@ -855,6 +890,16 @@ export class AgentRuntime {
       systemPromptAppend = systemPromptAppend + "\n\n" + personaPrompt;
     }
 
+    // Build the elicitation callback for this turn. The `ask_user` MCP
+    // tool calls `extra.sendRequest({method: "elicitation/create"})`;
+    // the SDK forwards to `onElicitation`, we route to the channel the
+    // user is currently talking to us on, and return their answer.
+    const mgr = this.elicitationManager;
+    const onElicitation: import("../sdk/session.ts").RunSessionParams["onElicitation"] =
+      mgr && source
+        ? (request, opts) => mgr.handleElicitation(request, source, opts.signal)
+        : undefined;
+
     const sdkQuery = runSession({
       prompt,
       model: model ?? this.config.model,
@@ -869,6 +914,7 @@ export class AgentRuntime {
       anthropicBaseUrl: this.config.anthropicBaseUrl,
       plugins: this.plugins,
       useSubscription: this.config.useSubscription,
+      onElicitation,
       stderr: (data: string) => {
         // Log SDK subprocess stderr so we can diagnose crash reasons
         const trimmed = data.trim();
