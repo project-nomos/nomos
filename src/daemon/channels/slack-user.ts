@@ -179,7 +179,25 @@ export class SlackUserAdapter implements ChannelAdapter {
         thread_ts?: string;
         channel: string;
         subtype?: string;
+        // Slack Connect DMs surface the sender's display info inline so we
+        // can name them without an API call. Same shape as users.info.profile.
+        user_profile?: {
+          real_name?: string;
+          display_name?: string;
+          name?: string;
+          email?: string;
+        };
+        // Sender's home team (different from this.teamId for Slack Connect).
+        user_team?: string;
+        team?: string;
       };
+
+      // Seed the username cache from the event payload before any handler
+      // runs lookupUserName. This is the key win for Slack Connect senders
+      // — without this seed we'd fall through to the "external Slack user
+      // (U073UDQAT0T)" label because users.info returns user_not_found for
+      // them in our own workspace.
+      if (e.user) this.seedUserFromEvent(e.user, e.user_profile, e.user_team ?? e.team);
 
       // Skip subtypes (edits, joins, etc.) and messages without text/user
       if (e.subtype || !e.text || !e.user) return;
@@ -561,6 +579,47 @@ export class SlackUserAdapter implements ChannelAdapter {
     return this.ownUserIds.has(userId);
   }
 
+  // Cache: user_id → sender's home team_id, if known from a recent event.
+  // Lets lookupUserCrossWorkspace skip workspaces we know aren't the home.
+  private userHomeTeam = new Map<string, string>();
+
+  /**
+   * Seed the username + home-team caches from a message event's inline
+   * `user_profile`. Slack Connect messages always carry this; regular DMs
+   * usually do too. Skip if a non-fallback name is already cached.
+   */
+  private seedUserFromEvent(
+    userId: string,
+    profile?: {
+      real_name?: string;
+      display_name?: string;
+      name?: string;
+      email?: string;
+    },
+    homeTeam?: string,
+  ): void {
+    if (homeTeam) this.userHomeTeam.set(userId, homeTeam);
+
+    if (!profile) return;
+    // Prefer real_name (full name); fall back to display_name, then name.
+    const name = profile.real_name || profile.display_name || profile.name;
+    if (!name) return;
+
+    // Don't overwrite a previously-resolved real name with an inferior
+    // event-provided one. Only seed if the cache is empty or holds the
+    // "external Slack user (...)" fallback label.
+    const existing = this.userNameCache.get(userId);
+    if (existing && !existing.startsWith("external Slack user")) return;
+
+    this.userNameCache.set(userId, name);
+
+    // If profile.email matches the owner, mark this user_id as our own so
+    // we skip drafting for messages "from us" on Slack Connect.
+    if (this.ownerEmail && profile.email?.toLowerCase() === this.ownerEmail) {
+      this.ownUserIds.add(userId);
+    }
+  }
+
   private async lookupUserName(userId: string): Promise<string> {
     const cached = this.userNameCache.get(userId);
     if (cached) return cached;
@@ -602,12 +661,26 @@ export class SlackUserAdapter implements ChannelAdapter {
   /**
    * Try to resolve a user name using tokens from other workspaces.
    * Needed for Slack Connect users whose IDs belong to a different workspace.
+   *
+   * Optimized: if we know the sender's home team from a recent message
+   * event (via `seedUserFromEvent`), try that workspace's token first.
+   * Falls back to scanning every workspace.
    */
   private async lookupUserCrossWorkspace(userId: string): Promise<string | null> {
     try {
       const { listIntegrationsByPrefix } = await import("../../db/integrations.ts");
       const workspaces = await listIntegrationsByPrefix("slack-ws:");
-      for (const ws of workspaces) {
+
+      // Prefer the known home team first.
+      const homeTeam = this.userHomeTeam.get(userId);
+      const ordered = homeTeam
+        ? [
+            ...workspaces.filter((ws) => ws.name === `slack-ws:${homeTeam}`),
+            ...workspaces.filter((ws) => ws.name !== `slack-ws:${homeTeam}`),
+          ]
+        : workspaces;
+
+      for (const ws of ordered) {
         // Skip our own workspace (already tried)
         if (ws.name === `slack-ws:${this.teamId}`) continue;
         const token = ws.secrets?.access_token;
