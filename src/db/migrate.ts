@@ -632,5 +632,19 @@ CREATE TABLE IF NOT EXISTS magic_doc_state (
   last_content_hash TEXT,
   state_json       JSONB
 );
+
+-- Mobile device registry: Expo push tokens per user. The agent writes
+-- pushes here on draft creation, CATE inbound arrival, and commitment
+-- nudges.
+CREATE TABLE IF NOT EXISTS mobile_devices (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id         TEXT NOT NULL,
+  expo_push_token TEXT NOT NULL UNIQUE,
+  platform        TEXT NOT NULL CHECK (platform IN ('ios', 'android')),
+  app_version     TEXT,
+  last_seen_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_mobile_devices_user ON mobile_devices(user_id);
   `.trim();
 }

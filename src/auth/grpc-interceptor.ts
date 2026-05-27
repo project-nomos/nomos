@@ -41,83 +41,110 @@ export interface ResolvedContext {
 }
 
 /**
- * Wrap a gRPC handler with auth resolution. Use this to compose interceptors
- * onto each method when adding service handlers.
+ * Resolve a TenantContext for a gRPC call. Use inside a handler:
+ *
+ *   const ctx = await resolveContext(call, "/nomos.MobileApi/GetMessages");
+ *   if (!ctx) { callback({ code: status.UNAUTHENTICATED }); return; }
+ *
+ * Throws no exceptions — returns `null` on missing/invalid token (the caller
+ * is responsible for surfacing an UNAUTHENTICATED error). On mTLS-only or
+ * power-user paths, returns LOCAL_TENANT.
  */
-export function withAuth<TReq, TRes>(
+export async function resolveContext(
+  call: { metadata: grpc.Metadata },
   methodPath: string,
-  handler: (
-    call: grpc.ServerUnaryCall<TReq, TRes> | grpc.ServerWritableStream<TReq, TRes>,
-    ctx: TenantContext,
-  ) => Promise<void> | void,
-): (
-  call: grpc.ServerUnaryCall<TReq, TRes> | grpc.ServerWritableStream<TReq, TRes>,
-  callback?: grpc.sendUnaryData<TRes>,
-) => Promise<void> {
-  return async (call, callback) => {
-    if (MTLS_ONLY_METHODS.has(methodPath) || !isHosted()) {
-      // Power-user / mTLS path: skip JWT, attach LOCAL_TENANT.
-      Reflect.set(call, CTX_SYMBOL, LOCAL_TENANT);
-      try {
-        await handler(call, LOCAL_TENANT);
-      } catch (err) {
-        const e = err instanceof Error ? err : new Error(String(err));
-        if (callback) callback({ code: grpc.status.INTERNAL, message: e.message });
-        else (call as grpc.ServerWritableStream<TReq, TRes>).destroy(e);
-      }
-      return;
-    }
-
-    // Hosted: require Bearer + verify
-    const token = bearerToken(call.metadata);
-    if (!token) {
-      const err: grpc.ServiceError = Object.assign(new Error("missing_token"), {
+): Promise<{ ctx: TenantContext } | { error: grpc.ServiceError }> {
+  if (MTLS_ONLY_METHODS.has(methodPath) || !isHosted()) {
+    return { ctx: LOCAL_TENANT };
+  }
+  const token = bearerToken(call.metadata);
+  if (!token) {
+    return {
+      error: Object.assign(new Error("missing_token"), {
         code: grpc.status.UNAUTHENTICATED,
         details: "missing_token",
         metadata: new grpc.Metadata(),
-      });
-      if (callback) callback(err);
-      else (call as grpc.ServerWritableStream<TReq, TRes>).emit("error", err);
-      return;
-    }
-
-    let ctx: TenantContext;
-    try {
-      ctx = await verifyJwt(token);
-    } catch (err) {
-      const reason = err instanceof JwtValidationError ? err.message : "verification_failed";
-      log.warn({ err, methodPath, reason }, "Rejecting unauthenticated call");
-      const e: grpc.ServiceError = Object.assign(new Error(reason), {
+      }) as grpc.ServiceError,
+    };
+  }
+  let ctx: TenantContext;
+  try {
+    ctx = await verifyJwt(token);
+  } catch (err) {
+    const reason = err instanceof JwtValidationError ? err.message : "verification_failed";
+    log.warn({ methodPath, reason }, "Rejecting unauthenticated call");
+    return {
+      error: Object.assign(new Error(reason), {
         code: grpc.status.UNAUTHENTICATED,
         details: reason,
         metadata: new grpc.Metadata(),
-      });
-      if (callback) callback(e);
-      else (call as grpc.ServerWritableStream<TReq, TRes>).emit("error", e);
-      return;
-    }
-
-    // Defense in depth: confirm user_id is a current member of this org
-    const member = await isOrgMember(ctx.userId);
-    if (!member) {
-      const e: grpc.ServiceError = Object.assign(new Error("not_org_member"), {
+      }) as grpc.ServiceError,
+    };
+  }
+  const member = await isOrgMember(ctx.userId);
+  if (!member) {
+    return {
+      error: Object.assign(new Error("not_org_member"), {
         code: grpc.status.PERMISSION_DENIED,
         details: "not_org_member",
         metadata: new grpc.Metadata(),
-      });
-      if (callback) callback(e);
-      else (call as grpc.ServerWritableStream<TReq, TRes>).emit("error", e);
-      return;
-    }
+      }) as grpc.ServiceError,
+    };
+  }
+  return { ctx };
+}
 
-    Reflect.set(call, CTX_SYMBOL, ctx);
-    try {
-      await handler(call, ctx);
-    } catch (err) {
-      const e = err instanceof Error ? err : new Error(String(err));
-      if (callback) callback({ code: grpc.status.INTERNAL, message: e.message });
-      else (call as grpc.ServerWritableStream<TReq, TRes>).destroy(e);
-    }
+/**
+ * Wrap a unary handler with auth resolution. Returns a function in the
+ * grpc-js `handleUnaryCall` shape: (call, callback). Skipped for mTLS-only
+ * methods, no-op in power-user mode.
+ */
+export function withAuthUnary<TReq, TRes>(
+  methodPath: string,
+  handler: (call: grpc.ServerUnaryCall<TReq, TRes>, ctx: TenantContext) => Promise<TRes>,
+): grpc.handleUnaryCall<TReq, TRes> {
+  return (call, callback) => {
+    resolveContext(call, methodPath).then(async (r) => {
+      if ("error" in r) {
+        callback(r.error);
+        return;
+      }
+      Reflect.set(call, CTX_SYMBOL, r.ctx);
+      try {
+        const result = await handler(call, r.ctx);
+        callback(null, result);
+      } catch (err) {
+        const e = err instanceof Error ? err : new Error(String(err));
+        callback({ code: grpc.status.INTERNAL, message: e.message });
+      }
+    });
+  };
+}
+
+/**
+ * Wrap a server-streaming handler with auth resolution.
+ */
+export function withAuthStream<TReq, TRes>(
+  methodPath: string,
+  handler: (
+    call: grpc.ServerWritableStream<TReq, TRes>,
+    ctx: TenantContext,
+  ) => void | Promise<void>,
+): grpc.handleServerStreamingCall<TReq, TRes> {
+  return (call) => {
+    resolveContext(call, methodPath).then(async (r) => {
+      if ("error" in r) {
+        call.destroy(r.error);
+        return;
+      }
+      Reflect.set(call, CTX_SYMBOL, r.ctx);
+      try {
+        await handler(call, r.ctx);
+      } catch (err) {
+        const e = err instanceof Error ? err : new Error(String(err));
+        call.destroy(e);
+      }
+    });
   };
 }
 

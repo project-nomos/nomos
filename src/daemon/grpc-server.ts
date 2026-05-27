@@ -17,6 +17,7 @@ import type { DraftManager } from "./draft-manager.ts";
 import type { AgentEvent, IncomingMessage } from "./types.ts";
 import { indexConversationTurn } from "./memory-indexer.ts";
 import { depositOAuthCredential } from "./oauth-deposit.ts";
+import { buildMobileApiHandlers } from "./mobile-api.ts";
 import { createLogger } from "../lib/logger.ts";
 
 const log = createLogger("grpc-server");
@@ -71,6 +72,8 @@ export class GrpcServer {
         .service;
       const OAuthDepositService = (nomosPackage.OAuthDeposit as { service: grpc.ServiceDefinition })
         .service;
+      const MobileApiService = (nomosPackage.MobileApi as { service: grpc.ServiceDefinition })
+        .service;
 
       this.server = new grpc.Server();
       this.server.addService(NomosAgentService, {
@@ -87,6 +90,13 @@ export class GrpcServer {
       this.server.addService(OAuthDepositService, {
         Deposit: depositOAuthCredential,
       });
+      this.server.addService(
+        MobileApiService,
+        buildMobileApiHandlers({
+          messageQueue: this.messageQueue,
+          draftManager: this.draftManager,
+        }) as unknown as grpc.UntypedServiceImplementation,
+      );
 
       const credentials = buildServerCredentials();
       this.server.bindAsync(`0.0.0.0:${this.port}`, credentials, (err, boundPort) => {

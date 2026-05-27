@@ -32,6 +32,8 @@ export interface SessionsTable {
   input_tokens: Generated<number>;
   output_tokens: Generated<number>;
   turn_count: Generated<number>;
+  // Phase 4b: per-user scoping
+  user_id: Generated<string>;
 }
 
 export interface TranscriptMessagesTable {
@@ -264,6 +266,16 @@ export interface MagicDocStateTable {
   state_json: ColumnType<Record<string, unknown> | null, string | null, string | null>;
 }
 
+export interface MobileDevicesTable {
+  id: Generated<string>;
+  user_id: string;
+  expo_push_token: string;
+  platform: "ios" | "android";
+  app_version: string | null;
+  last_seen_at: Generated<Date>;
+  created_at: Generated<Date>;
+}
+
 export interface ManagedFilesTable {
   path: string;
   content: string;
@@ -298,6 +310,7 @@ export interface Database {
   managed_files: ManagedFilesTable;
   auto_dream_state: AutoDreamStateTable;
   magic_doc_state: MagicDocStateTable;
+  mobile_devices: MobileDevicesTable;
 }
 
 // ---------------------------------------------------------------------------
