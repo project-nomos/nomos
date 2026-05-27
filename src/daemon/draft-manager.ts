@@ -151,6 +151,18 @@ export class DraftManager {
       );
     }
 
+    // Send Expo push notification so the mobile app surfaces the draft.
+    // Fire-and-forget — failure to push must not block draft creation.
+    import("./push-notifications.ts")
+      .then(({ notifyUser }) =>
+        notifyUser(userId, {
+          title: `Draft ready for ${message.platform}`,
+          body: message.content.slice(0, 140),
+          data: { draftId: draft.id, kind: "draft_created", platform: message.platform },
+        }),
+      )
+      .catch((err) => log.warn({ err }, "Mobile push fan-out failed"));
+
     log.info(`Draft created: ${draft.id.slice(0, 8)} for ${userId}`);
     return draft;
   }

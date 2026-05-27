@@ -646,5 +646,29 @@ CREATE TABLE IF NOT EXISTS mobile_devices (
   created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_mobile_devices_user ON mobile_devices(user_id);
+
+-- CATE inbound queue. Backs the mobile Inbox tab. Every inbound CATE
+-- envelope is appended here with a trust-tier classification; the user
+-- approves/denies/blocks via the mobile app.
+CREATE TABLE IF NOT EXISTS cate_inbound (
+  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id       TEXT NOT NULL DEFAULT 'local',
+  from_did      TEXT NOT NULL,
+  from_label    TEXT,
+  trust_tier    TEXT NOT NULL DEFAULT 'unknown'
+                CHECK (trust_tier IN ('verified', 'bonded', 'friend', 'blocked', 'unknown')),
+  subject       TEXT,
+  body          TEXT,
+  envelope      JSONB NOT NULL,
+  bond_amount   NUMERIC,
+  bond_currency TEXT,
+  status        TEXT NOT NULL DEFAULT 'pending'
+                CHECK (status IN ('pending', 'approved', 'denied', 'expired')),
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  acted_at      TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_cate_inbound_user_status
+  ON cate_inbound(user_id, status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_cate_inbound_from_did ON cate_inbound(from_did);
   `.trim();
 }

@@ -276,6 +276,22 @@ export interface MobileDevicesTable {
   created_at: Generated<Date>;
 }
 
+export interface CateInboundTable {
+  id: Generated<string>;
+  user_id: Generated<string>;
+  from_did: string;
+  from_label: string | null;
+  trust_tier: Generated<"verified" | "bonded" | "friend" | "blocked" | "unknown">;
+  subject: string | null;
+  body: string | null;
+  envelope: ColumnType<Record<string, unknown>, string, string>;
+  bond_amount: ColumnType<string | null, string | null, string | null>;
+  bond_currency: string | null;
+  status: Generated<"pending" | "approved" | "denied" | "expired">;
+  created_at: Generated<Date>;
+  acted_at: ColumnType<Date | null, Date | null, Date | null>;
+}
+
 export interface ManagedFilesTable {
   path: string;
   content: string;
@@ -311,6 +327,7 @@ export interface Database {
   auto_dream_state: AutoDreamStateTable;
   magic_doc_state: MagicDocStateTable;
   mobile_devices: MobileDevicesTable;
+  cate_inbound: CateInboundTable;
 }
 
 // ---------------------------------------------------------------------------
