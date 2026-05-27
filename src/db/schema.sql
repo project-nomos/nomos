@@ -424,3 +424,24 @@ CREATE TABLE IF NOT EXISTS managed_files (
   hash        TEXT NOT NULL,               -- SHA-256 of content (for change detection)
   updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Auto-dream consolidation state. Singleton (id=1).
+-- Replaces ~/.nomos/auto-dream/consolidation-state.json.
+CREATE TABLE IF NOT EXISTS auto_dream_state (
+  id              INT PRIMARY KEY DEFAULT 1,
+  last_run_at     TIMESTAMPTZ,
+  last_turn_count INT NOT NULL DEFAULT 0,
+  total_runs      INT NOT NULL DEFAULT 0,
+  state_json      JSONB,
+  updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT auto_dream_state_singleton CHECK (id = 1)
+);
+
+-- Magic-doc per-file update state.
+-- Replaces ~/.nomos/magic-docs-state.json.
+CREATE TABLE IF NOT EXISTS magic_doc_state (
+  file_path        TEXT PRIMARY KEY,
+  last_updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  last_content_hash TEXT,
+  state_json       JSONB
+);

@@ -248,6 +248,22 @@ export interface CommitmentsTable {
   updated_at: Generated<Date>;
 }
 
+export interface AutoDreamStateTable {
+  id: Generated<number>;
+  last_run_at: ColumnType<Date | null, Date | string | null, Date | string | null>;
+  last_turn_count: Generated<number>;
+  total_runs: Generated<number>;
+  state_json: ColumnType<Record<string, unknown> | null, string | null, string | null>;
+  updated_at: Generated<Date>;
+}
+
+export interface MagicDocStateTable {
+  file_path: string;
+  last_updated_at: Generated<Date>;
+  last_content_hash: string | null;
+  state_json: ColumnType<Record<string, unknown> | null, string | null, string | null>;
+}
+
 export interface ManagedFilesTable {
   path: string;
   content: string;
@@ -280,6 +296,8 @@ export interface Database {
   contact_identities: ContactIdentitiesTable;
   commitments: CommitmentsTable;
   managed_files: ManagedFilesTable;
+  auto_dream_state: AutoDreamStateTable;
+  magic_doc_state: MagicDocStateTable;
 }
 
 // ---------------------------------------------------------------------------

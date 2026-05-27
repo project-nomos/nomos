@@ -15,10 +15,10 @@
  * 4. Prune — remove stale/duplicate chunks
  */
 
-import { readFile, writeFile, unlink, mkdir } from "node:fs/promises";
-import { join } from "node:path";
-import { homedir } from "node:os";
 import { createLogger } from "../lib/logger.ts";
+import { getKysely } from "../db/client.ts";
+import { withLease } from "../storage/leases.ts";
+import { isRedisConfigured } from "../storage/redis.ts";
 
 const log = createLogger("auto-dream");
 
@@ -28,11 +28,11 @@ const MIN_INTERVAL_MS = 60 * 60 * 1000;
 /** Minimum new turns before triggering consolidation. */
 const MIN_NEW_TURNS = 10;
 
-/** Lock file to prevent parallel consolidation. */
-const LOCK_FILE = "consolidation.lock";
+/** Lease name for distributed mutex. */
+const LEASE_NAME = "auto-dream";
 
-/** State file tracking last consolidation. */
-const STATE_FILE = "consolidation-state.json";
+/** Lease TTL — long enough to cover a normal consolidation run. */
+const LEASE_TTL_SEC = 30 * 60;
 
 interface ConsolidationState {
   lastRunAt: string;
@@ -48,76 +48,52 @@ interface DreamResult {
 }
 
 /**
- * Get the directory for auto-dream state files.
- */
-function getDreamDir(): string {
-  return join(homedir(), ".nomos", "auto-dream");
-}
-
-/**
- * Load the consolidation state.
+ * Load the consolidation state from the database.
  */
 async function loadState(): Promise<ConsolidationState> {
-  const statePath = join(getDreamDir(), STATE_FILE);
   try {
-    const content = await readFile(statePath, "utf-8");
-    return JSON.parse(content) as ConsolidationState;
-  } catch {
+    const db = getKysely();
+    const row = await db
+      .selectFrom("auto_dream_state")
+      .selectAll()
+      .where("id", "=", 1)
+      .executeTakeFirst();
+    if (!row) {
+      return { lastRunAt: "", lastTurnCount: 0, totalRuns: 0 };
+    }
+    return {
+      lastRunAt: row.last_run_at ? new Date(row.last_run_at).toISOString() : "",
+      lastTurnCount: row.last_turn_count,
+      totalRuns: row.total_runs,
+    };
+  } catch (err) {
+    log.warn({ err }, "Failed to load auto-dream state");
     return { lastRunAt: "", lastTurnCount: 0, totalRuns: 0 };
   }
 }
 
 /**
- * Save the consolidation state.
+ * Save the consolidation state to the database.
  */
 async function saveState(state: ConsolidationState): Promise<void> {
-  const dir = getDreamDir();
-  await mkdir(dir, { recursive: true });
-  await writeFile(join(dir, STATE_FILE), JSON.stringify(state, null, 2), "utf-8");
-}
-
-/**
- * Acquire a lock for consolidation.
- * Returns true if the lock was acquired, false if another process holds it.
- */
-async function acquireLock(): Promise<boolean> {
-  const lockPath = join(getDreamDir(), LOCK_FILE);
-  try {
-    // Check if lock exists and is not stale (older than 30 minutes)
-    const content = await readFile(lockPath, "utf-8");
-    const lockData = JSON.parse(content) as { pid: number; acquiredAt: string };
-    const lockAge = Date.now() - new Date(lockData.acquiredAt).getTime();
-
-    if (lockAge < 30 * 60 * 1000) {
-      // Lock is still fresh — another process is consolidating
-      return false;
-    }
-    // Lock is stale — remove it and proceed
-  } catch {
-    // No lock file — proceed
-  }
-
-  // Create lock file
-  const dir = getDreamDir();
-  await mkdir(dir, { recursive: true });
-  await writeFile(
-    lockPath,
-    JSON.stringify({ pid: process.pid, acquiredAt: new Date().toISOString() }),
-    "utf-8",
-  );
-  return true;
-}
-
-/**
- * Release the consolidation lock.
- */
-async function releaseLock(): Promise<void> {
-  const lockPath = join(getDreamDir(), LOCK_FILE);
-  try {
-    await unlink(lockPath);
-  } catch {
-    // Lock already released or doesn't exist
-  }
+  const db = getKysely();
+  await db
+    .insertInto("auto_dream_state")
+    .values({
+      id: 1,
+      last_run_at: state.lastRunAt ? new Date(state.lastRunAt) : null,
+      last_turn_count: state.lastTurnCount,
+      total_runs: state.totalRuns,
+    })
+    .onConflict((oc) =>
+      oc.column("id").doUpdateSet({
+        last_run_at: state.lastRunAt ? new Date(state.lastRunAt) : null,
+        last_turn_count: state.lastTurnCount,
+        total_runs: state.totalRuns,
+        updated_at: new Date(),
+      }),
+    )
+    .execute();
 }
 
 /**
@@ -214,44 +190,49 @@ export async function autoDream(
   const shouldRun = await shouldConsolidate(currentTurnCount);
   if (!shouldRun) return null;
 
-  // Acquire lock
-  const locked = await acquireLock();
-  if (!locked) {
+  if (!isRedisConfigured()) {
+    log.debug("Redis not configured; running consolidation without distributed lease");
+  }
+
+  const result = await withLease(
+    LEASE_NAME,
+    async () => {
+      log.info("Starting background consolidation...");
+      const start = Date.now();
+
+      try {
+        const r = await runConsolidation();
+        r.durationMs = Date.now() - start;
+
+        // Update state
+        const state = await loadState();
+        state.lastRunAt = new Date().toISOString();
+        state.lastTurnCount = currentTurnCount;
+        state.totalRuns += 1;
+        await saveState(state);
+
+        log.info(
+          {
+            newChunks: r.newChunks,
+            merged: r.merged,
+            pruned: r.pruned,
+            durationMs: r.durationMs,
+          },
+          "Consolidation complete",
+        );
+        return r;
+      } catch (err) {
+        log.error({ err }, "Consolidation failed");
+        return null;
+      }
+    },
+    { ttlSec: LEASE_TTL_SEC },
+  );
+
+  if (result === null) {
     log.info("Another consolidation is in progress, skipping");
-    return null;
   }
-
-  try {
-    log.info("Starting background consolidation...");
-    const start = Date.now();
-
-    const result = await runConsolidation();
-    result.durationMs = Date.now() - start;
-
-    // Update state
-    const state = await loadState();
-    state.lastRunAt = new Date().toISOString();
-    state.lastTurnCount = currentTurnCount;
-    state.totalRuns += 1;
-    await saveState(state);
-
-    log.info(
-      {
-        newChunks: result.newChunks,
-        merged: result.merged,
-        pruned: result.pruned,
-        durationMs: result.durationMs,
-      },
-      "Consolidation complete",
-    );
-
-    return result;
-  } catch (err) {
-    log.error({ err }, "Consolidation failed");
-    return null;
-  } finally {
-    await releaseLock();
-  }
+  return result;
 }
 
 /**
