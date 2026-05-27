@@ -432,6 +432,123 @@ CREATE TABLE IF NOT EXISTS managed_files (
   updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- Per-instance org membership cache (replicated from BA's organization
+-- plugin via webhook). The gRPC interceptor checks this on every call to
+-- confirm the JWT sub is still a member of NOMOS_ORG_ID before letting
+-- the request through. See src/auth/grpc-interceptor.ts.
+CREATE TABLE IF NOT EXISTS org_members (
+  user_id    TEXT PRIMARY KEY,
+  role       TEXT NOT NULL DEFAULT 'member',
+  added_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Phase 4b: zero-trust tenant context. Per-user tables get a user_id column
+-- so query helpers can enforce per-user filtering against the BA-issued
+-- JWT. Single-user (power-user) installs default to 'local' so existing
+-- data keeps working without backfill.
+DO $$
+BEGIN
+  -- sessions
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'sessions' AND column_name = 'user_id'
+  ) THEN
+    ALTER TABLE sessions ADD COLUMN user_id TEXT NOT NULL DEFAULT 'local';
+    CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id, updated_at DESC);
+  END IF;
+
+  -- transcript_messages (already FKs to sessions; user_id denormalized for
+  -- per-user indexing without a join)
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'transcript_messages' AND column_name = 'user_id'
+  ) THEN
+    ALTER TABLE transcript_messages ADD COLUMN user_id TEXT NOT NULL DEFAULT 'local';
+    CREATE INDEX IF NOT EXISTS idx_transcript_user ON transcript_messages(user_id, id);
+  END IF;
+
+  -- memory_chunks (already user-scoped semantically; explicit column for RLS)
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'memory_chunks' AND column_name = 'user_id'
+  ) THEN
+    ALTER TABLE memory_chunks ADD COLUMN user_id TEXT NOT NULL DEFAULT 'local';
+    CREATE INDEX IF NOT EXISTS idx_memory_user ON memory_chunks(user_id);
+  END IF;
+
+  -- user_model
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'user_model' AND column_name = 'user_id'
+  ) THEN
+    ALTER TABLE user_model ADD COLUMN user_id TEXT NOT NULL DEFAULT 'local';
+    CREATE INDEX IF NOT EXISTS idx_user_model_user ON user_model(user_id);
+  END IF;
+
+  -- draft_messages
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'draft_messages' AND column_name = 'user_id'
+  ) THEN
+    ALTER TABLE draft_messages ADD COLUMN user_id TEXT NOT NULL DEFAULT 'local';
+    CREATE INDEX IF NOT EXISTS idx_draft_user ON draft_messages(user_id, created_at DESC);
+  END IF;
+
+  -- commitments
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'commitments' AND column_name = 'user_id'
+  ) THEN
+    ALTER TABLE commitments ADD COLUMN user_id TEXT NOT NULL DEFAULT 'local';
+    CREATE INDEX IF NOT EXISTS idx_commitments_user ON commitments(user_id, status);
+  END IF;
+
+  -- contacts (the user's contact list; subjective per family-plan member)
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'contacts' AND column_name = 'user_id'
+  ) THEN
+    ALTER TABLE contacts ADD COLUMN user_id TEXT NOT NULL DEFAULT 'local';
+    CREATE INDEX IF NOT EXISTS idx_contacts_user ON contacts(user_id);
+  END IF;
+
+  -- contact_identities
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'contact_identities' AND column_name = 'user_id'
+  ) THEN
+    ALTER TABLE contact_identities ADD COLUMN user_id TEXT NOT NULL DEFAULT 'local';
+    CREATE INDEX IF NOT EXISTS idx_contact_identities_user ON contact_identities(user_id);
+  END IF;
+
+  -- cron_jobs
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'cron_jobs' AND column_name = 'user_id'
+  ) THEN
+    ALTER TABLE cron_jobs ADD COLUMN user_id TEXT NOT NULL DEFAULT 'local';
+    CREATE INDEX IF NOT EXISTS idx_cron_user ON cron_jobs(user_id, enabled);
+  END IF;
+
+  -- slack_user_tokens
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'slack_user_tokens' AND column_name = 'user_id'
+  ) THEN
+    ALTER TABLE slack_user_tokens ADD COLUMN user_id TEXT NOT NULL DEFAULT 'local';
+  END IF;
+
+  -- google_accounts (note: separate from the OAuth "user_id" column which
+  -- belongs to Google; we name ours owner_user_id to avoid collision)
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'google_accounts' AND column_name = 'owner_user_id'
+  ) THEN
+    ALTER TABLE google_accounts ADD COLUMN owner_user_id TEXT NOT NULL DEFAULT 'local';
+    CREATE INDEX IF NOT EXISTS idx_google_accounts_owner ON google_accounts(owner_user_id);
+  END IF;
+END $$;
+
 -- Auto-dream consolidation state. Singleton (id=1).
 -- Replaces ~/.nomos/auto-dream/consolidation-state.json.
 CREATE TABLE IF NOT EXISTS auto_dream_state (
