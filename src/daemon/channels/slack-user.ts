@@ -86,11 +86,6 @@ export class SlackUserAdapter implements ChannelAdapter {
   }
 
   async start(): Promise<void> {
-    // Bolt requires the BOT token for Socket Mode event delivery.
-    // User tokens don't receive Socket Mode events reliably.
-    // The user token is kept separately for API calls (posting as user).
-    const boltToken = this.botTokenStr ?? this.userToken;
-    this.app = new App({ token: boltToken, appToken: this.appToken, socketMode: true });
     this.userClient = new WebClient(this.userToken);
 
     // Resolve own user ID (from user token)
@@ -101,17 +96,32 @@ export class SlackUserAdapter implements ChannelAdapter {
       throw new Error(`Could not resolve user ID from token for team ${this.teamId}`);
     }
 
-    // Resolve bot user ID (for echo loop prevention)
-    if (this.botClient) {
+    // Validate the bot token BEFORE handing it to Bolt. Constructing
+    // `new App({ token: <bad-bot-token>, ... })` triggers an internal
+    // auth.test that fires unhandled rejections (e.g. account_inactive)
+    // even if we later catch the bot client's own auth check. By
+    // validating up front we can drop a bad bot token and fall back to
+    // the user token for Bolt's Socket Mode connection.
+    let validatedBotToken: string | undefined;
+    if (this.botClient && this.botTokenStr) {
       try {
         const botAuth = await this.botClient.auth.test();
         this.botUserId = (botAuth.user_id as string) ?? null;
+        validatedBotToken = this.botTokenStr;
         log.info(`Bot identity loaded (${this.botUserId})`);
-      } catch {
-        log.warn(`Bot token auth failed -- agent will post as user`);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        log.warn(`Bot token auth failed (${message}) -- agent will post as user`);
         this.botClient = null;
       }
     }
+
+    // Bolt requires the BOT token for Socket Mode event delivery when
+    // available; user tokens don't receive Socket Mode events reliably.
+    // If the bot token was rejected, fall back to the user token (Socket
+    // Mode events may be incomplete, but DMs still flow).
+    const boltToken = validatedBotToken ?? this.userToken;
+    this.app = new App({ token: boltToken, appToken: this.appToken, socketMode: true });
 
     // Load all known user IDs for the owner across workspaces.
     // This catches own messages even when Slack Connect surfaces them with

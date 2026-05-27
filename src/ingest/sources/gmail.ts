@@ -133,7 +133,8 @@ export class GmailIngestSource implements IngestSource {
   private async *ingestAccount(
     account: string | undefined,
     options: IngestOptions,
-    cursor?: string,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    _cursor?: string,
   ): AsyncGenerator<IngestMessage, void, undefined> {
     const accessToken = await this.getAccessToken(account);
 
@@ -147,7 +148,17 @@ export class GmailIngestSource implements IngestSource {
       query += ` to:${options.contact}`;
     }
 
-    let pageToken: string | undefined = cursor || undefined;
+    // Important: do NOT pass the pipeline's cursor as Gmail's pageToken.
+    // The pipeline stores `lastMessage.id` (a Gmail message id, hex)
+    // as the cursor; pageToken is a different beast (an opaque,
+    // intra-run pagination handle, base64-ish). Cross-run reuse of a
+    // pageToken always 400s with `Invalid pageToken`.
+    //
+    // Re-running the same `q:` is safe — the pipeline's per-message
+    // dedup step rejects messages we've already stored, so a fresh full
+    // scan is idempotent. Delta semantics come from the `after:` clause
+    // (driven by `options.since`).
+    let pageToken: string | undefined;
 
     while (true) {
       const listUrl = new URL("https://gmail.googleapis.com/gmail/v1/users/me/messages");
