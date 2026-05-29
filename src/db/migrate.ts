@@ -591,8 +591,12 @@ BEGIN
   END IF;
 
   -- google_accounts (note: separate from the OAuth "user_id" column which
-  -- belongs to Google; we name ours owner_user_id to avoid collision)
-  IF NOT EXISTS (
+  -- belongs to Google; we name ours owner_user_id to avoid collision).
+  -- This table is created at runtime (not in schema.sql), so guard on its
+  -- existence — a fresh customer database won't have it yet.
+  IF EXISTS (
+    SELECT 1 FROM information_schema.tables WHERE table_name = 'google_accounts'
+  ) AND NOT EXISTS (
     SELECT 1 FROM information_schema.columns
     WHERE table_name = 'google_accounts' AND column_name = 'owner_user_id'
   ) THEN
