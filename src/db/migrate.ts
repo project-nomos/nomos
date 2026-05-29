@@ -1,60 +1,49 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import postgres from "postgres";
 import { getDb } from "./client.ts";
-import { applySchema, assertValidSchemaName, createSchema, dropSchema } from "./migrator.ts";
+import {
+  applySchema,
+  assertValidDatabaseName,
+  createDatabase,
+  dropDatabase,
+  provisionDatabase,
+} from "./migrator.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 /**
- * Apply the canonical schema to the configured database. When `schemaName`
- * is provided, scopes to that Postgres schema (creating it if needed);
- * otherwise applies to whichever schema is on the connection's search_path
- * (default `public`, or whatever `NOMOS_DB_SCHEMA` is set to).
+ * Apply the canonical schema to the connected database's `public` schema.
+ * Each instance (power-user or hosted customer) points DATABASE_URL at its
+ * own database, so there is no schema/search_path juggling.
  */
-export async function runMigrations(schemaName?: string | null): Promise<void> {
-  const sql = getDb();
-  const targetSchema = schemaName ?? process.env.NOMOS_DB_SCHEMA ?? null;
-  await applySchema(sql, targetSchema, resolveSchemaSql());
+export async function runMigrations(): Promise<void> {
+  await applySchema(getDb(), resolveSchemaSql());
 }
 
 /**
- * Create a fresh per-customer schema. Idempotent. Used by the BA admin
- * provisioning server when spinning up a new customer instance.
+ * Create a fresh per-customer database from the current admin connection.
+ * Idempotent. Used by the BA admin provisioning server.
  */
-export async function createCustomerSchema(schemaName: string): Promise<void> {
-  assertValidSchemaName(schemaName);
-  await createSchema(getDb(), schemaName);
+export async function createCustomerDatabase(dbName: string): Promise<void> {
+  assertValidDatabaseName(dbName);
+  await createDatabase(getDb(), dbName);
 }
 
 /**
- * Drop a per-customer schema and ALL its data. Destructive.
+ * Drop a per-customer database and ALL its data. Destructive.
  */
-export async function dropCustomerSchema(schemaName: string): Promise<void> {
-  assertValidSchemaName(schemaName);
-  await dropSchema(getDb(), schemaName);
+export async function dropCustomerDatabase(dbName: string): Promise<void> {
+  assertValidDatabaseName(dbName);
+  await dropDatabase(getDb(), dbName);
 }
 
 /**
- * Convenience for the admin server: open a temporary connection via the
- * provided URL, create+migrate the schema, then close. Useful when the
- * admin server's own `getDb()` is pointed at the central BA database and we
- * need to target a different (per-customer) database or connection
- * altogether.
+ * Convenience for the admin server: from an admin connection URL, create the
+ * customer database and apply the canonical schema to its `public` schema.
  */
-export async function provisionWithConnection(
-  databaseUrl: string,
-  schemaName: string,
-): Promise<void> {
-  const sql = postgres(databaseUrl, { max: 2 });
-  try {
-    assertValidSchemaName(schemaName);
-    await createSchema(sql, schemaName);
-    await applySchema(sql, schemaName, resolveSchemaSql());
-  } finally {
-    await sql.end();
-  }
+export async function provisionWithConnection(adminUrl: string, dbName: string): Promise<void> {
+  await provisionDatabase(adminUrl, dbName, resolveSchemaSql());
 }
 
 function resolveSchemaSql(): string {
