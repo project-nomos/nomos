@@ -706,8 +706,18 @@ export class Gateway {
       return;
     }
 
+    // Subscription mode uses the Claude Max/Pro OAuth credentials (macOS
+    // keychain / ~/.claude), not an API key — so an absent ANTHROPIC_API_KEY
+    // is expected and not a failure.
+    if (process.env.NOMOS_USE_SUBSCRIPTION === "true") {
+      log.info("Using Claude subscription (Max/Pro) — skipping API key check");
+      return;
+    }
+
     if (!apiKey) {
-      log.warn("⚠ No ANTHROPIC_API_KEY set — LLM calls will fail");
+      log.warn(
+        "⚠ No ANTHROPIC_API_KEY set — set one, enable NOMOS_USE_SUBSCRIPTION, or use Vertex",
+      );
       return;
     }
 
