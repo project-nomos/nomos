@@ -44,7 +44,7 @@ export interface ModelCapability {
  *
  * Context windows reflect Anthropic's current docs
  * (https://docs.claude.com/en/docs/build-with-claude/context-windows):
- *   - Opus 4.7, Opus 4.6, Sonnet 4.6 → 1M tokens by default, no beta
+ *   - Opus 4.8, Opus 4.6, Sonnet 4.6 → 1M tokens by default, no beta
  *   - Other models (Sonnet 4.5 deprecated, Haiku 4.5, older Opus) → 200K
  *
  * The historical `context-1m-2025-08-07` beta was for the old Sonnet 4
@@ -55,8 +55,8 @@ export interface ModelCapability {
  */
 export const MODEL_CAPABILITIES: ModelCapability[] = [
   {
-    id: "claude-opus-4-7",
-    label: "Claude Opus 4.7",
+    id: "claude-opus-4-8",
+    label: "Claude Opus 4.8",
     family: "opus",
     contextWindow: 1_000_000,
     maxOutputTokens: 128_000,

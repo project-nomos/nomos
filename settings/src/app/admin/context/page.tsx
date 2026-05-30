@@ -203,7 +203,7 @@ export default function ContextPage() {
           })}
         </div>
         <p className="text-xs text-overlay0 mt-4">
-          Opus 4.7, Opus 4.6, and Sonnet 4.6 ship with a 1M-token context window by default. Earlier
+          Opus 4.8, Opus 4.6, and Sonnet 4.6 ship with a 1M-token context window by default. Earlier
           models stay at 200K. Source:{" "}
           <a
             href="https://docs.claude.com/en/docs/build-with-claude/context-windows"

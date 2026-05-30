@@ -76,7 +76,7 @@ export interface CommandResult {
 }
 
 /** Available models for the `/model` picker. Derived from the central
- * registry so new releases (e.g. Opus 4.7 + 1M context) show up
+ * registry so new releases (e.g. Opus 4.8 + 1M context) show up
  * automatically — see `src/sdk/model-capabilities.ts`. */
 function getAvailableModels(): Array<{ id: string; label: string; desc: string }> {
   // Inline require so the slash command can run in environments where
