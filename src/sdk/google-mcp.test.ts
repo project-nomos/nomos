@@ -22,7 +22,9 @@ beforeEach(() => {
 });
 afterEach(() => vi.unstubAllEnvs());
 
-describe("buildGoogleMcpServers — official (default)", () => {
+describe("buildGoogleMcpServers — official", () => {
+  beforeEach(() => vi.stubEnv("NOMOS_GOOGLE_BACKEND", "official"));
+
   it("returns {} when Google isn't configured", async () => {
     isGoogleIntegrationConfigured.mockReturnValue(false);
     expect(await buildGoogleMcpServers("u1")).toEqual({});
@@ -90,5 +92,34 @@ describe("buildGoogleMcpServers — rest backup", () => {
     const servers = await buildGoogleMcpServers("u1");
     expect(Object.keys(servers)).toEqual(["nomos-google"]);
     expect((servers["nomos-google"] as { type: string }).type).toBe("sdk");
+  });
+});
+
+describe("buildGoogleMcpServers — mode-aware default", () => {
+  it("power-user (NOMOS_MODE unset): default backend is cli → no servers", async () => {
+    vi.stubEnv("NOMOS_MODE", ""); // not hosted
+    vi.stubEnv("NOMOS_GOOGLE_BACKEND", ""); // unset → mode-aware default
+    listGoogleAccounts.mockResolvedValue([
+      { email: "me@x.com", isDefault: true, sendEnabled: false },
+    ]);
+    expect(await buildGoogleMcpServers("u1")).toEqual({});
+    // cli short-circuits before any token/account work
+    expect(listGoogleAccounts).not.toHaveBeenCalled();
+  });
+
+  it("hosted (NOMOS_MODE=hosted): default backend is official → registers remote servers", async () => {
+    vi.stubEnv("NOMOS_MODE", "hosted");
+    vi.stubEnv("NOMOS_GOOGLE_BACKEND", ""); // unset → mode-aware default
+    listGoogleAccounts.mockResolvedValue([
+      { email: "me@x.com", isDefault: true, sendEnabled: false },
+    ]);
+    const keys = Object.keys(await buildGoogleMcpServers("u1"));
+    expect(keys).toContain("google-gmail");
+  });
+
+  it("explicit NOMOS_GOOGLE_BACKEND=cli wins even in hosted → no servers", async () => {
+    vi.stubEnv("NOMOS_MODE", "hosted");
+    vi.stubEnv("NOMOS_GOOGLE_BACKEND", "cli");
+    expect(await buildGoogleMcpServers("u1")).toEqual({});
   });
 });

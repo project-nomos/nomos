@@ -1,19 +1,23 @@
 /**
- * Google Workspace MCP orchestrator for HOSTED mode.
+ * Google Workspace MCP orchestrator.
  *
- * Selects the backend via NOMOS_GOOGLE_BACKEND:
- *   - "official" (default): Google's OFFICIAL remote MCP servers
+ * Backend via NOMOS_GOOGLE_BACKEND; the DEFAULT is mode-aware — "cli" for the
+ * open-source power-user build, "official" for hosted:
+ *   - "cli" (power-user default): nothing registered here; the agent reaches
+ *     Google through the gws CLI on PATH (wired in agent-runtime init).
+ *   - "official" (hosted default): Google's OFFICIAL remote MCP servers
  *     (gmailmcp/calendarmcp/drivemcp) for read/draft/calendar/drive, plus our
  *     in-process Gmail SEND tool (opt-in) — the official Gmail MCP is draft-only.
  *   - "rest": our full direct-REST in-process server (google-rest-mcp.ts), kept
  *     as a flag-selectable backup if the official servers misbehave.
  *
- * Either way the token comes from our own lifecycle (getValidAccessToken,
- * refreshed per call). Power-user mode keeps the gws CLI (agent-runtime init).
+ * For official/rest the token comes from our own lifecycle (getValidAccessToken,
+ * refreshed per call).
  */
 
 import type { McpHttpServerConfig, McpServerConfig } from "@anthropic-ai/claude-agent-sdk";
 import { createLogger } from "../lib/logger.ts";
+import { isHosted } from "../config/mode.ts";
 import {
   getValidAccessToken,
   isGoogleIntegrationConfigured,
@@ -80,17 +84,30 @@ async function buildGoogleOfficialMcpServers(
 }
 
 /**
- * Build the Google MCP servers for a user (hosted). Empty when Google isn't
- * configured or the user has connected nothing. Backend chosen by
- * NOMOS_GOOGLE_BACKEND ("official" default, "rest" backup).
+ * Build the Google MCP servers for a user. Empty for the "cli" backend, when
+ * Google isn't configured, or when the user has connected nothing. Backend via
+ * NOMOS_GOOGLE_BACKEND; default is mode-aware ("cli" power-user, "official"
+ * hosted), "rest" is the backup.
  */
 export async function buildGoogleMcpServers(
   userId: string,
 ): Promise<Record<string, McpServerConfig>> {
+  // Default is mode-aware: the open-source power-user build uses the gws CLI,
+  // hosted uses Google's official remote MCP. Override with NOMOS_GOOGLE_BACKEND.
+  // Empty/whitespace falls through to the default rather than "unknown".
+  const raw = process.env.NOMOS_GOOGLE_BACKEND?.trim().toLowerCase();
+  const backend = raw || (isHosted() ? "official" : "cli");
+
+  // "cli": the agent reaches Google through the gws CLI (via Bash), so there is
+  // no in-process/remote MCP to register here.
+  if (backend === "cli") return {};
+
+  // official / rest both rely on our OAuth-managed tokens.
   if (!isGoogleIntegrationConfigured()) return {};
-  const backend = (process.env.NOMOS_GOOGLE_BACKEND ?? "official").toLowerCase();
   try {
     if (backend === "rest") return await buildGoogleRestMcpServer(userId);
+    if (backend === "official") return await buildGoogleOfficialMcpServers(userId);
+    log.warn({ backend }, "unknown NOMOS_GOOGLE_BACKEND — using official");
     return await buildGoogleOfficialMcpServers(userId);
   } catch (err) {
     log.warn(
