@@ -31,36 +31,28 @@ const AUTH_ENDPOINT = "https://accounts.google.com/o/oauth2/v2/auth";
 const TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token";
 
 /**
- * Scopes for the hosted Google connect flow. Exactly what the Google Workspace
- * remote MCP servers validate, plus calendar.events / drive.file for the write
- * tools and openid/email/profile so we can read the account email. One grant
- * covers Gmail + Calendar + Drive.
+ * Scopes for the Google connect flow. We call the GA Gmail/Calendar/Drive REST
+ * APIs directly (see google-rest-mcp.ts), so these are the standard API scopes:
+ * read + draft + SEND for Gmail, full Calendar, read + create for Drive, and
+ * openid/email/profile so we can read the account email.
+ *
+ * Deliberately NOT gmail.modify (a restricted scope needing CASA review) — we
+ * stay on readonly+compose+send, which covers search/read/draft/send.
  */
 export const GOOGLE_SCOPES = [
   "openid",
   "email",
   "profile",
-  // Gmail
+  // Gmail — read + draft + send
   "https://www.googleapis.com/auth/gmail.readonly",
   "https://www.googleapis.com/auth/gmail.compose",
-  // Calendar
-  "https://www.googleapis.com/auth/calendar.calendarlist.readonly",
-  "https://www.googleapis.com/auth/calendar.events.freebusy",
-  "https://www.googleapis.com/auth/calendar.events.readonly",
-  "https://www.googleapis.com/auth/calendar.events",
-  // Drive
+  "https://www.googleapis.com/auth/gmail.send",
+  // Calendar — full read/write (covers list/read/create/update/delete + freebusy)
+  "https://www.googleapis.com/auth/calendar",
+  // Drive — read all + create/upload
   "https://www.googleapis.com/auth/drive.readonly",
   "https://www.googleapis.com/auth/drive.file",
 ];
-
-/** Remote MCP server endpoints (Google Workspace Developer Preview). */
-export const GOOGLE_MCP_ENDPOINTS = {
-  gmail: "https://gmailmcp.googleapis.com/mcp/v1",
-  calendar: "https://calendarmcp.googleapis.com/mcp/v1",
-  drive: "https://drivemcp.googleapis.com/mcp/v1",
-} as const;
-
-export type GoogleMcpService = keyof typeof GOOGLE_MCP_ENDPOINTS;
 
 export interface GoogleAccount {
   /** BA user this account belongs to. */

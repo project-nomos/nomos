@@ -1,7 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   buildAuthUrl,
-  GOOGLE_MCP_ENDPOINTS,
   GOOGLE_SCOPES,
   googleClientCreds,
   isGoogleIntegrationConfigured,
@@ -56,18 +55,14 @@ describe("buildAuthUrl", () => {
     const scope = url.searchParams.get("scope") ?? "";
     expect(scope).toContain("https://www.googleapis.com/auth/gmail.readonly");
     expect(scope).toContain("https://www.googleapis.com/auth/gmail.compose");
-    expect(scope).toContain("https://www.googleapis.com/auth/calendar.events");
+    // send is the load-bearing capability the REST server adds
+    expect(scope).toContain("https://www.googleapis.com/auth/gmail.send");
+    expect(scope).toContain("https://www.googleapis.com/auth/calendar");
     expect(scope).toContain("https://www.googleapis.com/auth/drive.file");
   });
 });
 
 describe("constants", () => {
-  it("exposes the three Developer-Preview remote MCP endpoints", () => {
-    expect(GOOGLE_MCP_ENDPOINTS.gmail).toBe("https://gmailmcp.googleapis.com/mcp/v1");
-    expect(GOOGLE_MCP_ENDPOINTS.calendar).toBe("https://calendarmcp.googleapis.com/mcp/v1");
-    expect(GOOGLE_MCP_ENDPOINTS.drive).toBe("https://drivemcp.googleapis.com/mcp/v1");
-  });
-
   it("includes identity scopes so the account email is readable", () => {
     expect(GOOGLE_SCOPES).toContain("openid");
     expect(GOOGLE_SCOPES).toContain("email");
