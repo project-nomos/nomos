@@ -63,6 +63,11 @@ export interface GoogleAccount {
   scopes: string;
   /** Whether this is the user's default Google account. */
   isDefault: boolean;
+  /**
+   * Whether the agent may SEND email from this account. Off by default: the
+   * agent drafts and the user approves/sends, unless explicitly enabled.
+   */
+  sendEnabled: boolean;
   /** Unix seconds when the current access token expires. */
   expiresAt: number;
 }
@@ -226,8 +231,8 @@ export async function storeGoogleAccount(opts: {
   scopes: string;
 }): Promise<void> {
   const existing = await listGoogleAccounts(opts.userId);
-  const isDefault =
-    existing.length === 0 || existing.some((a) => a.email === opts.email && a.isDefault);
+  const prev = existing.find((a) => a.email.toLowerCase() === opts.email.toLowerCase());
+  const isDefault = existing.length === 0 || Boolean(prev?.isDefault);
   await upsertIntegration(integrationName(opts.userId, opts.email), {
     enabled: true,
     config: {
@@ -236,6 +241,8 @@ export async function storeGoogleAccount(opts: {
       account_email: opts.email,
       scopes: opts.scopes,
       is_default: isDefault,
+      // Preserve the send toggle across re-connects (default off).
+      send_enabled: prev?.sendEnabled ?? false,
     },
     secrets: {
       access_token: opts.tokens.accessToken,
@@ -253,6 +260,7 @@ function rowToAccount(i: Integration): GoogleAccount {
     email: String(i.config.account_email ?? ""),
     scopes: String(i.config.scopes ?? ""),
     isDefault: Boolean(i.config.is_default),
+    sendEnabled: Boolean(i.config.send_enabled),
     expiresAt: Number(i.secrets.expires_at ?? 0),
   };
 }
@@ -261,6 +269,31 @@ function rowToAccount(i: Integration): GoogleAccount {
 export async function listGoogleAccounts(userId: string): Promise<GoogleAccount[]> {
   const rows = await listIntegrationsByPrefix(`google:${userId}:`);
   return rows.filter((r) => r.enabled).map(rowToAccount);
+}
+
+/**
+ * Enable/disable the agent sending email from a Google account. Off by default
+ * (draft-only). The Settings UI / a connect flow flips this per account.
+ */
+export async function setSendEnabled(
+  userId: string,
+  email: string,
+  enabled: boolean,
+): Promise<void> {
+  const name = integrationName(userId, email);
+  const integ = await getIntegration(name);
+  if (!integ) throw new Error(`No connected Google account ${email} for this user`);
+  await upsertIntegration(name, { config: { ...integ.config, send_enabled: enabled } });
+  log.info({ userId, email, enabled }, "set Google send_enabled");
+}
+
+/** Whether sending is enabled for a user's account (default account if omitted). */
+export async function isSendEnabled(userId: string, email?: string): Promise<boolean> {
+  const accounts = await listGoogleAccounts(userId);
+  const acct = email
+    ? accounts.find((a) => a.email.toLowerCase() === email.toLowerCase())
+    : (accounts.find((a) => a.isDefault) ?? accounts[0]);
+  return Boolean(acct?.sendEnabled);
 }
 
 /** Disconnect one Google account. */

@@ -4,11 +4,19 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const getValidAccessToken = vi.fn();
 const listGoogleAccounts = vi.fn();
 const isGoogleIntegrationConfigured = vi.fn();
+const isSendEnabled = vi.fn();
 vi.mock("../auth/google-integration.ts", () => ({
   getValidAccessToken: (...a: unknown[]) => getValidAccessToken(...a),
   listGoogleAccounts: (...a: unknown[]) => listGoogleAccounts(...a),
   isGoogleIntegrationConfigured: (...a: unknown[]) => isGoogleIntegrationConfigured(...a),
+  isSendEnabled: (...a: unknown[]) => isSendEnabled(...a),
 }));
+
+/** Tool names registered on an SDK MCP server instance. */
+function toolNames(server: { instance: unknown }): string[] {
+  const reg = (server.instance as { _registeredTools?: Record<string, unknown> })._registeredTools;
+  return reg ? Object.keys(reg) : [];
+}
 
 const { gapiFetch, buildRfc822, buildGoogleRestMcpServer, createGoogleRestMcpServer } =
   await import("./google-rest-mcp.ts");
@@ -131,18 +139,48 @@ describe("buildGoogleRestMcpServer", () => {
 
   it("returns the nomos-google server when an account is connected", async () => {
     isGoogleIntegrationConfigured.mockReturnValue(true);
-    listGoogleAccounts.mockResolvedValue([{ email: "me@x.com", isDefault: true }]);
+    listGoogleAccounts.mockResolvedValue([
+      { email: "me@x.com", isDefault: true, sendEnabled: false },
+    ]);
     const servers = await buildGoogleRestMcpServer("u1");
     expect(Object.keys(servers)).toEqual(["nomos-google"]);
     expect(servers["nomos-google"].name).toBe("nomos-google");
   });
+
+  it("exposes send tools only when an account has sending enabled", async () => {
+    isGoogleIntegrationConfigured.mockReturnValue(true);
+
+    listGoogleAccounts.mockResolvedValue([
+      { email: "me@x.com", isDefault: true, sendEnabled: false },
+    ]);
+    const draftOnly = await buildGoogleRestMcpServer("u1");
+    expect(toolNames(draftOnly["nomos-google"])).not.toContain("gmail_send_message");
+
+    listGoogleAccounts.mockResolvedValue([
+      { email: "me@x.com", isDefault: true, sendEnabled: true },
+    ]);
+    const withSend = await buildGoogleRestMcpServer("u1");
+    expect(toolNames(withSend["nomos-google"])).toContain("gmail_send_message");
+  });
 });
 
-describe("createGoogleRestMcpServer", () => {
-  it("builds an in-process SDK server bound to the user", () => {
+describe("createGoogleRestMcpServer send-gating", () => {
+  it("draft-only by default: no send tools, but create_draft is present", () => {
+    const names = toolNames(createGoogleRestMcpServer("u1"));
+    expect(names).toContain("gmail_create_draft");
+    expect(names).not.toContain("gmail_send_message");
+    expect(names).not.toContain("gmail_send_draft");
+  });
+
+  it("registers send tools when sendEnabled", () => {
+    const names = toolNames(createGoogleRestMcpServer("u1", { sendEnabled: true }));
+    expect(names).toContain("gmail_send_message");
+    expect(names).toContain("gmail_send_draft");
+  });
+
+  it("builds a valid in-process SDK server", () => {
     const server = createGoogleRestMcpServer("u1");
     expect(server.type).toBe("sdk");
     expect(server.name).toBe("nomos-google");
-    expect(server.instance).toBeDefined();
   });
 });

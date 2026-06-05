@@ -22,6 +22,7 @@ import { createLogger } from "../lib/logger.ts";
 import {
   getValidAccessToken,
   isGoogleIntegrationConfigured,
+  isSendEnabled,
   listGoogleAccounts,
 } from "../auth/google-integration.ts";
 
@@ -155,12 +156,25 @@ export function buildRfc822(args: {
 
 const MAX_DRIVE_TEXT = 100_000;
 
-/** Compose the in-process MCP server bound to one user. */
-export function createGoogleRestMcpServer(userId: string): McpSdkServerConfigWithInstance {
+/**
+ * Compose the in-process MCP server bound to one user. The Gmail SEND tools are
+ * only registered when `opts.sendEnabled` (the user has turned on sending for at
+ * least one account); by default the agent can draft but not send.
+ */
+export function createGoogleRestMcpServer(
+  userId: string,
+  opts?: { sendEnabled?: boolean },
+): McpSdkServerConfigWithInstance {
   const account = z
     .string()
     .optional()
     .describe("Email of the connected Google account to use. Defaults to the default account.");
+
+  /** Per-call guard: refuse to send from an account that hasn't enabled it. */
+  async function ensureSendAllowed(email?: string): Promise<string | null> {
+    if (await isSendEnabled(userId, email)) return null;
+    return `Sending is disabled${email ? ` for ${email}` : ""}. The agent can draft; enable sending in Settings → Integrations → Google to send directly.`;
+  }
 
   // ── Gmail ──
 
@@ -301,10 +315,12 @@ export function createGoogleRestMcpServer(userId: string): McpSdkServerConfigWit
 
   const gmailSendDraft = tool(
     "gmail_send_draft",
-    "Send a previously-created Gmail draft by draftId. Returns the sent message id.",
+    "Send a previously-created Gmail draft by draftId. Returns the sent message id. Requires sending to be enabled for the account.",
     { draftId: z.string(), account },
     async (args) => {
       try {
+        const blocked = await ensureSendAllowed(args.account);
+        if (blocked) return errorResult(blocked);
         const sent = await gapiFetch({
           userId,
           account: args.account,
@@ -321,7 +337,7 @@ export function createGoogleRestMcpServer(userId: string): McpSdkServerConfigWit
 
   const gmailSendMessage = tool(
     "gmail_send_message",
-    "Compose and SEND an email immediately (skips the draft step). Use threadId/inReplyTo to send within an existing thread.",
+    "Compose and SEND an email immediately (skips the draft step). Use threadId/inReplyTo to send within an existing thread. Requires sending to be enabled for the account.",
     {
       to: z.string().describe("Recipient email(s), comma-separated."),
       subject: z.string(),
@@ -334,6 +350,8 @@ export function createGoogleRestMcpServer(userId: string): McpSdkServerConfigWit
     },
     async (args) => {
       try {
+        const blocked = await ensureSendAllowed(args.account);
+        if (blocked) return errorResult(blocked);
         const sent = await gapiFetch({
           userId,
           account: args.account,
@@ -673,8 +691,9 @@ export function createGoogleRestMcpServer(userId: string): McpSdkServerConfigWit
       gmailGetMessage,
       gmailGetThread,
       gmailCreateDraft,
-      gmailSendDraft,
-      gmailSendMessage,
+      // Send tools are draft-only by default — only exposed when the user has
+      // enabled sending for an account (Claude-Code-style propose-then-approve).
+      ...(opts?.sendEnabled ? [gmailSendDraft, gmailSendMessage] : []),
       gmailListLabels,
       calendarListEvents,
       calendarGetEvent,
@@ -708,6 +727,8 @@ export async function buildGoogleRestMcpServer(
     return {};
   }
   if (accounts.length === 0) return {};
-  log.info({ userId, accounts: accounts.length }, "registered Google REST MCP server");
-  return { "nomos-google": createGoogleRestMcpServer(userId) };
+  // Expose send tools only if the user enabled sending on at least one account.
+  const sendEnabled = accounts.some((a) => a.sendEnabled);
+  log.info({ userId, accounts: accounts.length, sendEnabled }, "registered Google REST MCP server");
+  return { "nomos-google": createGoogleRestMcpServer(userId, { sendEnabled }) };
 }
