@@ -33,17 +33,19 @@ export class NomosKeystore implements Keystore {
       privateKey: Buffer.from(privateKey).toString("hex"),
     });
 
-    const configJson = JSON.stringify({ type: "cate-keypair", algorithm: "Ed25519" });
-    const metadataJson = JSON.stringify({ keyId, createdAt: new Date().toISOString() });
+    // jsonb columns take objects — the driver serializes once. Stringifying here
+    // would double-encode into a json string scalar (jsonb_typeof = 'string').
+    const config = { type: "cate-keypair", algorithm: "Ed25519" };
+    const metadata = { keyId, createdAt: new Date().toISOString() };
 
     await db
       .insertInto("integrations")
       .values({
         name: INTEGRATION_PREFIX + keyId,
         enabled: true,
-        config: configJson,
+        config,
         secrets: encrypt(secretData),
-        metadata: metadataJson,
+        metadata,
       })
       .onConflict((oc) =>
         oc.column("name").doUpdateSet({

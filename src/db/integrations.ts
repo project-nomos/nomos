@@ -70,29 +70,29 @@ export async function upsertIntegration(
   },
 ): Promise<Integration> {
   const db = getKysely();
-  const secretsStr = params.secrets ? encryptSecrets(params.secrets) : "";
-  const configJson = JSON.stringify(params.config ?? {});
-  const metadataJson = JSON.stringify(params.metadata ?? {});
   const enabled = params.enabled ?? true;
+
+  // JSONB columns take objects — the postgres-js driver serializes them once.
+  // (Passing JSON.stringify(...) double-encodes into a json string scalar, which
+  // makes config->>'key' read back NULL.) The update set is partial: only the
+  // fields the caller actually provided are touched, so e.g. a token refresh
+  // (secrets only) never clobbers config, and a config write never drops secrets.
+  const updates: Record<string, unknown> = { updated_at: sql`now()` };
+  if (params.enabled !== undefined) updates.enabled = params.enabled;
+  if (params.config !== undefined) updates.config = params.config;
+  if (params.secrets !== undefined) updates.secrets = encryptSecrets(params.secrets);
+  if (params.metadata !== undefined) updates.metadata = params.metadata;
 
   const row = await db
     .insertInto("integrations")
     .values({
       name,
       enabled,
-      config: configJson,
-      secrets: secretsStr,
-      metadata: metadataJson,
+      config: params.config ?? {},
+      secrets: params.secrets ? encryptSecrets(params.secrets) : "",
+      metadata: params.metadata ?? {},
     })
-    .onConflict((oc) =>
-      oc.column("name").doUpdateSet({
-        enabled: sql`COALESCE(${params.enabled ?? null}::boolean, integrations.enabled)`,
-        config: sql`CASE WHEN ${params.config !== undefined} THEN ${configJson}::jsonb ELSE integrations.config END`,
-        secrets: sql`CASE WHEN ${params.secrets !== undefined} THEN ${secretsStr} ELSE integrations.secrets END`,
-        metadata: sql`CASE WHEN ${params.metadata !== undefined} THEN ${metadataJson}::jsonb ELSE integrations.metadata END`,
-        updated_at: sql`now()`,
-      }),
-    )
+    .onConflict((oc) => oc.column("name").doUpdateSet(updates as never))
     .returningAll()
     .executeTakeFirstOrThrow();
   return rowToIntegration(row as unknown as IntegrationRow);

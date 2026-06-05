@@ -144,9 +144,20 @@ export interface IntegrationsTable {
   id: Generated<string>;
   name: string;
   enabled: Generated<boolean>;
-  config: ColumnType<Record<string, unknown>, string | undefined, string>;
+  // jsonb: pass objects on write. The postgres-js driver serializes them to
+  // jsonb once; a pre-stringified string would double-encode into a json string
+  // scalar (jsonb_typeof = 'string'), breaking config->>'key' reads.
+  config: ColumnType<
+    Record<string, unknown>,
+    Record<string, unknown> | undefined,
+    Record<string, unknown>
+  >;
   secrets: Generated<string>;
-  metadata: ColumnType<Record<string, unknown>, string | undefined, string>;
+  metadata: ColumnType<
+    Record<string, unknown>,
+    Record<string, unknown> | undefined,
+    Record<string, unknown>
+  >;
   created_at: Generated<Date>;
   updated_at: Generated<Date>;
 }

@@ -663,5 +663,21 @@ CREATE TABLE IF NOT EXISTS cate_inbound (
 CREATE INDEX IF NOT EXISTS idx_cate_inbound_user_status
   ON cate_inbound(user_id, status, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_cate_inbound_from_did ON cate_inbound(from_did);
+
+-- ── Repair: un-double-encode integrations JSONB ──────────────────────────────
+-- Earlier code wrote integrations.config / .metadata via JSON.stringify(...),
+-- which the postgres-js driver re-encoded into a json *string* scalar
+-- (jsonb_typeof = 'string'). That made config->>'key' read back NULL — e.g. a
+-- connected Google account's account_email came through empty, so its MCP was
+-- skipped as "no valid token". Unwrap any string-encoded rows back to objects.
+-- Idempotent: a no-op once every row is a json object.
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'integrations') THEN
+    UPDATE integrations SET config = (config #>> '{}')::jsonb
+      WHERE jsonb_typeof(config) = 'string';
+    UPDATE integrations SET metadata = (metadata #>> '{}')::jsonb
+      WHERE jsonb_typeof(metadata) = 'string';
+  END IF;
+END $$;
   `.trim();
 }
