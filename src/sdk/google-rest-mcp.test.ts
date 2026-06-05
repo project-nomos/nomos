@@ -18,8 +18,13 @@ function toolNames(server: { instance: unknown }): string[] {
   return reg ? Object.keys(reg) : [];
 }
 
-const { gapiFetch, buildRfc822, buildGoogleRestMcpServer, createGoogleRestMcpServer } =
-  await import("./google-rest-mcp.ts");
+const {
+  gapiFetch,
+  buildRfc822,
+  buildGoogleRestMcpServer,
+  createGoogleRestMcpServer,
+  createGoogleSendMcpServer,
+} = await import("./google-rest-mcp.ts");
 
 const fetchMock = vi.fn();
 beforeEach(() => {
@@ -176,6 +181,13 @@ describe("createGoogleRestMcpServer send-gating", () => {
     const names = toolNames(createGoogleRestMcpServer("u1", { sendEnabled: true }));
     expect(names).toContain("gmail_send_message");
     expect(names).toContain("gmail_send_draft");
+  });
+
+  it("send-only server exposes exactly the two send tools", () => {
+    expect(toolNames(createGoogleSendMcpServer("u1")).sort()).toEqual([
+      "gmail_send_draft",
+      "gmail_send_message",
+    ]);
   });
 
   it("builds a valid in-process SDK server", () => {

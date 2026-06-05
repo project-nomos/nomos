@@ -156,25 +156,102 @@ export function buildRfc822(args: {
 
 const MAX_DRIVE_TEXT = 100_000;
 
+const accountParam = z
+  .string()
+  .optional()
+  .describe("Email of the connected Google account to use. Defaults to the default account.");
+
 /**
- * Compose the in-process MCP server bound to one user. The Gmail SEND tools are
- * only registered when `opts.sendEnabled` (the user has turned on sending for at
- * least one account); by default the agent can draft but not send.
+ * The Gmail SEND tools (gmail_send_draft, gmail_send_message), shared by the
+ * full REST server and the send-only server used in official-MCP mode. Each
+ * call re-checks the per-account send opt-in before touching the API.
+ */
+function gmailSendTools(userId: string) {
+  async function ensureSendAllowed(email?: string): Promise<string | null> {
+    if (await isSendEnabled(userId, email)) return null;
+    return `Sending is disabled${email ? ` for ${email}` : ""}. The agent can draft; enable sending in Settings → Integrations → Google to send directly.`;
+  }
+
+  const gmailSendDraft = tool(
+    "gmail_send_draft",
+    "Send a previously-created Gmail draft by draftId. Returns the sent message id. Requires sending to be enabled for the account.",
+    { draftId: z.string(), account: accountParam },
+    async (args) => {
+      try {
+        const blocked = await ensureSendAllowed(args.account);
+        if (blocked) return errorResult(blocked);
+        const sent = await gapiFetch({
+          userId,
+          account: args.account,
+          method: "POST",
+          url: `${GAPI.gmail}/users/me/drafts/send`,
+          body: { id: args.draftId },
+        });
+        return jsonResult({ sent });
+      } catch (err) {
+        return errorResult(`gmail_send_draft failed: ${err instanceof Error ? err.message : err}`);
+      }
+    },
+  );
+
+  const gmailSendMessage = tool(
+    "gmail_send_message",
+    "Compose and SEND an email immediately (skips the draft step). Use threadId/inReplyTo to send within an existing thread. Requires sending to be enabled for the account.",
+    {
+      to: z.string().describe("Recipient email(s), comma-separated."),
+      subject: z.string(),
+      body: z.string().describe("Plain text body."),
+      cc: z.string().optional(),
+      bcc: z.string().optional(),
+      threadId: z.string().optional(),
+      inReplyTo: z.string().optional(),
+      account: accountParam,
+    },
+    async (args) => {
+      try {
+        const blocked = await ensureSendAllowed(args.account);
+        if (blocked) return errorResult(blocked);
+        const sent = await gapiFetch({
+          userId,
+          account: args.account,
+          method: "POST",
+          url: `${GAPI.gmail}/users/me/messages/send`,
+          body: { raw: buildRfc822(args), ...(args.threadId ? { threadId: args.threadId } : {}) },
+        });
+        return jsonResult({ sent });
+      } catch (err) {
+        return errorResult(
+          `gmail_send_message failed: ${err instanceof Error ? err.message : err}`,
+        );
+      }
+    },
+  );
+
+  return [gmailSendDraft, gmailSendMessage];
+}
+
+/**
+ * Send-only in-process server for OFFICIAL-MCP mode: Google's remote MCP servers
+ * cover read/draft/calendar/drive, and this adds just the opt-in Gmail send.
+ */
+export function createGoogleSendMcpServer(userId: string): McpSdkServerConfigWithInstance {
+  return createSdkMcpServer({
+    name: "nomos-google-send",
+    version: "1.0.0",
+    tools: gmailSendTools(userId),
+  });
+}
+
+/**
+ * Compose the full direct-REST in-process server bound to one user (the `rest`
+ * backend / backup). The Gmail SEND tools are only registered when
+ * `opts.sendEnabled`; by default the agent can draft but not send.
  */
 export function createGoogleRestMcpServer(
   userId: string,
   opts?: { sendEnabled?: boolean },
 ): McpSdkServerConfigWithInstance {
-  const account = z
-    .string()
-    .optional()
-    .describe("Email of the connected Google account to use. Defaults to the default account.");
-
-  /** Per-call guard: refuse to send from an account that hasn't enabled it. */
-  async function ensureSendAllowed(email?: string): Promise<string | null> {
-    if (await isSendEnabled(userId, email)) return null;
-    return `Sending is disabled${email ? ` for ${email}` : ""}. The agent can draft; enable sending in Settings → Integrations → Google to send directly.`;
-  }
+  const account = accountParam;
 
   // ── Gmail ──
 
@@ -308,61 +385,6 @@ export function createGoogleRestMcpServer(
       } catch (err) {
         return errorResult(
           `gmail_create_draft failed: ${err instanceof Error ? err.message : err}`,
-        );
-      }
-    },
-  );
-
-  const gmailSendDraft = tool(
-    "gmail_send_draft",
-    "Send a previously-created Gmail draft by draftId. Returns the sent message id. Requires sending to be enabled for the account.",
-    { draftId: z.string(), account },
-    async (args) => {
-      try {
-        const blocked = await ensureSendAllowed(args.account);
-        if (blocked) return errorResult(blocked);
-        const sent = await gapiFetch({
-          userId,
-          account: args.account,
-          method: "POST",
-          url: `${GAPI.gmail}/users/me/drafts/send`,
-          body: { id: args.draftId },
-        });
-        return jsonResult({ sent });
-      } catch (err) {
-        return errorResult(`gmail_send_draft failed: ${err instanceof Error ? err.message : err}`);
-      }
-    },
-  );
-
-  const gmailSendMessage = tool(
-    "gmail_send_message",
-    "Compose and SEND an email immediately (skips the draft step). Use threadId/inReplyTo to send within an existing thread. Requires sending to be enabled for the account.",
-    {
-      to: z.string().describe("Recipient email(s), comma-separated."),
-      subject: z.string(),
-      body: z.string().describe("Plain text body."),
-      cc: z.string().optional(),
-      bcc: z.string().optional(),
-      threadId: z.string().optional(),
-      inReplyTo: z.string().optional(),
-      account,
-    },
-    async (args) => {
-      try {
-        const blocked = await ensureSendAllowed(args.account);
-        if (blocked) return errorResult(blocked);
-        const sent = await gapiFetch({
-          userId,
-          account: args.account,
-          method: "POST",
-          url: `${GAPI.gmail}/users/me/messages/send`,
-          body: { raw: buildRfc822(args), ...(args.threadId ? { threadId: args.threadId } : {}) },
-        });
-        return jsonResult({ sent });
-      } catch (err) {
-        return errorResult(
-          `gmail_send_message failed: ${err instanceof Error ? err.message : err}`,
         );
       }
     },
@@ -693,7 +715,7 @@ export function createGoogleRestMcpServer(
       gmailCreateDraft,
       // Send tools are draft-only by default — only exposed when the user has
       // enabled sending for an account (Claude-Code-style propose-then-approve).
-      ...(opts?.sendEnabled ? [gmailSendDraft, gmailSendMessage] : []),
+      ...(opts?.sendEnabled ? gmailSendTools(userId) : []),
       gmailListLabels,
       calendarListEvents,
       calendarGetEvent,

@@ -27,7 +27,7 @@ import {
   loadTelegramTokenFromDb,
 } from "../sdk/telegram-mcp.ts";
 import { isGoogleWorkspaceConfiguredAsync } from "../sdk/google-workspace-mcp.ts";
-import { buildGoogleRestMcpServer } from "../sdk/google-rest-mcp.ts";
+import { buildGoogleMcpServers } from "../sdk/google-mcp.ts";
 import { loadEnvConfig, type NomosConfig } from "../config/env.ts";
 import { FEATURES, isHosted } from "../config/mode.ts";
 
@@ -886,21 +886,21 @@ export class AgentRuntime {
     inputTokens?: number;
     outputTokens?: number;
   }> {
-    // In hosted mode, register the requesting user's Google MCP server — an
-    // in-process server (gmail/calendar/drive) that calls the GA REST APIs with
-    // fresh per-account tokens resolved at call time. Power-user mode keeps the
-    // gws-CLI server from init().
+    // In hosted mode, register the requesting user's Google MCP servers:
+    // Google's official remote MCP (read/draft/calendar/drive) + our opt-in
+    // Gmail send tool, per connected account with fresh tokens (or the direct-
+    // REST backup via NOMOS_GOOGLE_BACKEND=rest). Power-user keeps the gws CLI.
     let mcpServers = this.mcpServers;
     if (isHosted() && userId) {
       try {
-        const googleServers = await buildGoogleRestMcpServer(userId);
+        const googleServers = await buildGoogleMcpServers(userId);
         if (Object.keys(googleServers).length > 0) {
           mcpServers = { ...this.mcpServers, ...googleServers };
         }
       } catch (err) {
         log.warn(
           { err: err instanceof Error ? err.message : err },
-          "failed to build Google REST MCP server",
+          "failed to build Google MCP servers",
         );
       }
     }

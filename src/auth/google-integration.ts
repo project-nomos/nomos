@@ -31,24 +31,27 @@ const AUTH_ENDPOINT = "https://accounts.google.com/o/oauth2/v2/auth";
 const TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token";
 
 /**
- * Scopes for the Google connect flow. We call the GA Gmail/Calendar/Drive REST
- * APIs directly (see google-rest-mcp.ts), so these are the standard API scopes:
- * read + draft + SEND for Gmail, full Calendar, read + create for Drive, and
- * openid/email/profile so we can read the account email.
+ * Scopes for the Google connect flow. Hosted uses Google's official remote MCP
+ * servers, so these match exactly what those servers validate (gmail.readonly +
+ * gmail.compose, the granular calendar scopes, drive.readonly + drive.file) —
+ * PLUS gmail.send + calendar.events, which the official Gmail MCP doesn't grant:
+ * sending is done by our own opt-in API tool, and calendar writes need events.
  *
- * Deliberately NOT gmail.modify (a restricted scope needing CASA review) — we
- * stay on readonly+compose+send, which covers search/read/draft/send.
+ * Deliberately NOT gmail.modify (a restricted scope needing CASA review).
  */
 export const GOOGLE_SCOPES = [
   "openid",
   "email",
   "profile",
-  // Gmail — read + draft + send
+  // Gmail — read + draft (official MCP) + send (our opt-in API tool)
   "https://www.googleapis.com/auth/gmail.readonly",
   "https://www.googleapis.com/auth/gmail.compose",
   "https://www.googleapis.com/auth/gmail.send",
-  // Calendar — full read/write (covers list/read/create/update/delete + freebusy)
-  "https://www.googleapis.com/auth/calendar",
+  // Calendar — official MCP's granular read scopes + events (write)
+  "https://www.googleapis.com/auth/calendar.calendarlist.readonly",
+  "https://www.googleapis.com/auth/calendar.events.freebusy",
+  "https://www.googleapis.com/auth/calendar.events.readonly",
+  "https://www.googleapis.com/auth/calendar.events",
   // Drive — read all + create/upload
   "https://www.googleapis.com/auth/drive.readonly",
   "https://www.googleapis.com/auth/drive.file",
