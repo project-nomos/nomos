@@ -143,6 +143,8 @@ service MobileApi {
   rpc UpdatePermission (MPermissionRequest) returns (MAck);
   rpc ListIntegrations (Empty) returns (MIntegrationsResponse);
   rpc StartConnectIntegration (MStartConnectRequest) returns (MStartConnectResponse);
+  rpc ConnectGoogleAccount (MConnectGoogleRequest) returns (MAck);
+  rpc SetGoogleSend (MSetGoogleSendRequest) returns (MAck);
   rpc DisconnectIntegration (MDisconnectRequest) returns (MAck);
 
   // Push notifications
@@ -298,11 +300,13 @@ message MPermission {
 }
 
 message MIntegration {
-  string id = 1;
+  string id = 1;            // for google: the account email (disconnect/toggle key)
   string label = 2;
   string icon = 3;
   bool connected = 4;
   string account_email = 5;
+  bool send_enabled = 6;    // google: whether the agent may send email
+  string provider = 7;      // google | slack | ...
 }
 
 message MProfile {
@@ -345,13 +349,28 @@ message MStartConnectRequest {
 }
 
 message MStartConnectResponse {
-  // URL the mobile app should open in an in-app browser to begin OAuth.
-  // Resolves to https://auth.mynomos.ai/api/oauth/<provider>/start.
+  // URL the client opens in a browser to begin OAuth. For google this is the
+  // daemon-built Google consent URL (state-signed); the callback then relays the
+  // code back via ConnectGoogleAccount.
   string oauth_url = 1;
 }
 
 message MDisconnectRequest {
   string integration_id = 1;
+  string account_email = 2;   // google: disconnect by account email (preferred)
+}
+
+// Relay an OAuth authorization code from the (web/mobile) callback to the daemon,
+// which exchanges it for tokens and stores the connected Google account. The
+// connecting user is the JWT subject; `state` is the signed CSRF token.
+message MConnectGoogleRequest {
+  string code = 1;
+  string state = 2;
+}
+
+message MSetGoogleSendRequest {
+  string account_email = 1;
+  bool enabled = 2;
 }
 
 message MDeviceRegister {

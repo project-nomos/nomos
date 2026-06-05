@@ -16,6 +16,7 @@
  * module is only used when isHosted().
  */
 
+import { createHmac, timingSafeEqual } from "node:crypto";
 import { createLogger } from "../lib/logger.ts";
 import {
   getIntegration,
@@ -98,6 +99,50 @@ export function googleClientCreds(): { clientId: string; clientSecret: string } 
 /** True if the daemon has Google client creds configured at all. */
 export function isGoogleIntegrationConfigured(): boolean {
   return Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET);
+}
+
+/**
+ * Redirect URI for the connect flow. MUST exactly match an authorized redirect
+ * URI on the OAuth client AND the route that relays the code back to the daemon
+ * (the web client / mobile callback). Used by both buildAuthUrl and exchangeCode.
+ */
+export function googleRedirectUri(): string {
+  return process.env.GOOGLE_OAUTH_REDIRECT_URI ?? "http://localhost:4100/oauth/google/callback";
+}
+
+function oauthStateSecret(): string {
+  return (
+    process.env.ENCRYPTION_KEY ?? process.env.GOOGLE_CLIENT_SECRET ?? "nomos-google-oauth-state"
+  );
+}
+
+/**
+ * Sign a CSRF `state` binding the connecting user + an expiry. Stateless (HMAC),
+ * so it survives across stateless pods — the callback verifies it before
+ * exchanging the code, and the user identity still comes from the JWT.
+ */
+export function signOAuthState(userId: string, ttlSeconds = 600): string {
+  const payload = `${userId}.${Math.floor(Date.now() / 1000) + ttlSeconds}`;
+  const sig = createHmac("sha256", oauthStateSecret()).update(payload).digest("base64url");
+  return `${Buffer.from(payload).toString("base64url")}.${sig}`;
+}
+
+/** Verify a signed state belongs to `userId` and hasn't expired. */
+export function verifyOAuthState(state: string, userId: string): boolean {
+  const dot = state.lastIndexOf(".");
+  if (dot < 0) return false;
+  let payload: string;
+  try {
+    payload = Buffer.from(state.slice(0, dot), "base64url").toString("utf8");
+  } catch {
+    return false;
+  }
+  const expected = createHmac("sha256", oauthStateSecret()).update(payload).digest("base64url");
+  const got = Buffer.from(state.slice(dot + 1));
+  const exp = Buffer.from(expected);
+  if (got.length !== exp.length || !timingSafeEqual(got, exp)) return false;
+  const [uid, expStr] = payload.split(".");
+  return uid === userId && Number(expStr) >= Math.floor(Date.now() / 1000);
 }
 
 function integrationName(userId: string, email: string): string {

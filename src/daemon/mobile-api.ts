@@ -22,6 +22,19 @@ import type { DraftManager } from "./draft-manager.ts";
 import type { AgentEvent, IncomingMessage } from "./types.ts";
 import { getKysely } from "../db/client.ts";
 import { listIntegrations } from "../db/integrations.ts";
+import {
+  buildAuthUrl,
+  exchangeCode,
+  googleRedirectUri,
+  GOOGLE_SCOPES,
+  isGoogleIntegrationConfigured,
+  listGoogleAccounts,
+  removeGoogleAccount,
+  setSendEnabled,
+  signOAuthState,
+  storeGoogleAccount,
+  verifyOAuthState,
+} from "../auth/google-integration.ts";
 import { loadSkills } from "../skills/loader.ts";
 import { withAuthUnary, withAuthStream } from "../auth/grpc-interceptor.ts";
 import { registerDevice, unregisterDevice } from "./push-notifications.ts";
@@ -80,8 +93,15 @@ export function buildMobileApiHandlers(deps: MobileApiDeps) {
     ListIntegrations: withAuthUnary("/nomos.MobileApi/ListIntegrations", (_, ctx) =>
       handleListIntegrations(ctx),
     ),
-    StartConnectIntegration: withAuthUnary("/nomos.MobileApi/StartConnectIntegration", (call) =>
-      handleStartConnect(call),
+    StartConnectIntegration: withAuthUnary(
+      "/nomos.MobileApi/StartConnectIntegration",
+      (call, ctx) => handleStartConnect(call, ctx),
+    ),
+    ConnectGoogleAccount: withAuthUnary("/nomos.MobileApi/ConnectGoogleAccount", (call, ctx) =>
+      handleConnectGoogleAccount(call, ctx),
+    ),
+    SetGoogleSend: withAuthUnary("/nomos.MobileApi/SetGoogleSend", (call, ctx) =>
+      handleSetGoogleSend(call, ctx),
     ),
     DisconnectIntegration: withAuthUnary("/nomos.MobileApi/DisconnectIntegration", (call, ctx) =>
       handleDisconnect(call, ctx),
@@ -533,19 +553,82 @@ async function handleListIntegrations(ctx: TenantContext) {
 
 async function handleStartConnect(
   call: grpc.ServerUnaryCall<unknown, unknown>,
+  ctx: TenantContext,
 ): Promise<{ oauthUrl: string }> {
-  const url = `${AUTH_BASE_URL}/api/oauth/${encodeURIComponent((call.request as any).provider)}/start`;
+  const provider = String((call.request as { provider?: string }).provider ?? "");
+  // Google (gmail/calendar/drive are aliases of one grant): the daemon owns the
+  // OAuth — build the consent URL with a signed CSRF state; the callback relays
+  // the code back via ConnectGoogleAccount.
+  if (["google", "gmail", "calendar", "drive"].includes(provider)) {
+    if (!isGoogleIntegrationConfigured()) {
+      throw new Error(
+        "Google integration not configured (set GOOGLE_CLIENT_ID/GOOGLE_CLIENT_SECRET)",
+      );
+    }
+    const url = buildAuthUrl({
+      redirectUri: googleRedirectUri(),
+      state: signOAuthState(ctx.userId),
+    });
+    return { oauthUrl: url };
+  }
+  // Other providers still go through the central auth server.
+  const url = `${AUTH_BASE_URL}/api/oauth/${encodeURIComponent(provider)}/start`;
   return { oauthUrl: url };
+}
+
+async function handleConnectGoogleAccount(
+  call: grpc.ServerUnaryCall<unknown, unknown>,
+  ctx: TenantContext,
+): Promise<{ success: boolean; message: string }> {
+  const req = call.request as { code?: string; state?: string };
+  if (!req.code) return { success: false, message: "missing_code" };
+  if (!req.state || !verifyOAuthState(req.state, ctx.userId)) {
+    return { success: false, message: "invalid_state" };
+  }
+  try {
+    const tokens = await exchangeCode({ code: req.code, redirectUri: googleRedirectUri() });
+    await storeGoogleAccount({
+      userId: ctx.userId,
+      email: tokens.email,
+      tokens,
+      scopes: tokens.scope ?? GOOGLE_SCOPES.join(" "),
+    });
+    return { success: true, message: tokens.email };
+  } catch (err) {
+    log.warn({ err: err instanceof Error ? err.message : err }, "Google connect failed");
+    return { success: false, message: err instanceof Error ? err.message : "connect_failed" };
+  }
+}
+
+async function handleSetGoogleSend(
+  call: grpc.ServerUnaryCall<unknown, unknown>,
+  ctx: TenantContext,
+): Promise<{ success: boolean; message: string }> {
+  const req = call.request as { accountEmail?: string; enabled?: boolean };
+  if (!req.accountEmail) return { success: false, message: "missing_account_email" };
+  try {
+    await setSendEnabled(ctx.userId, req.accountEmail, Boolean(req.enabled));
+    return { success: true, message: req.enabled ? "send_enabled" : "send_disabled" };
+  } catch (err) {
+    return { success: false, message: err instanceof Error ? err.message : "failed" };
+  }
 }
 
 async function handleDisconnect(
   call: grpc.ServerUnaryCall<unknown, unknown>,
   ctx: TenantContext,
 ): Promise<{ success: boolean; message: string }> {
+  const req = call.request as { accountEmail?: string; integrationId?: string };
+  // Google: disconnect by account email.
+  if (req.accountEmail) {
+    await removeGoogleAccount(ctx.userId, req.accountEmail);
+    return { success: true, message: "disconnected" };
+  }
+  // Legacy: disconnect by deposited integration_id.
   const db = getKysely();
   await db
     .deleteFrom("integrations")
-    .where(sql`metadata->>'integration_id'`, "=", (call.request as any).integrationId)
+    .where(sql`metadata->>'integration_id'`, "=", req.integrationId ?? "")
     .where(sql`config->>'user_id'`, "=", ctx.userId)
     .execute();
   return { success: true, message: "disconnected" };
@@ -580,11 +663,19 @@ async function listIntegrationsForUser(userId: string) {
   const all = await listIntegrations();
   return all
     .filter((i) => i.config.user_id === userId || i.config.user_id === undefined)
-    .map((i) => ({
-      id: String(i.metadata.integration_id ?? i.id),
-      label: String(i.config.provider ?? i.name),
-      icon: String(i.config.icon ?? "plug"),
-      connected: i.enabled,
-      accountEmail: String(i.config.account_email ?? ""),
-    }));
+    .map((i) => {
+      const provider = String(i.config.provider ?? i.name);
+      const accountEmail = String(i.config.account_email ?? "");
+      const isGoogle = provider === "google";
+      return {
+        // Google: key by account email so the client disconnects/toggles by account.
+        id: isGoogle && accountEmail ? accountEmail : String(i.metadata.integration_id ?? i.id),
+        label: isGoogle ? "Google" : provider,
+        icon: isGoogle ? "mail" : String(i.config.icon ?? "plug"),
+        connected: i.enabled,
+        accountEmail,
+        sendEnabled: Boolean(i.config.send_enabled),
+        provider,
+      };
+    });
 }

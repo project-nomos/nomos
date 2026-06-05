@@ -4,6 +4,8 @@ import {
   GOOGLE_SCOPES,
   googleClientCreds,
   isGoogleIntegrationConfigured,
+  signOAuthState,
+  verifyOAuthState,
 } from "./google-integration.ts";
 
 afterEach(() => {
@@ -59,6 +61,33 @@ describe("buildAuthUrl", () => {
     expect(scope).toContain("https://www.googleapis.com/auth/gmail.send");
     expect(scope).toContain("https://www.googleapis.com/auth/calendar");
     expect(scope).toContain("https://www.googleapis.com/auth/drive.file");
+  });
+});
+
+describe("OAuth CSRF state", () => {
+  it("round-trips for the same user", () => {
+    const s = signOAuthState("user-A");
+    expect(verifyOAuthState(s, "user-A")).toBe(true);
+  });
+
+  it("rejects a different user", () => {
+    const s = signOAuthState("user-A");
+    expect(verifyOAuthState(s, "user-B")).toBe(false);
+  });
+
+  it("rejects a tampered signature", () => {
+    const s = signOAuthState("user-A");
+    expect(verifyOAuthState(s.slice(0, -2) + "xy", "user-A")).toBe(false);
+  });
+
+  it("rejects an expired state", () => {
+    const s = signOAuthState("user-A", -1); // already expired
+    expect(verifyOAuthState(s, "user-A")).toBe(false);
+  });
+
+  it("rejects garbage", () => {
+    expect(verifyOAuthState("not-a-state", "user-A")).toBe(false);
+    expect(verifyOAuthState("", "user-A")).toBe(false);
   });
 });
 
