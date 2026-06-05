@@ -27,8 +27,9 @@ import {
   loadTelegramTokenFromDb,
 } from "../sdk/telegram-mcp.ts";
 import { isGoogleWorkspaceConfiguredAsync } from "../sdk/google-workspace-mcp.ts";
+import { buildGoogleMcpServers } from "../sdk/google-remote-mcp.ts";
 import { loadEnvConfig, type NomosConfig } from "../config/env.ts";
-import { FEATURES } from "../config/mode.ts";
+import { FEATURES, isHosted } from "../config/mode.ts";
 
 /**
  * Built-in tools blocked when hosted-mode feature gates demand it. Centralized
@@ -718,6 +719,7 @@ export class AgentRuntime {
           channelId: message.channelId,
           threadId: message.threadId,
         },
+        message.userId,
       );
 
       // Cache the new SDK session ID
@@ -784,6 +786,7 @@ export class AgentRuntime {
               channelId: message.channelId,
               threadId: message.threadId,
             },
+            message.userId,
           );
 
           if (result.sessionId) {
@@ -828,6 +831,7 @@ export class AgentRuntime {
                   channelId: message.channelId,
                   threadId: message.threadId,
                 },
+                message.userId,
               );
               if (upgraded.sessionId) {
                 this.sdkSessionIds.set(sessionKey, upgraded.sessionId);
@@ -873,6 +877,8 @@ export class AgentRuntime {
      * channel. Optional so non-message runs (cron, internal) keep working.
      */
     source?: { platform: string; channelId: string; threadId?: string },
+    /** BA user making this request — scopes per-user integrations (hosted). */
+    userId?: string,
   ): Promise<{
     text: string;
     sessionId?: string;
@@ -880,8 +886,26 @@ export class AgentRuntime {
     inputTokens?: number;
     outputTokens?: number;
   }> {
+    // In hosted mode, register the requesting user's Google remote MCP servers
+    // (gmail/calendar/drive, one set per connected account) with fresh
+    // per-account tokens. Power-user mode keeps the gws-CLI server from init().
+    let mcpServers = this.mcpServers;
+    if (isHosted() && userId) {
+      try {
+        const googleServers = await buildGoogleMcpServers(userId);
+        if (Object.keys(googleServers).length > 0) {
+          mcpServers = { ...this.mcpServers, ...googleServers };
+        }
+      } catch (err) {
+        log.warn(
+          { err: err instanceof Error ? err.message : err },
+          "failed to build Google remote MCP servers",
+        );
+      }
+    }
+
     // Auto-approve all tools from our MCP servers
-    const allowedTools = Object.keys(this.mcpServers).map((name) => `mcp__${name}`);
+    const allowedTools = Object.keys(mcpServers).map((name) => `mcp__${name}`);
 
     // Inject team context from a previous /team turn (if any)
     let systemPromptAppend = this.systemPromptAppend;
@@ -918,7 +942,7 @@ export class AgentRuntime {
       prompt,
       model: model ?? this.config.model,
       systemPromptAppend,
-      mcpServers: this.mcpServers,
+      mcpServers,
       // Daemon runs unattended — no human to approve tool calls.
       // Use bypassPermissions so tools like filesystem search and web search work.
       permissionMode: "bypassPermissions",
