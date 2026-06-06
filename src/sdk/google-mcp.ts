@@ -117,3 +117,35 @@ export async function buildGoogleMcpServers(
     return {};
   }
 }
+
+/**
+ * A system-prompt section asserting the user's ACTIVE Google access (hosted), so
+ * the agent stops telling the user that Gmail/Calendar/Drive needs configuring
+ * when the MCP tools are in fact registered. Empty for the "cli" backend, when
+ * Google isn't configured, or when no accounts are connected.
+ */
+export async function buildGoogleIntegrationPrompt(userId: string): Promise<string> {
+  const raw = process.env.NOMOS_GOOGLE_BACKEND?.trim().toLowerCase();
+  const backend = raw || (isHosted() ? "official" : "cli");
+  if (backend === "cli") return ""; // power-user advertises Google via the gws CLI summary
+  if (!isGoogleIntegrationConfigured()) return "";
+
+  let accounts: Awaited<ReturnType<typeof listGoogleAccounts>>;
+  try {
+    accounts = await listGoogleAccounts(userId);
+  } catch {
+    return "";
+  }
+  if (accounts.length === 0) return "";
+
+  const lines = accounts.map((a) => {
+    const send = a.sendEnabled ? "sending enabled" : "draft-only (sending is off)";
+    return `- ${a.email}${a.isDefault ? " (default)" : ""}: Gmail, Calendar, and Drive; ${send}`;
+  });
+  return [
+    "## Connected Google accounts",
+    "You have **active, authenticated** Google Workspace access right now through the Google MCP: Gmail, Calendar, and Drive. Do NOT tell the user that Gmail, Calendar, or Drive needs to be connected or configured; you already have access for the accounts below.",
+    ...lines,
+    "Use the matching `mcp__google-gmail__*`, `mcp__google-calendar__*`, and `mcp__google-drive__*` tools (the default account uses the unsuffixed `google-*` servers; additional accounts are suffixed with an email slug). The `google-gmail`, `gmail-inbox-triage`, `google-calendar*`, and `google-drive` skills give workflow guidance. Gmail sending is opt-in per account; for draft-only accounts, create a draft and ask the user before sending.",
+  ].join("\n");
+}

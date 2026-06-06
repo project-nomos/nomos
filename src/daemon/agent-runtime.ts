@@ -27,7 +27,7 @@ import {
   loadTelegramTokenFromDb,
 } from "../sdk/telegram-mcp.ts";
 import { isGoogleWorkspaceConfiguredAsync } from "../sdk/google-workspace-mcp.ts";
-import { buildGoogleMcpServers } from "../sdk/google-mcp.ts";
+import { buildGoogleMcpServers, buildGoogleIntegrationPrompt } from "../sdk/google-mcp.ts";
 import { loadEnvConfig, type NomosConfig } from "../config/env.ts";
 import { FEATURES, isHosted } from "../config/mode.ts";
 
@@ -465,7 +465,7 @@ export class AgentRuntime {
     if (isTelegramConfigured()) {
       parts.push("- **Telegram**: Send and receive messages via Telegram bot");
     }
-    if (this.gwsAccounts && this.gwsAccounts.length > 0) {
+    if (!isHosted() && this.gwsAccounts && this.gwsAccounts.length > 0) {
       const accountList = this.gwsAccounts
         .map((a) => `  - ${a.email}${a.isDefault ? " (default)" : ""}`)
         .join("\n");
@@ -891,12 +891,17 @@ export class AgentRuntime {
     // Gmail send tool, per connected account with fresh tokens (or the direct-
     // REST backup via NOMOS_GOOGLE_BACKEND=rest). Power-user keeps the gws CLI.
     let mcpServers = this.mcpServers;
+    let googlePrompt = "";
     if (isHosted() && userId) {
       try {
         const googleServers = await buildGoogleMcpServers(userId);
         if (Object.keys(googleServers).length > 0) {
           mcpServers = { ...this.mcpServers, ...googleServers };
         }
+        // Tell the agent it actually HAS this access, otherwise it trusts the
+        // static integrations summary (which lists only power-user channels) and
+        // wrongly claims Gmail/Calendar/Drive aren't configured.
+        googlePrompt = await buildGoogleIntegrationPrompt(userId);
       } catch (err) {
         log.warn(
           { err: err instanceof Error ? err.message : err },
@@ -927,6 +932,11 @@ export class AgentRuntime {
     // Inject active persona overrides (per-message, context-dependent)
     if (personaPrompt) {
       systemPromptAppend = systemPromptAppend + "\n\n" + personaPrompt;
+    }
+
+    // Inject the requesting user's connected Google accounts (hosted, per-user)
+    if (googlePrompt) {
+      systemPromptAppend = systemPromptAppend + "\n\n" + googlePrompt;
     }
 
     // Build the elicitation callback for this turn. The `ask_user` MCP

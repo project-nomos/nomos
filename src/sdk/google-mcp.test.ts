@@ -12,7 +12,7 @@ vi.mock("../auth/google-integration.ts", () => ({
   isSendEnabled: (...a: unknown[]) => isSendEnabled(...a),
 }));
 
-const { buildGoogleMcpServers } = await import("./google-mcp.ts");
+const { buildGoogleMcpServers, buildGoogleIntegrationPrompt } = await import("./google-mcp.ts");
 
 beforeEach(() => {
   getValidAccessToken.mockReset().mockResolvedValue("tok");
@@ -92,6 +92,37 @@ describe("buildGoogleMcpServers — rest backup", () => {
     const servers = await buildGoogleMcpServers("u1");
     expect(Object.keys(servers)).toEqual(["nomos-google"]);
     expect((servers["nomos-google"] as { type: string }).type).toBe("sdk");
+  });
+});
+
+describe("buildGoogleIntegrationPrompt", () => {
+  it("returns '' for the cli backend (power-user)", async () => {
+    vi.stubEnv("NOMOS_GOOGLE_BACKEND", "cli");
+    listGoogleAccounts.mockResolvedValue([
+      { email: "me@x.com", isDefault: true, sendEnabled: false },
+    ]);
+    expect(await buildGoogleIntegrationPrompt("u1")).toBe("");
+  });
+
+  it("returns '' when no accounts are connected", async () => {
+    vi.stubEnv("NOMOS_GOOGLE_BACKEND", "official");
+    listGoogleAccounts.mockResolvedValue([]);
+    expect(await buildGoogleIntegrationPrompt("u1")).toBe("");
+  });
+
+  it("asserts active access and lists each account with its send state", async () => {
+    vi.stubEnv("NOMOS_GOOGLE_BACKEND", "official");
+    listGoogleAccounts.mockResolvedValue([
+      { email: "me@x.com", isDefault: true, sendEnabled: false },
+      { email: "work@corp.com", isDefault: false, sendEnabled: true },
+    ]);
+    const p = await buildGoogleIntegrationPrompt("u1");
+    expect(p).toContain("Connected Google accounts");
+    expect(p).toContain("Do NOT tell the user");
+    expect(p).toContain("me@x.com (default)");
+    expect(p).toContain("work@corp.com");
+    expect(p).toContain("draft-only"); // me@x has send off
+    expect(p).toContain("sending enabled"); // work@corp has send on
   });
 });
 
