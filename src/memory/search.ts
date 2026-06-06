@@ -123,8 +123,52 @@ export async function textOnlySearch(
 }
 
 /**
- * Hybrid search combining vector similarity and full-text search.
- * Uses Reciprocal Rank Fusion (RRF) to merge results.
+ * Knowledge-graph candidates for a query: resolve the query to entity node(s),
+ * then surface their 1-hop relationships as searchable results. Degrades to []
+ * on any error (e.g. the kg_* tables not existing yet). This is the third
+ * retrieval signal fused into hybridSearch alongside vector + FTS.
+ */
+async function graphCandidates(query: string, limit: number): Promise<MemorySearchResult[]> {
+  try {
+    const { searchNodes, neighborhood } = await import("./graph.ts");
+    const { LOCAL_TENANT } = await import("../auth/tenant-context.ts");
+    const nodes = await searchNodes(LOCAL_TENANT, query, { limit: 3 });
+    if (nodes.length === 0) return [];
+
+    const out: MemorySearchResult[] = [];
+    for (const node of nodes.slice(0, 2)) {
+      if (node.summary) {
+        out.push({
+          id: `graph:node:${node.id}`,
+          text: `${node.name}: ${node.summary}`,
+          path: node.name,
+          source: "graph",
+          score: 0,
+        });
+      }
+      const sub = await neighborhood(LOCAL_TENANT, node.id, { depth: 1, limit: limit * 2 });
+      const nameById = new Map(sub.nodes.map((n) => [n.id, n.name]));
+      for (const e of sub.edges) {
+        const s = nameById.get(e.srcId) ?? "?";
+        const d = nameById.get(e.dstId) ?? "?";
+        out.push({
+          id: `graph:edge:${e.id}`,
+          text: e.fact ?? `${s} ${e.relType.replace(/_/g, " ")} ${d}`,
+          path: node.name,
+          source: "graph",
+          score: 0,
+        });
+      }
+    }
+    return out.slice(0, limit * 2);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Hybrid search combining vector similarity, full-text search, and knowledge-
+ * graph relationships. Uses Reciprocal Rank Fusion (RRF) to merge results.
  * Applies temporal decay to boost recent/frequently accessed memories.
  */
 export async function hybridSearch(
@@ -133,10 +177,12 @@ export async function hybridSearch(
   limit: number = 10,
   category?: string,
 ): Promise<MemorySearchResult[]> {
-  // Run both searches in parallel
-  const [vectorResults, textResults] = await Promise.all([
+  // Run all signals in parallel. Graph fusion only for general (uncategorized)
+  // queries — relationships aren't tied to a memory category.
+  const [vectorResults, textResults, graphResults] = await Promise.all([
     searchMemoryByVector(embedding, limit * 2, category),
     searchMemoryByText(query, limit * 2, category),
+    category ? Promise.resolve<MemorySearchResult[]>([]) : graphCandidates(query, limit),
   ]);
 
   // Build RRF scores
@@ -157,6 +203,18 @@ export async function hybridSearch(
   // Score text results by rank
   for (let rank = 0; rank < textResults.length; rank++) {
     const result = textResults[rank];
+    const rrfScore = 1 / (RRF_K + rank + 1);
+    const existing = scoreMap.get(result.id);
+    if (existing) {
+      existing.score += rrfScore;
+    } else {
+      scoreMap.set(result.id, { score: rrfScore, result });
+    }
+  }
+
+  // Score graph results by rank (third RRF signal)
+  for (let rank = 0; rank < graphResults.length; rank++) {
+    const result = graphResults[rank];
     const rrfScore = 1 / (RRF_K + rank + 1);
     const existing = scoreMap.get(result.id);
     if (existing) {

@@ -36,6 +36,8 @@ import {
   verifyOAuthState,
 } from "../auth/google-integration.ts";
 import { loadSkills } from "../skills/loader.ts";
+import { getProjection, neighborhood, searchNodes } from "../memory/graph.ts";
+import type { GraphNode, GraphEdge } from "../memory/graph.ts";
 import { withAuthUnary, withAuthStream } from "../auth/grpc-interceptor.ts";
 import { registerDevice, unregisterDevice } from "./push-notifications.ts";
 import { createLogger } from "../lib/logger.ts";
@@ -80,6 +82,13 @@ export function buildMobileApiHandlers(deps: MobileApiDeps) {
     ListSkills: withAuthUnary("/nomos.MobileApi/ListSkills", () => handleListSkills()),
     ToggleSkill: withAuthUnary("/nomos.MobileApi/ToggleSkill", (call) => handleToggleSkill(call)),
     GetEarnings: withAuthUnary("/nomos.MobileApi/GetEarnings", () => handleGetEarnings()),
+    GetGraph: withAuthUnary("/nomos.MobileApi/GetGraph", (call, ctx) => handleGetGraph(call, ctx)),
+    GetGraphNeighbors: withAuthUnary("/nomos.MobileApi/GetGraphNeighbors", (call, ctx) =>
+      handleGetGraphNeighbors(call, ctx),
+    ),
+    SearchGraph: withAuthUnary("/nomos.MobileApi/SearchGraph", (call, ctx) =>
+      handleSearchGraph(call, ctx),
+    ),
     GetSettings: withAuthUnary("/nomos.MobileApi/GetSettings", (_, ctx) => handleGetSettings(ctx)),
     UpdateConsent: withAuthUnary("/nomos.MobileApi/UpdateConsent", (call) =>
       handleUpdateConsent(call),
@@ -185,6 +194,92 @@ async function handleGetMessages(
       createdAt: r.created_at.toISOString(),
     })),
   };
+}
+
+// ──────────── Brain (knowledge graph) ────────────
+
+interface WireGraphNode {
+  id: string;
+  kind: string;
+  name: string;
+  aliases: string[];
+  summary: string;
+  confidence: number;
+  externalKind: string;
+  externalRef: string;
+}
+interface WireGraphEdge {
+  id: string;
+  srcId: string;
+  dstId: string;
+  relType: string;
+  fact: string;
+  weight: number;
+}
+
+function wireNode(n: GraphNode): WireGraphNode {
+  return {
+    id: n.id,
+    kind: n.kind,
+    name: n.name,
+    aliases: n.aliases,
+    summary: n.summary ?? "",
+    confidence: n.confidence,
+    externalKind: n.externalKind ?? "",
+    externalRef: n.externalRef ?? "",
+  };
+}
+function wireEdge(e: GraphEdge): WireGraphEdge {
+  return {
+    id: e.id,
+    srcId: e.srcId,
+    dstId: e.dstId,
+    relType: e.relType,
+    fact: e.fact ?? "",
+    weight: e.weight,
+  };
+}
+
+/** Brain tab: global graph projection (nodes + edges among them), user-scoped. */
+async function handleGetGraph(
+  call: grpc.ServerUnaryCall<unknown, unknown>,
+  ctx: TenantContext,
+): Promise<{ nodes: WireGraphNode[]; edges: WireGraphEdge[] }> {
+  const req = (call.request ?? {}) as { kinds?: string[]; limit?: number };
+  const kinds = Array.isArray(req.kinds) && req.kinds.length ? req.kinds : undefined;
+  const sub = await getProjection(ctx, { kinds, limit: Math.min(req.limit || 500, 5000) });
+  return { nodes: sub.nodes.map(wireNode), edges: sub.edges.map(wireEdge) };
+}
+
+/** Brain tab: depth-bounded local graph (ego-network) around a node, user-scoped. */
+async function handleGetGraphNeighbors(
+  call: grpc.ServerUnaryCall<unknown, unknown>,
+  ctx: TenantContext,
+): Promise<{ nodes: WireGraphNode[]; edges: WireGraphEdge[] }> {
+  const req = (call.request ?? {}) as {
+    nodeId?: string;
+    depth?: number;
+    relTypes?: string[];
+    direction?: string;
+  };
+  if (!req.nodeId) return { nodes: [], edges: [] };
+  const direction = req.direction === "in" || req.direction === "out" ? req.direction : "both";
+  const sub = await neighborhood(ctx, req.nodeId, {
+    depth: req.depth || 2,
+    relTypes: Array.isArray(req.relTypes) && req.relTypes.length ? req.relTypes : undefined,
+    direction,
+  });
+  return { nodes: sub.nodes.map(wireNode), edges: sub.edges.map(wireEdge) };
+}
+
+/** Brain tab: resolve a name to nodes (trigram + cosine), user-scoped. */
+async function handleSearchGraph(
+  call: grpc.ServerUnaryCall<unknown, unknown>,
+  ctx: TenantContext,
+): Promise<{ nodes: WireGraphNode[]; edges: WireGraphEdge[] }> {
+  const req = (call.request ?? {}) as { query?: string; limit?: number };
+  const nodes = await searchNodes(ctx, req.query ?? "", { limit: Math.min(req.limit || 10, 50) });
+  return { nodes: nodes.map(wireNode), edges: [] };
 }
 
 async function handleApproveDraft(

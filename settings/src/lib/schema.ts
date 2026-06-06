@@ -612,6 +612,71 @@ CREATE INDEX IF NOT EXISTS idx_cate_inbound_user_status
   ON cate_inbound(user_id, status, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_cate_inbound_from_did ON cate_inbound(from_did);
 
+-- ===========================================================================
+-- Knowledge graph (BRAIN). A typed, bitemporal entity/edge overlay over the
+-- existing memory stack. Nodes are typed entities that may reference an
+-- existing first-class row (a contact, wiki article, memory chunk) by
+-- (external_kind, external_ref) instead of duplicating it. Edges are typed,
+-- carry provenance, and are bitemporal (valid_at/invalid_at = when true in the
+-- world; created_at/expired_at = when the system learned/retracted it). The
+-- graph is per-person via user_id (RLS-ready, no org_id — org isolation is the
+-- database boundary). See BRAIN_PLAN.md. Requires pg_trgm for fuzzy name match.
+-- ===========================================================================
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+
+CREATE TABLE IF NOT EXISTS kg_nodes (
+  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  kind          TEXT NOT NULL,                 -- person|project|topic|decision|value|event|org|wiki|moc|chunk
+  name          TEXT NOT NULL,
+  canonical_key TEXT NOT NULL,                 -- dedup key, normalized (lowercased)
+  aliases       TEXT[] NOT NULL DEFAULT '{}',  -- Obsidian-style alias resolution
+  summary       TEXT,
+  embedding     vector(768),                   -- gemini-embedding-001; enables semantic edges
+  external_kind TEXT,                           -- 'contact'|'wiki'|'memory_chunk'|'user_model'|null
+  external_ref  TEXT,                           -- contacts.id | wiki_articles.path | memory_chunks.id | …
+  attrs         JSONB NOT NULL DEFAULT '{}',
+  source_ids    TEXT[] NOT NULL DEFAULT '{}',  -- provenance: memory_chunk ids that created this node
+  confidence    REAL NOT NULL DEFAULT 0.5,
+  user_id       TEXT NOT NULL DEFAULT 'local', -- per-person scoping (RLS-ready)
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (user_id, kind, canonical_key)
+);
+CREATE INDEX IF NOT EXISTS idx_kg_nodes_kind     ON kg_nodes(kind);
+CREATE INDEX IF NOT EXISTS idx_kg_nodes_external  ON kg_nodes(external_kind, external_ref);
+CREATE INDEX IF NOT EXISTS idx_kg_nodes_trgm      ON kg_nodes USING gin (name gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS idx_kg_nodes_attrs     ON kg_nodes USING gin(attrs);
+CREATE INDEX IF NOT EXISTS idx_kg_nodes_vec_hnsw  ON kg_nodes USING hnsw (embedding vector_cosine_ops);
+CREATE INDEX IF NOT EXISTS idx_kg_nodes_user      ON kg_nodes(user_id);
+
+CREATE TABLE IF NOT EXISTS kg_edges (
+  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  src_id        UUID NOT NULL REFERENCES kg_nodes(id) ON DELETE CASCADE,
+  dst_id        UUID NOT NULL REFERENCES kg_nodes(id) ON DELETE CASCADE,
+  rel_type      TEXT NOT NULL,                 -- works_at|member_of|mentions|links_to|part_of|related_to|derived_from|contradicts|prefers|decided|scheduled_with|semantic_sibling|...
+  fact          TEXT,                           -- natural-language assertion (fact-edges)
+  origin        TEXT NOT NULL DEFAULT 'explicit', -- explicit|frontmatter|body|mentions|inferred|semantic|manual
+  -- writing node, for scoped reconciliation (gbrain). nil-UUID = "none" so the
+  -- plain UNIQUE below works without PG15 NULLS NOT DISTINCT.
+  origin_node   UUID NOT NULL DEFAULT '00000000-0000-0000-0000-000000000000',
+  weight        REAL NOT NULL DEFAULT 1.0,     -- cosine score for semantic edges
+  valid_at      TIMESTAMPTZ NOT NULL DEFAULT now(),  -- event timeline: when true in the world
+  invalid_at    TIMESTAMPTZ,                    -- NULL = currently true; set on contradiction
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),  -- transaction timeline: when system learned it
+  expired_at    TIMESTAMPTZ,                    -- when the system retracted it
+  source_ids    TEXT[] NOT NULL DEFAULT '{}',
+  attrs         JSONB NOT NULL DEFAULT '{}',
+  confidence    REAL NOT NULL DEFAULT 0.5,
+  user_id       TEXT NOT NULL DEFAULT 'local',
+  UNIQUE (user_id, src_id, dst_id, rel_type, origin, origin_node)
+);
+CREATE INDEX IF NOT EXISTS idx_kg_edges_src    ON kg_edges(src_id, rel_type);
+CREATE INDEX IF NOT EXISTS idx_kg_edges_dst    ON kg_edges(dst_id, rel_type);
+CREATE INDEX IF NOT EXISTS idx_kg_edges_live   ON kg_edges(src_id, rel_type) WHERE invalid_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_kg_edges_origin ON kg_edges(origin_node, origin);
+CREATE INDEX IF NOT EXISTS idx_kg_edges_attrs  ON kg_edges USING gin(attrs);
+CREATE INDEX IF NOT EXISTS idx_kg_edges_user   ON kg_edges(user_id);
+
 -- ── Repair: un-double-encode integrations JSONB ──────────────────────────────
 -- Earlier code wrote integrations.config / .metadata via JSON.stringify(...),
 -- which the postgres-js driver re-encoded into a json *string* scalar

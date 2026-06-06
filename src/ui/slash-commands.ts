@@ -45,6 +45,7 @@ export const SLASH_COMMANDS = [
   { name: "twin-test", desc: "Adversarial test -- can the agent write like you?" },
   { name: "dna", desc: "Export/import your personality DNA" },
   { name: "wiki", desc: "Compile or browse the knowledge wiki" },
+  { name: "graph", desc: "Browse the knowledge graph (entities + relationships)" },
   { name: "quit", desc: "Exit nomos" },
 ] as const;
 
@@ -203,6 +204,8 @@ export async function dispatchSlashCommand(
         output: "",
         passthrough: `Knowledge wiki: ${args.join(" ") || "show status and list articles"}. Use the wiki tools.`,
       };
+    case "graph":
+      return { output: await cmdGraph(args) };
     case "undo-files":
       return { output: cmdUndoFiles() };
     default:
@@ -551,6 +554,78 @@ async function cmdSkills(args: string[]): Promise<string> {
   }
 
   return chalk.yellow("Usage: /skills  |  /skills info <name>");
+}
+
+async function cmdGraph(args: string[]): Promise<string> {
+  const query = args.join(" ").trim();
+  try {
+    const { searchNodes, neighborhood, getProjection } = await import("../memory/graph.ts");
+    const { LOCAL_TENANT } = await import("../auth/tenant-context.ts");
+
+    // No query (or `stats`): show a summary of the whole graph.
+    if (!query || query === "stats") {
+      const proj = await getProjection(LOCAL_TENANT, { limit: 5000 });
+      if (proj.nodes.length === 0) {
+        return chalk.dim("Knowledge graph is empty. Run `nomos brain backfill` to seed it.");
+      }
+      const byKind = new Map<string, number>();
+      for (const n of proj.nodes) byKind.set(n.kind, (byKind.get(n.kind) ?? 0) + 1);
+      const lines = [
+        chalk.bold(`Knowledge graph — ${proj.nodes.length} nodes, ${proj.edges.length} edges`),
+      ];
+      for (const [k, c] of [...byKind.entries()].sort((a, b) => b[1] - a[1])) {
+        lines.push(chalk.dim(`  ${k.padEnd(10)} ${c}`));
+      }
+      lines.push("");
+      lines.push(chalk.dim("Browse an entity:  /graph <name>"));
+      lines.push(chalk.dim("Full view:         Settings UI → Knowledge Graph (/admin/graph)"));
+      return lines.join("\n");
+    }
+
+    // Query: resolve an entity and render its local graph (ego-network).
+    const matches = await searchNodes(LOCAL_TENANT, query, { limit: 5 });
+    if (matches.length === 0) return chalk.dim(`No entity matching "${query}".`);
+    const top = matches[0]!;
+    const sub = await neighborhood(LOCAL_TENANT, top.id, { depth: 1, limit: 100 });
+    const nameById = new Map(sub.nodes.map((n) => [n.id, n.name]));
+
+    const lines = [chalk.bold(top.name) + chalk.dim(` [${top.kind}]`)];
+    if (top.summary) lines.push(chalk.dim(`  ${top.summary}`));
+
+    const outgoing = sub.edges.filter((e) => e.srcId === top.id);
+    const incoming = sub.edges.filter((e) => e.dstId === top.id);
+    if (outgoing.length) {
+      lines.push(chalk.bold("\n  → outgoing"));
+      for (const e of outgoing) {
+        lines.push(
+          `    ${chalk.cyan(e.relType.replace(/_/g, " "))} ${nameById.get(e.dstId) ?? "?"}`,
+        );
+      }
+    }
+    if (incoming.length) {
+      lines.push(chalk.bold("\n  ← incoming"));
+      for (const e of incoming) {
+        lines.push(
+          `    ${nameById.get(e.srcId) ?? "?"} ${chalk.cyan(e.relType.replace(/_/g, " "))}`,
+        );
+      }
+    }
+    if (!outgoing.length && !incoming.length) lines.push(chalk.dim("  (no relationships yet)"));
+    if (matches.length > 1) {
+      lines.push(
+        chalk.dim(
+          `\n  other matches: ${matches
+            .slice(1)
+            .map((m) => m.name)
+            .join(", ")}`,
+        ),
+      );
+    }
+    return lines.join("\n");
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return chalk.red(`Graph failed: ${message}`);
+  }
 }
 
 async function cmdMemory(ctx: CommandContext, args: string[]): Promise<string> {

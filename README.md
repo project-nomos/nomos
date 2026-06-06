@@ -427,6 +427,23 @@ See [docs/knowledge-wiki.md](docs/knowledge-wiki.md) for full details.
 </details>
 
 <details>
+<summary><strong>Knowledge Graph</strong></summary>
+
+A typed, bitemporal knowledge graph layered over vector memory. People, projects, topics, and the relationships between them become first-class **nodes** and **edges** the agent can traverse — so it answers "who do I know at Acme, and what's pending with them?" in one multi-hop query instead of a fuzzy text search.
+
+The graph fills itself from conversations with **zero extra LLM calls** (relation types come from verb patterns; a quality gate rejects junk before storage) plus your existing contacts and wiki. Facts are **bitemporal** — when something changes, the old edge is invalidated, not deleted, so you can ask "what was true before?". The agent queries it through MCP tools (`graph_search`, `graph_neighbors`, `graph_path`, `graph_history`), and there's an Obsidian-style force-directed graph view at `/admin/graph` plus JSON Canvas export.
+
+```bash
+nomos brain backfill     # seed from contacts + wiki
+nomos brain stats        # node/edge counts
+/graph alice             # (in the REPL) a node's local graph
+```
+
+See [docs/knowledge-graph.md](docs/knowledge-graph.md) for full details.
+
+</details>
+
+<details>
 <summary><strong>Theory of Mind</strong></summary>
 
 A hybrid per-session engine that models the user's mental state in real time so the agent can adapt its response style.

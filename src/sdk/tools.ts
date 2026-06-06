@@ -21,6 +21,31 @@ import {
   browserSnapshot,
   closeActivePage,
 } from "./browser.ts";
+import type { Subgraph } from "../memory/graph.ts";
+
+/** Render a knowledge-graph subgraph as readable text for the agent. */
+function formatSubgraph(sub: Subgraph): string {
+  if (sub.nodes.length === 0) return "No matching nodes in the knowledge graph.";
+  const nameById = new Map(sub.nodes.map((n) => [n.id, n.name]));
+  const nodeLines = sub.nodes.map(
+    (n) =>
+      `• ${n.name} [${n.kind}]${n.aliases.length ? ` (aka ${n.aliases.join(", ")})` : ""} — ${n.id.slice(0, 8)}`,
+  );
+  const edgeLines = sub.edges.map((e) => {
+    const s = nameById.get(e.srcId) ?? e.srcId.slice(0, 8);
+    const d = nameById.get(e.dstId) ?? e.dstId.slice(0, 8);
+    const f = e.fact ? ` — "${e.fact}"` : "";
+    return `  ${s} —[${e.relType}]→ ${d}${f}`;
+  });
+  return [
+    `Nodes (${sub.nodes.length}):`,
+    ...nodeLines,
+    edgeLines.length ? `\nEdges (${sub.edges.length}):` : "",
+    ...edgeLines,
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
 
 /**
  * Creates an in-process MCP server that exposes memory tools to the agent.
@@ -1915,12 +1940,269 @@ export function createMemoryMcpServer(): McpSdkServerConfigWithInstance {
     },
   );
 
+  // ── Knowledge Graph (BRAIN) Tools ──
+
+  const graphSearchTool = tool(
+    "graph_search",
+    "Resolve a person, project, topic, or other entity by name in the knowledge graph and return it with its immediate (1-hop) relationships. Use this FIRST when a question is about how things/people connect (e.g. 'who do I know at Acme', 'what is project X about'), before falling back to memory_search.",
+    {
+      query: z
+        .string()
+        .describe("Entity name or phrase to resolve (e.g. 'Alice', 'Acme', 'the launch plan')"),
+      limit: z.number().int().min(1).max(20).optional().describe("Max matching nodes (default: 5)"),
+    },
+    async (args) => {
+      try {
+        const { searchNodes, neighborhood } = await import("../memory/graph.ts");
+        const { LOCAL_TENANT } = await import("../auth/tenant-context.ts");
+        const matches = await searchNodes(LOCAL_TENANT, args.query, { limit: args.limit ?? 5 });
+        if (matches.length === 0) {
+          return {
+            content: [
+              { type: "text", text: `No entity matching "${args.query}" in the knowledge graph.` },
+            ],
+          };
+        }
+        // Expand the single best match with its 1-hop neighborhood for context.
+        const top = matches[0]!;
+        const sub = await neighborhood(LOCAL_TENANT, top.id, { depth: 1, limit: 50 });
+        const others =
+          matches.length > 1
+            ? `\n\nOther matches: ${matches
+                .slice(1)
+                .map((m) => `${m.name} [${m.kind}] (${m.id.slice(0, 8)})`)
+                .join(", ")}`
+            : "";
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Best match: ${top.name} [${top.kind}] (${top.id.slice(0, 8)})\n\n${formatSubgraph(sub)}${others}`,
+            },
+          ],
+        };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return {
+          content: [{ type: "text", text: `graph_search failed: ${message}` }],
+          isError: true,
+        };
+      }
+    },
+    { annotations: { readOnlyHint: true } },
+  );
+
+  const graphNeighborsTool = tool(
+    "graph_neighbors",
+    "Get the local subgraph (ego-network) around a known node: everything within N hops, optionally filtered by relationship type. This is the core relationship-recall tool — use it to assemble context about a person/project/topic once you have its node id (from graph_search).",
+    {
+      node_id: z.string().describe("The node id (UUID, full or first 8 chars) to expand around"),
+      depth: z
+        .number()
+        .int()
+        .min(1)
+        .max(3)
+        .optional()
+        .describe("Hops to traverse, 1-3 (default: 2)"),
+      rel_types: z
+        .array(z.string())
+        .optional()
+        .describe("Only follow these relationship types (e.g. ['works_at','member_of'])"),
+      direction: z
+        .enum(["in", "out", "both"])
+        .optional()
+        .describe("Edge direction to follow (default: both)"),
+      valid_only: z
+        .boolean()
+        .optional()
+        .describe(
+          "Only currently-true edges (default: true). Set false to include superseded history.",
+        ),
+      as_of: z
+        .string()
+        .optional()
+        .describe(
+          "Time-travel: ISO date/timestamp to see what was true THEN ('what did I believe on 2026-03-01'). Overrides valid_only.",
+        ),
+    },
+    async (args) => {
+      try {
+        const { neighborhood, getNode } = await import("../memory/graph.ts");
+        const { LOCAL_TENANT } = await import("../auth/tenant-context.ts");
+        const nodeId = args.node_id;
+        const node = await getNode(LOCAL_TENANT, nodeId);
+        if (!node) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: `No node with id ${nodeId}. Use graph_search to find the id first.`,
+              },
+            ],
+            isError: true,
+          };
+        }
+        const asOf = args.as_of ? new Date(args.as_of) : undefined;
+        const sub = await neighborhood(LOCAL_TENANT, nodeId, {
+          depth: args.depth ?? 2,
+          relTypes: args.rel_types,
+          direction: args.direction ?? "both",
+          validOnly: args.valid_only ?? true,
+          asOf: asOf && !isNaN(asOf.getTime()) ? asOf : undefined,
+        });
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Local graph around ${node.name} [${node.kind}]:\n\n${formatSubgraph(sub)}`,
+            },
+          ],
+        };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return {
+          content: [{ type: "text", text: `graph_neighbors failed: ${message}` }],
+          isError: true,
+        };
+      }
+    },
+    { annotations: { readOnlyHint: true } },
+  );
+
+  const graphPathTool = tool(
+    "graph_path",
+    "Find the shortest typed path between two entities in the knowledge graph ('how is A connected to B'). Returns the chain of relationships, or reports no connection within the search depth.",
+    {
+      from_id: z.string().describe("Source node id (UUID)"),
+      to_id: z.string().describe("Target node id (UUID)"),
+      max_depth: z
+        .number()
+        .int()
+        .min(1)
+        .max(5)
+        .optional()
+        .describe("Max hops to search (default: 4)"),
+    },
+    async (args) => {
+      try {
+        const { shortestPath } = await import("../memory/graph.ts");
+        const { LOCAL_TENANT } = await import("../auth/tenant-context.ts");
+        const path = await shortestPath(LOCAL_TENANT, args.from_id, args.to_id, {
+          maxDepth: args.max_depth ?? 4,
+        });
+        if (!path) {
+          return {
+            content: [{ type: "text", text: "No connecting path found within the search depth." }],
+          };
+        }
+        return { content: [{ type: "text", text: formatSubgraph(path) }] };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return {
+          content: [{ type: "text", text: `graph_path failed: ${message}` }],
+          isError: true,
+        };
+      }
+    },
+    { annotations: { readOnlyHint: true } },
+  );
+
+  const graphHistoryTool = tool(
+    "graph_history",
+    "Show how a single-valued relationship changed over time (e.g. where a person has worked). Returns the supersession chain oldest→newest; the last entry with no end date is the current value. Use to answer 'has X changed' / 'what was true before'.",
+    {
+      node_id: z.string().describe("Source node id (UUID)"),
+      rel_type: z
+        .string()
+        .describe("Relationship to trace (e.g. works_at, located_in, reports_to)"),
+    },
+    async (args) => {
+      try {
+        const { getTrajectory } = await import("../memory/graph.ts");
+        const { LOCAL_TENANT } = await import("../auth/tenant-context.ts");
+        const edges = await getTrajectory(LOCAL_TENANT, args.node_id, args.rel_type);
+        if (edges.length === 0) {
+          return {
+            content: [{ type: "text", text: `No '${args.rel_type}' history for that node.` }],
+          };
+        }
+        const lines = edges.map((e) => {
+          const from = e.validAt instanceof Date ? e.validAt.toISOString().slice(0, 10) : "?";
+          const to = e.invalidAt ? (e.invalidAt as Date).toISOString().slice(0, 10) : "present";
+          const status = e.invalidAt ? "" : " (current)";
+          return `${from} → ${to}: ${e.fact ?? e.relType}${status}`;
+        });
+        return { content: [{ type: "text", text: lines.join("\n") }] };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return {
+          content: [{ type: "text", text: `graph_history failed: ${message}` }],
+          isError: true,
+        };
+      }
+    },
+    { annotations: { readOnlyHint: true } },
+  );
+
+  const graphUpsertEdgeTool = tool(
+    "graph_upsert_edge",
+    "Record a relationship between two existing nodes in the knowledge graph (e.g. mark that a person works_at an org). Use sparingly to curate the brain when you learn a concrete, durable relationship. Both node ids must already exist (resolve them with graph_search).",
+    {
+      src_id: z.string().describe("Source node id (UUID)"),
+      dst_id: z.string().describe("Destination node id (UUID)"),
+      rel_type: z
+        .string()
+        .describe(
+          "Relationship type, e.g. works_at, member_of, related_to, prefers, scheduled_with",
+        ),
+      fact: z
+        .string()
+        .optional()
+        .describe("Optional natural-language statement of the relationship"),
+    },
+    async (args) => {
+      try {
+        const { upsertEdge } = await import("../memory/graph.ts");
+        const { LOCAL_TENANT } = await import("../auth/tenant-context.ts");
+        const id = await upsertEdge(LOCAL_TENANT, {
+          srcId: args.src_id,
+          dstId: args.dst_id,
+          relType: args.rel_type,
+          fact: args.fact ?? null,
+          origin: "manual",
+          confidence: 0.8,
+        });
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Edge recorded: ${args.src_id.slice(0, 8)} —[${args.rel_type}]→ ${args.dst_id.slice(0, 8)} (${id.slice(0, 8)})`,
+            },
+          ],
+        };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return {
+          content: [{ type: "text", text: `graph_upsert_edge failed: ${message}` }],
+          isError: true,
+        };
+      }
+    },
+    { annotations: { readOnlyHint: false } },
+  );
+
   return createSdkMcpServer({
     name: "nomos-memory",
     version: "0.1.0",
     tools: [
       memorySearchTool,
       userModelRecallTool,
+      // Knowledge graph (BRAIN)
+      graphSearchTool,
+      graphNeighborsTool,
+      graphPathTool,
+      graphHistoryTool,
+      graphUpsertEdgeTool,
       bootstrapCompleteTool,
       browserFetchTool,
       generateImageTool,
