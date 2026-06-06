@@ -2,26 +2,43 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { parseFrontmatter } from "./frontmatter.ts";
-import { FEATURES } from "../config/mode.ts";
+import { FEATURES, isHosted } from "../config/mode.ts";
 import type { Skill } from "./types.ts";
 
 const MAX_SKILL_FILE_BYTES = 256_000;
 
 /**
  * Load all skills from multiple source directories.
- * Precedence (highest wins): project > personal > bundled
+ * Precedence (highest wins): project > personal > external > bundled
  *
- * In hosted mode, only bundled skills are loaded — `~/.nomos/skills/` and
- * `./skills/` paths are ignored so customers can't inject arbitrary skills
- * into a multi-tenant container.
+ * In hosted mode:
+ *   - bundled skills that need a CLI binary (`requires.bins`, e.g. gws-*) are
+ *     dropped — bash/CLI is disabled in hosted, so they can't run and only
+ *     mislead the agent. Their MCP-based replacements live in NOMOS_SKILLS_DIR.
+ *   - `~/.nomos/skills/` and `./skills/` (customer-injectable) are ignored so a
+ *     tenant can't inject arbitrary skills into a multi-tenant container.
+ *
+ * NOMOS_SKILLS_DIR is an operator-provided (deployment env, not customer)
+ * directory of extra skills — used in hosted to ship the Google MCP skills.
  */
 export function loadSkills(): Skill[] {
   const bundledDir = resolveBundledSkillsDir();
   const merged = new Map<string, Skill>();
+  const hosted = isHosted();
 
-  // Bundled skills always load
+  // Bundled skills. In hosted, skip CLI-binary skills (the gws-* family).
   if (bundledDir) {
     for (const skill of loadSkillsFromDir(bundledDir, "bundled")) {
+      if (hosted && skillRequiresCli(skill)) continue;
+      merged.set(skill.name, skill);
+    }
+  }
+
+  // Operator-provided external skills (trusted: set via deployment env, not by
+  // the customer). Overrides bundled on name collision. Loads in any mode if set.
+  const externalDir = process.env.NOMOS_SKILLS_DIR?.trim();
+  if (externalDir) {
+    for (const skill of loadSkillsFromDir(externalDir, "external")) {
       merged.set(skill.name, skill);
     }
   }
@@ -41,6 +58,17 @@ export function loadSkills(): Skill[] {
   }
 
   return Array.from(merged.values()).sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/**
+ * A skill that shells out to a CLI binary — can't run in hosted (no bash).
+ * Detected via top-level `requires.bins`, or the gws-* family (whose binary
+ * requirement is nested under metadata.openclaw, which the lightweight
+ * frontmatter parser doesn't surface).
+ */
+function skillRequiresCli(skill: Skill): boolean {
+  if (skill.requires?.bins && skill.requires.bins.length > 0) return true;
+  return skill.name.startsWith("gws-");
 }
 
 export function loadSkillsFromDir(dir: string, source: string): Skill[] {

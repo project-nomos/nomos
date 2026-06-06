@@ -1,8 +1,8 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { loadSkillsFromDir, formatSkillsForPrompt } from "./loader.ts";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { loadSkills, loadSkillsFromDir, formatSkillsForPrompt } from "./loader.ts";
 import type { Skill } from "./types.ts";
 
 describe("loadSkillsFromDir", () => {
@@ -92,6 +92,41 @@ Do the thing.`,
 
     expect(skills).toHaveLength(3);
     expect(skills.map((s) => s.name).sort()).toEqual(["alpha", "beta", "gamma"]);
+  });
+});
+
+describe("loadSkills — mode gating + external dir", () => {
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("loads gws-* (CLI) skills in power-user mode", () => {
+    vi.stubEnv("NOMOS_MODE", "power_user");
+    const names = loadSkills().map((s) => s.name);
+    expect(names.some((n) => n.startsWith("gws-"))).toBe(true);
+  });
+
+  it("drops gws-* (CLI) skills in hosted mode", () => {
+    vi.stubEnv("NOMOS_MODE", "hosted");
+    const names = loadSkills().map((s) => s.name);
+    expect(names.some((n) => n.startsWith("gws-"))).toBe(false);
+  });
+
+  it("loads operator skills from NOMOS_SKILLS_DIR (hosted)", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ext-skills-"));
+    try {
+      const skillDir = path.join(dir, "google-gmail");
+      fs.mkdirSync(skillDir);
+      fs.writeFileSync(
+        path.join(skillDir, "SKILL.md"),
+        `---\nname: google-gmail\ndescription: "Gmail via MCP"\n---\n\n# Gmail`,
+      );
+      vi.stubEnv("NOMOS_MODE", "hosted");
+      vi.stubEnv("NOMOS_SKILLS_DIR", dir);
+      const skills = loadSkills();
+      const gmail = skills.find((s) => s.name === "google-gmail");
+      expect(gmail?.source).toBe("external");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 
