@@ -32,6 +32,8 @@ export interface SessionsTable {
   input_tokens: Generated<number>;
   output_tokens: Generated<number>;
   turn_count: Generated<number>;
+  // Phase 4b: per-user scoping
+  user_id: Generated<string>;
 }
 
 export interface TranscriptMessagesTable {
@@ -142,9 +144,20 @@ export interface IntegrationsTable {
   id: Generated<string>;
   name: string;
   enabled: Generated<boolean>;
-  config: ColumnType<Record<string, unknown>, string | undefined, string>;
+  // jsonb: pass objects on write. The postgres-js driver serializes them to
+  // jsonb once; a pre-stringified string would double-encode into a json string
+  // scalar (jsonb_typeof = 'string'), breaking config->>'key' reads.
+  config: ColumnType<
+    Record<string, unknown>,
+    Record<string, unknown> | undefined,
+    Record<string, unknown>
+  >;
   secrets: Generated<string>;
-  metadata: ColumnType<Record<string, unknown>, string | undefined, string>;
+  metadata: ColumnType<
+    Record<string, unknown>,
+    Record<string, unknown> | undefined,
+    Record<string, unknown>
+  >;
   created_at: Generated<Date>;
   updated_at: Generated<Date>;
 }
@@ -248,6 +261,48 @@ export interface CommitmentsTable {
   updated_at: Generated<Date>;
 }
 
+export interface AutoDreamStateTable {
+  id: Generated<number>;
+  last_run_at: ColumnType<Date | null, Date | string | null, Date | string | null>;
+  last_turn_count: Generated<number>;
+  total_runs: Generated<number>;
+  state_json: ColumnType<Record<string, unknown> | null, string | null, string | null>;
+  updated_at: Generated<Date>;
+}
+
+export interface MagicDocStateTable {
+  file_path: string;
+  last_updated_at: Generated<Date>;
+  last_content_hash: string | null;
+  state_json: ColumnType<Record<string, unknown> | null, string | null, string | null>;
+}
+
+export interface MobileDevicesTable {
+  id: Generated<string>;
+  user_id: string;
+  expo_push_token: string;
+  platform: "ios" | "android";
+  app_version: string | null;
+  last_seen_at: Generated<Date>;
+  created_at: Generated<Date>;
+}
+
+export interface CateInboundTable {
+  id: Generated<string>;
+  user_id: Generated<string>;
+  from_did: string;
+  from_label: string | null;
+  trust_tier: Generated<"verified" | "bonded" | "friend" | "blocked" | "unknown">;
+  subject: string | null;
+  body: string | null;
+  envelope: ColumnType<Record<string, unknown>, string, string>;
+  bond_amount: ColumnType<string | null, string | null, string | null>;
+  bond_currency: string | null;
+  status: Generated<"pending" | "approved" | "denied" | "expired">;
+  created_at: Generated<Date>;
+  acted_at: ColumnType<Date | null, Date | null, Date | null>;
+}
+
 export interface ManagedFilesTable {
   path: string;
   content: string;
@@ -280,6 +335,10 @@ export interface Database {
   contact_identities: ContactIdentitiesTable;
   commitments: CommitmentsTable;
   managed_files: ManagedFilesTable;
+  auto_dream_state: AutoDreamStateTable;
+  magic_doc_state: MagicDocStateTable;
+  mobile_devices: MobileDevicesTable;
+  cate_inbound: CateInboundTable;
 }
 
 // ---------------------------------------------------------------------------

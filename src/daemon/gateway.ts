@@ -35,6 +35,7 @@ import { IngestScheduler } from "../ingest/scheduler.ts";
 import { EmailAdapter } from "./channels/email.ts";
 import { observeMessage } from "./observer.ts";
 import { registerProactiveJobs } from "../proactive/scheduler.ts";
+import { FEATURES } from "../config/mode.ts";
 import {
   initCATEIntegration,
   stopCATEIntegration,
@@ -705,8 +706,18 @@ export class Gateway {
       return;
     }
 
+    // Subscription mode uses the Claude Max/Pro OAuth credentials (macOS
+    // keychain / ~/.claude), not an API key — so an absent ANTHROPIC_API_KEY
+    // is expected and not a failure.
+    if (process.env.NOMOS_USE_SUBSCRIPTION === "true") {
+      log.info("Using Claude subscription (Max/Pro) — skipping API key check");
+      return;
+    }
+
     if (!apiKey) {
-      log.warn("⚠ No ANTHROPIC_API_KEY set — LLM calls will fail");
+      log.warn(
+        "⚠ No ANTHROPIC_API_KEY set — set one, enable NOMOS_USE_SUBSCRIPTION, or use Vertex",
+      );
       return;
     }
 
@@ -994,8 +1005,13 @@ export class Gateway {
         }
 
         // Slack bulk ingestion retired -- agent learns from conversations + draft edits
-      } else if (process.env.SLACK_USER_TOKEN && process.env.SLACK_APP_TOKEN) {
-        // Backwards compat: single env var, no DB rows
+      } else if (
+        process.env.SLACK_USER_TOKEN &&
+        process.env.SLACK_APP_TOKEN &&
+        FEATURES.byoChannelTokens()
+      ) {
+        // Backwards compat: single env var, no DB rows. BYO-only — in hosted
+        // mode, tokens must come from DB rows deposited by the OAuth proxy.
         const adapter = new SlackUserAdapter({
           userToken: process.env.SLACK_USER_TOKEN,
           appToken: process.env.SLACK_APP_TOKEN,
@@ -1013,11 +1029,17 @@ export class Gateway {
 
     // Bot-mode SlackAdapter: only start if NOT using Socket Mode for user mode.
     // Two Socket Mode connections on the same xapp- token compete for events.
-    if (process.env.SLACK_BOT_TOKEN && process.env.SLACK_APP_TOKEN && !usingSocketMode) {
+    // Hosted mode skips env-var paths — bot tokens come via OAuth proxy.
+    if (
+      process.env.SLACK_BOT_TOKEN &&
+      process.env.SLACK_APP_TOKEN &&
+      !usingSocketMode &&
+      FEATURES.byoChannelTokens()
+    ) {
       this.channelManager.register(new SlackAdapter(enqueue, this.draftManager));
     }
 
-    if (process.env.DISCORD_BOT_TOKEN) {
+    if (process.env.DISCORD_BOT_TOKEN && FEATURES.byoChannelTokens()) {
       const adapter = new DiscordAdapter({
         onMessage: enqueue,
         draftManager: this.draftManager,
@@ -1036,7 +1058,7 @@ export class Gateway {
       // Discord ingestion removed -- agent learns from conversations, not history
     }
 
-    if (process.env.TELEGRAM_BOT_TOKEN) {
+    if (process.env.TELEGRAM_BOT_TOKEN && FEATURES.byoChannelTokens()) {
       const adapter = new TelegramAdapter({
         onMessage: enqueue,
         draftManager: this.draftManager,
@@ -1086,7 +1108,8 @@ export class Gateway {
         // DB not available
       }
     }
-    if (imessageEnabled && process.platform === "darwin") {
+    // Hosted mode never wires iMessage — Mac-only, requires local `imsg` CLI.
+    if (imessageEnabled && process.platform === "darwin" && FEATURES.iMessageChannel()) {
       const adapter = new IMessageAdapter({
         onMessage: enqueue,
         draftManager: this.draftManager,

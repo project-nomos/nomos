@@ -431,5 +431,201 @@ CREATE TABLE IF NOT EXISTS managed_files (
   hash        TEXT NOT NULL,               -- SHA-256 of content (for change detection)
   updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Per-instance org membership cache (replicated from BA's organization
+-- plugin via webhook). The gRPC interceptor checks this on every call to
+-- confirm the JWT sub is still a member of NOMOS_ORG_ID before letting
+-- the request through. See src/auth/grpc-interceptor.ts.
+CREATE TABLE IF NOT EXISTS org_members (
+  user_id    TEXT PRIMARY KEY,
+  role       TEXT NOT NULL DEFAULT 'member',
+  added_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Phase 4b: zero-trust tenant context. Per-user tables get a user_id column
+-- so query helpers can enforce per-user filtering against the BA-issued
+-- JWT. Single-user (power-user) installs default to 'local' so existing
+-- data keeps working without backfill.
+DO $$
+BEGIN
+  -- sessions
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'sessions' AND column_name = 'user_id'
+  ) THEN
+    ALTER TABLE sessions ADD COLUMN user_id TEXT NOT NULL DEFAULT 'local';
+    CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id, updated_at DESC);
+  END IF;
+
+  -- transcript_messages (already FKs to sessions; user_id denormalized for
+  -- per-user indexing without a join)
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'transcript_messages' AND column_name = 'user_id'
+  ) THEN
+    ALTER TABLE transcript_messages ADD COLUMN user_id TEXT NOT NULL DEFAULT 'local';
+    CREATE INDEX IF NOT EXISTS idx_transcript_user ON transcript_messages(user_id, id);
+  END IF;
+
+  -- memory_chunks (already user-scoped semantically; explicit column for RLS)
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'memory_chunks' AND column_name = 'user_id'
+  ) THEN
+    ALTER TABLE memory_chunks ADD COLUMN user_id TEXT NOT NULL DEFAULT 'local';
+    CREATE INDEX IF NOT EXISTS idx_memory_user ON memory_chunks(user_id);
+  END IF;
+
+  -- user_model
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'user_model' AND column_name = 'user_id'
+  ) THEN
+    ALTER TABLE user_model ADD COLUMN user_id TEXT NOT NULL DEFAULT 'local';
+    CREATE INDEX IF NOT EXISTS idx_user_model_user ON user_model(user_id);
+  END IF;
+
+  -- draft_messages
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'draft_messages' AND column_name = 'user_id'
+  ) THEN
+    ALTER TABLE draft_messages ADD COLUMN user_id TEXT NOT NULL DEFAULT 'local';
+    CREATE INDEX IF NOT EXISTS idx_draft_user ON draft_messages(user_id, created_at DESC);
+  END IF;
+
+  -- commitments
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'commitments' AND column_name = 'user_id'
+  ) THEN
+    ALTER TABLE commitments ADD COLUMN user_id TEXT NOT NULL DEFAULT 'local';
+    CREATE INDEX IF NOT EXISTS idx_commitments_user ON commitments(user_id, status);
+  END IF;
+
+  -- contacts (the user's contact list; subjective per family-plan member)
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'contacts' AND column_name = 'user_id'
+  ) THEN
+    ALTER TABLE contacts ADD COLUMN user_id TEXT NOT NULL DEFAULT 'local';
+    CREATE INDEX IF NOT EXISTS idx_contacts_user ON contacts(user_id);
+  END IF;
+
+  -- contact_identities
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'contact_identities' AND column_name = 'user_id'
+  ) THEN
+    ALTER TABLE contact_identities ADD COLUMN user_id TEXT NOT NULL DEFAULT 'local';
+    CREATE INDEX IF NOT EXISTS idx_contact_identities_user ON contact_identities(user_id);
+  END IF;
+
+  -- cron_jobs
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'cron_jobs' AND column_name = 'user_id'
+  ) THEN
+    ALTER TABLE cron_jobs ADD COLUMN user_id TEXT NOT NULL DEFAULT 'local';
+    CREATE INDEX IF NOT EXISTS idx_cron_user ON cron_jobs(user_id, enabled);
+  END IF;
+
+  -- slack_user_tokens
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'slack_user_tokens' AND column_name = 'user_id'
+  ) THEN
+    ALTER TABLE slack_user_tokens ADD COLUMN user_id TEXT NOT NULL DEFAULT 'local';
+  END IF;
+
+  -- google_accounts (note: separate from the OAuth "user_id" column which
+  -- belongs to Google; we name ours owner_user_id to avoid collision).
+  -- This table is created at runtime (not in schema.sql), so guard on its
+  -- existence — a fresh customer database won't have it yet.
+  IF EXISTS (
+    SELECT 1 FROM information_schema.tables WHERE table_name = 'google_accounts'
+  ) AND NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'google_accounts' AND column_name = 'owner_user_id'
+  ) THEN
+    ALTER TABLE google_accounts ADD COLUMN owner_user_id TEXT NOT NULL DEFAULT 'local';
+    CREATE INDEX IF NOT EXISTS idx_google_accounts_owner ON google_accounts(owner_user_id);
+  END IF;
+END $$;
+
+-- Auto-dream consolidation state. Singleton (id=1).
+-- Replaces ~/.nomos/auto-dream/consolidation-state.json.
+CREATE TABLE IF NOT EXISTS auto_dream_state (
+  id              INT PRIMARY KEY DEFAULT 1,
+  last_run_at     TIMESTAMPTZ,
+  last_turn_count INT NOT NULL DEFAULT 0,
+  total_runs      INT NOT NULL DEFAULT 0,
+  state_json      JSONB,
+  updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT auto_dream_state_singleton CHECK (id = 1)
+);
+
+-- Magic-doc per-file update state.
+-- Replaces ~/.nomos/magic-docs-state.json.
+CREATE TABLE IF NOT EXISTS magic_doc_state (
+  file_path        TEXT PRIMARY KEY,
+  last_updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  last_content_hash TEXT,
+  state_json       JSONB
+);
+
+-- Mobile device registry: Expo push tokens per user. The agent writes
+-- pushes here on draft creation, CATE inbound arrival, and commitment
+-- nudges.
+CREATE TABLE IF NOT EXISTS mobile_devices (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id         TEXT NOT NULL,
+  expo_push_token TEXT NOT NULL UNIQUE,
+  platform        TEXT NOT NULL CHECK (platform IN ('ios', 'android')),
+  app_version     TEXT,
+  last_seen_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_mobile_devices_user ON mobile_devices(user_id);
+
+-- CATE inbound queue. Backs the mobile Inbox tab. Every inbound CATE
+-- envelope is appended here with a trust-tier classification; the user
+-- approves/denies/blocks via the mobile app.
+CREATE TABLE IF NOT EXISTS cate_inbound (
+  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id       TEXT NOT NULL DEFAULT 'local',
+  from_did      TEXT NOT NULL,
+  from_label    TEXT,
+  trust_tier    TEXT NOT NULL DEFAULT 'unknown'
+                CHECK (trust_tier IN ('verified', 'bonded', 'friend', 'blocked', 'unknown')),
+  subject       TEXT,
+  body          TEXT,
+  envelope      JSONB NOT NULL,
+  bond_amount   NUMERIC,
+  bond_currency TEXT,
+  status        TEXT NOT NULL DEFAULT 'pending'
+                CHECK (status IN ('pending', 'approved', 'denied', 'expired')),
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  acted_at      TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_cate_inbound_user_status
+  ON cate_inbound(user_id, status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_cate_inbound_from_did ON cate_inbound(from_did);
+
+-- ── Repair: un-double-encode integrations JSONB ──────────────────────────────
+-- Earlier code wrote integrations.config / .metadata via JSON.stringify(...),
+-- which the postgres-js driver re-encoded into a json *string* scalar
+-- (jsonb_typeof = 'string'). That made config->>'key' read back NULL — e.g. a
+-- connected Google account's account_email came through empty, so its MCP was
+-- skipped as "no valid token". Unwrap any string-encoded rows back to objects.
+-- Idempotent: a no-op once every row is a json object.
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'integrations') THEN
+    UPDATE integrations SET config = (config #>> '{}')::jsonb
+      WHERE jsonb_typeof(config) = 'string';
+    UPDATE integrations SET metadata = (metadata #>> '{}')::jsonb
+      WHERE jsonb_typeof(metadata) = 'string';
+  END IF;
+END $$;
   `.trim();
 }

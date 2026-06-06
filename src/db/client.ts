@@ -8,7 +8,9 @@ let kyselyInstance: Kysely<Database> | null = null;
 
 function getSqlInstance(): postgres.Sql {
   if (!sqlInstance) {
-    // Default to local Postgres with `nomos` db (matches loadEnvConfig fallback).
+    // Each instance connects to its own database (database-per-customer in
+    // hosted mode; the local `nomos` db in power-user mode) and uses the
+    // default `public` schema.
     const url = process.env.DATABASE_URL ?? "postgresql://localhost:5432/nomos";
     sqlInstance = postgres(url, {
       max: 10,

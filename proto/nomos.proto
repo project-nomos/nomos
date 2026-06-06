@@ -107,3 +107,312 @@ message DraftItem {
 message PongResponse {
   int64 timestamp = 1;
 }
+
+// ── Mobile API ──
+// Surface for the Expo mobile app. Five tabs map to handler groups:
+//   Chat / Inbox / Skills / Earnings / Settings.
+//
+// All calls require a Bearer JWT issued by the central Better Auth server.
+// Validation + tenant context resolution happens in the gRPC interceptor;
+// handlers receive the authenticated TenantContext via call metadata.
+
+service MobileApi {
+  // Chat tab
+  rpc Chat (MChatRequest) returns (stream MChatEvent);
+  rpc GetMessages (MGetMessagesRequest) returns (MGetMessagesResponse);
+  rpc ApproveDraft (MDraftAction) returns (MDraftActionResponse);
+  rpc RejectDraft (MDraftAction) returns (MDraftActionResponse);
+  rpc ApproveDraftWithEdit (MDraftActionWithEdit) returns (MDraftActionResponse);
+
+  // Inbox tab (CATE inbound queue — Phase 5b)
+  rpc ListInbox (MInboxRequest) returns (MInboxResponse);
+  rpc GetCateEnvelope (MEnvelopeRequest) returns (MCateEnvelope);
+  rpc ActOnInboxItem (MInboxActionRequest) returns (MInboxActionResponse);
+
+  // Skills tab
+  rpc ListSkills (Empty) returns (MSkillsResponse);
+  rpc ToggleSkill (MSkillToggleRequest) returns (MSkillToggleResponse);
+
+  // Earnings tab
+  rpc GetEarnings (MEarningsRequest) returns (MEarningsResponse);
+
+  // Settings tab
+  rpc GetSettings (Empty) returns (MSettingsResponse);
+  rpc UpdateConsent (MConsentRequest) returns (MAck);
+  rpc UpdateTrustTier (MTrustTierRequest) returns (MAck);
+  rpc UpdatePermission (MPermissionRequest) returns (MAck);
+  rpc ListIntegrations (Empty) returns (MIntegrationsResponse);
+  rpc StartConnectIntegration (MStartConnectRequest) returns (MStartConnectResponse);
+  rpc ConnectGoogleAccount (MConnectGoogleRequest) returns (MAck);
+  rpc SetGoogleSend (MSetGoogleSendRequest) returns (MAck);
+  rpc DisconnectIntegration (MDisconnectRequest) returns (MAck);
+
+  // Push notifications
+  rpc RegisterDevice (MDeviceRegister) returns (MAck);
+  rpc UnregisterDevice (MDeviceUnregister) returns (MAck);
+}
+
+message MAck {
+  bool success = 1;
+  string message = 2;
+}
+
+// Chat
+message MChatRequest {
+  string content = 1;
+  string session_key = 2;
+}
+
+message MChatEvent {
+  string type = 1;
+  string json_payload = 2;
+}
+
+message MGetMessagesRequest {
+  string session_key = 1;
+  int32 limit = 2;
+  string before_id = 3;
+}
+
+message MMessage {
+  string id = 1;
+  string role = 2;          // user | agent
+  string content = 3;
+  string created_at = 4;
+}
+
+message MGetMessagesResponse {
+  repeated MMessage messages = 1;
+}
+
+message MDraftAction {
+  string draft_id = 1;
+}
+
+message MDraftActionWithEdit {
+  string draft_id = 1;
+  string edited_text = 2;
+}
+
+message MDraftActionResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+// Inbox
+message MInboxRequest {
+  string status = 1;        // pending | approved | denied | all
+  int32 limit = 2;
+}
+
+message MInboxItem {
+  string id = 1;
+  string from_label = 2;
+  string trust_tier = 3;    // verified | bonded | friend | blocked | unknown
+  string subject = 4;
+  string time = 5;          // human-formatted by client
+  string bond_amount = 6;   // empty if free
+  bool unread = 7;
+  string created_at = 8;
+}
+
+message MInboxResponse {
+  repeated MInboxItem items = 1;
+  int32 blocked_count = 2;
+}
+
+message MEnvelopeRequest {
+  string inbox_id = 1;
+}
+
+message MCateEnvelope {
+  string did = 1;
+  string trust_tier = 2;
+  string intent = 3;
+  string consent_grant = 4;
+  string stamp = 5;
+  string bond_amount = 6;
+  string raw_json = 7;
+}
+
+message MInboxActionRequest {
+  string inbox_id = 1;
+  string action = 2;        // approve | deny | block
+}
+
+message MInboxActionResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+// Skills
+message MSkill {
+  string name = 1;
+  string description = 2;
+  string source = 3;        // bundled | personal | project
+  bool enabled = 4;
+  repeated string certs = 5;
+  string price = 6;
+}
+
+message MSkillsResponse {
+  repeated MSkill skills = 1;
+}
+
+message MSkillToggleRequest {
+  string name = 1;
+  bool enabled = 2;
+}
+
+message MSkillToggleResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+// Earnings
+message MEarningsRequest {
+  string period = 1;        // month | week | all
+}
+
+message MEarningsResponse {
+  // All amounts in USD cents.
+  int64 this_period_cents = 1;
+  int64 bonds_count = 2;
+  int64 avg_bond_cents = 3;
+  int32 accept_rate_pct = 4;
+  // Daily series for sparkline (cents per day, oldest → newest).
+  repeated int64 series_cents = 5;
+}
+
+// Settings
+message MTrustTier {
+  string id = 1;
+  string name = 2;
+  string description = 3;
+  string mode = 4;          // free | blocked | bond
+  string bond_amount = 5;
+}
+
+message MPermission {
+  string id = 1;
+  string label = 2;
+  bool enabled = 3;
+}
+
+message MIntegration {
+  string id = 1;            // for google: the account email (disconnect/toggle key)
+  string label = 2;
+  string icon = 3;
+  bool connected = 4;
+  string account_email = 5;
+  bool send_enabled = 6;    // google: whether the agent may send email
+  string provider = 7;      // google | slack | ...
+}
+
+message MProfile {
+  string name = 1;
+  string plan = 2;
+  int64 message_count = 3;
+  int64 earned_cents = 4;
+  int64 saved_cents = 5;
+}
+
+message MSettingsResponse {
+  MProfile profile = 1;
+  repeated MTrustTier trust_tiers = 2;
+  repeated MPermission permissions = 3;
+  repeated MIntegration integrations = 4;
+}
+
+message MConsentRequest {
+  string platform = 1;
+  string mode = 2;          // always_ask | auto_approve | notify_only
+}
+
+message MTrustTierRequest {
+  string id = 1;
+  string mode = 2;
+  string bond_amount = 3;
+}
+
+message MPermissionRequest {
+  string id = 1;
+  bool enabled = 2;
+}
+
+message MIntegrationsResponse {
+  repeated MIntegration integrations = 1;
+}
+
+message MStartConnectRequest {
+  string provider = 1;      // gmail | calendar | slack | notion | linkedin
+}
+
+message MStartConnectResponse {
+  // URL the client opens in a browser to begin OAuth. For google this is the
+  // daemon-built Google consent URL (state-signed); the callback then relays the
+  // code back via ConnectGoogleAccount.
+  string oauth_url = 1;
+}
+
+message MDisconnectRequest {
+  string integration_id = 1;
+  string account_email = 2;   // google: disconnect by account email (preferred)
+}
+
+// Relay an OAuth authorization code from the (web/mobile) callback to the daemon,
+// which exchanges it for tokens and stores the connected Google account. The
+// connecting user is the JWT subject; `state` is the signed CSRF token.
+message MConnectGoogleRequest {
+  string code = 1;
+  string state = 2;
+}
+
+message MSetGoogleSendRequest {
+  string account_email = 1;
+  bool enabled = 2;
+}
+
+message MDeviceRegister {
+  string expo_push_token = 1;
+  string platform = 2;      // ios | android
+  string app_version = 3;
+}
+
+message MDeviceUnregister {
+  string expo_push_token = 1;
+}
+
+// ── OAuth Deposit ──
+// Used by the central Better Auth server to push OAuth tokens it obtained on
+// the customer's behalf into the customer's nomos instance. The call is
+// authenticated via mTLS (client cert signed by the central CA). Tokens are
+// stored encrypted in the customer's `integrations` / `google_accounts` /
+// `slack_workspaces` tables.
+
+service OAuthDeposit {
+  rpc Deposit (DepositRequest) returns (DepositResponse);
+}
+
+message DepositRequest {
+  // gmail | calendar | drive | slack | notion | ...
+  string provider = 1;
+  // Authenticated user inside the customer's instance (BA user.id).
+  // The instance enforces that this user_id is a member of NOMOS_ORG_ID.
+  string user_id = 2;
+  string access_token = 3;
+  string refresh_token = 4;
+  // Unix seconds.
+  int64 expires_at = 5;
+  // Comma-separated OAuth scopes granted.
+  string scopes = 6;
+  // Provider-specific extras (e.g., {"workspace_id": "T0123", "account_email": "x@y"}).
+  map<string, string> metadata = 7;
+}
+
+message DepositResponse {
+  bool success = 1;
+  string message = 2;
+  // Opaque integration id assigned by the customer instance (for revocation).
+  string integration_id = 3;
+}

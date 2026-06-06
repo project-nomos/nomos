@@ -16,22 +16,16 @@
  */
 
 import { readFile, writeFile, stat } from "node:fs/promises";
-import { join } from "node:path";
-import { homedir } from "node:os";
+import { getKysely } from "../db/client.ts";
+import { createLogger } from "../lib/logger.ts";
+
+const log = createLogger("magic-docs");
 
 /** Marker regex to detect magic doc files. */
 const MAGIC_DOC_MARKER = /<!--\s*MAGIC DOC:\s*(.+?)\s*-->/;
 
 /** Minimum time between updates for the same doc (1 hour). */
 const MIN_UPDATE_INTERVAL_MS = 60 * 60 * 1000;
-
-/** State file tracking last update times. */
-const STATE_FILE = join(homedir(), ".nomos", "magic-docs-state.json");
-
-interface MagicDocState {
-  /** Map of file path → last update timestamp. */
-  lastUpdated: Record<string, string>;
-}
 
 /**
  * Check if a file is a magic doc and extract its title.
@@ -46,8 +40,7 @@ export function detectMagicDoc(content: string): string | null {
  * Check if a magic doc is stale and needs updating.
  */
 export async function isMagicDocStale(filePath: string): Promise<boolean> {
-  const state = await loadState();
-  const lastUpdated = state.lastUpdated[filePath];
+  const lastUpdated = await loadLastUpdated(filePath);
 
   if (!lastUpdated) {
     // Never updated — definitely stale
@@ -108,9 +101,23 @@ Do not wrap in code fences or add explanations.`;
  * Mark a magic doc as updated.
  */
 export async function markMagicDocUpdated(filePath: string): Promise<void> {
-  const state = await loadState();
-  state.lastUpdated[filePath] = new Date().toISOString();
-  await saveState(state);
+  try {
+    const db = getKysely();
+    await db
+      .insertInto("magic_doc_state")
+      .values({
+        file_path: filePath,
+        last_updated_at: new Date(),
+      })
+      .onConflict((oc) =>
+        oc.column("file_path").doUpdateSet({
+          last_updated_at: new Date(),
+        }),
+      )
+      .execute();
+  } catch (err) {
+    log.warn({ err, filePath }, "Failed to mark magic doc updated");
+  }
 }
 
 /**
@@ -132,18 +139,17 @@ export async function writeMagicDoc(filePath: string, newContent: string): Promi
 
 // ── State Management ──
 
-async function loadState(): Promise<MagicDocState> {
+async function loadLastUpdated(filePath: string): Promise<string | undefined> {
   try {
-    const content = await readFile(STATE_FILE, "utf-8");
-    return JSON.parse(content) as MagicDocState;
-  } catch {
-    return { lastUpdated: {} };
+    const db = getKysely();
+    const row = await db
+      .selectFrom("magic_doc_state")
+      .select("last_updated_at")
+      .where("file_path", "=", filePath)
+      .executeTakeFirst();
+    return row?.last_updated_at ? new Date(row.last_updated_at).toISOString() : undefined;
+  } catch (err) {
+    log.warn({ err, filePath }, "Failed to load magic doc state");
+    return undefined;
   }
-}
-
-async function saveState(state: MagicDocState): Promise<void> {
-  const { mkdir: mkdirFs } = await import("node:fs/promises");
-  const { dirname } = await import("node:path");
-  await mkdirFs(dirname(STATE_FILE), { recursive: true });
-  await writeFile(STATE_FILE, JSON.stringify(state, null, 2), "utf-8");
 }

@@ -10,6 +10,14 @@ import type {
 } from "./types.ts";
 import { DEFAULT_PLUGINS } from "./types.ts";
 import { readInstalledManifest } from "./loader.ts";
+import { FEATURES } from "../config/mode.ts";
+
+function refuseInHosted(action: string): never {
+  throw new Error(
+    `Plugin ${action} is not allowed in hosted mode. Bundled plugins are read-only; ` +
+      `request additions via the admin portal.`,
+  );
+}
 
 const PLUGINS_DIR = join(homedir(), ".nomos", "plugins");
 const MANIFEST_PATH = join(PLUGINS_DIR, "installed.json");
@@ -139,6 +147,7 @@ export async function installPlugin(
   name: string,
   marketplace?: string,
 ): Promise<InstalledPluginEntry> {
+  if (!FEATURES.byoPlugins()) refuseInHosted("install");
   const resolved = await resolvePluginInMarketplace(name, marketplace);
   if (!resolved) {
     throw new Error(
@@ -179,6 +188,7 @@ export async function installPlugin(
 }
 
 export async function removePlugin(name: string): Promise<void> {
+  if (!FEATURES.byoPlugins()) refuseInHosted("remove");
   const destDir = join(PLUGINS_DIR, name);
   if (existsSync(destDir)) {
     await rm(destDir, { recursive: true, force: true });
@@ -190,6 +200,9 @@ export async function removePlugin(name: string): Promise<void> {
 }
 
 export async function ensureDefaultPlugins(): Promise<string[]> {
+  // Hosted mode: bundled plugins are baked into the container image and the
+  // marketplaces dir won't exist. Default-install is a no-op.
+  if (!FEATURES.byoPlugins()) return [];
   const marketplaces = await loadKnownMarketplaces();
   if (Object.keys(marketplaces).length === 0) return [];
 

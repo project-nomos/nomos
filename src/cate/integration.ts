@@ -113,6 +113,38 @@ export async function initCATEIntegration(options?: {
         },
         "Received envelope",
       );
+
+      // Append to the inbox queue (lazy import to avoid pulling in DB code
+      // at module init; some tests import CATEIntegration without a DB).
+      try {
+        const { enqueueInbound } = await import("./inbound-queue.ts");
+        const rawEnv = envelope as unknown as Record<string, unknown>;
+        const subject =
+          typeof rawEnv.subject === "string"
+            ? rawEnv.subject
+            : typeof rawEnv.intent === "string"
+              ? rawEnv.intent
+              : undefined;
+        const body =
+          typeof rawEnv.body === "string"
+            ? rawEnv.body
+            : typeof rawEnv.message === "string"
+              ? rawEnv.message
+              : undefined;
+        const bond = rawEnv.bond as { amount?: string | number; currency?: string } | undefined;
+        await enqueueInbound({
+          fromDid: context.senderDid,
+          fromLabel: typeof rawEnv.from_label === "string" ? rawEnv.from_label : undefined,
+          subject,
+          body,
+          bondAmount: bond?.amount != null ? String(bond.amount) : undefined,
+          bondCurrency: bond?.currency,
+          envelope: rawEnv,
+        });
+      } catch (err) {
+        log.error({ err }, "Failed to enqueue inbound CATE envelope");
+      }
+
       await options?.onMessage?.(envelope);
     },
     onError: (error) => {

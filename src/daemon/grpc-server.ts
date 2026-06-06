@@ -7,7 +7,7 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import * as grpc from "@grpc/grpc-js";
@@ -16,6 +16,8 @@ import type { MessageQueue } from "./message-queue.ts";
 import type { DraftManager } from "./draft-manager.ts";
 import type { AgentEvent, IncomingMessage } from "./types.ts";
 import { indexConversationTurn } from "./memory-indexer.ts";
+import { depositOAuthCredential } from "./oauth-deposit.ts";
+import { buildMobileApiHandlers } from "./mobile-api.ts";
 import { createLogger } from "../lib/logger.ts";
 
 const log = createLogger("grpc-server");
@@ -68,6 +70,10 @@ export class GrpcServer {
       const nomosPackage = protoDescriptor.nomos as Record<string, unknown>;
       const NomosAgentService = (nomosPackage.NomosAgent as { service: grpc.ServiceDefinition })
         .service;
+      const OAuthDepositService = (nomosPackage.OAuthDeposit as { service: grpc.ServiceDefinition })
+        .service;
+      const MobileApiService = (nomosPackage.MobileApi as { service: grpc.ServiceDefinition })
+        .service;
 
       this.server = new grpc.Server();
       this.server.addService(NomosAgentService, {
@@ -81,20 +87,27 @@ export class GrpcServer {
         RejectDraft: this.handleRejectDraft.bind(this),
         Ping: this.handlePing.bind(this),
       });
-
-      this.server.bindAsync(
-        `0.0.0.0:${this.port}`,
-        grpc.ServerCredentials.createInsecure(),
-        (err, boundPort) => {
-          if (err) {
-            log.error({ err }, "Failed to bind");
-            reject(err);
-            return;
-          }
-          log.info(`Listening on 0.0.0.0:${boundPort}`);
-          resolve();
-        },
+      this.server.addService(OAuthDepositService, {
+        Deposit: depositOAuthCredential,
+      });
+      this.server.addService(
+        MobileApiService,
+        buildMobileApiHandlers({
+          messageQueue: this.messageQueue,
+          draftManager: this.draftManager,
+        }) as unknown as grpc.UntypedServiceImplementation,
       );
+
+      const credentials = buildServerCredentials();
+      this.server.bindAsync(`0.0.0.0:${this.port}`, credentials, (err, boundPort) => {
+        if (err) {
+          log.error({ err }, "Failed to bind");
+          reject(err);
+          return;
+        }
+        log.info(`Listening on 0.0.0.0:${boundPort}`);
+        resolve();
+      });
     });
   }
 
@@ -335,4 +348,32 @@ export class GrpcServer {
   ): void {
     callback(null, { timestamp: String(Date.now()) });
   }
+}
+
+/**
+ * Build server credentials. When `GRPC_TLS_CERT_PATH` + `GRPC_TLS_KEY_PATH`
+ * are set, the server uses TLS. When `MTLS_CA_CERT_PATH` is also set, it
+ * requires client certs signed by that CA (used for the OAuthDeposit RPC
+ * called by nomos-server).
+ *
+ * Otherwise (dev / power-user) the server is plaintext on localhost.
+ */
+function buildServerCredentials(): grpc.ServerCredentials {
+  const certPath = process.env.GRPC_TLS_CERT_PATH;
+  const keyPath = process.env.GRPC_TLS_KEY_PATH;
+  if (!certPath || !keyPath) {
+    return grpc.ServerCredentials.createInsecure();
+  }
+
+  const cert = readFileSync(certPath);
+  const key = readFileSync(keyPath);
+  const caPath = process.env.MTLS_CA_CERT_PATH;
+  const rootCerts = caPath ? readFileSync(caPath) : null;
+
+  return grpc.ServerCredentials.createSsl(
+    rootCerts,
+    [{ private_key: key, cert_chain: cert }],
+    // Require client cert (mTLS) iff a CA was provided.
+    Boolean(caPath),
+  );
 }

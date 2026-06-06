@@ -95,14 +95,21 @@ const KEY_FILE = path.join(NOMOS_DIR, "encryption.key");
  * Ensure an encryption key is available.
  *
  * Priority:
- * 1. ENCRYPTION_KEY env var (already set)
- * 2. ~/.nomos/encryption.key file
+ * 1. ENCRYPTION_KEY env var (already set; required source in hosted mode)
+ * 2. ~/.nomos/encryption.key file (power-user mode only)
  * 3. Generate a new random key, persist to ~/.nomos/encryption.key, set env var
+ *    (power-user mode only — hosted mode fails fast instead)
  *
  * Call this early in startup before any encrypt/decrypt operations.
  */
 export function ensureEncryptionKey(): void {
   if (process.env.ENCRYPTION_KEY) return;
+
+  // Hosted mode requires the key be injected as env (e.g., K8s Secret).
+  // Generating it locally would mean each pod has a different key.
+  if (process.env.NOMOS_MODE === "hosted") {
+    throw new Error("ENCRYPTION_KEY env var is required in hosted mode. Inject via K8s Secret.");
+  }
 
   // Try reading from file
   if (fs.existsSync(KEY_FILE)) {

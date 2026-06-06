@@ -21,7 +21,7 @@ type Provider = "anthropic-subscription" | "anthropic-key" | "vertex";
 
 const MODELS = [
   { value: "claude-sonnet-4-6", label: "Claude Sonnet 4.6", description: "Fast and capable" },
-  { value: "claude-opus-4-7", label: "Claude Opus 4.7", description: "Most powerful" },
+  { value: "claude-opus-4-8", label: "Claude Opus 4.8", description: "Most powerful" },
   { value: "claude-haiku-4-5", label: "Claude Haiku 4.5", description: "Fastest, most efficient" },
 ];
 
