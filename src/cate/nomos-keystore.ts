@@ -12,8 +12,10 @@ import { sql } from "kysely";
 import type { Keystore, KeyPair } from "@project-nomos/cate-sdk/identity";
 import { getKysely } from "../db/client.ts";
 import { encrypt, decrypt } from "../db/encryption.ts";
+import { createLogger } from "../lib/logger.ts";
 
 const INTEGRATION_PREFIX = "cate-key:";
+const log = createLogger("cate-keystore");
 
 export class NomosKeystore implements Keystore {
   async generateKey(keyId: string): Promise<KeyPair> {
@@ -68,11 +70,24 @@ export class NomosKeystore implements Keystore {
 
     if (!row) return null;
 
-    const data = JSON.parse(decrypt(row.secrets));
-    return {
-      publicKey: new Uint8Array(Buffer.from(data.publicKey, "hex")),
-      privateKey: new Uint8Array(Buffer.from(data.privateKey, "hex")),
-    };
+    try {
+      const data = JSON.parse(decrypt(row.secrets));
+      return {
+        publicKey: new Uint8Array(Buffer.from(data.publicKey, "hex")),
+        privateKey: new Uint8Array(Buffer.from(data.privateKey, "hex")),
+      };
+    } catch (err) {
+      // The stored key can't be decrypted (e.g. ENCRYPTION_KEY rotated since it
+      // was written) or is malformed. Treat it as absent so the caller
+      // regenerates a fresh keypair with the current key instead of crashing
+      // CATE on boot. This rotates the agent's CATE DID, which is unavoidable:
+      // the old key is unrecoverable without the original ENCRYPTION_KEY.
+      log.warn(
+        { keyId, err: err instanceof Error ? err.message : err },
+        "CATE key could not be decrypted; treating as missing (will regenerate)",
+      );
+      return null;
+    }
   }
 
   async sign(keyId: string, data: Uint8Array): Promise<Uint8Array> {
