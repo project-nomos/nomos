@@ -115,6 +115,20 @@ async function extractAndStoreKnowledgeFromTurn(
 
   if (chunkIds.length > 0) {
     await updateUserModel(knowledge, chunkIds);
+
+    // Promote extracted facts into the knowledge graph (Phase 2 self-wiring).
+    // Scope to the CONVERSATION's user, not the indexer's system tenant, so
+    // each person's brain stays private. Fire-and-forget; never blocks.
+    try {
+      const { ingestKnowledgeIntoGraph } = await import("../memory/graph-writer.ts");
+      const ctx = {
+        orgId: process.env.NOMOS_ORG_ID ?? "local",
+        userId: incoming.userId || "local",
+      };
+      await ingestKnowledgeIntoGraph(ctx, knowledge, { sourceIds: chunkIds });
+    } catch (err) {
+      log.debug({ err }, "Graph ingestion failed");
+    }
   }
 }
 

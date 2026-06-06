@@ -15,6 +15,7 @@ import { registerIngestCommand } from "./ingest.ts";
 import { registerContactsCommand } from "./contacts.ts";
 import { registerPluginCommand } from "./plugin.ts";
 import { registerWikiCommand } from "./wiki.ts";
+import { registerBrainCommand } from "./brain.ts";
 
 export function buildProgram(): Command {
   const program = new Command();
@@ -39,6 +40,7 @@ export function buildProgram(): Command {
   registerContactsCommand(program);
   registerPluginCommand(program);
   registerWikiCommand(program);
+  registerBrainCommand(program);
 
   // Default command: start daemon (if not running) + chat
   program.action(async () => {

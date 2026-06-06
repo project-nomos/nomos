@@ -198,6 +198,17 @@ Maximum ${MAX_ARTICLES_PER_RUN} articles. Return [] if nothing is worth compilin
     // 6. Backup wiki articles to managed_files table
     await backupWikiToDb();
 
+    // 7. Wire the (re)compiled wiki into the knowledge graph (zero-LLM [[links]]
+    //    + MOC topic hubs).
+    try {
+      const { syncWikiBodyLinks, syncWikiMOCs } = await import("./graph-writer.ts");
+      const { LOCAL_TENANT } = await import("../auth/tenant-context.ts");
+      await syncWikiBodyLinks(LOCAL_TENANT);
+      await syncWikiMOCs(LOCAL_TENANT);
+    } catch (err) {
+      log.debug({ err }, "Wiki→graph sync failed (non-fatal)");
+    }
+
     log.info({ created: result.articlesCreated, updated: result.articlesUpdated }, "Done");
   } finally {
     if (fs.existsSync(LOCK_FILE)) {

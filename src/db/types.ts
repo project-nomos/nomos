@@ -310,6 +310,48 @@ export interface ManagedFilesTable {
   updated_at: Generated<Date>;
 }
 
+// Knowledge graph (BRAIN): typed entity nodes + typed, bitemporal edges.
+export interface KgNodesTable {
+  id: Generated<string>;
+  kind: string;
+  name: string;
+  canonical_key: string;
+  aliases: Generated<string[]>;
+  summary: string | null;
+  /** pgvector vector(768) — stored as string, queried via raw SQL operators. */
+  embedding: ColumnType<string | null, string | null, string | null>;
+  external_kind: string | null;
+  external_ref: string | null;
+  attrs: ColumnType<Record<string, unknown>, string | undefined, string>;
+  source_ids: Generated<string[]>;
+  confidence: Generated<number>;
+  user_id: Generated<string>;
+  created_at: Generated<Date>;
+  updated_at: Generated<Date>;
+}
+
+export interface KgEdgesTable {
+  id: Generated<string>;
+  src_id: string;
+  dst_id: string;
+  rel_type: string;
+  fact: string | null;
+  origin: Generated<string>;
+  origin_node: Generated<string>;
+  weight: Generated<number>;
+  /** event timeline — when the fact is/was true in the world. */
+  valid_at: Generated<Date>;
+  /** NULL = currently true; set to the contradicting edge's valid_at on supersession. */
+  invalid_at: ColumnType<Date | null, Date | null, Date | null>;
+  /** transaction timeline — when the system learned it. */
+  created_at: Generated<Date>;
+  expired_at: ColumnType<Date | null, Date | null, Date | null>;
+  source_ids: Generated<string[]>;
+  attrs: ColumnType<Record<string, unknown>, string | undefined, string>;
+  confidence: Generated<number>;
+  user_id: Generated<string>;
+}
+
 // ---------------------------------------------------------------------------
 // Database interface
 // ---------------------------------------------------------------------------
@@ -339,6 +381,8 @@ export interface Database {
   magic_doc_state: MagicDocStateTable;
   mobile_devices: MobileDevicesTable;
   cate_inbound: CateInboundTable;
+  kg_nodes: KgNodesTable;
+  kg_edges: KgEdgesTable;
 }
 
 // ---------------------------------------------------------------------------
@@ -413,3 +457,11 @@ export type NewContactIdentity = Insertable<ContactIdentitiesTable>;
 export type Commitment = Selectable<CommitmentsTable>;
 export type NewCommitment = Insertable<CommitmentsTable>;
 export type CommitmentUpdate = Updateable<CommitmentsTable>;
+
+export type KgNode = Selectable<KgNodesTable>;
+export type NewKgNode = Insertable<KgNodesTable>;
+export type KgNodeUpdate = Updateable<KgNodesTable>;
+
+export type KgEdge = Selectable<KgEdgesTable>;
+export type NewKgEdge = Insertable<KgEdgesTable>;
+export type KgEdgeUpdate = Updateable<KgEdgesTable>;
