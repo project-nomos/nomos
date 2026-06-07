@@ -809,14 +809,17 @@ export async function backfillGraph(ctx: TenantContext = LOCAL_TENANT): Promise<
   // backlinks[] -> links_to edges, within each namespace. We carry the source
   // `kind` through the UNION and pin BOTH ends of the edge to it, so a wiki
   // article's backlinks only ever link wiki nodes and a vault note's only link
-  // vault nodes. Without that pin, a path shared by a vault note and a wiki
-  // article would fan the join out to both nodes and fabricate edges the note
-  // never authored. (A backlink resolves only when its target text equals a note
-  // path; resolving human-readable [[labels]] is a separate follow-up.)
+  // vault nodes (a path shared by a vault note and a wiki article would otherwise
+  // fan the join out to both and fabricate edges).
+  //
+  // A backlink target is the raw [[label]] the author typed (e.g. "Dana"), not a
+  // path, so we resolve it by node IDENTITY: name, canonical_key (normalized), or
+  // an alias. We keep the path-equality arms as a fallback for notes that link by
+  // path. Self-links are excluded.
   const links = await sql<{ n: string }>`
     WITH ins AS (
       INSERT INTO kg_edges (src_id, dst_id, rel_type, origin, user_id)
-      SELECT src.id, dst.id, 'links_to', 'frontmatter', ${uid}
+      SELECT DISTINCT src.id, dst.id, 'links_to', 'frontmatter', ${uid}
       FROM (
         SELECT 'wiki' AS kind, path, backlinks FROM wiki_articles
         UNION ALL
@@ -824,7 +827,17 @@ export async function backfillGraph(ctx: TenantContext = LOCAL_TENANT): Promise<
       ) wa
       CROSS JOIN LATERAL unnest(wa.backlinks) AS bl(target)
       JOIN kg_nodes src ON src.external_kind = wa.kind AND src.external_ref = wa.path AND src.user_id = ${uid}
-      JOIN kg_nodes dst ON dst.external_kind = wa.kind AND dst.external_ref = bl.target AND dst.user_id = ${uid}
+      JOIN kg_nodes dst
+        ON dst.user_id = ${uid}
+       AND dst.external_kind = wa.kind
+       AND dst.id <> src.id
+       AND (
+             lower(trim(dst.name)) = lower(trim(bl.target))
+          OR dst.canonical_key = lower(regexp_replace(trim(bl.target), '\\s+', ' ', 'g'))
+          OR lower(trim(bl.target)) = ANY(SELECT lower(trim(a)) FROM unnest(dst.aliases) a)
+          OR dst.external_ref = bl.target
+          OR dst.external_ref = bl.target || '.md'
+       )
       ON CONFLICT (user_id, src_id, dst_id, rel_type, origin, origin_node) DO NOTHING
       RETURNING 1
     ) SELECT count(*)::text AS n FROM ins
