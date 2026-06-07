@@ -14,8 +14,32 @@
 import { sql } from "kysely";
 import { getKysely } from "../db/client.ts";
 import { createLogger } from "../lib/logger.ts";
+import { isHosted } from "../config/mode.ts";
+import { LOCAL_TENANT, systemTenant } from "./tenant-context.ts";
 
 const log = createLogger("org-members");
+
+/**
+ * The owners that per-user background jobs (wiki compile, consolidation,
+ * commitment reminders) must run for. Power-user is a single owner ('local'); a
+ * hosted multi-member DB enumerates its members so each gets their own pass.
+ * Falls back to the instance owner if membership is not yet populated.
+ */
+export async function listMemoryOwners(): Promise<string[]> {
+  if (!isHosted()) return [LOCAL_TENANT.userId];
+  try {
+    const db = getKysely();
+    // org_members is not a typed Kysely table (maintained via raw SQL), so query
+    // it raw like isOrgMember does.
+    const result = await db.executeQuery<{ user_id: string }>(
+      sql`SELECT user_id FROM org_members`.compile(db),
+    );
+    const ids = result.rows.map((r) => r.user_id).filter(Boolean);
+    return ids.length > 0 ? ids : [systemTenant().userId];
+  } catch {
+    return [systemTenant().userId];
+  }
+}
 
 const TTL_MS = 60_000;
 

@@ -44,51 +44,55 @@ const MAX_PRUNE_PER_RUN = 100;
  * 3. LLM-powered review: rewrite/merge semantically similar chunks (Haiku)
  * 4. Decay user model confidence for stale entries
  */
-export async function consolidateMemory(): Promise<ConsolidationResult> {
+export async function consolidateMemory(userId: string): Promise<ConsolidationResult> {
   const db = getKysely();
 
-  // Count before
+  // Count before (this owner only)
   const before = await db
     .selectFrom("memory_chunks")
     .select(sql<number>`count(*)::int`.as("count"))
+    .where("user_id", "=", userId)
     .executeTakeFirstOrThrow();
   const totalBefore = before.count;
 
   // Phase 1: Prune old, rarely-accessed chunks
-  const pruned = await pruneStaleChunks();
+  const pruned = await pruneStaleChunks(userId);
 
   // Phase 2: Merge near-duplicate chunks (vector similarity)
-  const merged = await mergeNearDuplicates();
+  const merged = await mergeNearDuplicates(userId);
 
   // Phase 3: LLM-powered review and rewrite
-  const rewritten = await llmConsolidate();
+  const rewritten = await llmConsolidate(userId);
 
   // Phase 4: Decay user model confidence for stale entries
-  await decayUserModelConfidence();
+  await decayUserModelConfidence(userId);
 
   // Count after
   const after = await db
     .selectFrom("memory_chunks")
     .select(sql<number>`count(*)::int`.as("count"))
+    .where("user_id", "=", userId)
     .executeTakeFirstOrThrow();
 
   return { merged, pruned, rewritten, totalBefore, totalAfter: after.count };
 }
 
-/** Remove chunks that are old and rarely accessed. */
-async function pruneStaleChunks(): Promise<number> {
+/** Remove chunks that are old and rarely accessed (for one owner). */
+async function pruneStaleChunks(userId: string): Promise<number> {
   const db = getKysely();
   const cutoffDate = new Date();
   cutoffDate.setDate(cutoffDate.getDate() - MIN_AGE_DAYS);
 
   const deleted = await db
     .deleteFrom("memory_chunks")
+    .where("user_id", "=", userId)
     .where(
       "id",
       "in",
       db
         .selectFrom("memory_chunks")
         .select("id")
+        .where("user_id", "=", userId)
         .where("access_count", "<=", PRUNE_ACCESS_THRESHOLD)
         .where("created_at", "<", cutoffDate)
         .where((eb) =>
@@ -105,15 +109,15 @@ async function pruneStaleChunks(): Promise<number> {
   return deleted.length;
 }
 
-/** Find and merge near-duplicate chunks based on vector similarity. */
-async function mergeNearDuplicates(): Promise<number> {
+/** Find and merge near-duplicate chunks based on vector similarity (for one owner). */
+async function mergeNearDuplicates(userId: string): Promise<number> {
   const db = getKysely();
   let mergeCount = 0;
 
-  // Find pairs of chunks with very high cosine similarity
+  // Find pairs of chunks with very high cosine similarity (same owner only)
   const duplicatePairs = await db
     .selectFrom("memory_chunks as a")
-    .innerJoin("memory_chunks as b", (join) => join.on(sql`a.id < b.id`))
+    .innerJoin("memory_chunks as b", (join) => join.on(sql`a.id < b.id AND a.user_id = b.user_id`))
     .select([
       "a.id as id_a",
       "b.id as id_b",
@@ -125,6 +129,7 @@ async function mergeNearDuplicates(): Promise<number> {
       "b.created_at as created_b",
       sql<number>`1 - (a.embedding <=> b.embedding)`.as("similarity"),
     ])
+    .where("a.user_id", "=", userId)
     .where("a.embedding", "is not", null)
     .where("b.embedding", "is not", null)
     .where(sql`1 - (a.embedding <=> b.embedding)`, ">", MERGE_SIMILARITY_THRESHOLD)
@@ -192,7 +197,7 @@ const LLM_BATCH_SIZE = 20;
  * LLM-powered consolidation: sends batches of memory chunks to Haiku
  * for semantic review, rewriting, and intelligent pruning.
  */
-async function llmConsolidate(): Promise<number> {
+async function llmConsolidate(userId: string): Promise<number> {
   const db = getKysely();
   const config = loadEnvConfig();
   const model = config.extractionModel ?? "claude-haiku-4-5";
@@ -201,6 +206,7 @@ async function llmConsolidate(): Promise<number> {
   const candidates = await db
     .selectFrom("memory_chunks")
     .select(["id", "text", "metadata", "access_count", "created_at"])
+    .where("user_id", "=", userId)
     .where("created_at", "<", sql<Date>`now() - interval '3 days'`)
     .orderBy("access_count", "asc")
     .orderBy("created_at", "asc")
@@ -335,8 +341,8 @@ async function llmConsolidate(): Promise<number> {
   }
 }
 
-/** Reduce confidence of user model entries that haven't been reinforced recently. */
-async function decayUserModelConfidence(): Promise<void> {
+/** Reduce confidence of user model entries that haven't been reinforced recently (one owner). */
+async function decayUserModelConfidence(userId: string): Promise<void> {
   const db = getKysely();
   const cutoffDate = new Date();
   cutoffDate.setDate(cutoffDate.getDate() - 30);
@@ -348,6 +354,7 @@ async function decayUserModelConfidence(): Promise<void> {
       confidence: sql`GREATEST(confidence * 0.9, 0.1)`,
       updated_at: sql`now()`,
     })
+    .where("user_id", "=", userId)
     .where("updated_at", "<", cutoffDate)
     .where("confidence", ">", 0.1)
     .execute();

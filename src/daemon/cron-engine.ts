@@ -74,19 +74,24 @@ export class CronEngine {
       return;
     }
 
-    // Intercept wiki compilation sentinel -- run compiler directly
+    // Intercept wiki compilation sentinel -- run compiler directly, once per
+    // owner (power-user: just 'local'; hosted: each member's own wiki).
     if (job.prompt === "__wiki_compile__") {
       log.info("Firing wiki compilation");
-      import("../memory/knowledge-compiler.ts")
-        .then(({ compileKnowledge }) => compileKnowledge())
-        .then((result) => {
-          log.info(
-            `Wiki compilation: ${result.articlesCreated} created, ${result.articlesUpdated} updated`,
-          );
-        })
-        .catch((err) => {
-          log.error({ err: err instanceof Error ? err.message : err }, "Wiki compilation failed");
-        });
+      (async () => {
+        const { compileKnowledge } = await import("../memory/knowledge-compiler.ts");
+        const { listMemoryOwners } = await import("../auth/org-members.ts");
+        let created = 0;
+        let updated = 0;
+        for (const userId of await listMemoryOwners()) {
+          const result = await compileKnowledge({ userId });
+          created += result.articlesCreated;
+          updated += result.articlesUpdated;
+        }
+        log.info(`Wiki compilation: ${created} created, ${updated} updated`);
+      })().catch((err) => {
+        log.error({ err: err instanceof Error ? err.message : err }, "Wiki compilation failed");
+      });
       return;
     }
 

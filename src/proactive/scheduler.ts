@@ -11,7 +11,7 @@
  */
 
 import { CronStore } from "../cron/store.ts";
-import { systemTenant, resolveMemoryUserId } from "../auth/tenant-context.ts";
+import { systemTenant } from "../auth/tenant-context.ts";
 import type { CronJobUpdate } from "../cron/types.ts";
 import {
   getCommitmentsForReminder,
@@ -129,30 +129,35 @@ export async function runCommitmentReminders(): Promise<{
   reminded: number;
   expired: number;
 }> {
-  // Background job: scope to the owner. Power-user collapses to 'local'; a
-  // multi-user hosted DB needs per-user iteration (see the background-job
-  // follow-up), which would call this once per member.
-  const userId = resolveMemoryUserId(undefined);
-  const due = await getCommitmentsForReminder(userId);
+  // Run once per owner: power-user is just 'local'; a hosted multi-member DB
+  // reminds each member about their own commitments.
+  const { listMemoryOwners } = await import("../auth/org-members.ts");
+  let reminded = 0;
+  let expired = 0;
 
-  if (due.length > 0) {
-    const reminders = due
-      .map((c) => {
-        const deadline = c.deadline ? ` (due: ${c.deadline.toLocaleDateString()})` : "";
-        return `- ${c.description}${deadline}`;
-      })
-      .join("\n");
+  for (const userId of await listMemoryOwners()) {
+    const due = await getCommitmentsForReminder(userId);
 
-    log.info(`Commitment reminders:\n${reminders}`);
-    await markReminded(
-      userId,
-      due.map((c) => c.id),
-    );
+    if (due.length > 0) {
+      const reminders = due
+        .map((c) => {
+          const deadline = c.deadline ? ` (due: ${c.deadline.toLocaleDateString()})` : "";
+          return `- ${c.description}${deadline}`;
+        })
+        .join("\n");
+
+      log.info(`Commitment reminders (${userId}):\n${reminders}`);
+      await markReminded(
+        userId,
+        due.map((c) => c.id),
+      );
+    }
+
+    reminded += due.length;
+    expired += await expireOverdueCommitments(userId);
   }
 
-  const expired = await expireOverdueCommitments(userId);
-
-  return { reminded: due.length, expired };
+  return { reminded, expired };
 }
 
 /**

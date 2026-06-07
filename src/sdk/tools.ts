@@ -1246,7 +1246,7 @@ export function createMemoryMcpServer(userId: string = "local"): McpSdkServerCon
     async () => {
       try {
         const { consolidateMemory } = await import("../memory/consolidator.ts");
-        const result = await consolidateMemory();
+        const result = await consolidateMemory(userId);
         return {
           content: [
             {
