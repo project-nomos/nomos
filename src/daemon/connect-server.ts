@@ -144,6 +144,10 @@ export class ConnectServer {
         disconnectIntegration: unary(handlers.DisconnectIntegration),
         registerDevice: unary(handlers.RegisterDevice),
         unregisterDevice: unary(handlers.UnregisterDevice),
+        listVaultNotes: unary(handlers.ListVaultNotes),
+        getVaultNote: unary(handlers.GetVaultNote),
+        writeVaultNote: unary(handlers.WriteVaultNote),
+        deleteVaultNote: unary(handlers.DeleteVaultNote),
       } as unknown as Parameters<typeof router.service<typeof MobileApi>>[1]);
     };
 

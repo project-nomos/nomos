@@ -40,6 +40,7 @@ import { getProjection, neighborhood, searchNodes } from "../memory/graph.ts";
 import type { GraphNode, GraphEdge } from "../memory/graph.ts";
 import { withAuthUnary, withAuthStream } from "../auth/grpc-interceptor.ts";
 import { registerDevice, unregisterDevice } from "./push-notifications.ts";
+import { vaultDelete, vaultList, vaultRead, vaultWrite } from "../memory/vault.ts";
 import { createLogger } from "../lib/logger.ts";
 import type { TenantContext } from "../auth/tenant-context.ts";
 
@@ -120,6 +121,18 @@ export function buildMobileApiHandlers(deps: MobileApiDeps) {
     ),
     UnregisterDevice: withAuthUnary("/nomos.MobileApi/UnregisterDevice", (call) =>
       handleUnregisterDevice(call),
+    ),
+    ListVaultNotes: withAuthUnary("/nomos.MobileApi/ListVaultNotes", (call, ctx) =>
+      handleListVaultNotes(call, ctx),
+    ),
+    GetVaultNote: withAuthUnary("/nomos.MobileApi/GetVaultNote", (call, ctx) =>
+      handleGetVaultNote(call, ctx),
+    ),
+    WriteVaultNote: withAuthUnary("/nomos.MobileApi/WriteVaultNote", (call, ctx) =>
+      handleWriteVaultNote(call, ctx),
+    ),
+    DeleteVaultNote: withAuthUnary("/nomos.MobileApi/DeleteVaultNote", (call, ctx) =>
+      handleDeleteVaultNote(call, ctx),
     ),
   };
 }
@@ -751,6 +764,66 @@ async function handleUnregisterDevice(
 ): Promise<{ success: boolean; message: string }> {
   await unregisterDevice((call.request as any).expoPushToken);
   return { success: true, message: "unregistered" };
+}
+
+// ──────────── Vault (long-term memory / knowledge base) ────────────
+
+async function handleListVaultNotes(
+  call: grpc.ServerUnaryCall<unknown, unknown>,
+  ctx: TenantContext,
+): Promise<{ notes: Array<{ path: string; title: string; updatedAt: string }> }> {
+  const prefix = (call.request as { prefix?: string }).prefix || undefined;
+  const notes = await vaultList(ctx.userId, prefix);
+  return {
+    notes: notes.map((n) => ({
+      path: n.path,
+      title: n.title,
+      updatedAt: n.updatedAt.toISOString(),
+    })),
+  };
+}
+
+async function handleGetVaultNote(
+  call: grpc.ServerUnaryCall<unknown, unknown>,
+  ctx: TenantContext,
+): Promise<{ path: string; title: string; content: string; updatedAt: string; exists: boolean }> {
+  const path = (call.request as { path?: string }).path ?? "";
+  const note = await vaultRead(ctx.userId, path);
+  if (!note) return { path, title: "", content: "", updatedAt: "", exists: false };
+  return {
+    path: note.path,
+    title: note.title,
+    content: note.content,
+    updatedAt: note.updatedAt.toISOString(),
+    exists: true,
+  };
+}
+
+async function handleWriteVaultNote(
+  call: grpc.ServerUnaryCall<unknown, unknown>,
+  ctx: TenantContext,
+): Promise<{ success: boolean; message: string }> {
+  const req = call.request as { path?: string; content?: string; title?: string };
+  if (!req.path) return { success: false, message: "missing_path" };
+  try {
+    await vaultWrite(ctx.userId, req.path, req.content ?? "", { title: req.title || undefined });
+    return { success: true, message: "saved" };
+  } catch (err) {
+    return { success: false, message: err instanceof Error ? err.message : "write_failed" };
+  }
+}
+
+async function handleDeleteVaultNote(
+  call: grpc.ServerUnaryCall<unknown, unknown>,
+  ctx: TenantContext,
+): Promise<{ success: boolean; message: string }> {
+  const path = (call.request as { path?: string }).path ?? "";
+  try {
+    await vaultDelete(ctx.userId, path);
+    return { success: true, message: "deleted" };
+  } catch (err) {
+    return { success: false, message: err instanceof Error ? err.message : "delete_failed" };
+  }
 }
 
 // Helpers
