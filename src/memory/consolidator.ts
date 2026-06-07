@@ -158,10 +158,15 @@ async function mergeNearDuplicates(userId: string): Promise<number> {
     await db
       .updateTable("memory_chunks")
       .set({ access_count: combinedAccess, updated_at: sql`now()` })
+      .where("user_id", "=", userId)
       .where("id", "=", keepId)
       .execute();
 
-    await db.deleteFrom("memory_chunks").where("id", "=", removeId).execute();
+    await db
+      .deleteFrom("memory_chunks")
+      .where("user_id", "=", userId)
+      .where("id", "=", removeId)
+      .execute();
     deletedIds.add(removeId);
     mergeCount++;
   }
@@ -269,7 +274,11 @@ async function llmConsolidate(userId: string): Promise<number> {
 
       switch (decision.action.toUpperCase()) {
         case "DROP": {
-          await db.deleteFrom("memory_chunks").where("id", "=", decision.id).execute();
+          await db
+            .deleteFrom("memory_chunks")
+            .where("user_id", "=", userId)
+            .where("id", "=", decision.id)
+            .execute();
           changeCount++;
           break;
         }
@@ -278,6 +287,7 @@ async function llmConsolidate(userId: string): Promise<number> {
             await db
               .updateTable("memory_chunks")
               .set({ text: decision.rewrite, updated_at: sql`now()` })
+              .where("user_id", "=", userId)
               .where("id", "=", decision.id)
               .execute();
 
@@ -290,6 +300,7 @@ async function llmConsolidate(userId: string): Promise<number> {
                 await db
                   .updateTable("memory_chunks")
                   .set({ embedding: sql`${embeddingStr}::vector` })
+                  .where("user_id", "=", userId)
                   .where("id", "=", decision.id)
                   .execute();
               }
@@ -311,6 +322,7 @@ async function llmConsolidate(userId: string): Promise<number> {
             const source = await db
               .selectFrom("memory_chunks")
               .select("access_count")
+              .where("user_id", "=", userId)
               .where("id", "=", decision.id)
               .executeTakeFirst();
             if (target && source) {
@@ -320,7 +332,11 @@ async function llmConsolidate(userId: string): Promise<number> {
                 .set({ access_count: combined, updated_at: sql`now()` })
                 .where("id", "=", decision.merge_with)
                 .execute();
-              await db.deleteFrom("memory_chunks").where("id", "=", decision.id).execute();
+              await db
+                .deleteFrom("memory_chunks")
+                .where("user_id", "=", userId)
+                .where("id", "=", decision.id)
+                .execute();
               changeCount++;
             }
           }

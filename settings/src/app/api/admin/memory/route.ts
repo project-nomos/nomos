@@ -13,11 +13,13 @@ export async function GET() {
         COUNT(DISTINCT source) AS unique_sources,
         COALESCE(SUM(LENGTH(text)), 0) AS total_text_size
       FROM memory_chunks
+    WHERE user_id = 'local'
     `;
 
     const sources = await sql`
       SELECT source, COUNT(*) AS count
       FROM memory_chunks
+      WHERE user_id = 'local'
       GROUP BY source
       ORDER BY count DESC
     `;
@@ -33,6 +35,7 @@ export async function GET() {
         access_count,
         created_at
       FROM memory_chunks
+      WHERE user_id = 'local'
       ORDER BY created_at DESC
       LIMIT 25
     `;

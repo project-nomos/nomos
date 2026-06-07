@@ -225,7 +225,10 @@ export function registerMemoryCommand(program: Command): void {
           console.log(chalk.green(`Deleted ${count} chunk(s) from path "${resolvedPath}"`));
         } else {
           const db = getKysely();
-          const result = await db.deleteFrom("memory_chunks").executeTakeFirst();
+          const result = await db
+            .deleteFrom("memory_chunks")
+            .where("user_id", "=", resolveMemoryUserId(undefined))
+            .executeTakeFirst();
           count = Number(result.numDeletedRows ?? 0n);
           console.log(chalk.green(`Deleted all ${count} memory chunk(s)`));
         }

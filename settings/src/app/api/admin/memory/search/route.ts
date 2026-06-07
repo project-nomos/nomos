@@ -24,7 +24,7 @@ export async function GET(request: NextRequest) {
         created_at,
         ts_rank(to_tsvector('english', text), plainto_tsquery('english', ${q})) AS score
       FROM memory_chunks
-      WHERE to_tsvector('english', text) @@ plainto_tsquery('english', ${q})
+      WHERE user_id = 'local' AND to_tsvector('english', text) @@ plainto_tsquery('english', ${q})
       ORDER BY score DESC
       LIMIT 20
     `;

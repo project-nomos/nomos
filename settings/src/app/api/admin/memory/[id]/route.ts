@@ -18,7 +18,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
         access_count,
         created_at
       FROM memory_chunks
-      WHERE id = ${id}
+      WHERE user_id = 'local' AND id = ${id}
       LIMIT 1
     `;
 

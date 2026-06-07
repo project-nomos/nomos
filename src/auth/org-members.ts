@@ -29,10 +29,16 @@ export async function listMemoryOwners(): Promise<string[]> {
   if (!isHosted()) return [LOCAL_TENANT.userId];
   try {
     const db = getKysely();
-    // org_members is not a typed Kysely table (maintained via raw SQL), so query
-    // it raw like isOrgMember does.
+    // Enumerate owners that actually have memory to process, from the reliably
+    // per-user-stamped memory tables (memory_chunks + user_model). This is the
+    // exact set background jobs should run for, and is population-free (no
+    // dependence on the org_members webhook). Falls back to the instance owner.
     const result = await db.executeQuery<{ user_id: string }>(
-      sql`SELECT user_id FROM org_members`.compile(db),
+      sql`
+        SELECT DISTINCT user_id FROM memory_chunks
+        UNION
+        SELECT DISTINCT user_id FROM user_model
+      `.compile(db),
     );
     const ids = result.rows.map((r) => r.user_id).filter(Boolean);
     return ids.length > 0 ? ids : [systemTenant().userId];

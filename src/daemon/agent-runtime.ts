@@ -309,10 +309,15 @@ export class AgentRuntime {
       // Permissions table may not exist yet on first run — skip
     }
 
-    // Load user model for adaptive behavior
+    // Load user model + exemplars for adaptive behavior, baked into the cached
+    // system prompt. This runs once at init with no per-turn user, so it is only
+    // correct for the single-owner power-user install. In hosted (multi-tenant)
+    // the per-turn `buildMemoryDigest` injects the right user's model+profile, so
+    // we skip the stale init-time load rather than bake one tenant's data into
+    // everyone's prompt.
     let userModel: import("../db/user-model.ts").UserModelEntry[] | undefined;
     let exemplars: import("../config/profile.ts").ExemplarEntry[] | undefined;
-    if (this.config.adaptiveMemory) {
+    if (this.config.adaptiveMemory && !isHosted()) {
       try {
         const { getUserModel } = await import("../db/user-model.ts");
         userModel = await getUserModel(resolveMemoryUserId(undefined));
