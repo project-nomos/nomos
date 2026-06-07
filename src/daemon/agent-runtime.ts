@@ -28,6 +28,7 @@ import {
 } from "../sdk/telegram-mcp.ts";
 import { isGoogleWorkspaceConfiguredAsync } from "../sdk/google-workspace-mcp.ts";
 import { buildGoogleMcpServers, buildGoogleIntegrationPrompt } from "../sdk/google-mcp.ts";
+import { buildVaultMcpServer } from "../sdk/vault-mcp.ts";
 import { loadEnvConfig, type NomosConfig } from "../config/env.ts";
 import { FEATURES, isHosted } from "../config/mode.ts";
 
@@ -890,13 +891,17 @@ export class AgentRuntime {
     // Google's official remote MCP (read/draft/calendar/drive) + our opt-in
     // Gmail send tool, per connected account with fresh tokens (or the direct-
     // REST backup via NOMOS_GOOGLE_BACKEND=rest). Power-user keeps the gws CLI.
-    let mcpServers = this.mcpServers;
+    // Long-term memory (vault) tools, scoped to the requesting user. Both modes.
+    let mcpServers = {
+      ...this.mcpServers,
+      "nomos-vault": buildVaultMcpServer(userId ?? "local"),
+    };
     let googlePrompt = "";
     if (isHosted() && userId) {
       try {
         const googleServers = await buildGoogleMcpServers(userId);
         if (Object.keys(googleServers).length > 0) {
-          mcpServers = { ...this.mcpServers, ...googleServers };
+          mcpServers = { ...mcpServers, ...googleServers };
         }
         // Tell the agent it actually HAS this access, otherwise it trusts the
         // static integrations summary (which lists only power-user channels) and
