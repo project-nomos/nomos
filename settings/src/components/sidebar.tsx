@@ -15,6 +15,7 @@ import {
   Smartphone,
   Database,
   Brain,
+  NotebookPen,
   Network,
   DollarSign,
   Activity,
@@ -44,6 +45,7 @@ const channelItems = [
 const advancedItems = [
   { href: "/admin/database", label: "Database", icon: Database },
   { href: "/admin/memory", label: "Memory", icon: Brain },
+  { href: "/admin/vault", label: "Vault", icon: NotebookPen },
   { href: "/admin/graph", label: "Knowledge Graph", icon: Network },
   { href: "/admin/exemplars", label: "Exemplars", icon: Sparkles },
   { href: "/admin/wiki", label: "Wiki", icon: BookOpen },
