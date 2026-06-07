@@ -11,6 +11,7 @@
  */
 
 import { getUserModel, type UserModelEntry } from "../db/user-model.ts";
+import { resolveMemoryUserId } from "../auth/tenant-context.ts";
 import { CALIBRATION_DOMAINS, type CalibrationDomain } from "./calibration.ts";
 
 export interface ReflectionSynthesis {
@@ -55,7 +56,7 @@ export interface ReflectionData {
 export async function generateReflectionData(): Promise<ReflectionData> {
   let entries: UserModelEntry[];
   try {
-    entries = await getUserModel();
+    entries = await getUserModel(resolveMemoryUserId(undefined));
   } catch {
     entries = [];
   }

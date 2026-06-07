@@ -175,6 +175,7 @@ export interface AgentPermissionsTable {
 
 export interface UserModelTable {
   id: Generated<string>;
+  user_id: Generated<string>;
   category: string;
   key: string;
   /** JSONB — can be any JSON value. */

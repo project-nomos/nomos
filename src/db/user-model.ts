@@ -3,6 +3,7 @@ import { getKysely } from "./client.ts";
 
 export interface UserModelEntry {
   id: string;
+  userId: string;
   category: string;
   key: string;
   value: unknown;
@@ -20,6 +21,7 @@ export async function upsertUserModel(
   await db
     .insertInto("user_model")
     .values({
+      user_id: entry.userId,
       category: entry.category,
       key: entry.key,
       value: valueJson,
@@ -27,7 +29,7 @@ export async function upsertUserModel(
       confidence: entry.confidence,
     })
     .onConflict((oc) =>
-      oc.columns(["category", "key"]).doUpdateSet({
+      oc.columns(["user_id", "category", "key"]).doUpdateSet({
         value: sql`${valueJson}::jsonb`,
         source_ids: sql`(
           SELECT array_agg(DISTINCT s)
@@ -40,12 +42,13 @@ export async function upsertUserModel(
     .execute();
 }
 
-export async function getUserModel(category?: string): Promise<UserModelEntry[]> {
+export async function getUserModel(userId: string, category?: string): Promise<UserModelEntry[]> {
   const db = getKysely();
 
   let query = db
     .selectFrom("user_model")
-    .select(["id", "category", "key", "value", "source_ids", "confidence", "updated_at"])
+    .select(["id", "user_id", "category", "key", "value", "source_ids", "confidence", "updated_at"])
+    .where("user_id", "=", userId)
     .orderBy("confidence", "desc")
     .orderBy("updated_at", "desc");
 
@@ -56,6 +59,7 @@ export async function getUserModel(category?: string): Promise<UserModelEntry[]>
   const rows = await query.execute();
   return rows.map((row) => ({
     id: row.id,
+    userId: row.user_id,
     category: row.category,
     key: row.key,
     value: row.value,
@@ -65,10 +69,15 @@ export async function getUserModel(category?: string): Promise<UserModelEntry[]>
   }));
 }
 
-export async function deleteUserModelEntry(category: string, key: string): Promise<boolean> {
+export async function deleteUserModelEntry(
+  userId: string,
+  category: string,
+  key: string,
+): Promise<boolean> {
   const db = getKysely();
   const result = await db
     .deleteFrom("user_model")
+    .where("user_id", "=", userId)
     .where("category", "=", category)
     .where("key", "=", key)
     .executeTakeFirst();

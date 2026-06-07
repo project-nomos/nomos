@@ -41,7 +41,7 @@ export async function buildMemoryDigest(
   // High-confidence structured user model, grouped by category.
   let modelSection = "";
   try {
-    const entries = (await getUserModel())
+    const entries = (await getUserModel(userId))
       .filter((e) => (e.confidence ?? 1) >= minConfidence)
       .slice(0, maxEntries);
     if (entries.length > 0) {

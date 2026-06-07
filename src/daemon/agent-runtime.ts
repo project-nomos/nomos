@@ -315,7 +315,7 @@ export class AgentRuntime {
     if (this.config.adaptiveMemory) {
       try {
         const { getUserModel } = await import("../db/user-model.ts");
-        userModel = await getUserModel();
+        userModel = await getUserModel(resolveMemoryUserId(undefined));
       } catch {
         // Table may not exist yet -- skip
       }

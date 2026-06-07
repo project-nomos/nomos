@@ -168,6 +168,7 @@ describe("buildSystemPromptAppend", () => {
       userModel: [
         {
           id: "1",
+          userId: "local",
           category: "decision_pattern",
           key: "prefer_simplicity",
           value: {
@@ -197,6 +198,7 @@ describe("buildSystemPromptAppend", () => {
       userModel: [
         {
           id: "1",
+          userId: "local",
           category: "value",
           key: "simplicity",
           value: {
@@ -222,6 +224,7 @@ describe("buildSystemPromptAppend", () => {
       userModel: [
         {
           id: "1",
+          userId: "local",
           category: "preference",
           key: "editor",
           value: "vscode",
@@ -231,6 +234,7 @@ describe("buildSystemPromptAppend", () => {
         },
         {
           id: "2",
+          userId: "local",
           category: "decision_pattern",
           key: "test_first",
           value: {

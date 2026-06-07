@@ -7,6 +7,7 @@
  */
 
 import { getUserModel, type UserModelEntry } from "../db/user-model.ts";
+import { resolveMemoryUserId } from "../auth/tenant-context.ts";
 
 /** Domains that the calibration system covers. */
 export const CALIBRATION_DOMAINS = [
@@ -237,7 +238,7 @@ const SCENARIO_LIBRARY: CalibrationScenario[] = [
 export async function analyzeCalibrationGaps(): Promise<CalibrationStatus> {
   let entries: UserModelEntry[];
   try {
-    entries = await getUserModel();
+    entries = await getUserModel(resolveMemoryUserId(undefined));
   } catch {
     entries = [];
   }

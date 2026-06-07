@@ -155,7 +155,7 @@ export function createMemoryMcpServer(userId: string = "local"): McpSdkServerCon
     async (args) => {
       try {
         const { getUserModel } = await import("../db/user-model.ts");
-        const entries = await getUserModel(args.category);
+        const entries = await getUserModel(userId, args.category);
 
         if (entries.length === 0) {
           return {

@@ -16,6 +16,7 @@
  */
 
 import { createLogger } from "../lib/logger.ts";
+import { resolveMemoryUserId } from "../auth/tenant-context.ts";
 import { getKysely } from "../db/client.ts";
 import { withLease } from "../storage/leases.ts";
 import { isRedisConfigured } from "../storage/redis.ts";
@@ -259,12 +260,13 @@ export async function reRankValues(reflection: {
 
   // Boost values reinforced by evidence
   if (reflection.values_to_boost) {
-    const values = await getUserModel("value");
+    const values = await getUserModel(resolveMemoryUserId(undefined), "value");
     for (const boost of reflection.values_to_boost) {
       const entry = values.find((e) => e.key === boost.key);
       if (entry) {
         const newConfidence = Math.min((entry.confidence + 0.1) * 1.05, 0.95);
         await upsertUserModel({
+          userId: resolveMemoryUserId(undefined),
           category: "value",
           key: entry.key,
           value: entry.value,
@@ -278,12 +280,13 @@ export async function reRankValues(reflection: {
 
   // Decrease values contradicted by behavior
   if (reflection.values_to_decrease) {
-    const values = await getUserModel("value");
+    const values = await getUserModel(resolveMemoryUserId(undefined), "value");
     for (const dec of reflection.values_to_decrease) {
       const entry = values.find((e) => e.key === dec.key);
       if (entry) {
         const newConfidence = Math.max(entry.confidence * 0.85 - 0.05, 0.1);
         await upsertUserModel({
+          userId: resolveMemoryUserId(undefined),
           category: "value",
           key: entry.key,
           value: entry.value,
@@ -305,6 +308,7 @@ export async function reRankValues(reflection: {
         .replace(/^_|_$/g, "");
 
       await upsertUserModel({
+        userId: resolveMemoryUserId(undefined),
         category: "value",
         key,
         value: {
@@ -322,13 +326,14 @@ export async function reRankValues(reflection: {
 
   // Refine decision patterns
   if (reflection.pattern_refinements) {
-    const patterns = await getUserModel("decision_pattern");
+    const patterns = await getUserModel(resolveMemoryUserId(undefined), "decision_pattern");
     for (const ref of reflection.pattern_refinements) {
       const entry = patterns.find((e) => e.key === ref.key);
       if (entry) {
         const val = entry.value as Record<string, unknown>;
         const evidence = (val.evidence as string[]) ?? [];
         await upsertUserModel({
+          userId: resolveMemoryUserId(undefined),
           category: "decision_pattern",
           key: entry.key,
           value: {

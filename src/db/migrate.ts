@@ -272,6 +272,7 @@ CREATE INDEX IF NOT EXISTS idx_memory_metadata ON memory_chunks USING gin(metada
 -- User model: accumulated preferences and facts learned from conversations
 CREATE TABLE IF NOT EXISTS user_model (
   id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id     TEXT NOT NULL DEFAULT 'local',  -- owner; per-person accumulated model
   category    TEXT NOT NULL,
   key         TEXT NOT NULL,
   value       JSONB NOT NULL,
@@ -279,8 +280,20 @@ CREATE TABLE IF NOT EXISTS user_model (
   confidence  FLOAT NOT NULL DEFAULT 0.5,
   created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
-  UNIQUE (category, key)
+  UNIQUE (user_id, category, key)
 );
+
+-- Per-user hardening: the user model used to be global (UNIQUE(category,key)).
+-- Swap to a per-owner key so two members of one DB keep separate models.
+-- Idempotent: drops the legacy constraint if present, adds the new one if not.
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'user_model_category_key_key') THEN
+    ALTER TABLE user_model DROP CONSTRAINT user_model_category_key_key;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'user_model_user_id_category_key_key') THEN
+    ALTER TABLE user_model ADD CONSTRAINT user_model_user_id_category_key_key UNIQUE (user_id, category, key);
+  END IF;
+END $$;
 
 CREATE INDEX IF NOT EXISTS idx_user_model_category ON user_model(category);
 

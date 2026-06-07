@@ -109,7 +109,8 @@ export async function startRepl(options: ReplOptions): Promise<void> {
   if (options.config.adaptiveMemory) {
     try {
       const { getUserModel } = await import("../db/user-model.ts");
-      userModel = await getUserModel();
+      const { resolveMemoryUserId } = await import("../auth/tenant-context.ts");
+      userModel = await getUserModel(resolveMemoryUserId(undefined));
     } catch {
       // Table may not exist yet
     }
