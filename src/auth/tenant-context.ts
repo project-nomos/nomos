@@ -32,28 +32,45 @@ export const LOCAL_TENANT: TenantContext = {
 };
 
 /**
- * Resolve the canonical owner id for durable per-user memory (the vault) from a
- * raw, per-message/per-request user id.
+ * Synthetic / non-human owner ids that must NEVER become a durable per-user
+ * memory partition (a vault, a user model, a graph). They belong to internal
+ * machinery, not a person: the cron scheduler, the `system` instance tenant, and
+ * remote agent DIDs from CATE (`did:...`). In hosted mode these collapse onto the
+ * instance owner instead of minting a junk per-id partition.
+ */
+const SYNTHETIC_OWNER_IDS = new Set(["system", "cron-scheduler"]);
+
+function isSyntheticOwnerId(id: string): boolean {
+  return SYNTHETIC_OWNER_IDS.has(id) || id.startsWith("did:");
+}
+
+/**
+ * Resolve the canonical owner id for ALL durable per-user memory (the vault,
+ * memory_chunks, user_model, contacts, the knowledge graph) from a raw,
+ * per-message/per-request user id.
  *
  * Power-user (self-hosted) mode is a single owner's personal clone: every channel
  * (CLI, Slack, iMessage, Telegram, ...) is the same person, but the channel
  * adapters stamp `message.userId` with the platform sender id (e.g. a Slack user
- * id). Left as-is that would fragment the one vault into a separate brain per
+ * id). Left as-is that would fragment the one brain into a separate partition per
  * channel and mismatch the settings UI, which reads `local`. So we COLLAPSE every
  * raw id to `LOCAL_TENANT.userId`. The column `DEFAULT 'local'` does not cover
  * this, because the daemon passes a non-null channel id that overrides it.
  *
- * Hosted (multi-tenant) mode genuinely has one vault per authenticated user, so
- * we keep the resolved per-request id (falling back to local only if absent,
- * which upstream auth should prevent).
+ * Hosted (multi-tenant) mode genuinely has one partition per authenticated user,
+ * so we keep the resolved per-request id, EXCEPT when it is absent or synthetic
+ * (cron scheduler, CATE DID, the `system` sentinel): those collapse onto the
+ * instance owner (`systemTenant().userId`) so internal machinery never creates a
+ * junk per-id partition. Real owners for cron/CATE traffic are supplied upstream
+ * (the job's owner, the local recipient), so this is the safety net.
  *
- * Use this wherever a vault/durable-memory `user_id` is derived from an incoming
- * message or request. Behavioral/ephemeral signals keyed by sender (persona,
- * theory-of-mind) keep the raw id; this is only for durable per-user memory.
+ * Behavioral/ephemeral signals keyed by sender (persona, theory-of-mind) keep the
+ * raw id; this is only for durable per-user memory.
  */
-export function resolveVaultUserId(rawUserId?: string | null): string {
+export function resolveMemoryUserId(rawUserId?: string | null): string {
   if (!isHosted()) return LOCAL_TENANT.userId;
-  return rawUserId ?? LOCAL_TENANT.userId;
+  if (!rawUserId || isSyntheticOwnerId(rawUserId)) return systemTenant().userId;
+  return rawUserId;
 }
 
 /**

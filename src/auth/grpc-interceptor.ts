@@ -17,7 +17,7 @@ import { isOrgMember } from "./org-members.ts";
 import { LOCAL_TENANT, type TenantContext } from "./tenant-context.ts";
 // Single source of truth for "are we hosted": getMode() already folds in
 // AUTH_JWKS_URL, so auth enforcement here and per-user vault scoping in
-// resolveVaultUserId can never disagree (a skew would collapse authenticated
+// resolveMemoryUserId can never disagree (a skew would collapse authenticated
 // users onto the shared 'local' vault).
 import { isHosted } from "../config/mode.ts";
 

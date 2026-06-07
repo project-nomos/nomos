@@ -32,7 +32,7 @@ export function getMode(): NomosMode {
   // JWT auth configured (AUTH_JWKS_URL) means we are serving authenticated,
   // multi-tenant traffic, so treat it as hosted even when NOMOS_MODE was not set
   // explicitly. This keeps auth enforcement (grpc-interceptor), feature gates,
-  // and per-user vault scoping (resolveVaultUserId) on ONE definition of
+  // and per-user vault scoping (resolveMemoryUserId) on ONE definition of
   // "hosted": a skew here would collapse authenticated users onto the shared
   // 'local' vault. Power-user installs never set AUTH_JWKS_URL, so they are
   // unaffected.

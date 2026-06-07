@@ -32,7 +32,7 @@ import { buildVaultMcpServer } from "../sdk/vault-mcp.ts";
 import { buildMemoryDigest } from "../memory/digest.ts";
 import { loadEnvConfig, type NomosConfig } from "../config/env.ts";
 import { FEATURES, isHosted } from "../config/mode.ts";
-import { resolveVaultUserId } from "../auth/tenant-context.ts";
+import { resolveMemoryUserId } from "../auth/tenant-context.ts";
 
 /**
  * Built-in tools blocked when hosted-mode feature gates demand it. Centralized
@@ -897,7 +897,7 @@ export class AgentRuntime {
     // In power-user mode every channel is the same owner, so collapse the raw
     // channel sender id to the canonical local id (otherwise the vault fragments
     // per channel); in hosted mode this is the authenticated per-tenant user.
-    const vaultUserId = resolveVaultUserId(userId);
+    const vaultUserId = resolveMemoryUserId(userId);
     let mcpServers = {
       ...this.mcpServers,
       "nomos-vault": buildVaultMcpServer(vaultUserId),
