@@ -1,0 +1,12 @@
+# Generates TS Connect-ES bindings for the daemon side.
+# Output lives under src/gen/ and is consumed by src/daemon/connect-server.ts.
+# Run:  pnpm codegen
+version: v2
+inputs:
+  - directory: proto
+plugins:
+  - local: ./node_modules/.bin/protoc-gen-es
+    out: src/gen
+    opt:
+      - target=ts
+      - import_extension=ts

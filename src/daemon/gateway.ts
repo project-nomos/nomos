@@ -13,6 +13,7 @@ import { AgentRuntime } from "./agent-runtime.ts";
 import { MessageQueue } from "./message-queue.ts";
 import { DaemonWebSocketServer } from "./websocket-server.ts";
 import { GrpcServer } from "./grpc-server.ts";
+import { ConnectServer } from "./connect-server.ts";
 import { ChannelManager } from "./channel-manager.ts";
 import { CronEngine } from "./cron-engine.ts";
 import { DraftManager } from "./draft-manager.ts";
@@ -52,6 +53,8 @@ export interface GatewayOptions {
   port?: number;
   /** gRPC server port (default: port + 1, i.e., 8766) */
   grpcPort?: number;
+  /** Connect (HTTP) server port for mobile clients (default: grpcPort + 1, i.e., 8767) */
+  connectPort?: number;
   /** Skip channel adapters (useful for testing) */
   skipChannels?: boolean;
   /** Skip cron engine */
@@ -67,6 +70,7 @@ export class Gateway {
   private messageQueue: MessageQueue;
   private wsServer: DaemonWebSocketServer;
   private grpcServer: GrpcServer;
+  private connectServer: ConnectServer;
   private channelManager: ChannelManager;
   private cronEngine: CronEngine;
   private draftManager: DraftManager;
@@ -115,6 +119,14 @@ export class Gateway {
       options.grpcPort ?? (options.port ?? 8765) + 1,
       this.draftManager,
     );
+
+    // 4c. Create Connect server (HTTP/1.1 — mobile clients use this).
+    const grpcPort = options.grpcPort ?? (options.port ?? 8765) + 1;
+    this.connectServer = new ConnectServer({
+      messageQueue: this.messageQueue,
+      draftManager: this.draftManager,
+      port: options.connectPort ?? grpcPort + 1,
+    });
 
     // 5. Create channel manager
     this.channelManager = new ChannelManager();
@@ -214,6 +226,16 @@ export class Gateway {
 
     // Start gRPC server
     await this.grpcServer.start();
+
+    // Start Connect server (mobile clients) — same handlers, HTTP-friendly wire.
+    try {
+      await this.connectServer.start();
+    } catch (err) {
+      log.warn(
+        { err: err instanceof Error ? err.message : err },
+        "Connect server failed to start (mobile clients will be unable to reach the daemon)",
+      );
+    }
 
     // Register command handler for hot-reload and ingestion triggers
     this.grpcServer.onCommand((command) => this.handleCommand(command));
@@ -411,6 +433,7 @@ export class Gateway {
     this.cronEngine.stop();
     await this.channelManager.stop();
     await this.grpcServer.stop();
+    await this.connectServer.stop();
     await this.wsServer.stop();
     await closeBrowser();
 
