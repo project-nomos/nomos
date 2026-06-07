@@ -99,7 +99,7 @@ export async function vaultDelete(userId: string, path: string): Promise<void> {
   await deleteVaultNote(userId, p);
   // Forget = full forget: drop this note's vector chunks too. Fire-and-forget;
   // a failure here must not make the user-visible delete fail.
-  void deleteMemoryByIdPrefix(vaultChunkIdPrefix(userId, p)).catch(() => {});
+  void deleteMemoryByIdPrefix(userId, vaultChunkIdPrefix(userId, p)).catch(() => {});
 }
 
 /**
@@ -152,6 +152,7 @@ async function indexNoteIntoVectorMemory(
     const c = chunks[i];
     await storeMemoryChunk({
       id: `${idPrefix}${i}`,
+      userId,
       source: "vault",
       path,
       text: c.text,

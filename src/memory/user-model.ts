@@ -33,6 +33,7 @@ function mergeConfidence(existing: number, incoming: number): number {
  * Upserts preferences, facts, and handles corrections.
  */
 export async function updateUserModel(
+  userId: string,
   extracted: ExtractedKnowledge,
   sourceChunkIds: string[],
 ): Promise<void> {
@@ -83,9 +84,9 @@ export async function updateUserModel(
       // Update its metadata to mark it as superseded
       try {
         const { searchMemoryByText } = await import("../db/memory.ts");
-        const originals = await searchMemoryByText(corr.original, 1);
+        const originals = await searchMemoryByText(userId, corr.original, 1);
         if (originals.length > 0) {
-          await updateMemoryMetadata(originals[0].id, {
+          await updateMemoryMetadata(userId, originals[0].id, {
             superseded_by: corrChunkId,
           });
         }

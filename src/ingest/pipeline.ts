@@ -9,6 +9,7 @@ import { randomUUID } from "node:crypto";
 import { chunkText } from "../memory/chunker.ts";
 import { generateEmbeddings, isEmbeddingAvailable } from "../memory/embeddings.ts";
 import { storeMemoryChunk } from "../db/memory.ts";
+import { resolveMemoryUserId } from "../auth/tenant-context.ts";
 import { sql } from "kysely";
 import { getKysely } from "../db/client.ts";
 import { deduplicateBatch } from "./dedup.ts";
@@ -61,7 +62,12 @@ export async function runIngestionPipeline(
       batch.push(message);
 
       if (batch.length >= batchSize) {
-        await processBatch(batch, options.dryRun ?? false, progress);
+        await processBatch(
+          batch,
+          options.dryRun ?? false,
+          progress,
+          resolveMemoryUserId(options.userId),
+        );
         batch = [];
 
         // Update job progress
@@ -72,7 +78,12 @@ export async function runIngestionPipeline(
 
     // Process remaining messages
     if (batch.length > 0) {
-      await processBatch(batch, options.dryRun ?? false, progress);
+      await processBatch(
+        batch,
+        options.dryRun ?? false,
+        progress,
+        resolveMemoryUserId(options.userId),
+      );
     }
 
     progress.done = true;
@@ -93,6 +104,7 @@ async function processBatch(
   messages: IngestMessage[],
   dryRun: boolean,
   progress: IngestProgress,
+  userId: string,
 ): Promise<void> {
   // Deduplicate against existing memory
   const unique = await deduplicateBatch(messages);
@@ -146,6 +158,7 @@ async function processBatch(
     const entry = chunkEntries[i];
     await storeMemoryChunk({
       id: entry.chunkId,
+      userId,
       source: "ingest",
       path: `${entry.message.platform}/${entry.message.channelId}`,
       text: entry.text,

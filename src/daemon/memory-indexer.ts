@@ -14,6 +14,7 @@ import { precompress } from "../memory/compressor.ts";
 import { generateEmbeddings, isEmbeddingAvailable } from "../memory/embeddings.ts";
 import { storeMemoryChunk } from "../db/memory.ts";
 import { loadEnvConfig } from "../config/env.ts";
+import { resolveMemoryUserId } from "../auth/tenant-context.ts";
 import type { IncomingMessage, OutgoingMessage } from "./types.ts";
 import { createLogger } from "../lib/logger.ts";
 
@@ -44,6 +45,10 @@ export async function indexConversationTurn(
     log.debug(`Skipping ephemeral session ${sessionKey} (off the record)`);
     return;
   }
+  // Resolve the durable-memory owner: power-user collapses every channel to
+  // 'local'; hosted keeps the authenticated user (synthetic ids fold to the
+  // instance owner). This is the user_id every chunk for this turn is stamped with.
+  const userId = resolveMemoryUserId(incoming.userId);
   const timestamp = incoming.timestamp.toISOString();
 
   // Format the exchange as a structured text block
@@ -80,10 +85,13 @@ export async function indexConversationTurn(
   for (let i = 0; i < chunks.length; i++) {
     const chunk = chunks[i];
     const chunkHash = createHash("sha256").update(chunk.text).digest("hex").slice(0, 16);
-    const docHash = createHash("sha256").update(text).digest("hex").slice(0, 16);
+    // Fold userId into the doc hash so two users' identical exchanges never
+    // collide on the primary key (and overwrite each other).
+    const docHash = createHash("sha256").update(`${userId}:${text}`).digest("hex").slice(0, 16);
 
     await storeMemoryChunk({
       id: `conv:${docHash}:${i}`,
+      userId,
       source: "conversation",
       path: sessionKey,
       text: chunk.text,
@@ -100,12 +108,12 @@ export async function indexConversationTurn(
   // Adaptive memory: extract structured knowledge and score exemplars (fire-and-forget)
   const config = loadEnvConfig();
   if (config.adaptiveMemory) {
-    extractAndStoreKnowledgeFromTurn(incoming, outgoing, sessionKey).catch((err) => {
+    extractAndStoreKnowledgeFromTurn(incoming, outgoing, sessionKey, userId).catch((err) => {
       log.debug({ err }, "Knowledge extraction failed");
     });
 
     // Score user message as a potential exemplar for few-shot personality priming
-    scoreExemplarFromTurn(incoming, sessionKey).catch((err) => {
+    scoreExemplarFromTurn(incoming, sessionKey, userId).catch((err) => {
       log.debug({ err }, "Exemplar scoring failed");
     });
   }
@@ -119,28 +127,27 @@ async function extractAndStoreKnowledgeFromTurn(
   incoming: IncomingMessage,
   outgoing: OutgoingMessage,
   sessionKey: string,
+  userId: string,
 ): Promise<void> {
   const { extractAndStoreKnowledge } = await import("../memory/extractor.ts");
   const { updateUserModel } = await import("../memory/user-model.ts");
 
   const { knowledge, chunkIds } = await extractAndStoreKnowledge(
+    userId,
     incoming.content,
     outgoing.content,
     sessionKey,
   );
 
   if (chunkIds.length > 0) {
-    await updateUserModel(knowledge, chunkIds);
+    await updateUserModel(userId, knowledge, chunkIds);
 
     // Promote extracted facts into the knowledge graph (Phase 2 self-wiring).
-    // Scope to the CONVERSATION's user, not the indexer's system tenant, so
-    // each person's brain stays private. Fire-and-forget; never blocks.
+    // Scope to the resolved conversation owner so each person's brain stays
+    // private. Fire-and-forget; never blocks.
     try {
       const { ingestKnowledgeIntoGraph } = await import("../memory/graph-writer.ts");
-      const ctx = {
-        orgId: process.env.NOMOS_ORG_ID ?? "local",
-        userId: incoming.userId || "local",
-      };
+      const ctx = { orgId: process.env.NOMOS_ORG_ID ?? "local", userId };
       await ingestKnowledgeIntoGraph(ctx, knowledge, { sourceIds: chunkIds });
     } catch (err) {
       log.debug({ err }, "Graph ingestion failed");
@@ -152,9 +159,13 @@ async function extractAndStoreKnowledgeFromTurn(
  * Score a user message as a potential exemplar for few-shot personality priming.
  * Only scores messages long enough to be useful (>= 30 chars).
  */
-async function scoreExemplarFromTurn(incoming: IncomingMessage, sessionKey: string): Promise<void> {
+async function scoreExemplarFromTurn(
+  incoming: IncomingMessage,
+  sessionKey: string,
+  userId: string,
+): Promise<void> {
   if (incoming.content.length < 30) return;
 
   const { scoreAndStoreExemplar } = await import("../memory/exemplars.ts");
-  await scoreAndStoreExemplar(incoming.content, incoming.platform, sessionKey);
+  await scoreAndStoreExemplar(userId, incoming.content, incoming.platform, sessionKey);
 }

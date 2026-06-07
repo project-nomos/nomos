@@ -79,11 +79,11 @@ function applyTemporalDecay(results: MemorySearchResult[]): MemorySearchResult[]
 }
 
 /**
- * Record access for returned search results (fire-and-forget).
+ * Record access for returned search results (fire-and-forget), scoped to the owner.
  */
-function trackAccess(results: MemorySearchResult[]): void {
+function trackAccess(userId: string, results: MemorySearchResult[]): void {
   const ids = results.map((r) => r.id);
-  recordMemoryAccess(ids).catch(() => {
+  recordMemoryAccess(userId, ids).catch(() => {
     // best-effort — don't fail searches over access tracking
   });
 }
@@ -104,12 +104,13 @@ function extractKeywords(query: string): string {
  * Applies temporal decay to boost recent/frequently accessed memories.
  */
 export async function textOnlySearch(
+  userId: string,
   query: string,
   limit: number = 10,
   category?: string,
 ): Promise<MemorySearchResult[]> {
   const keywords = extractKeywords(query);
-  const results = await searchMemoryByText(keywords, limit * 2, category);
+  const results = await searchMemoryByText(userId, keywords, limit * 2, category);
 
   // Normalize scores to 0-1 range based on rank, then apply temporal decay
   const scored = results.map((result, rank) => ({
@@ -118,7 +119,7 @@ export async function textOnlySearch(
   }));
 
   const decayed = applyTemporalDecay(scored).slice(0, limit);
-  trackAccess(decayed);
+  trackAccess(userId, decayed);
   return decayed;
 }
 
@@ -128,11 +129,17 @@ export async function textOnlySearch(
  * on any error (e.g. the kg_* tables not existing yet). This is the third
  * retrieval signal fused into hybridSearch alongside vector + FTS.
  */
-async function graphCandidates(query: string, limit: number): Promise<MemorySearchResult[]> {
+async function graphCandidates(
+  userId: string,
+  query: string,
+  limit: number,
+): Promise<MemorySearchResult[]> {
   try {
     const { searchNodes, neighborhood } = await import("./graph.ts");
-    const { LOCAL_TENANT } = await import("../auth/tenant-context.ts");
-    const nodes = await searchNodes(LOCAL_TENANT, query, { limit: 3 });
+    const { systemTenant } = await import("../auth/tenant-context.ts");
+    // Scope graph recall to the same owner as the vector/FTS signals.
+    const ctx = { orgId: systemTenant().orgId, userId };
+    const nodes = await searchNodes(ctx, query, { limit: 3 });
     if (nodes.length === 0) return [];
 
     const out: MemorySearchResult[] = [];
@@ -146,7 +153,7 @@ async function graphCandidates(query: string, limit: number): Promise<MemorySear
           score: 0,
         });
       }
-      const sub = await neighborhood(LOCAL_TENANT, node.id, { depth: 1, limit: limit * 2 });
+      const sub = await neighborhood(ctx, node.id, { depth: 1, limit: limit * 2 });
       const nameById = new Map(sub.nodes.map((n) => [n.id, n.name]));
       for (const e of sub.edges) {
         const s = nameById.get(e.srcId) ?? "?";
@@ -172,6 +179,7 @@ async function graphCandidates(query: string, limit: number): Promise<MemorySear
  * Applies temporal decay to boost recent/frequently accessed memories.
  */
 export async function hybridSearch(
+  userId: string,
   query: string,
   embedding: number[],
   limit: number = 10,
@@ -180,9 +188,9 @@ export async function hybridSearch(
   // Run all signals in parallel. Graph fusion only for general (uncategorized)
   // queries — relationships aren't tied to a memory category.
   const [vectorResults, textResults, graphResults] = await Promise.all([
-    searchMemoryByVector(embedding, limit * 2, category),
-    searchMemoryByText(query, limit * 2, category),
-    category ? Promise.resolve<MemorySearchResult[]>([]) : graphCandidates(query, limit),
+    searchMemoryByVector(userId, embedding, limit * 2, category),
+    searchMemoryByText(userId, query, limit * 2, category),
+    category ? Promise.resolve<MemorySearchResult[]>([]) : graphCandidates(userId, query, limit),
   ]);
 
   // Build RRF scores
@@ -231,6 +239,6 @@ export async function hybridSearch(
   }));
 
   const decayed = applyTemporalDecay(merged).slice(0, limit);
-  trackAccess(decayed);
+  trackAccess(userId, decayed);
   return decayed;
 }

@@ -60,7 +60,12 @@ export async function sampleRealMessages(count = 5): Promise<TwinTestPair[]> {
 
   // Try exemplar-tagged messages first
   try {
-    const exemplarResults = await textOnlySearch("representative message", count * 2, "exemplar");
+    const exemplarResults = await textOnlySearch(
+      "local",
+      "representative message",
+      count * 2,
+      "exemplar",
+    );
 
     for (const result of exemplarResults) {
       if (pairs.length >= count) break;
@@ -81,6 +86,7 @@ export async function sampleRealMessages(count = 5): Promise<TwinTestPair[]> {
   if (pairs.length < count) {
     try {
       const sentResults = await textOnlySearch(
+        "local",
         "user conversation message",
         (count - pairs.length) * 3,
       );

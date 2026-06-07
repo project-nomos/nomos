@@ -115,7 +115,13 @@ export async function startRepl(options: ReplOptions): Promise<void> {
     }
     try {
       const { retrieveExemplars } = await import("../memory/exemplars.ts");
-      const stored = await retrieveExemplars("general conversation", undefined, 3);
+      const { resolveMemoryUserId } = await import("../auth/tenant-context.ts");
+      const stored = await retrieveExemplars(
+        resolveMemoryUserId(undefined),
+        "general conversation",
+        undefined,
+        3,
+      );
       if (stored.length > 0) {
         exemplars = stored.map((e) => ({
           text: e.text,

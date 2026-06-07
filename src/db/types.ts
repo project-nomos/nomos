@@ -48,6 +48,7 @@ export interface TranscriptMessagesTable {
 
 export interface MemoryChunksTable {
   id: string;
+  user_id: Generated<string>;
   source: string;
   path: string | null;
   text: string;

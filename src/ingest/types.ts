@@ -41,6 +41,8 @@ export interface IngestOptions {
    * authorized account.
    */
   account?: string;
+  /** Owner of the imported memory. Resolved via resolveMemoryUserId; defaults to the local owner. */
+  userId?: string;
 }
 
 export interface IngestProgress {

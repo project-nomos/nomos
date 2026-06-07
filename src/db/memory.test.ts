@@ -21,6 +21,7 @@ describe("storeMemoryChunk", () => {
     addResult([]);
     await storeMemoryChunk({
       id: "chunk-1",
+      userId: "local",
       source: "conversation",
       text: "Some text to remember",
     });
@@ -30,6 +31,7 @@ describe("storeMemoryChunk", () => {
     addResult([]);
     await storeMemoryChunk({
       id: "chunk-2",
+      userId: "local",
       source: "file",
       path: "/src/index.ts",
       text: "Code content",
@@ -49,7 +51,7 @@ describe("searchMemoryByVector", () => {
       { id: "chunk-2", text: "World", path: "/a.ts", source: "file", score: 0.8 },
     ];
     addResult(rows);
-    const result = await searchMemoryByVector([0.1, 0.2], 10);
+    const result = await searchMemoryByVector("local", [0.1, 0.2], 10);
     expect(result).toEqual(rows);
   });
 });
@@ -60,7 +62,7 @@ describe("searchMemoryByText", () => {
       { id: "chunk-1", text: "matching text", path: null, source: "conversation", score: 0.5 },
     ];
     addResult(rows);
-    const result = await searchMemoryByText("matching", 5);
+    const result = await searchMemoryByText("local", "matching", 5);
     expect(result).toEqual(rows);
   });
 });
@@ -68,7 +70,7 @@ describe("searchMemoryByText", () => {
 describe("deleteMemoryBySource", () => {
   it("returns count of deleted rows", async () => {
     addResult([{}, {}, {}, {}, {}]); // 5 rows → numDeletedRows = 5
-    const result = await deleteMemoryBySource("conversation");
+    const result = await deleteMemoryBySource("local", "conversation");
     expect(result).toBe(5);
   });
 });
@@ -76,7 +78,7 @@ describe("deleteMemoryBySource", () => {
 describe("deleteMemoryByPath", () => {
   it("returns count of deleted rows", async () => {
     addResult([{}, {}]); // 2 rows → numDeletedRows = 2
-    const result = await deleteMemoryByPath("/src/old.ts");
+    const result = await deleteMemoryByPath("local", "/src/old.ts");
     expect(result).toBe(2);
   });
 });

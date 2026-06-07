@@ -323,7 +323,12 @@ export class AgentRuntime {
       // Load exemplars for few-shot personality priming
       try {
         const { retrieveExemplars } = await import("../memory/exemplars.ts");
-        const stored = await retrieveExemplars("general conversation", undefined, 3);
+        const stored = await retrieveExemplars(
+          resolveMemoryUserId(undefined),
+          "general conversation",
+          undefined,
+          3,
+        );
         if (stored.length > 0) {
           exemplars = stored.map((e) => ({
             text: e.text,
@@ -901,6 +906,9 @@ export class AgentRuntime {
     let mcpServers = {
       ...this.mcpServers,
       "nomos-vault": buildVaultMcpServer(vaultUserId),
+      // Rebuild the memory tools per-turn so memory_search is scoped to this
+      // owner (the cached one at init has no user). Overrides the cached entry.
+      "nomos-memory": createMemoryMcpServer(vaultUserId),
     };
     let googlePrompt = "";
     if (isHosted() && userId) {

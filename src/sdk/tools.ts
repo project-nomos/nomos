@@ -51,7 +51,7 @@ function formatSubgraph(sub: Subgraph): string {
  * Creates an in-process MCP server that exposes memory tools to the agent.
  * The agent can call `memory_search` to query the pgvector-backed memory store.
  */
-export function createMemoryMcpServer(): McpSdkServerConfigWithInstance {
+export function createMemoryMcpServer(userId: string = "local"): McpSdkServerConfigWithInstance {
   const memorySearchTool = tool(
     "memory_search",
     "Search the long-term memory store using hybrid vector + text search. Returns relevant code snippets, documentation, and previously stored knowledge. Use the category filter for targeted recall.",
@@ -87,15 +87,21 @@ export function createMemoryMcpServer(): McpSdkServerConfigWithInstance {
 
         if (!isEmbeddingAvailable()) {
           // Fall back to text-only search when embeddings are unavailable
-          results = await textOnlySearch(args.query, args.limit ?? 5, args.category);
+          results = await textOnlySearch(userId, args.query, args.limit ?? 5, args.category);
         } else {
           try {
             const embedding = await generateEmbedding(args.query);
-            results = await hybridSearch(args.query, embedding, args.limit ?? 5, args.category);
+            results = await hybridSearch(
+              userId,
+              args.query,
+              embedding,
+              args.limit ?? 5,
+              args.category,
+            );
           } catch {
             // Fall back to text-only search if embedding generation fails
             log.warn("Embedding generation failed, falling back to text-only search");
-            results = await textOnlySearch(args.query, args.limit ?? 5, args.category);
+            results = await textOnlySearch(userId, args.query, args.limit ?? 5, args.category);
           }
         }
 
