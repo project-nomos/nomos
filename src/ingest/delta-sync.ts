@@ -9,6 +9,7 @@
  */
 
 import { getKysely } from "../db/client.ts";
+import { systemTenant } from "../auth/tenant-context.ts";
 import { CronStore } from "../cron/store.ts";
 import { createLogger } from "../lib/logger.ts";
 
@@ -50,6 +51,7 @@ export async function registerDeltaSyncJobs(): Promise<void> {
     }
 
     await store.createJob({
+      userId: systemTenant().userId,
       name: cronName,
       schedule: job.delta_schedule || "6h",
       scheduleType: "every",

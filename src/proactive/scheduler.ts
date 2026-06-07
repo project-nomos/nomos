@@ -11,6 +11,7 @@
  */
 
 import { CronStore } from "../cron/store.ts";
+import { systemTenant } from "../auth/tenant-context.ts";
 import type { CronJobUpdate } from "../cron/types.ts";
 import {
   getCommitmentsForReminder,
@@ -87,6 +88,7 @@ async function upsertJob(
 
   if (!existing) {
     await store.createJob({
+      userId: systemTenant().userId,
       name: spec.name,
       schedule: spec.schedule,
       scheduleType: spec.scheduleType,

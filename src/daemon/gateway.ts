@@ -8,6 +8,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { systemTenant } from "../auth/tenant-context.ts";
 import { fileURLToPath } from "node:url";
 import { AgentRuntime } from "./agent-runtime.ts";
 import { MessageQueue } from "./message-queue.ts";
@@ -314,6 +315,7 @@ export class Gateway {
       const existingWikiJob = await cronStore.getJobByName("wiki-compile");
       if (!existingWikiJob) {
         await cronStore.createJob({
+          userId: systemTenant().userId,
           name: "wiki-compile",
           schedule: "1h",
           scheduleType: "every",
@@ -342,7 +344,11 @@ export class Gateway {
             platform: "cate",
             channelId: envelope.header.thread_id,
             threadId: envelope.header.thread_id,
-            userId: envelope.parties.from.did,
+            // The vault/memory owner is the LOCAL recipient, not the remote
+            // sender. The sender DID is surfaced separately (broadcast below) for
+            // trust/display; using it as the owner would spin up a junk per-DID
+            // partition.
+            userId: systemTenant().userId,
             content: payload,
             timestamp: new Date(envelope.header.timestamp),
           };

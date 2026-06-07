@@ -603,6 +603,7 @@ export function createMemoryMcpServer(userId: string = "local"): McpSdkServerCon
 
         const store = new CronStore();
         const id = await store.createJob({
+          userId,
           name: args.name,
           prompt: args.prompt,
           schedule: args.schedule,

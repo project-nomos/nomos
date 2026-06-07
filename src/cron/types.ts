@@ -6,6 +6,8 @@ export type DeliveryMode = "none" | "announce";
 
 export interface CronJob {
   id: string;
+  /** Owner of the scheduled task; becomes the vault/memory owner when it runs. */
+  userId: string;
   name: string;
   schedule: string;
   scheduleType: ScheduleType;

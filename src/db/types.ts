@@ -67,6 +67,7 @@ export interface MemoryChunksTable {
 
 export interface CronJobsTable {
   id: Generated<string>;
+  user_id: Generated<string>;
   name: string;
   schedule: string;
   schedule_type: "at" | "every" | "cron";

@@ -99,7 +99,7 @@ export class CronEngine {
       id: randomUUID(),
       platform: job.platform ?? "cron",
       channelId: job.channelId ?? sessionKey,
-      userId: "cron-scheduler",
+      userId: job.userId ?? "local",
       content: job.prompt,
       timestamp: new Date(),
     };
