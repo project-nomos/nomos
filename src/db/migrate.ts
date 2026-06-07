@@ -400,6 +400,40 @@ CREATE INDEX IF NOT EXISTS idx_wiki_path ON wiki_articles(path);
 CREATE INDEX IF NOT EXISTS idx_wiki_fts ON wiki_articles
   USING gin(to_tsvector('english', content));
 
+-- Agent long-term memory: the vault. Per-user, agent- and human-authored markdown
+-- notes that are the SOURCE OF TRUTH for what the clone knows. Distinct from
+-- wiki_articles, which holds the DERIVED/compiled wiki (contacts, topic summaries)
+-- projected out of this vault + other sources. The agent reads/writes the vault
+-- in-loop via the memory_* tools; the user edits it directly.
+CREATE TABLE IF NOT EXISTS vault_notes (
+  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id     TEXT NOT NULL DEFAULT 'local',  -- per-person scoping (zero-trust on top of db-per-user)
+  path        TEXT NOT NULL,
+  title       TEXT NOT NULL,
+  content     TEXT NOT NULL,
+  backlinks   TEXT[] NOT NULL DEFAULT '{}',
+  word_count  INT NOT NULL DEFAULT 0,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (user_id, path)
+);
+CREATE INDEX IF NOT EXISTS idx_vault_user ON vault_notes(user_id);
+CREATE INDEX IF NOT EXISTS idx_vault_path ON vault_notes(user_id, path);
+CREATE INDEX IF NOT EXISTS idx_vault_fts ON vault_notes
+  USING gin(to_tsvector('english', content));
+
+-- One-time data migration: the vault used to live in wiki_articles under
+-- category 'memory'. Move those rows into vault_notes. Idempotent: ON CONFLICT
+-- skips already-migrated rows and the DELETE then clears the source, so on every
+-- subsequent migrate this is a no-op (no 'memory' rows remain). Stamps user_id
+-- 'local' because wiki_articles has no user_id column; live writes carry the
+-- real id going forward.
+INSERT INTO vault_notes (user_id, path, title, content, backlinks, word_count, created_at, updated_at)
+SELECT 'local', path, title, content, backlinks, word_count, created_at, updated_at
+FROM wiki_articles WHERE category = 'memory'
+ON CONFLICT (user_id, path) DO NOTHING;
+DELETE FROM wiki_articles WHERE category = 'memory';
+
 -- Wiki config defaults
 INSERT INTO config (key, value) VALUES
   ('app.wikiEnabled',          '"true"'),
@@ -678,14 +712,14 @@ CREATE EXTENSION IF NOT EXISTS pg_trgm;
 
 CREATE TABLE IF NOT EXISTS kg_nodes (
   id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  kind          TEXT NOT NULL,                 -- person|project|topic|decision|value|event|org|wiki|moc|chunk
+  kind          TEXT NOT NULL,                 -- person|project|topic|decision|value|event|org|vault|wiki|moc|chunk
   name          TEXT NOT NULL,
   canonical_key TEXT NOT NULL,                 -- dedup key, normalized (lowercased)
   aliases       TEXT[] NOT NULL DEFAULT '{}',  -- Obsidian-style alias resolution
   summary       TEXT,
   embedding     vector(768),                   -- gemini-embedding-001; enables semantic edges
-  external_kind TEXT,                           -- 'contact'|'wiki'|'memory_chunk'|'user_model'|null
-  external_ref  TEXT,                           -- contacts.id | wiki_articles.path | memory_chunks.id | …
+  external_kind TEXT,                           -- 'contact'|'vault'|'wiki'|'memory_chunk'|'user_model'|null
+  external_ref  TEXT,                           -- contacts.id | vault_notes.path | wiki_articles.path | memory_chunks.id | …
   attrs         JSONB NOT NULL DEFAULT '{}',
   source_ids    TEXT[] NOT NULL DEFAULT '{}',  -- provenance: memory_chunk ids that created this node
   confidence    REAL NOT NULL DEFAULT 0.5,

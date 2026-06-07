@@ -226,6 +226,19 @@ export interface WikiArticlesTable {
   updated_at: Generated<Date>;
 }
 
+/** The vault: per-user agent long-term memory (source of truth). */
+export interface VaultNotesTable {
+  id: Generated<string>;
+  user_id: Generated<string>;
+  path: string;
+  title: string;
+  content: string;
+  backlinks: Generated<string[]>;
+  word_count: Generated<number>;
+  created_at: Generated<Date>;
+  updated_at: Generated<Date>;
+}
+
 export interface ContactsTable {
   id: Generated<string>;
   display_name: string;
@@ -373,6 +386,7 @@ export interface Database {
   ingest_jobs: IngestJobsTable;
   style_profiles: StyleProfilesTable;
   wiki_articles: WikiArticlesTable;
+  vault_notes: VaultNotesTable;
   contacts: ContactsTable;
   contact_identities: ContactIdentitiesTable;
   commitments: CommitmentsTable;

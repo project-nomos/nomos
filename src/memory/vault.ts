@@ -2,34 +2,31 @@
  * Per-user vault: the agent's long-term memory store.
  *
  * A markdown knowledge base the agent reads and writes in-loop (the memory-tool
- * pattern, with our own backend) and the user can browse and edit. Backed by the
- * `wiki_articles` table; agent-authored notes live under the `memory` category,
- * distinct from the compiled knowledge wiki (contacts, etc.).
+ * pattern, with our own backend) and the user can browse and edit. The SOURCE OF
+ * TRUTH for what the clone knows. Backed by its own `vault_notes` table, distinct
+ * from `wiki_articles` (the derived/compiled wiki projected out of this vault).
  *
- * Isolation is database-per-user (the JWT-scoped DB connection is the boundary).
- * `userId` is threaded through every call so the per-row zero-trust filter can be
- * switched on once `wiki_articles` gains a `user_id` column (v2 hardening); for
- * now it is unused at the query layer.
+ * Isolation is database-per-user (the JWT-scoped DB connection is the boundary),
+ * with a per-row `user_id` filter enforced in the `db/vault.ts` queries as
+ * zero-trust defense-in-depth on top of it.
  *
- * Writes REVISE (upsert by path), they do not append, so the vault does not
- * accrete duplicates or contradictions.
+ * Writes REVISE (upsert by `(user_id, path)`), they do not append, so the vault
+ * does not accrete duplicates or contradictions.
  */
 
 import {
-  deleteArticle,
-  getArticle,
-  listArticles,
-  searchArticles,
-  upsertArticle,
-  type WikiArticleRow,
-} from "../db/wiki.ts";
+  deleteVaultNote,
+  getVaultNote,
+  listVaultNotes,
+  searchVaultNotes,
+  upsertVaultNote,
+  type VaultNoteRow,
+} from "../db/vault.ts";
 import { createHash } from "node:crypto";
 import { chunkText } from "./chunker.ts";
 import { generateEmbeddings, isEmbeddingAvailable } from "./embeddings.ts";
 import { storeMemoryChunk } from "../db/memory.ts";
 
-/** Agent-authored notes use this category in wiki_articles. */
-export const VAULT_CATEGORY = "memory";
 const MAX_PATH_LEN = 200;
 
 export interface VaultNote {
@@ -60,23 +57,23 @@ export function extractWikiLinks(content: string): string[] {
   return [...links];
 }
 
-function toNote(row: WikiArticleRow): VaultNote {
+function toNote(row: VaultNoteRow): VaultNote {
   return { path: row.path, title: row.title, content: row.content, updatedAt: row.updated_at };
 }
 
 /** Read one note by path. Null if it does not exist. */
-export async function vaultRead(_userId: string, path: string): Promise<VaultNote | null> {
-  const row = await getArticle(validateVaultPath(path));
+export async function vaultRead(userId: string, path: string): Promise<VaultNote | null> {
+  const row = await getVaultNote(userId, validateVaultPath(path));
   return row ? toNote(row) : null;
 }
 
-/** List agent memory notes, optionally filtered to a path prefix. */
-export async function vaultList(_userId: string, prefix?: string): Promise<VaultNote[]> {
-  const notes = (await listArticles(VAULT_CATEGORY)).map(toNote);
+/** List the user's vault notes, optionally filtered to a path prefix. */
+export async function vaultList(userId: string, prefix?: string): Promise<VaultNote[]> {
+  const notes = (await listVaultNotes(userId)).map(toNote);
   return prefix ? notes.filter((n) => n.path.startsWith(prefix)) : notes;
 }
 
-/** Write or revise a note (upsert by path). Returns the stored note. */
+/** Write or revise a note (upsert by user + path). Returns the stored note. */
 export async function vaultWrite(
   userId: string,
   path: string,
@@ -85,14 +82,7 @@ export async function vaultWrite(
 ): Promise<VaultNote> {
   const p = validateVaultPath(path);
   const title = opts?.title ?? (p.replace(/\.md$/, "").split("/").pop() || p);
-  const row = await upsertArticle(
-    p,
-    title,
-    content,
-    VAULT_CATEGORY,
-    extractWikiLinks(content),
-    "agent",
-  );
+  const row = await upsertVaultNote(userId, p, title, content, extractWikiLinks(content));
   // Also index into vector memory so the agent's hybrid memory_search surfaces
   // self-written notes, not only the FTS path. Fire-and-forget; never blocks.
   void indexNoteIntoVectorMemory(userId, p, content).catch(() => {});
@@ -100,16 +90,17 @@ export async function vaultWrite(
 }
 
 /** Forget a note ("forget this"). No-op if it does not exist. */
-export async function vaultDelete(_userId: string, path: string): Promise<void> {
-  await deleteArticle(validateVaultPath(path));
+export async function vaultDelete(userId: string, path: string): Promise<void> {
+  await deleteVaultNote(userId, validateVaultPath(path));
 }
 
 /**
- * Keyword search across the user's knowledge base (vault notes + compiled wiki).
- * FTS-backed; semantic recall at scale is the separate `memory_search` (vector).
+ * Keyword search across the user's vault notes (FTS), scoped to this user.
+ * Semantic recall at scale is the separate `memory_search` (vector), which also
+ * surfaces vault notes because `vaultWrite` indexes them into the vector store.
  */
-export async function vaultSearch(_userId: string, query: string, limit = 8): Promise<VaultNote[]> {
-  return (await searchArticles(query, limit)).map(toNote);
+export async function vaultSearch(userId: string, query: string, limit = 8): Promise<VaultNote[]> {
+  return (await searchVaultNotes(userId, query, limit)).map(toNote);
 }
 
 /**

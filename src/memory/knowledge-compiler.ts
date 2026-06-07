@@ -1,11 +1,14 @@
 /**
  * Knowledge compiler -- Karpathy-style wiki compilation.
  *
- * Compiles the agent's accumulated knowledge (user model, conversation
- * memory, contacts) into structured markdown wiki articles. The LLM
- * decides what topics deserve articles based on the available data.
+ * Compiles the agent's accumulated knowledge into structured markdown wiki
+ * articles. The compiled wiki is a DERIVED PROJECTION: the vault (the user's
+ * authored memory) is the source of truth, and this distils it (plus the other
+ * signals below) into browsable topic/contact articles. The LLM decides what
+ * topics deserve articles based on the available data.
  *
- * Sources:
+ * Sources (vault first, it is the source of truth):
+ *   - vault_notes: the user's authored long-term memory (the vault)
  *   - user_model: facts, preferences, decision patterns, values
  *   - memory_chunks: conversation history (source = "conversation")
  *   - contacts + contact_identities: identity graph
@@ -97,15 +100,27 @@ export async function compileKnowledge(options?: { force?: boolean }): Promise<C
       GROUP BY c.id, c.display_name, c.autonomy
     `;
 
+    // The vault is the SOURCE OF TRUTH: the user's authored long-term memory.
+    // The compiled wiki is a projection over it (+ the other sources below), so
+    // the curator reads the vault first.
+    const vaultNotes = await sql`
+      SELECT path, title, content
+      FROM vault_notes
+      ORDER BY updated_at DESC
+      LIMIT 100
+    `;
+
     const existingArticles = await listArticles();
 
     // 2. Ask the LLM what articles to create/update
     type ModelEntry = { category: string; key: string; value: string; confidence: number };
     type ContactRow = { id: string; name: string; identities: unknown[] };
+    type VaultRow = { path: string; title: string; content: string };
     const entries = userModelEntries as unknown as ModelEntry[];
     const contactRows = contacts as unknown as ContactRow[];
+    const vaultRows = vaultNotes as unknown as VaultRow[];
 
-    const knowledgeSummary = buildKnowledgeSummary(entries, contactRows);
+    const knowledgeSummary = buildKnowledgeSummary(entries, contactRows, vaultRows);
 
     const planResult = await runForkedAgent({
       prompt: `You are a knowledge wiki curator. Based on the user's accumulated knowledge, decide which wiki articles to create or update.
@@ -317,8 +332,21 @@ async function backupWikiToDb(): Promise<void> {
 function buildKnowledgeSummary(
   entries: Array<{ category: string; key: string; value: string; confidence: number }>,
   contacts: Array<{ id: string; name: string; identities: unknown[] }>,
+  vaultNotes: Array<{ path: string; title: string; content: string }> = [],
 ): string {
   const lines: string[] = [];
+
+  // The vault first: it is the user's authored memory, the source of truth the
+  // compiled wiki should be derived from.
+  if (vaultNotes.length > 0) {
+    lines.push(`VAULT NOTES (the user's authored memory, source of truth) (${vaultNotes.length}):`);
+    for (const n of vaultNotes.slice(0, 40)) {
+      lines.push(`\n[${n.path}] ${n.title}`);
+      lines.push(`  ${n.content.replace(/\s+/g, " ").slice(0, 300)}`);
+    }
+    if (vaultNotes.length > 40) lines.push(`  ... and ${vaultNotes.length - 40} more`);
+    lines.push("");
+  }
 
   // Group user model by category
   const byCategory = new Map<string, typeof entries>();
