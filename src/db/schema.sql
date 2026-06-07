@@ -385,6 +385,7 @@ ON CONFLICT (key) DO NOTHING;
 -- Unified contacts (cross-platform identity graph)
 CREATE TABLE IF NOT EXISTS contacts (
   id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id      TEXT NOT NULL DEFAULT 'local',  -- owner; per-person contact graph
   display_name TEXT NOT NULL,
   role         TEXT,
   relationship JSONB NOT NULL DEFAULT '{}',
@@ -402,6 +403,7 @@ CREATE INDEX IF NOT EXISTS idx_contacts_name ON contacts(display_name);
 -- Platform identities linked to contacts
 CREATE TABLE IF NOT EXISTS contact_identities (
   id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id           TEXT NOT NULL DEFAULT 'local',  -- owner; same platform person can belong to two members
   contact_id        UUID NOT NULL REFERENCES contacts(id) ON DELETE CASCADE,
   platform          TEXT NOT NULL,
   platform_user_id  TEXT NOT NULL,
@@ -409,11 +411,24 @@ CREATE TABLE IF NOT EXISTS contact_identities (
   email             TEXT,
   metadata          JSONB NOT NULL DEFAULT '{}',
   created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
-  UNIQUE (platform, platform_user_id)
+  UNIQUE (user_id, platform, platform_user_id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_ci_contact ON contact_identities(contact_id);
 CREATE INDEX IF NOT EXISTS idx_ci_platform ON contact_identities(platform, platform_user_id);
+
+-- Per-user hardening: contacts/contact_identities used to be global. Swap the
+-- old global UNIQUE(platform, platform_user_id) for a per-owner one so two
+-- members of one DB can each have an identity for the same platform person.
+-- Idempotent: drops the legacy constraint if present, adds the new one if not.
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'contact_identities_platform_platform_user_id_key') THEN
+    ALTER TABLE contact_identities DROP CONSTRAINT contact_identities_platform_platform_user_id_key;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'contact_identities_user_id_platform_platform_user_id_key') THEN
+    ALTER TABLE contact_identities ADD CONSTRAINT contact_identities_user_id_platform_platform_user_id_key UNIQUE (user_id, platform, platform_user_id);
+  END IF;
+END $$;
 
 -- Commitment tracking for proactive agency
 CREATE TABLE IF NOT EXISTS commitments (

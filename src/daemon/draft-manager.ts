@@ -330,7 +330,11 @@ export class DraftManager {
     channelId: string,
   ): Promise<"auto" | "draft" | "silent"> {
     try {
-      const contact = await findContactByIdentity(platform, channelId);
+      const contact = await findContactByIdentity(
+        resolveMemoryUserId(undefined),
+        platform,
+        channelId,
+      );
       if (contact) {
         return contact.autonomy;
       }

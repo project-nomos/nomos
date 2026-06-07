@@ -12,6 +12,7 @@ import { runForkedAgent } from "../sdk/forked-agent.ts";
 
 export interface CommitmentRow {
   id: string;
+  user_id: string;
   contact_id: string | null;
   description: string;
   source_msg: string | null;
@@ -68,6 +69,7 @@ Return [] if no commitments found. Return ONLY the JSON array.`;
  * Store extracted commitments in the database.
  */
 export async function storeCommitments(
+  userId: string,
   commitments: ExtractedCommitment[],
   sourceMsg?: string,
 ): Promise<CommitmentRow[]> {
@@ -80,6 +82,7 @@ export async function storeCommitments(
     const row = await db
       .insertInto("commitments")
       .values({
+        user_id: userId,
         description: c.description,
         source_msg: sourceMsg ?? null,
         deadline: c.deadline ? new Date(c.deadline) : null,
@@ -95,10 +98,17 @@ export async function storeCommitments(
 /**
  * Get pending commitments, optionally filtered by upcoming deadlines.
  */
-export async function getPendingCommitments(daysAhead?: number): Promise<CommitmentRow[]> {
+export async function getPendingCommitments(
+  userId: string,
+  daysAhead?: number,
+): Promise<CommitmentRow[]> {
   const db = getKysely();
 
-  let query = db.selectFrom("commitments").selectAll().where("status", "=", "pending");
+  let query = db
+    .selectFrom("commitments")
+    .selectAll()
+    .where("user_id", "=", userId)
+    .where("status", "=", "pending");
 
   if (daysAhead !== undefined) {
     query = query
@@ -115,11 +125,12 @@ export async function getPendingCommitments(daysAhead?: number): Promise<Commitm
 /**
  * Mark a commitment as completed.
  */
-export async function completeCommitment(id: string): Promise<void> {
+export async function completeCommitment(userId: string, id: string): Promise<void> {
   const db = getKysely();
   await db
     .updateTable("commitments")
     .set({ status: "completed", updated_at: sql`now()` })
+    .where("user_id", "=", userId)
     .where("id", "=", id)
     .execute();
 }
@@ -127,11 +138,12 @@ export async function completeCommitment(id: string): Promise<void> {
 /**
  * Get commitments due for reminders (deadline within 24h, not yet reminded).
  */
-export async function getCommitmentsForReminder(): Promise<CommitmentRow[]> {
+export async function getCommitmentsForReminder(userId: string): Promise<CommitmentRow[]> {
   const db = getKysely();
   const rows = await db
     .selectFrom("commitments")
     .selectAll()
+    .where("user_id", "=", userId)
     .where("status", "=", "pending")
     .where("reminded", "=", false)
     .where("deadline", "is not", null)
@@ -144,12 +156,13 @@ export async function getCommitmentsForReminder(): Promise<CommitmentRow[]> {
 /**
  * Mark commitments as reminded.
  */
-export async function markReminded(ids: string[]): Promise<void> {
+export async function markReminded(userId: string, ids: string[]): Promise<void> {
   if (ids.length === 0) return;
   const db = getKysely();
   await db
     .updateTable("commitments")
     .set({ reminded: true, updated_at: sql`now()` })
+    .where("user_id", "=", userId)
     .where("id", "in", ids)
     .execute();
 }
@@ -157,11 +170,12 @@ export async function markReminded(ids: string[]): Promise<void> {
 /**
  * Expire overdue commitments (past deadline by more than 7 days).
  */
-export async function expireOverdueCommitments(): Promise<number> {
+export async function expireOverdueCommitments(userId: string): Promise<number> {
   const db = getKysely();
   const result = await db
     .updateTable("commitments")
     .set({ status: "expired", updated_at: sql`now()` })
+    .where("user_id", "=", userId)
     .where("status", "=", "pending")
     .where("deadline", "is not", null)
     .where("deadline", "<", sql<Date>`now() - interval '7 days'`)

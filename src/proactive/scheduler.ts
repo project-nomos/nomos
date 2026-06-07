@@ -11,7 +11,7 @@
  */
 
 import { CronStore } from "../cron/store.ts";
-import { systemTenant } from "../auth/tenant-context.ts";
+import { systemTenant, resolveMemoryUserId } from "../auth/tenant-context.ts";
 import type { CronJobUpdate } from "../cron/types.ts";
 import {
   getCommitmentsForReminder,
@@ -129,7 +129,11 @@ export async function runCommitmentReminders(): Promise<{
   reminded: number;
   expired: number;
 }> {
-  const due = await getCommitmentsForReminder();
+  // Background job: scope to the owner. Power-user collapses to 'local'; a
+  // multi-user hosted DB needs per-user iteration (see the background-job
+  // follow-up), which would call this once per member.
+  const userId = resolveMemoryUserId(undefined);
+  const due = await getCommitmentsForReminder(userId);
 
   if (due.length > 0) {
     const reminders = due
@@ -140,10 +144,13 @@ export async function runCommitmentReminders(): Promise<{
       .join("\n");
 
     log.info(`Commitment reminders:\n${reminders}`);
-    await markReminded(due.map((c) => c.id));
+    await markReminded(
+      userId,
+      due.map((c) => c.id),
+    );
   }
 
-  const expired = await expireOverdueCommitments();
+  const expired = await expireOverdueCommitments(userId);
 
   return { reminded: due.length, expired };
 }

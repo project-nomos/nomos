@@ -243,6 +243,7 @@ export interface VaultNotesTable {
 
 export interface ContactsTable {
   id: Generated<string>;
+  user_id: Generated<string>;
   display_name: string;
   role: string | null;
   relationship: ColumnType<Record<string, unknown>, string | undefined, string>;
@@ -255,6 +256,7 @@ export interface ContactsTable {
 
 export interface ContactIdentitiesTable {
   id: Generated<string>;
+  user_id: Generated<string>;
   contact_id: string;
   platform: string;
   platform_user_id: string;
@@ -266,6 +268,7 @@ export interface ContactIdentitiesTable {
 
 export interface CommitmentsTable {
   id: Generated<string>;
+  user_id: Generated<string>;
   contact_id: string | null;
   description: string;
   source_msg: string | null;

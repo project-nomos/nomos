@@ -12,6 +12,7 @@ import { getDb } from "../db/client.ts";
 import { runForkedAgent } from "../sdk/forked-agent.ts";
 import { findContactByIdentity } from "../identity/identities.ts";
 import { getRelevantArticles } from "../memory/wiki-reader.ts";
+import { resolveMemoryUserId } from "../auth/tenant-context.ts";
 
 export interface MeetingBrief {
   eventTitle: string;
@@ -45,7 +46,7 @@ export async function generateMeetingBrief(
   const contextParts: string[] = [];
 
   for (const email of attendeeEmails) {
-    const contact = await findContactByIdentity("email", email);
+    const contact = await findContactByIdentity(resolveMemoryUserId(undefined), "email", email);
     const attendee: MeetingBrief["attendees"][0] = {
       name: contact?.display_name ?? email,
       email,
