@@ -20,6 +20,18 @@ import { createLogger } from "../lib/logger.ts";
 const log = createLogger("memory-indexer");
 
 /**
+ * Ephemeral ("off the record") sessions are never auto-remembered: no vector
+ * indexing, no knowledge extraction, no exemplar scoring. The convention is a
+ * session key with an `ephemeral` segment (e.g. `mobile:ephemeral:<id>`), which
+ * a client opens when the user wants an incognito conversation. The deliberate
+ * memory tools still work if the agent explicitly chooses to write; this only
+ * suppresses the automatic capture path.
+ */
+export function isEphemeralSession(sessionKey: string): boolean {
+  return /(^|:)ephemeral(:|$)/.test(sessionKey);
+}
+
+/**
  * Index a conversation turn (user message + agent response) into vector memory.
  * Safe to call fire-and-forget — logs errors but never throws.
  */
@@ -28,6 +40,10 @@ export async function indexConversationTurn(
   outgoing: OutgoingMessage,
 ): Promise<void> {
   const sessionKey = `${incoming.platform}:${incoming.channelId}`;
+  if (isEphemeralSession(sessionKey)) {
+    log.debug(`Skipping ephemeral session ${sessionKey} (off the record)`);
+    return;
+  }
   const timestamp = incoming.timestamp.toISOString();
 
   // Format the exchange as a structured text block
