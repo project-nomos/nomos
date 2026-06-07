@@ -32,6 +32,7 @@ import { buildVaultMcpServer } from "../sdk/vault-mcp.ts";
 import { buildMemoryDigest } from "../memory/digest.ts";
 import { loadEnvConfig, type NomosConfig } from "../config/env.ts";
 import { FEATURES, isHosted } from "../config/mode.ts";
+import { resolveVaultUserId } from "../auth/tenant-context.ts";
 
 /**
  * Built-in tools blocked when hosted-mode feature gates demand it. Centralized
@@ -892,10 +893,14 @@ export class AgentRuntime {
     // Google's official remote MCP (read/draft/calendar/drive) + our opt-in
     // Gmail send tool, per connected account with fresh tokens (or the direct-
     // REST backup via NOMOS_GOOGLE_BACKEND=rest). Power-user keeps the gws CLI.
-    // Long-term memory (vault) tools, scoped to the requesting user. Both modes.
+    // Long-term memory (vault) tools, scoped to the vault owner. Both modes.
+    // In power-user mode every channel is the same owner, so collapse the raw
+    // channel sender id to the canonical local id (otherwise the vault fragments
+    // per channel); in hosted mode this is the authenticated per-tenant user.
+    const vaultUserId = resolveVaultUserId(userId);
     let mcpServers = {
       ...this.mcpServers,
-      "nomos-vault": buildVaultMcpServer(userId ?? "local"),
+      "nomos-vault": buildVaultMcpServer(vaultUserId),
     };
     let googlePrompt = "";
     if (isHosted() && userId) {
@@ -918,7 +923,7 @@ export class AgentRuntime {
 
     // Reasoning-first: always-inject what the agent already knows about the user,
     // so it stays continuous without having to call a recall tool first.
-    const memoryDigest = await buildMemoryDigest(userId ?? "local").catch(() => "");
+    const memoryDigest = await buildMemoryDigest(vaultUserId).catch(() => "");
 
     // Auto-approve all tools from our MCP servers
     const allowedTools = Object.keys(mcpServers).map((name) => `mcp__${name}`);

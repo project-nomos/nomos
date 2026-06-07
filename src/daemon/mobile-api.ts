@@ -43,6 +43,7 @@ import { registerDevice, unregisterDevice } from "./push-notifications.ts";
 import { vaultDelete, vaultList, vaultRead, vaultWrite } from "../memory/vault.ts";
 import { createLogger } from "../lib/logger.ts";
 import type { TenantContext } from "../auth/tenant-context.ts";
+import { resolveVaultUserId } from "../auth/tenant-context.ts";
 
 const log = createLogger("mobile-api");
 
@@ -773,7 +774,7 @@ async function handleListVaultNotes(
   ctx: TenantContext,
 ): Promise<{ notes: Array<{ path: string; title: string; updatedAt: string }> }> {
   const prefix = (call.request as { prefix?: string }).prefix || undefined;
-  const notes = await vaultList(ctx.userId, prefix);
+  const notes = await vaultList(resolveVaultUserId(ctx.userId), prefix);
   return {
     notes: notes.map((n) => ({
       path: n.path,
@@ -788,7 +789,7 @@ async function handleGetVaultNote(
   ctx: TenantContext,
 ): Promise<{ path: string; title: string; content: string; updatedAt: string; exists: boolean }> {
   const path = (call.request as { path?: string }).path ?? "";
-  const note = await vaultRead(ctx.userId, path);
+  const note = await vaultRead(resolveVaultUserId(ctx.userId), path);
   if (!note) return { path, title: "", content: "", updatedAt: "", exists: false };
   return {
     path: note.path,
@@ -806,7 +807,9 @@ async function handleWriteVaultNote(
   const req = call.request as { path?: string; content?: string; title?: string };
   if (!req.path) return { success: false, message: "missing_path" };
   try {
-    await vaultWrite(ctx.userId, req.path, req.content ?? "", { title: req.title || undefined });
+    await vaultWrite(resolveVaultUserId(ctx.userId), req.path, req.content ?? "", {
+      title: req.title || undefined,
+    });
     return { success: true, message: "saved" };
   } catch (err) {
     return { success: false, message: err instanceof Error ? err.message : "write_failed" };
@@ -819,7 +822,7 @@ async function handleDeleteVaultNote(
 ): Promise<{ success: boolean; message: string }> {
   const path = (call.request as { path?: string }).path ?? "";
   try {
-    await vaultDelete(ctx.userId, path);
+    await vaultDelete(resolveVaultUserId(ctx.userId), path);
     return { success: true, message: "deleted" };
   } catch (err) {
     return { success: false, message: err instanceof Error ? err.message : "delete_failed" };

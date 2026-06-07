@@ -13,6 +13,8 @@
  * `LOCAL_TENANT` so existing functions keep working without rewrites.
  */
 
+import { isHosted } from "../config/mode.ts";
+
 export interface TenantContext {
   /** BA organization id. Matches process.env.NOMOS_ORG_ID. */
   readonly orgId: string;
@@ -28,6 +30,31 @@ export const LOCAL_TENANT: TenantContext = {
   orgId: "local",
   userId: "local",
 };
+
+/**
+ * Resolve the canonical owner id for durable per-user memory (the vault) from a
+ * raw, per-message/per-request user id.
+ *
+ * Power-user (self-hosted) mode is a single owner's personal clone: every channel
+ * (CLI, Slack, iMessage, Telegram, ...) is the same person, but the channel
+ * adapters stamp `message.userId` with the platform sender id (e.g. a Slack user
+ * id). Left as-is that would fragment the one vault into a separate brain per
+ * channel and mismatch the settings UI, which reads `local`. So we COLLAPSE every
+ * raw id to `LOCAL_TENANT.userId`. The column `DEFAULT 'local'` does not cover
+ * this, because the daemon passes a non-null channel id that overrides it.
+ *
+ * Hosted (multi-tenant) mode genuinely has one vault per authenticated user, so
+ * we keep the resolved per-request id (falling back to local only if absent,
+ * which upstream auth should prevent).
+ *
+ * Use this wherever a vault/durable-memory `user_id` is derived from an incoming
+ * message or request. Behavioral/ephemeral signals keyed by sender (persona,
+ * theory-of-mind) keep the raw id; this is only for durable per-user memory.
+ */
+export function resolveVaultUserId(rawUserId?: string | null): string {
+  if (!isHosted()) return LOCAL_TENANT.userId;
+  return rawUserId ?? LOCAL_TENANT.userId;
+}
 
 /**
  * Resolve the active context for code that doesn't have a request-scoped one
