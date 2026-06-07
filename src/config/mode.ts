@@ -16,6 +16,12 @@
  *
  * Plus: filesystem state is disallowed (see ensureEncryptionKey) and Redis
  * is required.
+ *
+ * Setting `AUTH_JWKS_URL` (JWT auth) also implies hosted, even without
+ * `NOMOS_MODE=hosted`: once authenticated multi-tenant traffic is being served,
+ * auth enforcement, feature gates, and per-user vault scoping must all agree
+ * that we are hosted, otherwise authenticated users would collapse onto the
+ * shared `local` vault.
  */
 
 export type NomosMode = "hosted" | "power_user";
@@ -23,6 +29,14 @@ export type NomosMode = "hosted" | "power_user";
 export function getMode(): NomosMode {
   const raw = process.env.NOMOS_MODE?.trim().toLowerCase();
   if (raw === "hosted") return "hosted";
+  // JWT auth configured (AUTH_JWKS_URL) means we are serving authenticated,
+  // multi-tenant traffic, so treat it as hosted even when NOMOS_MODE was not set
+  // explicitly. This keeps auth enforcement (grpc-interceptor), feature gates,
+  // and per-user vault scoping (resolveVaultUserId) on ONE definition of
+  // "hosted": a skew here would collapse authenticated users onto the shared
+  // 'local' vault. Power-user installs never set AUTH_JWKS_URL, so they are
+  // unaffected.
+  if (process.env.AUTH_JWKS_URL) return "hosted";
   return "power_user";
 }
 
