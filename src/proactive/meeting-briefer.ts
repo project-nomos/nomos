@@ -58,7 +58,8 @@ export async function generateMeetingBrief(
       // Get recent conversations with this contact
       const recentMsgs = await sql<{ content: string }[]>`
         SELECT text AS content FROM memory_chunks
-        WHERE metadata->>'source' = 'ingest'
+        WHERE user_id = ${resolveMemoryUserId(undefined)}
+          AND metadata->>'source' = 'ingest'
           AND metadata->>'contact' = ${email}
         ORDER BY created_at DESC
         LIMIT 10

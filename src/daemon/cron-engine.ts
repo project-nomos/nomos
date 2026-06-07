@@ -84,9 +84,16 @@ export class CronEngine {
         let created = 0;
         let updated = 0;
         for (const userId of await listMemoryOwners()) {
-          const result = await compileKnowledge({ userId });
-          created += result.articlesCreated;
-          updated += result.articlesUpdated;
+          try {
+            const result = await compileKnowledge({ userId });
+            created += result.articlesCreated;
+            updated += result.articlesUpdated;
+          } catch (err) {
+            log.error(
+              { err: err instanceof Error ? err.message : err, userId },
+              "Wiki compilation failed for owner",
+            );
+          }
         }
         log.info(`Wiki compilation: ${created} created, ${updated} updated`);
       })().catch((err) => {

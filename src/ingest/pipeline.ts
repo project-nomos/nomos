@@ -107,7 +107,7 @@ async function processBatch(
   userId: string,
 ): Promise<void> {
   // Deduplicate against existing memory
-  const unique = await deduplicateBatch(messages);
+  const unique = await deduplicateBatch(userId, messages);
   progress.messagesSkipped += messages.length - unique.length;
 
   if (dryRun || unique.length === 0) {

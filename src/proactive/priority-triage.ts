@@ -30,7 +30,10 @@ export interface TriageSummary {
  * Generate a priority triage of recent unprocessed messages.
  * Groups by contact, ranks by relationship importance + recency.
  */
-export async function generateTriage(sinceDays: number = 1): Promise<TriageSummary> {
+export async function generateTriage(
+  userId: string,
+  sinceDays: number = 1,
+): Promise<TriageSummary> {
   const sql = getDb();
   const since = new Date(Date.now() - sinceDays * 24 * 60 * 60 * 1000);
 
@@ -53,7 +56,8 @@ export async function generateTriage(sinceDays: number = 1): Promise<TriageSumma
       (array_agg(text ORDER BY created_at DESC))[1] AS last_content,
       MAX(metadata->>'timestamp') AS last_timestamp
     FROM memory_chunks
-    WHERE metadata->>'source' = 'ingest'
+    WHERE user_id = ${userId}
+      AND metadata->>'source' = 'ingest'
       AND metadata->>'direction' = 'received'
       AND created_at > ${since}
     GROUP BY metadata->>'contact', metadata->>'contactName', metadata->>'platform'
@@ -73,7 +77,8 @@ export async function generateTriage(sinceDays: number = 1): Promise<TriageSumma
     SELECT ci.platform_user_id, c.autonomy, c.role
     FROM contact_identities ci
     JOIN contacts c ON c.id = ci.contact_id
-    WHERE ci.platform_user_id = ANY(${contactIds})
+    WHERE ci.user_id = ${userId} AND c.user_id = ${userId}
+      AND ci.platform_user_id = ANY(${contactIds})
   `;
 
   const relMap = new Map(relationships.map((r) => [r.platform_user_id, r]));

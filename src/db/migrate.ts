@@ -284,9 +284,17 @@ CREATE TABLE IF NOT EXISTS user_model (
 );
 
 -- Per-user hardening: the user model used to be global (UNIQUE(category,key)).
--- Swap to a per-owner key so two members of one DB keep separate models.
--- Idempotent: drops the legacy constraint if present, adds the new one if not.
+-- Swap to a per-owner key so two members of one DB keep separate models. The
+-- ADD CONSTRAINT references user_id, so on a legacy table (CREATE was a no-op)
+-- the column must be added first, here, not in the later Phase-4b block.
+-- All idempotent.
 DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'user_model' AND column_name = 'user_id'
+  ) THEN
+    ALTER TABLE user_model ADD COLUMN user_id TEXT NOT NULL DEFAULT 'local';
+  END IF;
   IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'user_model_category_key_key') THEN
     ALTER TABLE user_model DROP CONSTRAINT user_model_category_key_key;
   END IF;
@@ -514,9 +522,16 @@ CREATE INDEX IF NOT EXISTS idx_ci_platform ON contact_identities(platform, platf
 
 -- Per-user hardening: contacts/contact_identities used to be global. Swap the
 -- old global UNIQUE(platform, platform_user_id) for a per-owner one so two
--- members of one DB can each have an identity for the same platform person.
--- Idempotent: drops the legacy constraint if present, adds the new one if not.
+-- members of one DB can each have an identity for the same platform person. The
+-- ADD CONSTRAINT references user_id, so on a legacy table the column must be
+-- added first, here, not in the later Phase-4b block. All idempotent.
 DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'contact_identities' AND column_name = 'user_id'
+  ) THEN
+    ALTER TABLE contact_identities ADD COLUMN user_id TEXT NOT NULL DEFAULT 'local';
+  END IF;
   IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'contact_identities_platform_platform_user_id_key') THEN
     ALTER TABLE contact_identities DROP CONSTRAINT contact_identities_platform_platform_user_id_key;
   END IF;

@@ -11,7 +11,7 @@
  */
 
 import { CronStore } from "../cron/store.ts";
-import { systemTenant } from "../auth/tenant-context.ts";
+import { systemTenant, resolveMemoryUserId } from "../auth/tenant-context.ts";
 import type { CronJobUpdate } from "../cron/types.ts";
 import {
   getCommitmentsForReminder,
@@ -165,7 +165,9 @@ export async function runCommitmentReminders(): Promise<{
  * Called by CronEngine or manually.
  */
 export async function runTriageDigest(): Promise<string> {
-  const triage = await generateTriage(1);
+  // Scope to the local/instance owner. Per-owner digests in a multi-member DB
+  // would need per-owner notifications (follow-up alongside the analysis jobs).
+  const triage = await generateTriage(resolveMemoryUserId(undefined), 1);
 
   if (triage.items.length === 0) {
     return "No new messages requiring attention.";

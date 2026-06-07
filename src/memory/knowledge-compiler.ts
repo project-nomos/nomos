@@ -31,7 +31,15 @@ import { createLogger } from "../lib/logger.ts";
 
 const log = createLogger("knowledge-compiler");
 
-const LOCK_FILE = path.join(homedir(), ".nomos", "wiki-compiler.lock");
+/** Per-owner lock path so a hosted per-member compile loop does not serialize on
+ * one shared lock (which would starve every member after the first). */
+function lockFileFor(userId: string): string {
+  return path.join(
+    homedir(),
+    ".nomos",
+    userId === "local" ? "wiki-compiler.lock" : `wiki-compiler.${userId}.lock`,
+  );
+}
 const WIKI_DIR = path.join(homedir(), ".nomos", "wiki");
 const MIN_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
 const MAX_ARTICLES_PER_RUN = 20;
@@ -61,18 +69,19 @@ export async function compileKnowledge(options?: {
   // single-user install. Per-user wiki compilation in a multi-user DB is a
   // follow-up (it needs wiki_articles to carry user_id too).
   const userId = options?.userId ?? "local";
+  const lockFile = lockFileFor(userId);
   // Lock file coordination
-  if (!options?.force && fs.existsSync(LOCK_FILE)) {
-    const lockAge = Date.now() - fs.statSync(LOCK_FILE).mtimeMs;
+  if (!options?.force && fs.existsSync(lockFile)) {
+    const lockAge = Date.now() - fs.statSync(lockFile).mtimeMs;
     if (lockAge < MIN_INTERVAL_MS) {
       return { articlesCreated: 0, articlesUpdated: 0, errors: ["Skipped: too recent"] };
     }
-    fs.unlinkSync(LOCK_FILE);
+    fs.unlinkSync(lockFile);
   }
 
-  const lockDir = path.dirname(LOCK_FILE);
+  const lockDir = path.dirname(lockFile);
   fs.mkdirSync(lockDir, { recursive: true });
-  fs.writeFileSync(LOCK_FILE, new Date().toISOString());
+  fs.writeFileSync(lockFile, new Date().toISOString());
 
   const result: CompilationResult = { articlesCreated: 0, articlesUpdated: 0, errors: [] };
 
@@ -245,8 +254,8 @@ Maximum ${MAX_ARTICLES_PER_RUN} articles. Return [] if nothing is worth compilin
 
     log.info({ created: result.articlesCreated, updated: result.articlesUpdated }, "Done");
   } finally {
-    if (fs.existsSync(LOCK_FILE)) {
-      fs.writeFileSync(LOCK_FILE, new Date().toISOString());
+    if (fs.existsSync(lockFile)) {
+      fs.writeFileSync(lockFile, new Date().toISOString());
     }
   }
 

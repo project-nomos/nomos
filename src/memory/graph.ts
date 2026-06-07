@@ -772,7 +772,7 @@ export async function backfillGraph(ctx: TenantContext = LOCAL_TENANT): Promise<
         n.aliases || COALESCE((
           SELECT array_agg(ci.display_name)
           FROM contact_identities ci
-          WHERE ci.contact_id::text = n.external_ref AND ci.display_name IS NOT NULL
+          WHERE ci.contact_id::text = n.external_ref AND ci.user_id = ${uid} AND ci.display_name IS NOT NULL
         ), '{}')
       ) a WHERE a IS NOT NULL AND a <> n.name
     )
