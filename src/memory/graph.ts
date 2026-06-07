@@ -790,9 +790,11 @@ export async function backfillGraph(ctx: TenantContext = LOCAL_TENANT): Promise<
   `.execute(db);
 
   // vault_notes -> vault nodes. The vault is the source of truth; its notes
-  // become first-class graph nodes (kind 'vault', distinct canonical-key
-  // namespace from wiki nodes so a shared path never collides). vault_notes has
-  // its own user_id, so we filter on it directly.
+  // become first-class graph nodes with their own kind 'vault'. A vault note and
+  // a wiki article that happen to share a path become two distinct nodes (the
+  // UNIQUE key is (user_id, kind, canonical_key)); the links_to backfill below
+  // disambiguates them by kind. vault_notes has its own user_id, so we filter on
+  // it directly.
   const vaults = await sql<{ n: string }>`
     WITH ins AS (
       INSERT INTO kg_nodes (kind, name, canonical_key, external_kind, external_ref, user_id, confidence)
@@ -804,20 +806,25 @@ export async function backfillGraph(ctx: TenantContext = LOCAL_TENANT): Promise<
     ) SELECT count(*)::text AS n FROM ins
   `.execute(db);
 
-  // backlinks[] -> links_to edges, for BOTH vault and wiki note nodes. A vault
-  // wikilink resolves to whichever note node (vault or wiki) carries that path.
+  // backlinks[] -> links_to edges, within each namespace. We carry the source
+  // `kind` through the UNION and pin BOTH ends of the edge to it, so a wiki
+  // article's backlinks only ever link wiki nodes and a vault note's only link
+  // vault nodes. Without that pin, a path shared by a vault note and a wiki
+  // article would fan the join out to both nodes and fabricate edges the note
+  // never authored. (A backlink resolves only when its target text equals a note
+  // path; resolving human-readable [[labels]] is a separate follow-up.)
   const links = await sql<{ n: string }>`
     WITH ins AS (
       INSERT INTO kg_edges (src_id, dst_id, rel_type, origin, user_id)
       SELECT src.id, dst.id, 'links_to', 'frontmatter', ${uid}
       FROM (
-        SELECT path, backlinks FROM wiki_articles
+        SELECT 'wiki' AS kind, path, backlinks FROM wiki_articles
         UNION ALL
-        SELECT path, backlinks FROM vault_notes WHERE user_id = ${uid}
+        SELECT 'vault' AS kind, path, backlinks FROM vault_notes WHERE user_id = ${uid}
       ) wa
       CROSS JOIN LATERAL unnest(wa.backlinks) AS bl(target)
-      JOIN kg_nodes src ON src.external_kind IN ('wiki', 'vault') AND src.external_ref = wa.path AND src.user_id = ${uid}
-      JOIN kg_nodes dst ON dst.external_kind IN ('wiki', 'vault') AND dst.external_ref = bl.target AND dst.user_id = ${uid}
+      JOIN kg_nodes src ON src.external_kind = wa.kind AND src.external_ref = wa.path AND src.user_id = ${uid}
+      JOIN kg_nodes dst ON dst.external_kind = wa.kind AND dst.external_ref = bl.target AND dst.user_id = ${uid}
       ON CONFLICT (user_id, src_id, dst_id, rel_type, origin, origin_node) DO NOTHING
       RETURNING 1
     ) SELECT count(*)::text AS n FROM ins

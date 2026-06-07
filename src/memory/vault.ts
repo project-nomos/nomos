@@ -25,7 +25,7 @@ import {
 import { createHash } from "node:crypto";
 import { chunkText } from "./chunker.ts";
 import { generateEmbeddings, isEmbeddingAvailable } from "./embeddings.ts";
-import { storeMemoryChunk } from "../db/memory.ts";
+import { deleteMemoryByIdPrefix, storeMemoryChunk } from "../db/memory.ts";
 
 const MAX_PATH_LEN = 200;
 
@@ -89,9 +89,17 @@ export async function vaultWrite(
   return toNote(row);
 }
 
-/** Forget a note ("forget this"). No-op if it does not exist. */
+/**
+ * Forget a note ("forget this"). Removes it from the vault AND from the vector
+ * store, so a forgotten note does not linger in semantic recall. No-op if it
+ * does not exist.
+ */
 export async function vaultDelete(userId: string, path: string): Promise<void> {
-  await deleteVaultNote(userId, validateVaultPath(path));
+  const p = validateVaultPath(path);
+  await deleteVaultNote(userId, p);
+  // Forget = full forget: drop this note's vector chunks too. Fire-and-forget;
+  // a failure here must not make the user-visible delete fail.
+  void deleteMemoryByIdPrefix(vaultChunkIdPrefix(userId, p)).catch(() => {});
 }
 
 /**
@@ -101,6 +109,17 @@ export async function vaultDelete(userId: string, path: string): Promise<void> {
  */
 export async function vaultSearch(userId: string, query: string, limit = 8): Promise<VaultNote[]> {
   return (await searchVaultNotes(userId, query, limit)).map(toNote);
+}
+
+/**
+ * Deterministic, user-namespaced id prefix for a note's vector chunks
+ * (`vault:<hash(userId:path)>:`). User-namespaced so two users who share a note
+ * path get distinct chunk ids, and so a revise or a delete targets exactly one
+ * user's chunks for that note.
+ */
+function vaultChunkIdPrefix(userId: string, path: string): string {
+  const docHash = createHash("sha256").update(`${userId}:${path}`).digest("hex").slice(0, 16);
+  return `vault:${docHash}:`;
 }
 
 /**
@@ -127,12 +146,12 @@ async function indexNoteIntoVectorMemory(
     }
   }
   const model = process.env.EMBEDDING_MODEL ?? "gemini-embedding-001";
-  const docHash = createHash("sha256").update(`${userId}:${path}`).digest("hex").slice(0, 16);
+  const idPrefix = vaultChunkIdPrefix(userId, path);
 
   for (let i = 0; i < chunks.length; i++) {
     const c = chunks[i];
     await storeMemoryChunk({
-      id: `vault:${docHash}:${i}`,
+      id: `${idPrefix}${i}`,
       source: "vault",
       path,
       text: c.text,

@@ -191,3 +191,18 @@ export async function deleteMemoryByPath(path: string): Promise<number> {
   const result = await db.deleteFrom("memory_chunks").where("path", "=", path).executeTakeFirst();
   return Number(result.numDeletedRows ?? 0n);
 }
+
+/**
+ * Delete all chunks whose id starts with `prefix`. Used to remove a single
+ * vault note's chunks by their deterministic, user-namespaced id prefix
+ * (`vault:<hash(userId:path)>:`) so forgetting a note also forgets it from
+ * vector recall, without touching another user who happens to share a path.
+ */
+export async function deleteMemoryByIdPrefix(prefix: string): Promise<number> {
+  const db = getKysely();
+  const result = await db
+    .deleteFrom("memory_chunks")
+    .where("id", "like", `${prefix}%`)
+    .executeTakeFirst();
+  return Number(result.numDeletedRows ?? 0n);
+}

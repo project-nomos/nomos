@@ -51,7 +51,16 @@ interface CompilationResult {
  * 3. Compile/update articles
  * 4. Sync to disk + DB backup
  */
-export async function compileKnowledge(options?: { force?: boolean }): Promise<CompilationResult> {
+export async function compileKnowledge(options?: {
+  force?: boolean;
+  userId?: string;
+}): Promise<CompilationResult> {
+  // The vault is per-user (zero-trust on top of database-per-customer). Scope the
+  // vault read to one tenant so a multi-user (per-person-brain) DB never blends
+  // members' private notes into the shared compiled wiki. Defaults to the local
+  // single-user install. Per-user wiki compilation in a multi-user DB is a
+  // follow-up (it needs wiki_articles to carry user_id too).
+  const userId = options?.userId ?? "local";
   // Lock file coordination
   if (!options?.force && fs.existsSync(LOCK_FILE)) {
     const lockAge = Date.now() - fs.statSync(LOCK_FILE).mtimeMs;
@@ -106,6 +115,7 @@ export async function compileKnowledge(options?: { force?: boolean }): Promise<C
     const vaultNotes = await sql`
       SELECT path, title, content
       FROM vault_notes
+      WHERE user_id = ${userId}
       ORDER BY updated_at DESC
       LIMIT 100
     `;

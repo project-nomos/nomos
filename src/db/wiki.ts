@@ -33,6 +33,11 @@ export async function upsertArticle(
 ): Promise<WikiArticleRow> {
   const db = getKysely();
   const wordCount = content.split(/\s+/).length;
+  // 'memory' is reserved: it is the legacy category the vault used before it got
+  // its own table, and the migration unconditionally DELETEs wiki_articles rows
+  // with that category on every migrate. Remap so a compiled article or a
+  // user-created `memory/` wiki folder can never be silently retired.
+  const safeCategory = category === "memory" ? "general" : category;
 
   const row = await db
     .insertInto("wiki_articles")
@@ -40,7 +45,7 @@ export async function upsertArticle(
       path,
       title,
       content,
-      category,
+      category: safeCategory,
       backlinks,
       word_count: wordCount,
       compile_model: compileModel ?? null,
