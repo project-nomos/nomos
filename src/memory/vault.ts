@@ -23,6 +23,10 @@ import {
   upsertArticle,
   type WikiArticleRow,
 } from "../db/wiki.ts";
+import { createHash } from "node:crypto";
+import { chunkText } from "./chunker.ts";
+import { generateEmbeddings, isEmbeddingAvailable } from "./embeddings.ts";
+import { storeMemoryChunk } from "../db/memory.ts";
 
 /** Agent-authored notes use this category in wiki_articles. */
 export const VAULT_CATEGORY = "memory";
@@ -74,7 +78,7 @@ export async function vaultList(_userId: string, prefix?: string): Promise<Vault
 
 /** Write or revise a note (upsert by path). Returns the stored note. */
 export async function vaultWrite(
-  _userId: string,
+  userId: string,
   path: string,
   content: string,
   opts?: { title?: string },
@@ -89,6 +93,9 @@ export async function vaultWrite(
     extractWikiLinks(content),
     "agent",
   );
+  // Also index into vector memory so the agent's hybrid memory_search surfaces
+  // self-written notes, not only the FTS path. Fire-and-forget; never blocks.
+  void indexNoteIntoVectorMemory(userId, p, content).catch(() => {});
   return toNote(row);
 }
 
@@ -103,4 +110,46 @@ export async function vaultDelete(_userId: string, path: string): Promise<void> 
  */
 export async function vaultSearch(_userId: string, query: string, limit = 8): Promise<VaultNote[]> {
   return (await searchArticles(query, limit)).map(toNote);
+}
+
+/**
+ * Index a vault note into the vector memory store (memory_chunks), source
+ * "vault", so the agent's hybrid memory_search surfaces self-written notes, not
+ * only the FTS path. Deterministic id per (user, path) so a revise overwrites the
+ * prior chunks. Embeds when embeddings are available, else text-only (FTS).
+ */
+async function indexNoteIntoVectorMemory(
+  userId: string,
+  path: string,
+  content: string,
+): Promise<void> {
+  if (!content.trim()) return;
+  const chunks = chunkText(content);
+  if (chunks.length === 0) return;
+
+  let embeddings: number[][] | undefined;
+  if (isEmbeddingAvailable()) {
+    try {
+      embeddings = await generateEmbeddings(chunks.map((c) => c.text));
+    } catch {
+      /* store text-only; FTS still works */
+    }
+  }
+  const model = process.env.EMBEDDING_MODEL ?? "gemini-embedding-001";
+  const docHash = createHash("sha256").update(`${userId}:${path}`).digest("hex").slice(0, 16);
+
+  for (let i = 0; i < chunks.length; i++) {
+    const c = chunks[i];
+    await storeMemoryChunk({
+      id: `vault:${docHash}:${i}`,
+      source: "vault",
+      path,
+      text: c.text,
+      embedding: embeddings?.[i],
+      startLine: c.startLine,
+      endLine: c.endLine,
+      hash: createHash("sha256").update(c.text).digest("hex").slice(0, 16),
+      model: embeddings?.[i] ? model : undefined,
+    });
+  }
 }
