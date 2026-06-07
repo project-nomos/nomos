@@ -4,6 +4,7 @@ import {
   type McpSdkServerConfigWithInstance,
 } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod/v4";
+import { traceMemory } from "../memory/trace.ts";
 import { handleBootstrapComplete } from "../ui/bootstrap.ts";
 import { createLogger } from "../lib/logger.ts";
 import { createAskUserTool } from "./ask-user.ts";
@@ -104,6 +105,14 @@ export function createMemoryMcpServer(userId: string = "local"): McpSdkServerCon
             results = await textOnlySearch(userId, args.query, args.limit ?? 5, args.category);
           }
         }
+
+        traceMemory({
+          op: "recall_search",
+          userId,
+          query: args.query,
+          resultCount: results.length,
+          ref: args.category,
+        });
 
         if (results.length === 0) {
           return {

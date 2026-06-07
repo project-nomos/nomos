@@ -26,6 +26,7 @@ import { createHash } from "node:crypto";
 import { chunkText } from "./chunker.ts";
 import { generateEmbeddings, isEmbeddingAvailable } from "./embeddings.ts";
 import { deleteMemoryByIdPrefix, storeMemoryChunk } from "../db/memory.ts";
+import { traceMemory, tracedRecall } from "./trace.ts";
 
 const MAX_PATH_LEN = 200;
 
@@ -86,6 +87,7 @@ export async function vaultWrite(
   // Also index into vector memory so the agent's hybrid memory_search surfaces
   // self-written notes, not only the FTS path. Fire-and-forget; never blocks.
   void indexNoteIntoVectorMemory(userId, p, content).catch(() => {});
+  traceMemory({ op: "write_vault", userId, ref: p, writeCount: 1 });
   return toNote(row);
 }
 
@@ -100,6 +102,7 @@ export async function vaultDelete(userId: string, path: string): Promise<void> {
   // Forget = full forget: drop this note's vector chunks too. Fire-and-forget;
   // a failure here must not make the user-visible delete fail.
   void deleteMemoryByIdPrefix(userId, vaultChunkIdPrefix(userId, p)).catch(() => {});
+  traceMemory({ op: "forget", userId, ref: p });
 }
 
 /**
@@ -108,7 +111,9 @@ export async function vaultDelete(userId: string, path: string): Promise<void> {
  * surfaces vault notes because `vaultWrite` indexes them into the vector store.
  */
 export async function vaultSearch(userId: string, query: string, limit = 8): Promise<VaultNote[]> {
-  return (await searchVaultNotes(userId, query, limit)).map(toNote);
+  return tracedRecall("recall_vault", userId, query, async () =>
+    (await searchVaultNotes(userId, query, limit)).map(toNote),
+  );
 }
 
 /**

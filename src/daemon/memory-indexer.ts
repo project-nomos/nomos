@@ -15,6 +15,7 @@ import { generateEmbeddings, isEmbeddingAvailable } from "../memory/embeddings.t
 import { storeMemoryChunk } from "../db/memory.ts";
 import { loadEnvConfig } from "../config/env.ts";
 import { resolveMemoryUserId } from "../auth/tenant-context.ts";
+import { traceMemory } from "../memory/trace.ts";
 import type { IncomingMessage, OutgoingMessage } from "./types.ts";
 import { createLogger } from "../lib/logger.ts";
 
@@ -104,6 +105,7 @@ export async function indexConversationTurn(
   }
 
   log.debug(`Indexed ${chunks.length} chunk(s) from ${sessionKey}`);
+  traceMemory({ op: "write_chunk", userId, ref: sessionKey, writeCount: chunks.length });
 
   // Adaptive memory: extract structured knowledge and score exemplars (fire-and-forget)
   const config = loadEnvConfig();
