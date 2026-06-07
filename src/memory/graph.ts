@@ -784,6 +784,7 @@ export async function backfillGraph(ctx: TenantContext = LOCAL_TENANT): Promise<
       INSERT INTO kg_nodes (kind, name, canonical_key, external_kind, external_ref, user_id, confidence)
       SELECT 'wiki', w.title, lower(w.path), 'wiki', w.path, ${uid}, 0.8
       FROM wiki_articles w
+      WHERE w.user_id = ${uid}
       ON CONFLICT (user_id, kind, canonical_key) DO NOTHING
       RETURNING 1
     ) SELECT count(*)::text AS n FROM ins
@@ -821,7 +822,7 @@ export async function backfillGraph(ctx: TenantContext = LOCAL_TENANT): Promise<
       INSERT INTO kg_edges (src_id, dst_id, rel_type, origin, user_id)
       SELECT DISTINCT src.id, dst.id, 'links_to', 'frontmatter', ${uid}
       FROM (
-        SELECT 'wiki' AS kind, path, backlinks FROM wiki_articles
+        SELECT 'wiki' AS kind, path, backlinks FROM wiki_articles WHERE user_id = ${uid}
         UNION ALL
         SELECT 'vault' AS kind, path, backlinks FROM vault_notes WHERE user_id = ${uid}
       ) wa

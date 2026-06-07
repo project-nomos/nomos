@@ -74,7 +74,7 @@ export async function generateMeetingBrief(
       }
 
       // Check wiki for contact article
-      const wikiContext = await getRelevantArticles(attendee.name);
+      const wikiContext = await getRelevantArticles(resolveMemoryUserId(undefined), attendee.name);
       if (wikiContext) {
         contextParts.push(wikiContext.slice(0, 500));
       }

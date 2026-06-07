@@ -83,7 +83,7 @@ export async function compileKnowledge(options?: {
     const userModelEntries = await sql`
       SELECT category, key, value::text as value, confidence
       FROM user_model
-      WHERE confidence >= 0.6
+      WHERE user_id = ${userId} AND confidence >= 0.6
       ORDER BY confidence DESC
       LIMIT 200
     `;
@@ -91,7 +91,7 @@ export async function compileKnowledge(options?: {
     const recentConversations = await sql`
       SELECT text, path, created_at
       FROM memory_chunks
-      WHERE source = ${"conversation"}
+      WHERE user_id = ${userId} AND source = ${"conversation"}
       ORDER BY created_at DESC
       LIMIT 100
     `;
@@ -106,6 +106,7 @@ export async function compileKnowledge(options?: {
              )) as identities
       FROM contacts c
       LEFT JOIN contact_identities ci ON ci.contact_id = c.id
+      WHERE c.user_id = ${userId}
       GROUP BY c.id, c.display_name, c.autonomy
     `;
 
@@ -120,7 +121,7 @@ export async function compileKnowledge(options?: {
       LIMIT 100
     `;
 
-    const existingArticles = await listArticles();
+    const existingArticles = await listArticles(userId);
 
     // 2. Ask the LLM what articles to create/update
     type ModelEntry = { category: string; key: string; value: string; confidence: number };
@@ -177,7 +178,7 @@ Maximum ${MAX_ARTICLES_PER_RUN} articles. Return [] if nothing is worth compilin
     // 3. Compile each article
     for (const plan of plans) {
       try {
-        const existing = await getArticle(plan.path);
+        const existing = await getArticle(userId, plan.path);
 
         // Gather relevant data for this article
         const relevantFacts = entries.filter((e) => {
@@ -205,7 +206,15 @@ Maximum ${MAX_ARTICLES_PER_RUN} articles. Return [] if nothing is worth compilin
         );
 
         const isNew = !existing;
-        await upsertArticle(plan.path, plan.title, article, plan.category, [], COMPILE_MODEL);
+        await upsertArticle(
+          userId,
+          plan.path,
+          plan.title,
+          article,
+          plan.category,
+          [],
+          COMPILE_MODEL,
+        );
 
         if (isNew) result.articlesCreated++;
         else result.articlesUpdated++;
@@ -215,10 +224,10 @@ Maximum ${MAX_ARTICLES_PER_RUN} articles. Return [] if nothing is worth compilin
     }
 
     // 4. Update index
-    await updateIndex();
+    await updateIndex(userId);
 
     // 5. Sync to disk
-    await syncToDisk();
+    await syncToDisk(userId);
 
     // 6. Backup wiki articles to managed_files table
     await backupWikiToDb();
@@ -228,8 +237,8 @@ Maximum ${MAX_ARTICLES_PER_RUN} articles. Return [] if nothing is worth compilin
     try {
       const { syncWikiBodyLinks, syncWikiMOCs } = await import("./graph-writer.ts");
       const { LOCAL_TENANT } = await import("../auth/tenant-context.ts");
-      await syncWikiBodyLinks(LOCAL_TENANT);
-      await syncWikiMOCs(LOCAL_TENANT);
+      await syncWikiBodyLinks({ orgId: process.env.NOMOS_ORG_ID ?? "local", userId });
+      await syncWikiMOCs({ orgId: process.env.NOMOS_ORG_ID ?? "local", userId });
     } catch (err) {
       log.debug({ err }, "Wiki→graph sync failed (non-fatal)");
     }
@@ -294,8 +303,8 @@ Return ONLY the markdown article content.`;
   return compiled.text.trim();
 }
 
-async function updateIndex(): Promise<void> {
-  const articles = await listArticles();
+async function updateIndex(userId: string): Promise<void> {
+  const articles = await listArticles(userId);
   if (articles.length === 0) return;
 
   const indexLines = ["# Knowledge Wiki Index\n"];
@@ -315,7 +324,7 @@ async function updateIndex(): Promise<void> {
     indexLines.push("");
   }
 
-  await upsertArticle("_index.md", "Knowledge Wiki Index", indexLines.join("\n"), "index");
+  await upsertArticle(userId, "_index.md", "Knowledge Wiki Index", indexLines.join("\n"), "index");
 }
 
 /** Backup wiki articles to managed_files table for DB recovery. */

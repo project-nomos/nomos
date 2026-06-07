@@ -7,6 +7,7 @@ export async function GET() {
     const articles = await sql`
       SELECT path, title, category, content, compiled_at
       FROM wiki_articles
+      WHERE user_id = 'local'
       ORDER BY category, title
     `;
     return NextResponse.json({ articles });

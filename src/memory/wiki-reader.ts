@@ -18,11 +18,11 @@ const MAX_CONTEXT_CHARS = 4000;
  * 2. Full-text search wiki articles matching the query
  * 3. Return top matches within context budget
  */
-export async function getRelevantArticles(query: string): Promise<string> {
+export async function getRelevantArticles(userId: string, query: string): Promise<string> {
   if (!query) return "";
 
   // Search wiki articles
-  const matches = await searchArticles(query, MAX_CONTEXT_ARTICLES);
+  const matches = await searchArticles(userId, query, MAX_CONTEXT_ARTICLES);
   if (matches.length === 0) return "";
 
   return formatArticlesForContext(matches);
@@ -31,16 +31,16 @@ export async function getRelevantArticles(query: string): Promise<string> {
 /**
  * Get a specific wiki article by path.
  */
-export async function getArticleContent(path: string): Promise<string | null> {
-  const article = await getArticle(path);
+export async function getArticleContent(userId: string, path: string): Promise<string | null> {
+  const article = await getArticle(userId, path);
   return article?.content ?? null;
 }
 
 /**
  * Get all contact-related wiki articles.
  */
-export async function getContactArticles(): Promise<WikiArticleRow[]> {
-  return listArticles("contacts");
+export async function getContactArticles(userId: string): Promise<WikiArticleRow[]> {
+  return listArticles(userId, "contacts");
 }
 
 /** Format wiki articles into context text for the agent. */

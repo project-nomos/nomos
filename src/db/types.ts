@@ -217,6 +217,7 @@ export interface StyleProfilesTable {
 
 export interface WikiArticlesTable {
   id: Generated<string>;
+  user_id: Generated<string>;
   path: string;
   title: string;
   content: string;

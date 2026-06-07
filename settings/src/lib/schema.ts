@@ -344,7 +344,8 @@ CREATE INDEX IF NOT EXISTS idx_style_contact ON style_profiles(contact_id);
 -- Knowledge wiki articles (DB-primary, disk as cache)
 CREATE TABLE IF NOT EXISTS wiki_articles (
   id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  path          TEXT UNIQUE NOT NULL,
+  user_id       TEXT NOT NULL DEFAULT 'local',  -- owner; the compiled wiki is per-person
+  path          TEXT NOT NULL,
   title         TEXT NOT NULL,
   content       TEXT NOT NULL,
   category      TEXT NOT NULL,
@@ -353,11 +354,33 @@ CREATE TABLE IF NOT EXISTS wiki_articles (
   compile_model TEXT,
   compiled_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
   created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+  updated_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (user_id, path)
 );
 
+-- Per-user hardening: wiki_articles used to be global with UNIQUE(path) and no
+-- user_id. On an existing DB the CREATE TABLE above is a no-op, so add the column
+-- first, then swap the path-unique for a per-owner one. Both idempotent.
+DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'wiki_articles' AND column_name = 'user_id'
+  ) THEN
+    ALTER TABLE wiki_articles ADD COLUMN user_id TEXT NOT NULL DEFAULT 'local';
+  END IF;
+END $$;
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'wiki_articles_path_key') THEN
+    ALTER TABLE wiki_articles DROP CONSTRAINT wiki_articles_path_key;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'wiki_articles_user_id_path_key') THEN
+    ALTER TABLE wiki_articles ADD CONSTRAINT wiki_articles_user_id_path_key UNIQUE (user_id, path);
+  END IF;
+END $$;
+
 CREATE INDEX IF NOT EXISTS idx_wiki_category ON wiki_articles(category);
-CREATE INDEX IF NOT EXISTS idx_wiki_path ON wiki_articles(path);
+CREATE INDEX IF NOT EXISTS idx_wiki_path ON wiki_articles(user_id, path);
+CREATE INDEX IF NOT EXISTS idx_wiki_user ON wiki_articles(user_id);
 CREATE INDEX IF NOT EXISTS idx_wiki_fts ON wiki_articles
   USING gin(to_tsvector('english', content));
 
