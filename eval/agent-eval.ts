@@ -47,6 +47,16 @@ import { vaultWrite, vaultSearch, vaultRead, vaultDelete } from "../src/memory/v
 import { storeMemoryChunk, searchMemoryByText, deleteMemoryByPath } from "../src/db/memory.ts";
 import { createContact, listContacts } from "../src/identity/contacts.ts";
 import { createSession, getSessionByKey } from "../src/db/sessions.ts";
+import { countTranscriptMessages } from "../src/db/transcripts.ts";
+import {
+  backfillGraph,
+  getProjection,
+  neighborhood,
+  getNodeByExternal,
+} from "../src/memory/graph.ts";
+import { consolidateMemory } from "../src/memory/consolidator.ts";
+import { compileKnowledge } from "../src/memory/knowledge-compiler.ts";
+import { listArticles, upsertArticle, searchArticles } from "../src/db/wiki.ts";
 import { isEphemeralSession } from "../src/daemon/memory-indexer.ts";
 import { GrpcServer } from "../src/daemon/grpc-server.ts";
 import { MessageQueue } from "../src/daemon/message-queue.ts";
@@ -329,6 +339,25 @@ async function runGrpcChat(): Promise<void> {
         "A passing response must name the dentist as Dr. Patel (the surname Patel is sufficient).",
     });
     check("[grpc-chat] judge: agent answer recalls the fact", v.pass, v.reasoning);
+
+    // transcript_messages: a NON-ephemeral turn must persist user+assistant rows;
+    // the ephemeral turns above must NOT. Persistence is fire-and-forget, so poll.
+    await sendAndWait(
+      client,
+      "Remember: the sky is teal today. Just acknowledge.",
+      "eval-transcript",
+      120_000,
+    );
+    let tCount = 0;
+    for (let i = 0; i < 25 && tCount < 2; i++) {
+      const s = await getSessionByKey("terminal:eval-transcript");
+      if (s) tCount = await countTranscriptMessages(s.id);
+      if (tCount < 2) await new Promise((r) => setTimeout(r, 200));
+    }
+    check("[transcript] a non-ephemeral turn persists user+assistant rows", tCount >= 2);
+    const es = await getSessionByKey(dbSessionKey);
+    const eCount = es ? await countTranscriptMessages(es.id) : 0;
+    check("[transcript] ephemeral session is NOT transcribed (off-the-record)", eCount === 0);
   } catch (err) {
     check(
       "[grpc-chat] agent recalls a fact across turns over gRPC",
@@ -470,6 +499,148 @@ async function mobileChatTurn(
     }
   }
   return finalText;
+}
+
+async function runGraphBuild(): Promise<void> {
+  // Derived store: kg_nodes / kg_edges are built FROM the vault by backfillGraph
+  // (deterministic, no LLM). Asserts the derive-from-vault pipeline + closes the
+  // kg_* per-user isolation gap (check:isolation does not cover the graph).
+  const ctxA = { orgId: "eval-org", userId: "eval-graph-a" };
+  const ctxB = { orgId: "eval-org", userId: "eval-graph-b" };
+
+  await createContact(ctxA.userId, { displayName: "Alice Chen" });
+  await vaultWrite(ctxA.userId, "people/alice.md", "Alice works with [[Bob]].", { title: "Alice" });
+  await vaultWrite(ctxA.userId, "people/bob.md", "Bob notes.", { title: "Bob" });
+  await createContact(ctxB.userId, { displayName: "Carol Roe" });
+  await vaultWrite(ctxB.userId, "people/carol.md", "Carol's private note.", { title: "Carol" });
+
+  const rA = await backfillGraph(ctxA);
+  await backfillGraph(ctxB);
+
+  check(
+    "[graph] backfill promotes vault notes + contacts into kg_nodes",
+    rA.vaultNodes >= 2 && rA.personNodes >= 1,
+  );
+  check("[graph] backfill creates [[link]] edges (kg_edges)", rA.linkEdges >= 1);
+
+  const projA = await getProjection(ctxA, { limit: 500 });
+  check(
+    "[graph] projection returns A's nodes (person + vault kinds)",
+    projA.nodes.some((n) => n.kind === "person") &&
+      projA.nodes.filter((n) => n.kind === "vault").length >= 2,
+  );
+  check(
+    "[graph] projection includes a links_to edge",
+    projA.edges.some((e) => e.relType === "links_to"),
+  );
+
+  const projB = await getProjection(ctxB, { limit: 500 });
+  check(
+    "[graph] B's projection excludes A's nodes",
+    projB.nodes.every((n) => n.name !== "Alice Chen"),
+  );
+  const aNodeId = projA.nodes[0]?.id;
+  const cross = aNodeId
+    ? await neighborhood(ctxB, aNodeId, { depth: 3 })
+    : { nodes: [], edges: [] };
+  check(
+    "[graph] traversal cannot cross tenants",
+    cross.nodes.length === 0 && cross.edges.length === 0,
+  );
+  check(
+    "[graph] getNodeByExternal is owner-scoped",
+    (await getNodeByExternal(ctxB, "vault", "people/alice.md")) === undefined,
+  );
+}
+
+async function runConsolidation(): Promise<void> {
+  // Auto-dream's per-user worker (consolidateMemory). Phase-1 prune is
+  // deterministic (no LLM). Assert it prunes stale chunks AND stays scoped to one
+  // user. (The gated/leased autoDream wrapper is dormant; this is the real path.)
+  const A = "eval-dream-a";
+  const B = "eval-dream-b";
+  const db = getKysely();
+  for (const u of [A, B]) {
+    await storeMemoryChunk({
+      id: `dream:${u}:stale`,
+      userId: u,
+      source: "conversation",
+      text: "stale trivia that should be pruned",
+      metadata: { category: "fact" },
+    });
+  }
+  // Backdate so the age (>7d) + low-access prune predicate matches.
+  await db
+    .updateTable("memory_chunks")
+    .set({ created_at: sql`now() - interval '30 days'`, access_count: 0, last_accessed_at: null })
+    .where("id", "in", [`dream:${A}:stale`, `dream:${B}:stale`])
+    .execute();
+
+  const result = await consolidateMemory(A);
+  check(
+    "[auto-dream] consolidation prunes stale chunks",
+    result.pruned >= 1 && result.totalAfter < result.totalBefore,
+  );
+  const aGone = await db
+    .selectFrom("memory_chunks")
+    .select("id")
+    .where("id", "=", `dream:${A}:stale`)
+    .executeTakeFirst();
+  const bSurvives = await db
+    .selectFrom("memory_chunks")
+    .select("id")
+    .where("id", "=", `dream:${B}:stale`)
+    .executeTakeFirst();
+  check("[auto-dream] A's stale chunk is pruned", !aGone);
+  check("[auto-dream] consolidation stayed scoped to A (B untouched)", Boolean(bSurvives));
+}
+
+async function runWikiArticles(): Promise<void> {
+  // Derived store: wiki_articles. Deterministic write + per-user isolation by
+  // default; the full LLM compile (2 Sonnet passes, writes ~/.nomos/wiki) is
+  // opt-in via EVAL_WIKI_COMPILE=1.
+  const A = "eval-wiki-a";
+  const B = "eval-wiki-b";
+  await upsertArticle(A, "contacts/alice.md", "Alice", "Alice is A's contact.", "contacts");
+  await upsertArticle(B, "contacts/zara.md", "Zara", "Zara is B's contact.", "contacts");
+
+  const listA = await listArticles(A);
+  check(
+    "[wiki] articles are written + listed per owner",
+    listA.length >= 1 && listA.every((a) => a.user_id === A),
+  );
+  check(
+    "[wiki] B's article search is owner-scoped",
+    (await searchArticles(B, "Alice")).every((a) => a.user_id === B),
+  );
+  check(
+    "[wiki] A cannot see B's article",
+    (await listArticles(A)).every((a) => a.path !== "contacts/zara.md"),
+  );
+
+  if (process.env.EVAL_WIKI_COMPILE === "1" && hasLLM) {
+    await vaultWrite(
+      A,
+      "people/dana.md",
+      "Dana Smith is the VP of Engineering at Acme, leads the platform team, and prefers async standups.",
+      { title: "Dana Smith" },
+    );
+    const res = await compileKnowledge({ userId: A, force: true });
+    check(
+      "[wiki] LLM compile produces articles from the vault",
+      res.articlesCreated + res.articlesUpdated > 0,
+      res.errors.join("; ") || undefined,
+    );
+    check(
+      "[wiki] compiled articles are owner-scoped",
+      (await listArticles(A)).every((a) => a.user_id === A),
+    );
+  } else {
+    skip(
+      "[wiki] LLM compile produces articles from the vault",
+      "set EVAL_WIKI_COMPILE=1 (makes Sonnet calls + writes ~/.nomos/wiki)",
+    );
+  }
 }
 
 // ── helpers ──
@@ -695,6 +866,12 @@ async function runEval(): Promise<void> {
   await runMode("hosted");
   await runWire();
   await runHostedWire();
+
+  // Derived stores built from the vault (deterministic, no LLM): the knowledge
+  // graph, auto-dream consolidation, and the wiki, each with per-user isolation.
+  await runGraphBuild();
+  await runConsolidation();
+  await runWikiArticles();
 
   // Negative control: a judge that passes everything is worthless. Prove it
   // rejects a response that plainly misses the rubric.
