@@ -31,7 +31,6 @@ export interface MemorySearchResult {
 export async function storeMemoryChunk(chunk: MemoryChunk): Promise<void> {
   const db = getKysely();
   const embeddingStr = chunk.embedding ? `[${chunk.embedding.join(",")}]` : null;
-  const metadataJson = JSON.stringify(chunk.metadata ?? {});
 
   await db
     .insertInto("memory_chunks")
@@ -46,7 +45,11 @@ export async function storeMemoryChunk(chunk: MemoryChunk): Promise<void> {
       end_line: chunk.endLine ?? null,
       hash: chunk.hash ?? null,
       model: chunk.model ?? null,
-      metadata: metadataJson,
+      // Pass the metadata OBJECT, not a pre-stringified string: the postgres-js
+      // driver serializes an object to jsonb exactly once. Passing a JSON string
+      // double-encodes it into a jsonb *string* ("{\"category\":...}") instead of an
+      // object, silently breaking metadata->>'category' filters (category search + prune).
+      metadata: (chunk.metadata ?? {}) as unknown as string,
     })
     .onConflict((oc) =>
       oc.column("id").doUpdateSet({
