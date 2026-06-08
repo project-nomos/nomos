@@ -48,8 +48,21 @@ import { createDatabase, dropDatabase, withDatabaseName } from "../src/db/migrat
 import { resolveMemoryUserId } from "../src/auth/tenant-context.ts";
 import { vaultWrite, vaultSearch, vaultRead, vaultDelete } from "../src/memory/vault.ts";
 import { storeMemoryChunk, searchMemoryByText, deleteMemoryByPath } from "../src/db/memory.ts";
-import { createContact, listContacts } from "../src/identity/contacts.ts";
+import { createContact, listContacts, mergeContacts } from "../src/identity/contacts.ts";
+import { resolveContact, listIdentities } from "../src/identity/identities.ts";
+import { runAutoLinker } from "../src/identity/auto-linker.ts";
 import { createSession, getSessionByKey } from "../src/db/sessions.ts";
+import { SessionStore } from "../src/sessions/store.ts";
+import { CronStore } from "../src/cron/store.ts";
+import {
+  createDraft,
+  getDraft,
+  listPendingDrafts,
+  approveDraft,
+  rejectDraft,
+  markDraftSent,
+} from "../src/db/drafts.ts";
+import { syncFileToDb } from "../src/config/file-sync.ts";
 import { countTranscriptMessages, appendTranscriptMessage } from "../src/db/transcripts.ts";
 import {
   backfillGraph,
@@ -758,6 +771,187 @@ async function runCommitments(): Promise<void> {
   );
 }
 
+async function runSessionResume(): Promise<void> {
+  // Regression guard for the session-metadata fix: persist an SDK session id and
+  // read it back. A double-encoded jsonb *string* would make metadata.sdkSessionId
+  // undefined and silently break cross-restart resume.
+  const key = "slack:eval-resume";
+  const scope = { platform: "slack", channelId: "eval-resume" };
+  const SDK_ID = "sdk-eval-9f3c";
+  const db = getKysely();
+  await db.deleteFrom("sessions").where("session_key", "=", key).execute();
+  // Row must exist first: setWithDbPersist only UPDATEs by session_key.
+  await createSession({ sessionKey: key, model: "claude-opus-4-8", metadata: {} });
+  await new SessionStore("channel").setWithDbPersist(scope, SDK_ID);
+
+  const row = await getSessionByKey(key);
+  const meta = row?.metadata as Record<string, unknown> | undefined;
+  check(
+    "[session-resume] metadata is a jsonb object (not a double-encoded string)",
+    typeof meta === "object" && meta !== null,
+  );
+  check(
+    "[session-resume] sdkSessionId round-trips for cross-restart resume",
+    typeof meta?.sdkSessionId === "string" && meta.sdkSessionId === SDK_ID,
+  );
+  check(
+    "[session-resume] a cold instance resumes the SDK session from the DB",
+    (await new SessionStore("channel").getWithDbFallback(scope)) === SDK_ID,
+  );
+  if (!KEEP) await db.deleteFrom("sessions").where("session_key", "=", key).execute();
+}
+
+async function runCron(): Promise<void> {
+  // cron_jobs / cron_runs: scheduled tasks. The owner is tagged on the job (cron is
+  // global at the store layer; isolation rides database-per-customer).
+  const store = new CronStore();
+  const jobId = await store.createJob({
+    userId: "eval-cron-a",
+    name: "eval-cron-job",
+    schedule: "0 9 * * *",
+    scheduleType: "cron",
+    sessionTarget: "isolated",
+    deliveryMode: "announce",
+    prompt: "summarize yesterday",
+    enabled: true,
+    errorCount: 0,
+  });
+  const job = await store.getJob(jobId);
+  check(
+    "[cron] job created + owner round-trips",
+    job != null && job.userId === "eval-cron-a" && job.scheduleType === "cron",
+  );
+
+  const runId = await store.recordRunStart(jobId, "eval-cron-job", `cron:${jobId}:1`);
+  await store.recordRunEnd(runId, true, 1200);
+  const runs = await store.listRuns({ jobId });
+  check(
+    "[cron] run recorded + retrievable",
+    runs.length === 1 && runs[0]!.success === true && runs[0]!.durationMs === 1200,
+  );
+  const stats = await store.getRunStats(jobId);
+  check("[cron] run stats reflect the run", stats.totalRuns === 1 && stats.successCount === 1);
+  if (!KEEP) await store.deleteJob(jobId); // cron_runs cascade via FK
+}
+
+async function runDrafts(): Promise<void> {
+  // draft_messages: consent-aware outgoing drafts. Per-user at the LIST layer;
+  // status state machine is pending -> approved -> sent, or pending -> rejected.
+  const A = "eval-draft-a";
+  const B = "eval-draft-b";
+  const dA = await createDraft({
+    platform: "slack",
+    channelId: "C_EVAL",
+    userId: A,
+    inReplyTo: "m1",
+    content: "from A",
+    context: { source: "eval" },
+  });
+  const dB = await createDraft({
+    platform: "slack",
+    channelId: "C_EVAL",
+    userId: B,
+    inReplyTo: "m2",
+    content: "from B",
+  });
+
+  check(
+    "[drafts] created pending + listed per owner",
+    (await getDraft(dA.id))?.status === "pending" &&
+      (await listPendingDrafts(A)).some((d) => d.id === dA.id),
+  );
+  check(
+    "[drafts] A's pending list excludes B's draft",
+    (await listPendingDrafts(A)).every((d) => d.id !== dB.id),
+  );
+
+  const approved = await approveDraft(dA.id);
+  check(
+    "[drafts] approve transitions pending -> approved (drops from pending)",
+    approved?.status === "approved" && (await listPendingDrafts(A)).every((d) => d.id !== dA.id),
+  );
+  check(
+    "[drafts] re-approving a non-pending draft is a no-op",
+    (await approveDraft(dA.id)) === null,
+  );
+  check("[drafts] approved -> sent", (await markDraftSent(dA.id))?.status === "sent");
+
+  const rejected = await rejectDraft(dB.id);
+  check(
+    "[drafts] reject transitions pending -> rejected",
+    rejected?.status === "rejected" && (await listPendingDrafts(B)).length === 0,
+  );
+  if (!KEEP)
+    await getKysely().deleteFrom("draft_messages").where("user_id", "in", [A, B]).execute();
+}
+
+async function runAutoLinkerGuard(): Promise<void> {
+  // Regression guard for the cross-tenant merge data-loss bug: the auto-linker
+  // (deterministic, owner-scoped SQL) must merge within a user but NEVER touch
+  // another user's contacts.
+  const A = "eval-autolink-a";
+  const B = "eval-autolink-b";
+  const a1 = await resolveContact(A, "slack", "U_A1", "Alice", "dup@example.com");
+  await resolveContact(A, "email", "alice@work", "Alice", "dup@example.com");
+  const b1 = await resolveContact(B, "slack", "U_B1", "Alice", "dup@example.com");
+  await resolveContact(B, "email", "alice@work", "Alice", "dup@example.com");
+
+  const bBefore = JSON.stringify((await listContacts(B)).map((c) => c.id).sort());
+  await runAutoLinker(A);
+
+  const aAfter = await listContacts(A);
+  check("[auto-linker] merges a user's own duplicate contacts (2 -> 1)", aAfter.length === 1);
+  check(
+    "[auto-linker] survivor owns both identities",
+    aAfter.length === 1 && (await listIdentities(A, aAfter[0]!.id)).length === 2,
+  );
+  check(
+    "[auto-linker] another tenant's contacts are untouched (regression guard)",
+    JSON.stringify((await listContacts(B)).map((c) => c.id).sort()) === bBefore,
+  );
+  await mergeContacts(A, aAfter[0]?.id ?? "none", b1.contact.id);
+  check(
+    "[auto-linker] cross-user mergeContacts does not delete B's contact",
+    (await listContacts(B)).some((c) => c.id === b1.contact.id),
+  );
+  if (!KEEP) {
+    const db = getKysely();
+    for (const uid of [A, B]) {
+      await db.deleteFrom("contact_identities").where("user_id", "=", uid).execute();
+      await db.deleteFrom("contacts").where("user_id", "=", uid).execute();
+    }
+  }
+}
+
+async function runManagedFiles(): Promise<void> {
+  // managed_files: content-addressed DB backup of disk config (global; the daemon
+  // restores from it on boot). Round-trip + sha-256 hash + idempotent upsert.
+  const { createHash } = await import("node:crypto");
+  const path = "eval/managed-test.md";
+  await syncFileToDb(path, "hello world");
+  const row = await getKysely()
+    .selectFrom("managed_files")
+    .select(["content", "hash"])
+    .where("path", "=", path)
+    .executeTakeFirst();
+  check(
+    "[managed-files] write + read round-trips with a sha-256 hash",
+    row?.content === "hello world" &&
+      row?.hash === createHash("sha256").update("hello world", "utf-8").digest("hex"),
+  );
+  await syncFileToDb(path, "v2");
+  const again = await getKysely()
+    .selectFrom("managed_files")
+    .select(["content"])
+    .where("path", "=", path)
+    .executeTakeFirst();
+  check(
+    "[managed-files] upsert by path updates in place (no duplicate row)",
+    again?.content === "v2",
+  );
+  if (!KEEP) await getKysely().deleteFrom("managed_files").where("path", "=", path).execute();
+}
+
 async function runWikiArticles(): Promise<void> {
   // Derived store: wiki_articles. Deterministic write + per-user isolation by
   // default; the full LLM compile (2 Sonnet passes, writes ~/.nomos/wiki) is
@@ -1037,6 +1231,11 @@ async function runEval(): Promise<void> {
   await runAutoDreamState();
   await runWikiArticles();
   await runCommitments();
+  await runSessionResume();
+  await runCron();
+  await runDrafts();
+  await runAutoLinkerGuard();
+  await runManagedFiles();
   await runGetMessagesWire();
 
   // Negative control: a judge that passes everything is worthless. Prove it
