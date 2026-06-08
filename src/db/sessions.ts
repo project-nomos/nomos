@@ -120,7 +120,7 @@ export async function updateSessionSdkId(sessionKey: string, sdkSessionId: strin
   await db
     .updateTable("sessions")
     .set({
-      metadata: sql`jsonb_set(COALESCE(metadata, '{}'), '{sdkSessionId}', ${JSON.stringify(sdkSessionId)}::jsonb)`,
+      metadata: sql`jsonb_set(COALESCE(metadata, '{}'), '{sdkSessionId}', to_jsonb(${sdkSessionId}::text))`,
       updated_at: sql`now()`,
     })
     .where("session_key", "=", sessionKey)
