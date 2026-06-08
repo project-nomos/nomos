@@ -47,11 +47,19 @@ import { runMigrations } from "../src/db/migrate.ts";
 import { createDatabase, dropDatabase, withDatabaseName } from "../src/db/migrator.ts";
 import { resolveMemoryUserId } from "../src/auth/tenant-context.ts";
 import { vaultWrite, vaultSearch, vaultRead, vaultDelete } from "../src/memory/vault.ts";
-import { storeMemoryChunk, searchMemoryByText, deleteMemoryByPath } from "../src/db/memory.ts";
+import {
+  storeMemoryChunk,
+  searchMemoryByText,
+  searchMemoryByCategory,
+  recordMemoryAccess,
+  deleteMemoryByPath,
+} from "../src/db/memory.ts";
 import { createContact, listContacts, mergeContacts } from "../src/identity/contacts.ts";
 import { resolveContact, listIdentities } from "../src/identity/identities.ts";
 import { runAutoLinker } from "../src/identity/auto-linker.ts";
-import { createSession, getSessionByKey } from "../src/db/sessions.ts";
+import { createSession, getSessionByKey, updateSessionSdkId } from "../src/db/sessions.ts";
+import { getVaultNote } from "../src/db/vault.ts";
+import { markMagicDocUpdated, isMagicDocStale } from "../src/memory/magic-docs.ts";
 import { SessionStore } from "../src/sessions/store.ts";
 import { CronStore } from "../src/cron/store.ts";
 import {
@@ -63,18 +71,26 @@ import {
   markDraftSent,
 } from "../src/db/drafts.ts";
 import { syncFileToDb } from "../src/config/file-sync.ts";
-import { countTranscriptMessages, appendTranscriptMessage } from "../src/db/transcripts.ts";
+import {
+  countTranscriptMessages,
+  appendTranscriptMessage,
+  getTranscriptWithUsage,
+} from "../src/db/transcripts.ts";
 import {
   backfillGraph,
   getProjection,
   neighborhood,
   getNodeByExternal,
+  upsertNode,
+  upsertEdge,
+  mergeNodeAttrs,
+  getNode,
 } from "../src/memory/graph.ts";
 import { consolidateMemory } from "../src/memory/consolidator.ts";
-import { autoDream, getConsolidationState } from "../src/memory/auto-dream.ts";
+import { autoDream, getConsolidationState, shouldConsolidate } from "../src/memory/auto-dream.ts";
 import { storeCommitments, getPendingCommitments } from "../src/proactive/commitment-tracker.ts";
 import { compileKnowledge } from "../src/memory/knowledge-compiler.ts";
-import { listArticles, upsertArticle, searchArticles } from "../src/db/wiki.ts";
+import { listArticles, upsertArticle, searchArticles, getArticle } from "../src/db/wiki.ts";
 import { isEphemeralSession } from "../src/daemon/memory-indexer.ts";
 import { GrpcServer } from "../src/daemon/grpc-server.ts";
 import { MessageQueue } from "../src/daemon/message-queue.ts";
@@ -1025,6 +1041,285 @@ async function runWikiArticles(): Promise<void> {
   }
 }
 
+async function runGraphMetadata(): Promise<void> {
+  // kg_nodes carry aliases (TEXT[]) + attrs (JSONB metadata) + confidence; kg_edges
+  // carry a fact (TEXT) + attrs (JSONB) + confidence. Assert all of it round-trips
+  // (incl. mergeNodeAttrs folding a key), per-user scoped.
+  const ctx = { orgId: "eval-org", userId: "eval-kgmeta" };
+  const db = getKysely();
+  await db.deleteFrom("kg_edges").where("user_id", "=", ctx.userId).execute();
+  await db.deleteFrom("kg_nodes").where("user_id", "=", ctx.userId).execute();
+
+  const aliceId = await upsertNode(ctx, {
+    kind: "person",
+    name: "Alice Ferreira",
+    aliases: ["Ali", "A. Ferreira"],
+    attrs: { phone: "+15551234567", email: "alice@example.com" },
+    confidence: 0.9,
+  });
+  const acmeId = await upsertNode(ctx, { kind: "org", name: "Acme Corp", confidence: 0.8 });
+  await mergeNodeAttrs(ctx, aliceId, { url: "https://alice.example" });
+  const edgeId = await upsertEdge(ctx, {
+    srcId: aliceId,
+    dstId: acmeId,
+    relType: "works_at",
+    fact: "Alice is a staff engineer at Acme Corp since 2021",
+    attrs: { role: "Staff Engineer", since: "2021" },
+    confidence: 0.95,
+  });
+
+  const alice = await getNode(ctx, aliceId);
+  check(
+    "[kg-meta] node aliases round-trip",
+    JSON.stringify([...(alice?.aliases ?? [])].sort()) === JSON.stringify(["A. Ferreira", "Ali"]),
+  );
+  check(
+    "[kg-meta] node attrs (metadata bag) round-trip incl. mergeNodeAttrs",
+    alice?.attrs.phone === "+15551234567" &&
+      alice?.attrs.email === "alice@example.com" &&
+      alice?.attrs.url === "https://alice.example",
+  );
+  check("[kg-meta] node confidence round-trips", alice?.confidence === 0.9);
+
+  const sub = await neighborhood(ctx, aliceId, { depth: 1 });
+  const edge = sub.edges.find((e) => e.id === edgeId);
+  check(
+    "[kg-meta] edge fact + attrs + confidence round-trip",
+    edge?.fact === "Alice is a staff engineer at Acme Corp since 2021" &&
+      edge?.attrs.role === "Staff Engineer" &&
+      edge?.confidence === 0.95,
+  );
+  // Per-user: another tenant cannot read this node by id.
+  check(
+    "[kg-meta] node is owner-scoped",
+    (await getNode({ orgId: "eval-org", userId: "eval-other" }, aliceId)) === undefined,
+  );
+}
+
+async function runBacklinks(): Promise<void> {
+  // vault_notes.backlinks (auto-derived from [[links]]) and wiki_articles.backlinks
+  // (passed explicitly) are native TEXT[] columns. Assert they store + read back.
+  const U = "eval-backlinks";
+  await vaultWrite(U, "notes/trip.md", "Met [[Dana]] and [[ Acme ]]; ping [[Dana]] again");
+  const vrow = await getVaultNote(U, "notes/trip.md"); // db layer: vaultRead strips backlinks
+  check(
+    "[backlinks] vault [[links]] are extracted, deduped + trimmed",
+    JSON.stringify(vrow?.backlinks) === JSON.stringify(["Dana", "Acme"]),
+  );
+  check(
+    "[backlinks] vault backlinks are plain strings (no double-encoding)",
+    (vrow?.backlinks ?? []).every((b) => typeof b === "string" && !b.startsWith('"')),
+  );
+
+  await upsertArticle(U, "contacts/dana.md", "Dana", "Dana profile", "contacts", ["trip", "Acme"]);
+  const wrow = await getArticle(U, "contacts/dana.md");
+  check(
+    "[backlinks] wiki article backlinks round-trip",
+    JSON.stringify(wrow?.backlinks) === JSON.stringify(["trip", "Acme"]),
+  );
+  await upsertArticle(U, "contacts/dana.md", "Dana", "Dana v2", "contacts", ["trip"]);
+  check(
+    "[backlinks] revising an article updates its backlinks",
+    JSON.stringify((await getArticle(U, "contacts/dana.md"))?.backlinks) ===
+      JSON.stringify(["trip"]),
+  );
+}
+
+async function runMetadataColumns(): Promise<void> {
+  // JSONB/array column round-trips that the mocked-DB unit tests structurally can't
+  // catch: transcript usage, session metadata (custom key), chunk last_accessed_at +
+  // access_count, and chunk metadata category.
+  const U = "eval-mdcols";
+  const db = getKysely();
+
+  // transcript_messages.usage
+  const tKey = `eval:usage:${Date.now()}`;
+  const ts = await createSession({ sessionKey: tKey, userId: U });
+  await appendTranscriptMessage({
+    sessionId: ts.id,
+    userId: U,
+    role: "assistant",
+    content: [{ type: "text", text: "hi" }],
+    usage: { input: 11, output: 22 },
+  });
+  const msgs = await getTranscriptWithUsage(ts.id);
+  check(
+    "[md-cols] transcript usage round-trips as {input,output}",
+    msgs.length === 1 && msgs[0]!.usage?.input === 11 && msgs[0]!.usage?.output === 22,
+  );
+
+  // sessions.metadata: a custom key must read back as an object (proves the
+  // double-encoding fix), and jsonb_set via updateSessionSdkId must work.
+  const mKey = `eval:meta:${Date.now()}`;
+  await createSession({
+    sessionKey: mKey,
+    userId: U,
+    metadata: { project: "apollo", nested: { tier: 3 } },
+  });
+  const got = await getSessionByKey(mKey);
+  const meta = got?.metadata as Record<string, unknown> | undefined;
+  check(
+    "[md-cols] session metadata custom key reads back as an object",
+    typeof meta === "object" &&
+      meta?.project === "apollo" &&
+      (meta?.nested as { tier?: number })?.tier === 3,
+  );
+  await updateSessionSdkId(mKey, "sdk-xyz");
+  check(
+    "[md-cols] jsonb_set on session metadata works (sdkSessionId)",
+    ((await getSessionByKey(mKey))?.metadata as Record<string, unknown> | undefined)
+      ?.sdkSessionId === "sdk-xyz",
+  );
+
+  // memory_chunks: last_accessed_at + access_count via recordMemoryAccess, and
+  // metadata.category readable via searchMemoryByCategory.
+  const cid = `eval-md:${U}:c1`;
+  await storeMemoryChunk({
+    id: cid,
+    userId: U,
+    source: "conversation",
+    text: "remember me",
+    metadata: { category: "note" },
+  });
+  const before = await db
+    .selectFrom("memory_chunks")
+    .select(["access_count", "last_accessed_at"])
+    .where("id", "=", cid)
+    .where("user_id", "=", U)
+    .executeTakeFirst();
+  check(
+    "[md-cols] new chunk starts at access_count 0, last_accessed_at null",
+    before?.access_count === 0 && before?.last_accessed_at === null,
+  );
+  await recordMemoryAccess(U, [cid]);
+  const after = await db
+    .selectFrom("memory_chunks")
+    .select(["access_count", "last_accessed_at"])
+    .where("id", "=", cid)
+    .where("user_id", "=", U)
+    .executeTakeFirst();
+  check(
+    "[md-cols] recordMemoryAccess bumps access_count + sets last_accessed_at",
+    after?.access_count === 1 && after?.last_accessed_at !== null,
+  );
+  await recordMemoryAccess("eval-md-other", [cid]); // wrong owner: zero-trust no-op
+  const guarded = await db
+    .selectFrom("memory_chunks")
+    .select("access_count")
+    .where("id", "=", cid)
+    .executeTakeFirst();
+  check(
+    "[md-cols] recordMemoryAccess is owner-scoped (wrong owner is a no-op)",
+    guarded?.access_count === 1,
+  );
+  const byCat = await searchMemoryByCategory(U, "note", 10);
+  check(
+    "[md-cols] chunk metadata.category is a readable object (not double-encoded)",
+    byCat.some((r) => r.id === cid) &&
+      byCat.find((r) => r.id === cid)?.metadata?.category === "note",
+  );
+
+  if (!KEEP) await db.deleteFrom("sessions").where("user_id", "=", U).execute(); // transcripts cascade
+}
+
+async function runMagicDocState(): Promise<void> {
+  // magic_doc_state: markMagicDocUpdated writes file_path + last_updated_at; a fresh
+  // row is "not stale". state_json + last_content_hash are DEAD columns (in the DDL
+  // + types but never written by any code) — assert null to document that.
+  const db = getKysely();
+  const fp = "/eval/magic-doc-test.md";
+  await db.deleteFrom("magic_doc_state").where("file_path", "=", fp).execute();
+  check("[magic-doc] a never-seen doc is stale", (await isMagicDocStale(fp)) === true);
+  await markMagicDocUpdated(fp);
+  check("[magic-doc] a just-updated doc is not stale", (await isMagicDocStale(fp)) === false);
+  const row = await db
+    .selectFrom("magic_doc_state")
+    .select(["state_json", "last_content_hash"])
+    .where("file_path", "=", fp)
+    .executeTakeFirst();
+  check(
+    "[magic-doc] state_json + last_content_hash are unwired (null) — documented dead columns",
+    row != null && row.state_json === null && row.last_content_hash === null,
+  );
+  if (!KEEP) await db.deleteFrom("magic_doc_state").where("file_path", "=", fp).execute();
+}
+
+async function runAutoDreamDeep(): Promise<void> {
+  // Deeper auto-dream: the shouldConsolidate time + turn gates, and Phase-2
+  // near-duplicate merge (cosine > 0.92 on real embeddings). All deterministic.
+  const db = getKysely();
+
+  // ── gates (shouldConsolidate reads the auto_dream_state singleton) ──
+  const setState = async (lastRunAt: Date | null, lastTurnCount: number) => {
+    await db.deleteFrom("auto_dream_state").execute();
+    if (lastRunAt) {
+      await db
+        .insertInto("auto_dream_state")
+        .values({ id: 1, last_run_at: lastRunAt, last_turn_count: lastTurnCount, total_runs: 0 })
+        .execute();
+    }
+  };
+  await setState(new Date(), 0); // ran just now
+  check(
+    "[auto-dream] time gate blocks a run within the interval",
+    (await shouldConsolidate(10_000)) === false,
+  );
+  await setState(new Date(Date.now() - 2 * 60 * 60 * 1000), 0); // 2h ago
+  check("[auto-dream] turn gate blocks < 10 new turns", (await shouldConsolidate(9)) === false);
+  check(
+    "[auto-dream] runs once the interval passed + >= 10 new turns",
+    (await shouldConsolidate(10)) === true,
+  );
+  await setState(null, 0); // no state row
+  check(
+    "[auto-dream] with no prior state the time gate is skipped (turn gate only)",
+    (await shouldConsolidate(10)) === true,
+  );
+
+  // ── Phase 2: near-duplicate merge on real 768-d embeddings ──
+  const U = "eval-dream-merge";
+  const vec = (second: number) => {
+    const v = new Array(768).fill(0);
+    v[0] = 1;
+    v[1] = second;
+    return v;
+  };
+  await storeMemoryChunk({
+    id: `${U}:a`,
+    userId: U,
+    source: "test",
+    text: "user likes oat milk flat whites",
+    embedding: vec(0),
+    metadata: { category: "fact" },
+  });
+  await storeMemoryChunk({
+    id: `${U}:b`,
+    userId: U,
+    source: "test",
+    text: "the user drinks oat-milk flat whites",
+    embedding: vec(0.05),
+    metadata: { category: "fact" },
+  });
+  await recordMemoryAccess(U, [`${U}:a`]); // a kept (higher access)
+  const res = await consolidateMemory(U);
+  check("[auto-dream] Phase 2 merges near-duplicate chunks (cosine > 0.92)", res.merged === 1);
+  const survivors = await db
+    .selectFrom("memory_chunks")
+    .select(["id", "access_count"])
+    .where("user_id", "=", U)
+    .where("id", "in", [`${U}:a`, `${U}:b`])
+    .execute();
+  check(
+    "[auto-dream] the higher-access chunk survives with combined access_count",
+    survivors.length === 1 && survivors[0]!.id === `${U}:a` && survivors[0]!.access_count === 1,
+  );
+
+  if (!KEEP) {
+    await db.deleteFrom("memory_chunks").where("user_id", "=", U).execute();
+    await db.deleteFrom("auto_dream_state").execute();
+  }
+}
+
 // ── helpers ──
 
 async function seedOrgMembers(ids: string[]): Promise<void> {
@@ -1311,6 +1606,11 @@ async function runEval(): Promise<void> {
   await runDrafts();
   await runAutoLinkerGuard();
   await runManagedFiles();
+  await runGraphMetadata();
+  await runBacklinks();
+  await runMetadataColumns();
+  await runMagicDocState();
+  await runAutoDreamDeep();
   await runGetMessagesWire();
 
   // Negative control: a judge that passes everything is worthless. Prove it
