@@ -9,11 +9,19 @@
  *    to one owner; hosted keeps users isolated (no cross-user leak)
  *  - per-user isolation across vault + memory_chunks + user_model + contacts
  *  - session management: continuity (resume by key) + ephemeral (off-the-record)
- *  - the real mobile endpoints over the Connect wire (write/list/get/delete vault)
+ *  - the mobile endpoints over the Connect wire (write/list/get/delete vault)
+ *  - the AUTHENTICATED hosted wire: minted JWTs prove per-tenant isolation +
+ *    reject unauthenticated calls
+ *  - a live agent conversation over the gRPC NomosAgent.Chat RPC (judged recall)
+ *  - the JWT-gated streaming MobileApi.Chat with a REAL nomos-server token (judged
+ *    recall); skipped when nomos-server is not running
  *
- * Run:  DATABASE_URL=... [ANTHROPIC_API_KEY=...] pnpm eval:agent
- * Exits non-zero on any failure. The judge checks are skipped (reported) when no
- * LLM provider is configured.
+ * It runs against a freshly provisioned, throwaway database (nomos_eval) that is
+ * dropped on exit, so it never touches the dev `nomos` DB.
+ *
+ * Run:  DATABASE_URL=... [NOMOS_USE_SUBSCRIPTION=true] pnpm eval:agent
+ * Exits non-zero on any failure. Judge + real-token checks skip (reported) when no
+ * LLM provider / no nomos-server is available.
  */
 
 import { homedir } from "node:os";
@@ -45,9 +53,11 @@ import { MessageQueue } from "../src/daemon/message-queue.ts";
 import { AgentRuntime } from "../src/daemon/agent-runtime.ts";
 import { GrpcClient } from "../src/ui/grpc-client.ts";
 import type { AgentEvent } from "../src/daemon/types.ts";
+import { refreshJwks } from "../src/auth/jwt-validator.ts";
 import { judge } from "./judge.ts";
 import { startWire, startConnectServer, makeMobileClient } from "./wire.ts";
 import { startHostedAuth } from "./hosted-auth.ts";
+import { provisionRealUser } from "./nomos-server-auth.ts";
 
 // The judge needs any provider the forked-agent path supports: a direct API key,
 // Vertex, or a Claude subscription (NOMOS_USE_SUBSCRIPTION).
@@ -363,6 +373,94 @@ function sendAndWait(
   });
 }
 
+async function runHostedMobileChat(): Promise<void> {
+  // GAP 2 (full fidelity): the JWT-gated streaming MobileApi.Chat RPC, driven with
+  // a REAL token issued by nomos-server (Better Auth), verified against its live
+  // JWKS. Skips when nomos-server is not running, so the eval stays standalone.
+  const label = "[mobile-chat] authenticated MobileApi.Chat recalls across turns (real token)";
+  const judgeLabel = "[mobile-chat] judge: authenticated agent answer recalls the fact";
+  if (!hasLLM) {
+    skip(label, "no LLM provider configured");
+    skip(judgeLabel, "no LLM provider configured");
+    return;
+  }
+  const real = await provisionRealUser();
+  if (!real) {
+    skip(label, "nomos-server not reachable on :4000");
+    skip(judgeLabel, "nomos-server not reachable on :4000");
+    return;
+  }
+
+  process.env.NOMOS_MODE = "hosted";
+  process.env.NOMOS_ORG_ID = real.orgId;
+  process.env.AUTH_JWKS_URL = `${real.serverUrl}/api/auth/jwks`;
+  await refreshJwks().catch(() => undefined); // fetch nomos-server's real keys
+  await seedOrgMembers([real.userId]); // interceptor gates on membership
+
+  const chatChannel = "ephemeral:eval-mobile";
+  let runtime: AgentRuntime | undefined;
+  let server: Awaited<ReturnType<typeof startConnectServer>> | undefined;
+  try {
+    runtime = new AgentRuntime();
+    await runtime.initialize();
+    const queue = new MessageQueue((msg, emit) => runtime!.processMessage(msg, emit));
+    server = await startConnectServer(8797, queue);
+    const client = makeMobileClient(8797, () => real.token);
+
+    await mobileChatTurn(
+      client,
+      "Please remember this for later: my dentist is Dr. Patel on 5th Avenue. Just acknowledge.",
+      chatChannel,
+    );
+    const answer = await mobileChatTurn(
+      client,
+      "Who is my dentist? Reply with just the name.",
+      chatChannel,
+    );
+
+    check(label, answer.includes("Patel"), answer.slice(0, 100));
+    const v = await judge({
+      context:
+        "Over two authenticated mobile chat turns the user said their dentist is Dr. Patel, then asked who their dentist is.",
+      response: answer,
+      rubric:
+        "A passing response must name the dentist as Dr. Patel (the surname Patel is sufficient).",
+    });
+    check(judgeLabel, v.pass, v.reasoning);
+  } catch (err) {
+    check(label, false, err instanceof Error ? err.message : String(err));
+  } finally {
+    try {
+      await server?.stop();
+    } catch {
+      /* ignore */
+    }
+    delete process.env.NOMOS_MODE;
+    delete process.env.NOMOS_ORG_ID;
+    delete process.env.AUTH_JWKS_URL;
+    await refreshJwks().catch(() => undefined);
+  }
+}
+
+/** Drive one MobileApi.Chat server-streaming turn; return the final assistant text. */
+async function mobileChatTurn(
+  client: ReturnType<typeof makeMobileClient>,
+  content: string,
+  sessionKey: string,
+): Promise<string> {
+  let finalText = "";
+  for await (const ev of client.chat({ content, sessionKey }, { timeoutMs: 120_000 })) {
+    if (ev.type === "result") {
+      const payload = ev.jsonPayload ? (JSON.parse(ev.jsonPayload) as { result?: string }) : {};
+      finalText = payload.result ?? "";
+    } else if (ev.type === "error") {
+      const payload = ev.jsonPayload ? (JSON.parse(ev.jsonPayload) as { message?: string }) : {};
+      throw new Error(payload.message ?? "agent error");
+    }
+  }
+  return finalText;
+}
+
 // ── helpers ──
 
 async function seedOrgMembers(ids: string[]): Promise<void> {
@@ -574,8 +672,10 @@ async function runEval(): Promise<void> {
     skip("[judge] rejects a response that misses the rubric", "no LLM provider configured");
   }
 
-  // Slowest last: a live agent conversation over the gRPC Chat wire.
+  // Slowest last: live agent conversations. NomosAgent.Chat over gRPC (unauth,
+  // power-user), then the JWT-gated MobileApi.Chat with a real nomos-server token.
   await runGrpcChat();
+  await runHostedMobileChat();
 }
 
 void main();

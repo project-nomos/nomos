@@ -20,12 +20,17 @@ export interface ServerHandle {
   stop: () => Promise<void>;
 }
 
-/** Boot the MobileApi Connect server on a test port. */
-export async function startConnectServer(port = 8799): Promise<ServerHandle> {
-  // The vault/session RPCs under test do not touch the queue; Chat (the only
-  // queue consumer) is exercised separately via the gRPC agent path.
+/**
+ * Boot the MobileApi Connect server on a test port. Pass a real `messageQueue`
+ * to exercise the streaming Chat RPC; the vault/session RPCs do not touch it, so
+ * the unary tests can leave it as a stub.
+ */
+export async function startConnectServer(
+  port = 8799,
+  messageQueue?: MessageQueue,
+): Promise<ServerHandle> {
   const server = new ConnectServer({
-    messageQueue: {} as MessageQueue,
+    messageQueue: messageQueue ?? ({} as MessageQueue),
     draftManager: null,
     port,
   });
