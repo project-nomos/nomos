@@ -16,7 +16,7 @@ An end-to-end eval of the memory + session management system across **both** pow
 and hosted modes. It boots the daemon's real subsystems (gRPC `NomosAgent`, the Connect
 `MobileApi`, `AgentRuntime`, the message queue) and grades behavior, not just plumbing.
 
-What it checks (75 checks when fully wired):
+What it checks (111 checks when fully wired):
 
 - **Memory recall** from the vault, plus an LLM-as-a-Judge verdict on whether the recalled
   content actually answers the question.
@@ -34,8 +34,15 @@ What it checks (75 checks when fully wired):
 - **Transcripts + GetMessages**: a non-ephemeral turn persists `transcript_messages`
   (ephemeral does not); `MobileApi.GetMessages` over the authenticated wire returns a
   tenant's own sessions (multi-session) and is empty cross-user.
-- **auto_dream_state**: the `autoDream` orchestrator persists its singleton run-state row
-  and the turn gate blocks premature re-runs.
+- **auto_dream_state**: the `autoDream` orchestrator persists its singleton run-state row,
+  the run outcome round-trips through `state_json` as a jsonb object (not a double-encoded
+  string), the turn gate blocks premature re-runs, and the production cron entry point
+  `runAutoDreamCycle` honors the same gate (no-ops right after a run).
+- **magic_doc_state**: `writeMagicDoc` records `last_content_hash` + a `state_json` metadata
+  bag; `isMagicDocStale` is content-addressed (a hand-edited doc is stale immediately on hash
+  mismatch, unchanged content past the interval is stale on the periodic timer); the
+  `refreshMagicDocs` runner enumerates marker files under a root, ignores plain `.md`, and
+  skips fresh docs with no LLM call.
 - **commitments**: per-user proactive-promise store + cross-user isolation.
 - **session-resume**: persists an SDK session id and reads it back (guards the jsonb
   double-encoding fixes; a cold `SessionStore` resumes from the DB).

@@ -27,8 +27,9 @@
  * LLM provider / no nomos-server is available.
  */
 
-import { homedir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
+import { writeFile, rm, mkdir } from "node:fs/promises";
 import { config } from "dotenv";
 // Load .env the same way the app entry point does, so DATABASE_URL and the LLM
 // provider key are present when this script runs standalone (the judge runs only
@@ -59,7 +60,12 @@ import { resolveContact, listIdentities } from "../src/identity/identities.ts";
 import { runAutoLinker } from "../src/identity/auto-linker.ts";
 import { createSession, getSessionByKey, updateSessionSdkId } from "../src/db/sessions.ts";
 import { getVaultNote } from "../src/db/vault.ts";
-import { markMagicDocUpdated, isMagicDocStale } from "../src/memory/magic-docs.ts";
+import {
+  markMagicDocUpdated,
+  isMagicDocStale,
+  writeMagicDoc,
+  refreshMagicDocs,
+} from "../src/memory/magic-docs.ts";
 import { SessionStore } from "../src/sessions/store.ts";
 import { CronStore } from "../src/cron/store.ts";
 import {
@@ -87,7 +93,12 @@ import {
   getNode,
 } from "../src/memory/graph.ts";
 import { consolidateMemory } from "../src/memory/consolidator.ts";
-import { autoDream, getConsolidationState, shouldConsolidate } from "../src/memory/auto-dream.ts";
+import {
+  autoDream,
+  getConsolidationState,
+  shouldConsolidate,
+  runAutoDreamCycle,
+} from "../src/memory/auto-dream.ts";
 import { storeCommitments, getPendingCommitments } from "../src/proactive/commitment-tracker.ts";
 import { compileKnowledge } from "../src/memory/knowledge-compiler.ts";
 import { listArticles, upsertArticle, searchArticles, getArticle } from "../src/db/wiki.ts";
@@ -650,22 +661,53 @@ async function runConsolidation(): Promise<void> {
 }
 
 async function runAutoDreamState(): Promise<void> {
-  // The dormant autoDream() orchestrator persists a singleton run-state row
+  // The autoDream() orchestrator persists a singleton run-state row
   // (instance-wide). Gates: turn delta >= 10, time gate skipped on fresh state;
-  // the Redis lease no-ops without REDIS_URL. Asserts the state IS written + that
-  // the gate then blocks a premature re-run.
-  await getKysely().deleteFrom("auto_dream_state").execute();
-  const noop = async () => ({ merged: 0, pruned: 0, newChunks: 0, durationMs: 0 });
+  // the Redis lease no-ops without REDIS_URL. Asserts the state IS written, that
+  // the run outcome round-trips through state_json as an OBJECT (not a
+  // double-encoded JSON string), and that the gate then blocks a premature re-run.
+  const db = getKysely();
+  await db.deleteFrom("auto_dream_state").execute();
+  const result = { merged: 2, pruned: 1, newChunks: 3, durationMs: 0 };
+  const run = async () => ({ ...result });
 
-  const ran = await autoDream(10, noop);
+  const ran = await autoDream(10, run);
   check("[auto-dream-state] autoDream runs when the turn gate is met", ran !== null);
   const state = await getConsolidationState();
   check(
     "[auto-dream-state] run-state is persisted (last_run_at + turn count + total_runs)",
     Boolean(state.lastRunAt) && state.lastTurnCount === 10 && state.totalRuns === 1,
   );
-  const blocked = await autoDream(10, noop);
+  // state_json round-trips as a readable object (the recurring jsonb
+  // double-encoding bug would surface it as a string here).
+  check(
+    "[auto-dream-state] state_json round-trips as an object {merged,pruned,newChunks}",
+    typeof state.lastResult === "object" &&
+      state.lastResult !== null &&
+      (state.lastResult as Record<string, unknown>).merged === 2 &&
+      (state.lastResult as Record<string, unknown>).pruned === 1 &&
+      (state.lastResult as Record<string, unknown>).newChunks === 3,
+  );
+  const raw = await db
+    .selectFrom("auto_dream_state")
+    .select("state_json")
+    .where("id", "=", 1)
+    .executeTakeFirst();
+  check(
+    "[auto-dream-state] state_json column is jsonb object, not a double-encoded string",
+    raw != null && typeof raw.state_json === "object" && raw.state_json !== null,
+  );
+  const blocked = await autoDream(10, run);
   check("[auto-dream-state] gate blocks a re-run without 10 new turns", blocked === null);
+
+  // The production cron entry point runs the same singleton gate, so right after
+  // a successful run it must no-op (returns null) without fanning out to any
+  // per-owner consolidation. Deterministic: the time gate is still fresh.
+  const gated = await runAutoDreamCycle();
+  check(
+    "[auto-dream-state] runAutoDreamCycle respects the time gate (no-op after a run)",
+    gated === null,
+  );
 }
 
 async function runGetMessagesWire(): Promise<void> {
@@ -1223,25 +1265,94 @@ async function runMetadataColumns(): Promise<void> {
 }
 
 async function runMagicDocState(): Promise<void> {
-  // magic_doc_state: markMagicDocUpdated writes file_path + last_updated_at; a fresh
-  // row is "not stale". state_json + last_content_hash are DEAD columns (in the DDL
-  // + types but never written by any code). Assert null to document that.
+  // magic_doc_state, now content-addressed: writeMagicDoc persists last_content_hash
+  // + state_json (title/chars); isMagicDocStale is gated on (a) never-seen, (b) the
+  // file's content drifting from the stored hash, and (c) the refresh interval.
+  // refreshMagicDocs enumerates marker files under roots and skips fresh ones with
+  // no LLM call. All deterministic (no provider needed).
   const db = getKysely();
-  const fp = "/eval/magic-doc-test.md";
+  const dir = join(tmpdir(), `nomos-eval-magicdoc-${process.pid}`);
+  await mkdir(dir, { recursive: true });
+  const fp = join(dir, "doc.md");
+  const body = "<!-- MAGIC DOC: Eval Doc -->\n\n# Eval Doc\n\nInitial content.\n";
+  await writeFile(fp, body, "utf-8");
   await db.deleteFrom("magic_doc_state").where("file_path", "=", fp).execute();
+
+  // (a) never-seen -> stale
   check("[magic-doc] a never-seen doc is stale", (await isMagicDocStale(fp)) === true);
-  await markMagicDocUpdated(fp);
-  check("[magic-doc] a just-updated doc is not stale", (await isMagicDocStale(fp)) === false);
+
+  // writeMagicDoc writes the file + records hash + metadata.
+  await writeMagicDoc(fp, body);
   const row = await db
     .selectFrom("magic_doc_state")
     .select(["state_json", "last_content_hash"])
     .where("file_path", "=", fp)
     .executeTakeFirst();
   check(
-    "[magic-doc] state_json + last_content_hash are unwired (null), documented dead columns",
-    row != null && row.state_json === null && row.last_content_hash === null,
+    "[magic-doc] writeMagicDoc populates last_content_hash (64-hex sha256)",
+    row != null && typeof row.last_content_hash === "string" && row.last_content_hash.length === 64,
   );
-  if (!KEEP) await db.deleteFrom("magic_doc_state").where("file_path", "=", fp).execute();
+  check(
+    "[magic-doc] state_json round-trips as an object (title/chars), not a string",
+    row != null &&
+      typeof row.state_json === "object" &&
+      row.state_json !== null &&
+      (row.state_json as Record<string, unknown>).title === "Eval Doc",
+  );
+
+  // (c) content unchanged + just updated -> not stale
+  check("[magic-doc] a just-written, unchanged doc is not stale", !(await isMagicDocStale(fp)));
+
+  // (b) content drifts on disk -> stale immediately (hash mismatch), regardless of time
+  await writeFile(fp, body + "\nEdited by hand.\n", "utf-8");
+  check("[magic-doc] an edited doc (hash mismatch) is stale", await isMagicDocStale(fp));
+
+  // restore content; backdate the row past the interval -> time-based refresh fires
+  await writeFile(fp, body, "utf-8");
+  check(
+    "[magic-doc] restored content matches the stored hash (not stale)",
+    !(await isMagicDocStale(fp)),
+  );
+  await db
+    .updateTable("magic_doc_state")
+    .set({ last_updated_at: new Date(Date.now() - 2 * 60 * 60 * 1000) })
+    .where("file_path", "=", fp)
+    .execute();
+  check(
+    "[magic-doc] unchanged content past the interval is stale (periodic refresh)",
+    await isMagicDocStale(fp),
+  );
+
+  // markMagicDocUpdated with no hash leaves the column null (back-compat path).
+  await markMagicDocUpdated(fp);
+  const noHash = await db
+    .selectFrom("magic_doc_state")
+    .select("last_content_hash")
+    .where("file_path", "=", fp)
+    .executeTakeFirst();
+  check(
+    "[magic-doc] markMagicDocUpdated() without a hash clears last_content_hash",
+    noHash != null && noHash.last_content_hash === null,
+  );
+
+  // refreshMagicDocs runner: enumerate the dir, find the one marker file, skip it
+  // (fresh after writeMagicDoc) with no LLM call; a plain .md is ignored.
+  await writeMagicDoc(fp, body); // make it fresh again
+  await writeFile(join(dir, "plain.md"), "# not a magic doc\n", "utf-8");
+  const summary = await refreshMagicDocs([dir]);
+  check(
+    "[magic-doc] refreshMagicDocs finds only the marker file (ignores plain .md)",
+    summary.scanned === 1,
+  );
+  check(
+    "[magic-doc] refreshMagicDocs skips a fresh doc (no refresh, no failure)",
+    summary.refreshed === 0 && summary.skipped === 1 && summary.failed === 0,
+  );
+
+  if (!KEEP) {
+    await db.deleteFrom("magic_doc_state").where("file_path", "=", fp).execute();
+    await rm(dir, { recursive: true, force: true });
+  }
 }
 
 async function runAutoDreamDeep(): Promise<void> {
