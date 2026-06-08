@@ -66,6 +66,11 @@ const hasLLM =
   process.env.CLAUDE_CODE_USE_VERTEX === "1" ||
   process.env.NOMOS_USE_SUBSCRIPTION === "true";
 
+// `--keep` leaves the throwaway DB AND skips the per-test data cleanup, so the
+// rows each check wrote remain in nomos_eval for inspection. Server/connection
+// teardown still runs unconditionally.
+const KEEP = process.argv.slice(2).includes("--keep");
+
 interface Result {
   label: string;
   pass: boolean;
@@ -174,7 +179,9 @@ async function runMode(mode: "power_user" | "hosted"): Promise<void> {
   );
 
   // ── cleanup for this mode (surgical for the real local owner; bulk only for
-  // the synthetic hosted tenants, which never hold real data) ──
+  // the synthetic hosted tenants, which never hold real data). Skipped under
+  // --keep so the rows stay inspectable. ──
+  if (KEEP) return;
   if (mode === "power_user") {
     await purgeArtifacts(ua, { notePath, chunkId, modelKey, contactId: contact.id });
   } else {
@@ -212,8 +219,8 @@ async function runWire(): Promise<void> {
   } finally {
     await wire.stop();
     // Surgical: only the test note (+ its fire-and-forget vector chunk), never a
-    // bulk delete of the real local owner.
-    await purgeArtifacts("local", { notePath });
+    // bulk delete of the real local owner. Skipped under --keep.
+    if (!KEEP) await purgeArtifacts("local", { notePath });
   }
 }
 
@@ -259,8 +266,10 @@ async function runHostedWire(): Promise<void> {
     check("[hosted-wire] unauthenticated call is rejected at the wire", rejected);
   } finally {
     await server.stop();
-    await removeOrgMembers(ids);
-    for (const id of ids) await purgeSyntheticTenant(id);
+    if (!KEEP) {
+      await removeOrgMembers(ids);
+      for (const id of ids) await purgeSyntheticTenant(id);
+    }
     await auth.stop();
   }
 }
@@ -337,11 +346,13 @@ async function runGrpcChat(): Promise<void> {
     } catch {
       /* ignore */
     }
-    await getKysely()
-      .deleteFrom("sessions")
-      .where("session_key", "=", dbSessionKey)
-      .execute()
-      .catch(() => undefined);
+    if (!KEEP) {
+      await getKysely()
+        .deleteFrom("sessions")
+        .where("session_key", "=", dbSessionKey)
+        .execute()
+        .catch(() => undefined);
+    }
   }
 }
 
@@ -607,7 +618,7 @@ async function setupTestDb(): Promise<{ baseUrl: string }> {
   if (new URL(baseUrl).pathname === `/${TEST_DB_NAME}`) {
     throw new Error(`DATABASE_URL already points at the test db ${TEST_DB_NAME}; refusing to run`);
   }
-  const admin = postgres(adminUrlFrom(baseUrl), { max: 1 });
+  const admin = postgres(adminUrlFrom(baseUrl), { max: 1, onnotice: () => {} });
   try {
     await dropDatabase(admin, TEST_DB_NAME); // clean any orphan from a crashed run
     await createDatabase(admin, TEST_DB_NAME);
@@ -621,26 +632,52 @@ async function setupTestDb(): Promise<{ baseUrl: string }> {
   return { baseUrl };
 }
 
-async function teardownTestDb(baseUrl: string): Promise<void> {
-  await closeDb(); // detach the app pool before DROP (WITH FORCE also kills stragglers)
-  const admin = postgres(adminUrlFrom(baseUrl), { max: 1 });
+/** Drop the test DB via an admin connection. Caller must have closed the app pool. */
+async function dropTestDb(baseUrl: string): Promise<void> {
+  const admin = postgres(adminUrlFrom(baseUrl), { max: 1, onnotice: () => {} });
   try {
-    await dropDatabase(admin, TEST_DB_NAME);
+    await dropDatabase(admin, TEST_DB_NAME); // WITH FORCE also kills stragglers
   } finally {
     await admin.end();
   }
+  // eslint-disable-next-line no-console
+  console.log(`Dropped test DB: ${TEST_DB_NAME}`);
+}
+
+async function teardownTestDb(baseUrl: string): Promise<void> {
+  await closeDb(); // detach the app pool before DROP
+  await dropTestDb(baseUrl);
 }
 
 async function main(): Promise<void> {
+  const args = process.argv.slice(2);
+
+  // `--clean`: just drop a previously kept test DB and exit (tidy up after --keep).
+  if (args.includes("--clean")) {
+    await dropTestDb(process.env.DATABASE_URL ?? "postgresql://localhost:5432/nomos");
+    return;
+  }
+  // `--keep`: run normally but leave the test DB (and everything the run wrote) intact
+  // so it can be inspected; drop it later with `pnpm eval:agent --clean`.
+  const keep = args.includes("--keep");
+
   // eslint-disable-next-line no-console
-  console.log(`Agent eval (LLM judge: ${hasLLM ? "on" : "off"})\n`);
+  console.log(`Agent eval (LLM judge: ${hasLLM ? "on" : "off"}${keep ? "; --keep" : ""})\n`);
   const { baseUrl } = await setupTestDb();
   try {
     await runEval();
   } finally {
-    // The throwaway DB is dropped wholesale, so per-row cleanup is belt-and-braces.
-    await finalSweep().catch(() => undefined);
-    await teardownTestDb(baseUrl);
+    if (keep) {
+      await closeDb(); // release the pool so the process can exit; do NOT drop the DB
+      // eslint-disable-next-line no-console
+      console.log(
+        `\nKept test DB for inspection:\n  psql "${process.env.DATABASE_URL}"\n  drop it with: pnpm eval:agent --clean`,
+      );
+    } else {
+      // The throwaway DB is dropped wholesale, so per-row cleanup is belt-and-braces.
+      await finalSweep().catch(() => undefined);
+      await teardownTestDb(baseUrl);
+    }
   }
 
   const failed = results.filter((r) => !r.pass);

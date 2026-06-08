@@ -53,11 +53,22 @@ the dev `nomos` database.
 ### Run
 
 ```bash
-pnpm eval:agent
-# overrides: NOMOS_SERVER_URL, NOMOS_EVAL_EMAIL, NOMOS_EVAL_PASSWORD
+pnpm eval:agent            # provision -> run -> drop the test DB (default)
+pnpm eval:agent --keep     # run, then KEEP nomos_eval (and every row the run wrote) for inspection
+pnpm eval:agent --clean    # drop a kept nomos_eval and exit (tidy up after --keep)
 ```
 
-Exits non-zero on any failure.
+`--keep` also skips the per-test data cleanup, so afterward you can inspect what each
+check wrote, e.g. per-user isolation in the actual tables:
+
+```bash
+psql "$DATABASE_URL_BUT_NOMOS_EVAL" -c "SELECT user_id, path FROM vault_notes;"
+```
+
+The run prints the exact `psql` connection string on exit. Drop it with `--clean` when done.
+
+Overrides: `NOMOS_SERVER_URL`, `NOMOS_EVAL_EMAIL`, `NOMOS_EVAL_PASSWORD`. Exits non-zero on
+any failure.
 
 ## Modules
 

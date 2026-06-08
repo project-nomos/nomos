@@ -514,6 +514,12 @@ Beyond reactive responses — the clone tracks commitments, generates pre-meetin
 <details>
 <summary><strong>Memory & Adaptive Learning</strong></summary>
 
+### Long-Term Memory (the Vault)
+
+A per-user markdown knowledge base in Postgres that is the agent's durable memory and your editable "brain": notes with `[[wikilinks]]`, a `profile.md`, `people/`, and `procedures/`. The agent reads and writes it in-loop via memory tools (`memory_read/write/list/forget` + `memory_search`); you browse and correct it in settings or the mobile app. The compiled wiki and knowledge graph are derived from it, and a reasoning-first digest is injected every turn so continuity does not depend on the agent remembering to search. Works in both power-user and hosted modes, scoped per `user_id`.
+
+See [docs/memory-system.md](docs/memory-system.md) for the full architecture.
+
 ### Persistent Vector Memory
 
 Every conversation is automatically indexed into a PostgreSQL-backed vector store. When the agent needs context from a past interaction — even one that happened in a different channel weeks ago — it finds it.
