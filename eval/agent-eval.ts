@@ -990,17 +990,24 @@ async function runWikiArticles(): Promise<void> {
   process.env.NOMOS_MODE = "hosted";
   process.env.NOMOS_ORG_ID = "eval-org";
   try {
-    await vaultWrite(
-      A,
-      "people/dana.md",
-      "Dana Smith is the VP of Engineering at Acme, leads the platform team, and prefers async standups.",
-      { title: "Dana Smith" },
+    // Seed a realistic multi-note brain so the compiler produces several genuine
+    // articles (and the kept DB is worth browsing), not just one thin note.
+    await seedRichVault(A);
+    const vaultCount = await getKysely()
+      .selectFrom("vault_notes")
+      .select((eb) => eb.fn.countAll<number>().as("n"))
+      .where("user_id", "=", A)
+      .executeTakeFirst();
+    check(
+      "[wiki] rich vault seeded (profile + people + project + procedure)",
+      Number(vaultCount?.n ?? 0) >= 6,
     );
+
     const res = await compileKnowledge({ userId: A, force: true });
     check(
-      "[wiki] LLM compile produces articles in the DB from the vault",
-      res.articlesCreated + res.articlesUpdated > 0,
-      res.errors.join("; ") || undefined,
+      "[wiki] LLM compile produces multiple articles from the vault",
+      res.articlesCreated + res.articlesUpdated >= 2,
+      `created=${res.articlesCreated} updated=${res.articlesUpdated} ${res.errors.join("; ")}`.trim(),
     );
     check(
       "[wiki] compiled articles are owner-scoped",
@@ -1058,6 +1065,56 @@ async function upsertModel(userId: string, key: string, value: string): Promise<
     sourceIds: [],
     confidence: 0.9,
   });
+}
+
+/**
+ * Seed a realistic personal "brain" for a user: a profile, several people notes
+ * with real detail, a project, a procedure, contacts, and a couple of user-model
+ * preferences. Gives the wiki compiler something substantial to distil, and leaves
+ * inspectable content in the kept DB (vault_notes + contacts + user_model).
+ */
+async function seedRichVault(userId: string): Promise<void> {
+  await vaultWrite(
+    userId,
+    "profile.md",
+    "I'm a staff engineer at Acme on the Platform team. I care about reliability, prefer async-first communication, and run a weekly architecture review on Wednesdays.",
+    { title: "Profile" },
+  );
+  await vaultWrite(
+    userId,
+    "people/dana.md",
+    "Dana Smith is the VP of Engineering at Acme. She leads the Platform org, prefers async standups, and approves any infra spend over $10k. We met at the 2023 offsite.",
+    { title: "Dana Smith" },
+  );
+  await vaultWrite(
+    userId,
+    "people/raj.md",
+    "Raj Patel is a Senior PM on the Payments team and owns the billing roadmap. He is vegetarian and allergic to peanuts, so pick restaurants accordingly. He drives the [[Project Atlas]] requirements.",
+    { title: "Raj Patel" },
+  );
+  await vaultWrite(
+    userId,
+    "people/maya.md",
+    "Maya Chen is a staff SRE who owns the on-call rotation and the incident process. Loop her in for anything production-impacting.",
+    { title: "Maya Chen" },
+  );
+  await vaultWrite(
+    userId,
+    "projects/atlas.md",
+    "Project Atlas is the billing migration off the legacy invoicing system, targeting Q3. [[Raj Patel]] owns requirements; the current blocker is the Stripe webhook reconciliation work, and [[Dana Smith]] is the exec sponsor.",
+    { title: "Project Atlas" },
+  );
+  await vaultWrite(
+    userId,
+    "procedures/inbox.md",
+    "Inbox triage: archive newsletters, flag anything from Dana or Raj, draft replies for review on threads I own, and snooze anything not actionable this week.",
+    { title: "Inbox triage" },
+  );
+  await createContact(userId, { displayName: "Dana Smith" });
+  await createContact(userId, { displayName: "Raj Patel" });
+  await createContact(userId, { displayName: "Maya Chen" });
+  await upsertModel(userId, "communication_style", "async-first");
+  await upsertModel(userId, "meeting_cadence", "weekly architecture review on Wednesdays");
 }
 
 /**
