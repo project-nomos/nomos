@@ -15,7 +15,8 @@ session _was_ the memory, so compressing the session is data loss.
 Nomos splits the two apart:
 
 - The **session** is a disposable working buffer. One rolling SDK session per user, with
-  native compaction. Rotating it is never data loss.
+  native compaction. Rotating it is never data loss. See
+  [session management](session-management.md).
 - The **vault** is durable, separate, per-user memory: a markdown knowledge base in
   Postgres that you can open, read, and correct.
 

@@ -305,6 +305,8 @@ All state lives in PostgreSQL. Schema defined in `src/db/schema.sql` (17 tables)
 
 Session keys follow the pattern `<platform>:<channel_id>` (e.g., `cli:default`, `slack:C04ABCDEF`, `slack-user:T01ABC:C04ABCDEF`). The default CLI session key is `cli:default`, enabling auto-resume without timestamp-based keys.
 
+See [session-management.md](session-management.md) for scope modes, the per-session FIFO queue, resume/rotation, and ephemeral sessions.
+
 ### 4.3 MCP Servers
 
 #### In-Process MCP: `nomos-memory`

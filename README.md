@@ -520,6 +520,10 @@ A per-user markdown knowledge base in Postgres that is the agent's durable memor
 
 See [docs/memory-system.md](docs/memory-system.md) for the full architecture.
 
+### Sessions
+
+A session is the disposable working buffer; durable state lives in the vault, so rotating or losing a session is never data loss. Stable session keys (e.g. `cli:default`) enable auto-resume across restarts; configurable scope modes (`channel`, `sender`, `peer`, `channel-peer`) decide what shares one conversation; a per-session FIFO queue serializes turns within a key while running different keys concurrently; and `ephemeral` session keys are off-the-record (no capture). See [docs/session-management.md](docs/session-management.md) for full details.
+
 ### Persistent Vector Memory
 
 Every conversation is automatically indexed into a PostgreSQL-backed vector store. When the agent needs context from a past interaction — even one that happened in a different channel weeks ago — it finds it.
