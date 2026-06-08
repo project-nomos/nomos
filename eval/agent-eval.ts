@@ -979,11 +979,16 @@ async function runWikiArticles(): Promise<void> {
     skip("[wiki] LLM compile produces articles from the vault", "no LLM provider configured");
     return;
   }
-  const { mkdtempSync, rmSync } = await import("node:fs");
+  const { mkdtempSync, rmSync, existsSync } = await import("node:fs");
   const { tmpdir } = await import("node:os");
   const { join: joinPath } = await import("node:path");
   const wikiDir = mkdtempSync(joinPath(tmpdir(), "nomos-eval-wiki-"));
-  process.env.NOMOS_WIKI_DIR = joinPath(wikiDir, "wiki"); // compiler writes here, not ~/.nomos
+  const target = joinPath(wikiDir, "wiki");
+  // Compile in HOSTED mode: the DB (wiki_articles) must get the articles while the
+  // disk mirror is skipped (in multi-node hosted a per-pod disk copy just diverges).
+  process.env.NOMOS_WIKI_DIR = target;
+  process.env.NOMOS_MODE = "hosted";
+  process.env.NOMOS_ORG_ID = "eval-org";
   try {
     await vaultWrite(
       A,
@@ -993,7 +998,7 @@ async function runWikiArticles(): Promise<void> {
     );
     const res = await compileKnowledge({ userId: A, force: true });
     check(
-      "[wiki] LLM compile produces articles from the vault",
+      "[wiki] LLM compile produces articles in the DB from the vault",
       res.articlesCreated + res.articlesUpdated > 0,
       res.errors.join("; ") || undefined,
     );
@@ -1001,8 +1006,14 @@ async function runWikiArticles(): Promise<void> {
       "[wiki] compiled articles are owner-scoped",
       (await listArticles(A)).every((a) => a.user_id === A),
     );
+    check(
+      "[wiki] hosted compile keeps the wiki in the DB, not on disk (multi-node safe)",
+      !existsSync(target),
+    );
   } finally {
     delete process.env.NOMOS_WIKI_DIR;
+    delete process.env.NOMOS_MODE;
+    delete process.env.NOMOS_ORG_ID;
     rmSync(wikiDir, { recursive: true, force: true });
   }
 }
