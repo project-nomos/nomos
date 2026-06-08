@@ -60,6 +60,15 @@ npx vitest run src/path/to/file.test.ts
 
 Tests are colocated with source as `*.test.ts`.
 
+### Evals (require a real DATABASE_URL)
+
+```bash
+pnpm eval:recall        # seed facts, probe retrieval, score recall@5 (regression guard)
+pnpm check:isolation    # write as two users via the real fns, assert no cross-user leak
+pnpm eval:agent         # end-to-end agent eval: boots the daemon (power-user + hosted),
+                        # drives gRPC + MobileApi, tests memory + sessions, LLM-as-a-Judge
+```
+
 ### Key Tooling
 
 - **Build**: tsdown (Rolldown-based). Single entry `src/index.ts` → `dist/index.js` with `#!/usr/bin/env node` banner.
@@ -204,6 +213,7 @@ See `.env.example` for the full set of optional variables (model, permissions, c
 - **Automatic conversation memory** -- every daemon turn is chunked, embedded, and indexed (fire-and-forget). When adaptive memory is enabled, also extracts structured knowledge (facts, preferences, corrections) and accumulates a user model
 - **Adaptive memory** -- opt-in (`NOMOS_ADAPTIVE_MEMORY=true`). Uses lightweight LLM call (Haiku) to extract knowledge from conversations. Accumulated user model is injected into system prompt and accessible via `user_model_recall` tool. Confidence-weighted: repeated confirmations increase, contradictions decrease
 - **Long-term memory (the vault)** -- a per-user markdown knowledge base in its own `vault_notes` table (user*id-scoped) that is the agent's durable memory and the user's editable "brain", and the SOURCE OF TRUTH the compiled wiki + knowledge graph are derived from (`knowledge-compiler` reads the vault first; `backfillGraph` promotes `vault_notes` into `kg_nodes` of kind `vault`). Tools-not-router: the agent reads/writes it in-loop via the `vault-mcp` tools (`memory*\*`+`load_thread`); the user browses/edits it via settings `/admin/vault`or the MobileApi`MVaultNote`RPCs. Reasoning-first: a compact user-model +`profile.md` digest (`buildMemoryDigest`) is injected every turn so continuity does not depend on the agent remembering to search. The rolling SDK session is a disposable working buffer (native compaction); durable state lives in the vault, so session rotation is never data loss. Works in BOTH power-user and hosted modes; scoped by database-per-user + a `user_id`zero-trust check. Recall is guarded by`pnpm eval:recall`. Ephemeral sessions (an `ephemeral`segment in the session key) skip the automatic capture path. Background on the design + the deviation from the SDK's native memory tool:`nomos-docs/memory-system-architecture.md` (private).
+- **Per-user scoping (zero-trust on top of database-per-customer)** -- EVERY per-user store filters by `user_id` at the query layer, not just by the DB connection: `vault_notes`, `memory_chunks`, `user_model` (`UNIQUE(user_id,category,key)`), `wiki_articles` (`UNIQUE(user_id,path)`), `contacts`/`contact_identities` (`UNIQUE(user_id,platform,platform_user_id)`), `commitments`, and the `kg_*` graph. The owner is resolved once at the boundary by `resolveMemoryUserId(raw)` (`src/auth/tenant-context.ts`): power-user collapses every channel to `local`; hosted keeps the authenticated per-tenant id; synthetic ids (cron, CATE DID, `system`) collapse onto the instance owner. Content-hash chunk ids are user-namespaced so identical content across users never collides. Background jobs (wiki compile, commitment reminders, consolidation) iterate per owner via `listMemoryOwners()`. Isolation is guarded end-to-end by `pnpm check:isolation` (writes as two users through the real functions, asserts neither sees the other). `src/memory/trace.ts` emits a structured event per recall/write with a recall-hit-rate tally (`getMemoryStats`).
 - **Embeddings** via Vertex AI `gemini-embedding-001` (768 dimensions); FTS fallback when embeddings unavailable
 - **Provider switching** handled entirely by SDK env vars (`ANTHROPIC_API_KEY` or `CLAUDE_CODE_USE_VERTEX`)
 - **Integration secrets encrypted at rest** -- AES-256-GCM via `ENCRYPTION_KEY`; auto-generated at `~/.nomos/encryption.key` on first run
