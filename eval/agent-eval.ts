@@ -1225,7 +1225,7 @@ async function runMetadataColumns(): Promise<void> {
 async function runMagicDocState(): Promise<void> {
   // magic_doc_state: markMagicDocUpdated writes file_path + last_updated_at; a fresh
   // row is "not stale". state_json + last_content_hash are DEAD columns (in the DDL
-  // + types but never written by any code) — assert null to document that.
+  // + types but never written by any code). Assert null to document that.
   const db = getKysely();
   const fp = "/eval/magic-doc-test.md";
   await db.deleteFrom("magic_doc_state").where("file_path", "=", fp).execute();
@@ -1238,7 +1238,7 @@ async function runMagicDocState(): Promise<void> {
     .where("file_path", "=", fp)
     .executeTakeFirst();
   check(
-    "[magic-doc] state_json + last_content_hash are unwired (null) — documented dead columns",
+    "[magic-doc] state_json + last_content_hash are unwired (null), documented dead columns",
     row != null && row.state_json === null && row.last_content_hash === null,
   );
   if (!KEEP) await db.deleteFrom("magic_doc_state").where("file_path", "=", fp).execute();
