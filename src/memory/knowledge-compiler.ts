@@ -27,6 +27,8 @@ import { runForkedAgent } from "../sdk/forked-agent.ts";
 import { upsertArticle, getArticle, listArticles } from "../db/wiki.ts";
 import { syncToDisk } from "./wiki-sync.ts";
 import { syncFileToDb } from "../config/file-sync.ts";
+import { isHosted } from "../config/mode.ts";
+import { isRedisConfigured, getRedis, keyFor } from "../storage/redis.ts";
 import { createLogger } from "../lib/logger.ts";
 
 const log = createLogger("knowledge-compiler");
@@ -37,14 +39,59 @@ function wikiBaseDir(): string {
   return process.env.NOMOS_WIKI_DIR ?? path.join(homedir(), ".nomos", "wiki");
 }
 
-/** Per-owner lock path so a hosted per-member compile loop does not serialize on
- * one shared lock (which would starve every member after the first). Kept beside
+/** Per-owner lock path (power-user fallback when Redis is unavailable). Kept beside
  * the wiki dir so it follows NOMOS_WIKI_DIR. */
 function lockFileFor(userId: string): string {
   return path.join(
     path.dirname(wikiBaseDir()),
     userId === "local" ? "wiki-compiler.lock" : `wiki-compiler.${userId}.lock`,
   );
+}
+
+/**
+ * Acquire the per-owner compile slot. This is one guard doing two jobs, like the
+ * old file lock: a cross-node MUTEX (two pods of one customer must not compile
+ * concurrently) AND a cooldown (do not recompile within MIN_INTERVAL_MS). In
+ * hosted (multi-node) it is a Redis key shared across the customer's pods; in
+ * power-user it falls back to the local lock file. Returns false to skip.
+ */
+async function acquireCompileSlot(userId: string, force: boolean): Promise<boolean> {
+  const cooldownSec = Math.floor(MIN_INTERVAL_MS / 1000);
+  const stamp = new Date().toISOString();
+  if (isRedisConfigured()) {
+    const redis = getRedis();
+    const key = keyFor("wiki-compile", userId);
+    if (force) {
+      await redis.set(key, stamp, "EX", cooldownSec);
+      return true;
+    }
+    return (await redis.set(key, stamp, "EX", cooldownSec, "NX")) === "OK";
+  }
+  const lockFile = lockFileFor(userId);
+  if (
+    !force &&
+    fs.existsSync(lockFile) &&
+    Date.now() - fs.statSync(lockFile).mtimeMs < MIN_INTERVAL_MS
+  ) {
+    return false;
+  }
+  fs.mkdirSync(path.dirname(lockFile), { recursive: true });
+  fs.writeFileSync(lockFile, stamp);
+  return true;
+}
+
+/** Re-anchor the cooldown to compile completion (mirrors the old end-of-run lock refresh). */
+async function refreshCompileSlot(userId: string): Promise<void> {
+  const cooldownSec = Math.floor(MIN_INTERVAL_MS / 1000);
+  const stamp = new Date().toISOString();
+  if (isRedisConfigured()) {
+    await getRedis()
+      .set(keyFor("wiki-compile", userId), stamp, "EX", cooldownSec)
+      .catch(() => undefined);
+    return;
+  }
+  const lockFile = lockFileFor(userId);
+  if (fs.existsSync(lockFile)) fs.writeFileSync(lockFile, stamp);
 }
 const MIN_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
 const MAX_ARTICLES_PER_RUN = 20;
@@ -100,19 +147,14 @@ export async function compileKnowledge(options?: {
   // single-user install. Per-user wiki compilation in a multi-user DB is a
   // follow-up (it needs wiki_articles to carry user_id too).
   const userId = options?.userId ?? "local";
-  const lockFile = lockFileFor(userId);
-  // Lock file coordination
-  if (!options?.force && fs.existsSync(lockFile)) {
-    const lockAge = Date.now() - fs.statSync(lockFile).mtimeMs;
-    if (lockAge < MIN_INTERVAL_MS) {
-      return { articlesCreated: 0, articlesUpdated: 0, errors: ["Skipped: too recent"] };
-    }
-    fs.unlinkSync(lockFile);
+  // Cross-node mutex + cooldown (Redis in hosted, lock file in power-user).
+  if (!(await acquireCompileSlot(userId, options?.force ?? false))) {
+    return {
+      articlesCreated: 0,
+      articlesUpdated: 0,
+      errors: ["Skipped: compiling elsewhere or too recent"],
+    };
   }
-
-  const lockDir = path.dirname(lockFile);
-  fs.mkdirSync(lockDir, { recursive: true });
-  fs.writeFileSync(lockFile, new Date().toISOString());
 
   const result: CompilationResult = { articlesCreated: 0, articlesUpdated: 0, errors: [] };
 
@@ -266,11 +308,14 @@ Maximum ${MAX_ARTICLES_PER_RUN} articles. Return [] if nothing is worth compilin
     // 4. Update index
     await updateIndex(userId);
 
-    // 5. Sync to disk
-    await syncToDisk(userId);
-
-    // 6. Backup wiki articles to managed_files table
-    await backupWikiToDb();
+    // 5. Disk mirror is a power-user convenience (browse the wiki as files). In
+    //    hosted the DB (wiki_articles, database-per-customer) is the shared source
+    //    of truth read by the agent + clients; a per-node disk copy would just
+    //    diverge across pods, so skip it (and its managed_files backup).
+    if (!isHosted()) {
+      await syncToDisk(userId);
+      await backupWikiToDb();
+    }
 
     // 7. Wire the (re)compiled wiki into the knowledge graph (zero-LLM [[links]]
     //    + MOC topic hubs).
@@ -285,9 +330,7 @@ Maximum ${MAX_ARTICLES_PER_RUN} articles. Return [] if nothing is worth compilin
 
     log.info({ created: result.articlesCreated, updated: result.articlesUpdated }, "Done");
   } finally {
-    if (fs.existsSync(lockFile)) {
-      fs.writeFileSync(lockFile, new Date().toISOString());
-    }
+    await refreshCompileSlot(userId);
   }
 
   return result;
