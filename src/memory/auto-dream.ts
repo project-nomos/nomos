@@ -39,6 +39,8 @@ interface ConsolidationState {
   lastRunAt: string;
   lastTurnCount: number;
   totalRuns: number;
+  /** The last run's outcome (merged/pruned/etc.), persisted to state_json. */
+  lastResult?: Record<string, unknown>;
 }
 
 interface DreamResult {
@@ -66,6 +68,7 @@ async function loadState(): Promise<ConsolidationState> {
       lastRunAt: row.last_run_at ? new Date(row.last_run_at).toISOString() : "",
       lastTurnCount: row.last_turn_count,
       totalRuns: row.total_runs,
+      lastResult: (row.state_json as Record<string, unknown> | null) ?? undefined,
     };
   } catch (err) {
     log.warn({ err }, "Failed to load auto-dream state");
@@ -85,12 +88,16 @@ async function saveState(state: ConsolidationState): Promise<void> {
       last_run_at: state.lastRunAt ? new Date(state.lastRunAt) : null,
       last_turn_count: state.lastTurnCount,
       total_runs: state.totalRuns,
+      // Pass the OBJECT (not JSON.stringify): postgres-js serializes to jsonb
+      // once. Stringifying first double-encodes into a jsonb *string*.
+      state_json: (state.lastResult ?? null) as unknown as string | null,
     })
     .onConflict((oc) =>
       oc.column("id").doUpdateSet({
         last_run_at: state.lastRunAt ? new Date(state.lastRunAt) : null,
         last_turn_count: state.lastTurnCount,
         total_runs: state.totalRuns,
+        state_json: (state.lastResult ?? null) as unknown as string | null,
         updated_at: new Date(),
       }),
     )
@@ -205,11 +212,12 @@ export async function autoDream(
         const r = await runConsolidation();
         r.durationMs = Date.now() - start;
 
-        // Update state
+        // Update state, persisting the run outcome to state_json.
         const state = await loadState();
         state.lastRunAt = new Date().toISOString();
         state.lastTurnCount = currentTurnCount;
         state.totalRuns += 1;
+        state.lastResult = { ...r };
         await saveState(state);
 
         log.info(
@@ -241,6 +249,57 @@ export async function autoDream(
  */
 export async function getConsolidationState(): Promise<ConsolidationState> {
   return loadState();
+}
+
+/**
+ * Instance-wide activity counter used as the auto-dream turn gate.
+ *
+ * Total persisted memory chunks is a cheap monotonic proxy for "how much has
+ * happened since the last consolidation" across all owners on this instance.
+ */
+async function instanceActivityCount(): Promise<number> {
+  try {
+    const db = getKysely();
+    const row = await db
+      .selectFrom("memory_chunks")
+      .select((eb) => eb.fn.countAll<number>().as("count"))
+      .executeTakeFirst();
+    return Number(row?.count ?? 0);
+  } catch (err) {
+    log.warn({ err }, "Failed to count memory chunks for auto-dream gate");
+    return 0;
+  }
+}
+
+/**
+ * Run one autonomous auto-dream cycle.
+ *
+ * This is the production entry point (invoked by the daemon's cron sentinel).
+ * The singleton gate (time + turn) and distributed lease live in `autoDream`;
+ * the consolidation work fans out per memory owner so every tenant on the
+ * instance gets consolidated, and the aggregate result is persisted to
+ * `auto_dream_state.state_json`.
+ */
+export async function runAutoDreamCycle(): Promise<DreamResult | null> {
+  const turnCount = await instanceActivityCount();
+  return autoDream(turnCount, async () => {
+    const { listMemoryOwners } = await import("../auth/org-members.ts");
+    const { consolidateMemory } = await import("./consolidator.ts");
+    const owners = await listMemoryOwners();
+    const agg: DreamResult = { merged: 0, pruned: 0, newChunks: 0, durationMs: 0 };
+    for (const userId of owners) {
+      try {
+        const r = await consolidateMemory(userId);
+        agg.merged += r.merged;
+        agg.pruned += r.pruned;
+        // "newChunks" tracks chunks rewritten/regenerated during consolidation.
+        agg.newChunks += r.rewritten;
+      } catch (err) {
+        log.warn({ err, userId }, "Per-owner consolidation failed");
+      }
+    }
+    return agg;
+  });
 }
 
 /**

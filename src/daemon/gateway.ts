@@ -332,6 +332,50 @@ export class Gateway {
       log.warn({ err }, "Wiki cron registration failed");
     }
 
+    // Register auto-dream + magic-docs background jobs. Both are sentinel
+    // prompts handled directly by CronEngine.handleCronJob (no agent turn).
+    try {
+      const { CronStore } = await import("../cron/store.ts");
+      const cronStore = new CronStore();
+
+      // Auto-dream consolidation: fire every 6h; the runner is singleton-gated
+      // (1h + >=10 new chunks) and leased, so it no-ops when not yet due.
+      if (!(await cronStore.getJobByName("auto-dream"))) {
+        await cronStore.createJob({
+          userId: systemTenant().userId,
+          name: "auto-dream",
+          schedule: "6h",
+          scheduleType: "every",
+          sessionTarget: "isolated",
+          deliveryMode: "none",
+          prompt: "__auto_dream__",
+          enabled: true,
+          errorCount: 0,
+        });
+        log.info("Registered auto-dream cron job (every 6h)");
+        process.emit("cron:refresh" as never);
+      }
+
+      // Magic-docs refresh: re-sync self-updating docs every 1h (content-gated).
+      if (!(await cronStore.getJobByName("magic-docs-refresh"))) {
+        await cronStore.createJob({
+          userId: systemTenant().userId,
+          name: "magic-docs-refresh",
+          schedule: "1h",
+          scheduleType: "every",
+          sessionTarget: "isolated",
+          deliveryMode: "none",
+          prompt: "__magic_docs__",
+          enabled: true,
+          errorCount: 0,
+        });
+        log.info("Registered magic-docs refresh cron job (every 1h)");
+        process.emit("cron:refresh" as never);
+      }
+    } catch (err) {
+      log.warn({ err }, "Auto-dream/magic-docs cron registration failed");
+    }
+
     // Start CATE protocol server (agent-to-agent trust layer)
     try {
       this.cateIntegration = await initCATEIntegration({

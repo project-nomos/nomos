@@ -102,6 +102,43 @@ export class CronEngine {
       return;
     }
 
+    // Intercept auto-dream sentinel -- run background memory consolidation
+    // directly (singleton-gated + leased + fans out per owner internally).
+    if (job.prompt === "__auto_dream__") {
+      log.info("Firing auto-dream consolidation");
+      (async () => {
+        const { runAutoDreamCycle } = await import("../memory/auto-dream.ts");
+        const r = await runAutoDreamCycle();
+        if (r) {
+          log.info(
+            { merged: r.merged, pruned: r.pruned, newChunks: r.newChunks },
+            "Auto-dream cycle complete",
+          );
+        } else {
+          log.info("Auto-dream skipped (gate not met or already running)");
+        }
+      })().catch((err) => {
+        log.error({ err: err instanceof Error ? err.message : err }, "Auto-dream failed");
+      });
+      return;
+    }
+
+    // Intercept magic-docs sentinel -- refresh stale self-updating docs.
+    if (job.prompt === "__magic_docs__") {
+      log.info("Firing magic-docs refresh");
+      (async () => {
+        const { refreshMagicDocs } = await import("../memory/magic-docs.ts");
+        const r = await refreshMagicDocs();
+        log.info(
+          { scanned: r.scanned, refreshed: r.refreshed, skipped: r.skipped, failed: r.failed },
+          "Magic-docs refresh complete",
+        );
+      })().catch((err) => {
+        log.error({ err: err instanceof Error ? err.message : err }, "Magic-docs refresh failed");
+      });
+      return;
+    }
+
     log.info(`Triggering job: ${job.name} (${job.id})`);
 
     const sessionKey =
