@@ -39,6 +39,8 @@ export interface SessionsTable {
 export interface TranscriptMessagesTable {
   id: Generated<number>;
   session_id: string;
+  /** Denormalized owner (per-user indexing without a join); defaults to 'local'. */
+  user_id: Generated<string>;
   role: string;
   /** JSONB — string or structured content blocks. */
   content: ColumnType<unknown, string, string>;

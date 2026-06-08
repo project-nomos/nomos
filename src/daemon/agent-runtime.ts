@@ -61,6 +61,8 @@ import { loadAgentConfigs, getActiveAgent } from "../config/agents.ts";
 import { loadSkills, formatSkillsForPrompt } from "../skills/loader.ts";
 import { loadMcpConfig } from "../cli/mcp-config.ts";
 import { createSession as createDbSession, getSessionByKey } from "../db/sessions.ts";
+import { appendTranscriptMessage } from "../db/transcripts.ts";
+import { isEphemeralSession } from "./memory-indexer.ts";
 import { runMigrations } from "../db/migrate.ts";
 import type { IncomingMessage, OutgoingMessage, AgentEvent } from "./types.ts";
 import { TheoryOfMindTracker } from "../memory/theory-of-mind.ts";
@@ -752,6 +754,29 @@ export class AgentRuntime {
             ),
           )
           .catch(() => {});
+      }
+
+      // Persist the turn transcript (user + assistant) so MGetMessages and the
+      // load_thread tool have history. Off-the-record (ephemeral) sessions skip it.
+      if (!isEphemeralSession(sessionKey)) {
+        void (async () => {
+          const session = await getSessionByKey(sessionKey);
+          if (!session) return;
+          const uid = resolveMemoryUserId(message.userId);
+          await appendTranscriptMessage({
+            sessionId: session.id,
+            userId: uid,
+            role: "user",
+            content: message.content,
+          });
+          await appendTranscriptMessage({
+            sessionId: session.id,
+            userId: uid,
+            role: "assistant",
+            content: result.text || "",
+            usage: { input: result.inputTokens ?? 0, output: result.outputTokens ?? 0 },
+          });
+        })().catch(() => {});
       }
 
       return {

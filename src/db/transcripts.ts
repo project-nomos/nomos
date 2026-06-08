@@ -15,12 +15,15 @@ export async function appendTranscriptMessage(params: {
   role: string;
   content: string | unknown[];
   usage?: { input: number; output: number };
+  /** Denormalized owner; defaults to 'local' when omitted. */
+  userId?: string;
 }): Promise<void> {
   const db = getKysely();
   await db
     .insertInto("transcript_messages")
     .values({
       session_id: params.sessionId,
+      user_id: params.userId ?? "local",
       role: params.role,
       content: JSON.stringify(params.content),
       usage: params.usage ? JSON.stringify(params.usage) : null,
