@@ -953,9 +953,9 @@ async function runManagedFiles(): Promise<void> {
 }
 
 async function runWikiArticles(): Promise<void> {
-  // Derived store: wiki_articles. Deterministic write + per-user isolation by
-  // default; the full LLM compile (2 Sonnet passes, writes ~/.nomos/wiki) is
-  // opt-in via EVAL_WIKI_COMPILE=1.
+  // Derived store: wiki_articles. Deterministic write + per-user isolation, then
+  // the full LLM compile (2 Sonnet passes) pointed at a temp NOMOS_WIKI_DIR so it
+  // never touches the real ~/.nomos/wiki.
   const A = "eval-wiki-a";
   const B = "eval-wiki-b";
   await upsertArticle(A, "contacts/alice.md", "Alice", "Alice is A's contact.", "contacts");
@@ -975,7 +975,16 @@ async function runWikiArticles(): Promise<void> {
     (await listArticles(A)).every((a) => a.path !== "contacts/zara.md"),
   );
 
-  if (process.env.EVAL_WIKI_COMPILE === "1" && hasLLM) {
+  if (!hasLLM) {
+    skip("[wiki] LLM compile produces articles from the vault", "no LLM provider configured");
+    return;
+  }
+  const { mkdtempSync, rmSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join: joinPath } = await import("node:path");
+  const wikiDir = mkdtempSync(joinPath(tmpdir(), "nomos-eval-wiki-"));
+  process.env.NOMOS_WIKI_DIR = joinPath(wikiDir, "wiki"); // compiler writes here, not ~/.nomos
+  try {
     await vaultWrite(
       A,
       "people/dana.md",
@@ -992,11 +1001,9 @@ async function runWikiArticles(): Promise<void> {
       "[wiki] compiled articles are owner-scoped",
       (await listArticles(A)).every((a) => a.user_id === A),
     );
-  } else {
-    skip(
-      "[wiki] LLM compile produces articles from the vault",
-      "set EVAL_WIKI_COMPILE=1 (makes Sonnet calls + writes ~/.nomos/wiki)",
-    );
+  } finally {
+    delete process.env.NOMOS_WIKI_DIR;
+    rmSync(wikiDir, { recursive: true, force: true });
   }
 }
 
