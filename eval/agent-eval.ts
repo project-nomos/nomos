@@ -50,7 +50,7 @@ import { vaultWrite, vaultSearch, vaultRead, vaultDelete } from "../src/memory/v
 import { storeMemoryChunk, searchMemoryByText, deleteMemoryByPath } from "../src/db/memory.ts";
 import { createContact, listContacts } from "../src/identity/contacts.ts";
 import { createSession, getSessionByKey } from "../src/db/sessions.ts";
-import { countTranscriptMessages } from "../src/db/transcripts.ts";
+import { countTranscriptMessages, appendTranscriptMessage } from "../src/db/transcripts.ts";
 import {
   backfillGraph,
   getProjection,
@@ -58,6 +58,8 @@ import {
   getNodeByExternal,
 } from "../src/memory/graph.ts";
 import { consolidateMemory } from "../src/memory/consolidator.ts";
+import { autoDream, getConsolidationState } from "../src/memory/auto-dream.ts";
+import { storeCommitments, getPendingCommitments } from "../src/proactive/commitment-tracker.ts";
 import { compileKnowledge } from "../src/memory/knowledge-compiler.ts";
 import { listArticles, upsertArticle, searchArticles } from "../src/db/wiki.ts";
 import { isEphemeralSession } from "../src/daemon/memory-indexer.ts";
@@ -579,6 +581,15 @@ async function runConsolidation(): Promise<void> {
     .where("id", "in", [`dream:${A}:stale`, `dream:${B}:stale`])
     .execute();
 
+  // Phase 4: confidence decay for a user_model row untouched for >30 days.
+  await upsertModel(A, "stale_pref", "old-value");
+  await db
+    .updateTable("user_model")
+    .set({ updated_at: sql`now() - interval '40 days'` })
+    .where("user_id", "=", A)
+    .where("key", "=", "stale_pref")
+    .execute();
+
   const result = await consolidateMemory(A);
   check(
     "[auto-dream] consolidation prunes stale chunks",
@@ -596,6 +607,155 @@ async function runConsolidation(): Promise<void> {
     .executeTakeFirst();
   check("[auto-dream] A's stale chunk is pruned", !aGone);
   check("[auto-dream] consolidation stayed scoped to A (B untouched)", Boolean(bSurvives));
+
+  const decayed = await db
+    .selectFrom("user_model")
+    .select("confidence")
+    .where("user_id", "=", A)
+    .where("key", "=", "stale_pref")
+    .executeTakeFirst();
+  check(
+    "[auto-dream] stale user_model confidence decays (Phase 4)",
+    decayed != null && Number(decayed.confidence) < 0.9 && Number(decayed.confidence) >= 0.1,
+  );
+}
+
+async function runAutoDreamState(): Promise<void> {
+  // The dormant autoDream() orchestrator persists a singleton run-state row
+  // (instance-wide). Gates: turn delta >= 10, time gate skipped on fresh state;
+  // the Redis lease no-ops without REDIS_URL. Asserts the state IS written + that
+  // the gate then blocks a premature re-run.
+  await getKysely().deleteFrom("auto_dream_state").execute();
+  const noop = async () => ({ merged: 0, pruned: 0, newChunks: 0, durationMs: 0 });
+
+  const ran = await autoDream(10, noop);
+  check("[auto-dream-state] autoDream runs when the turn gate is met", ran !== null);
+  const state = await getConsolidationState();
+  check(
+    "[auto-dream-state] run-state is persisted (last_run_at + turn count + total_runs)",
+    Boolean(state.lastRunAt) && state.lastTurnCount === 10 && state.totalRuns === 1,
+  );
+  const blocked = await autoDream(10, noop);
+  check("[auto-dream-state] gate blocks a re-run without 10 new turns", blocked === null);
+}
+
+async function runGetMessagesWire(): Promise<void> {
+  // MobileApi.GetMessages over the authenticated Connect wire: multi-session AND
+  // per-user isolation. Deterministic (no LLM): seeds owned sessions + transcripts
+  // directly, then reads them back over the wire as each tenant.
+  const auth = await startHostedAuth("eval-org");
+  const ids = ["eval-alice", "eval-bob"];
+  await seedOrgMembers(ids);
+  const server = await startConnectServer(8798);
+  const alice = makeMobileClient(8798, () => auth.mint("eval-alice"));
+  const bob = makeMobileClient(8798, () => auth.mint("eval-bob"));
+  const aKey1 = "mobile:gm-alice:s1";
+  const aKey2 = "mobile:gm-alice:s2";
+  const bKey = "mobile:gm-bob:s1";
+  try {
+    const sA1 = await createSession({ sessionKey: aKey1, userId: "eval-alice" });
+    const sA2 = await createSession({ sessionKey: aKey2, userId: "eval-alice" });
+    const sB1 = await createSession({ sessionKey: bKey, userId: "eval-bob" });
+    await appendTranscriptMessage({
+      sessionId: sA1.id,
+      userId: "eval-alice",
+      role: "user",
+      content: "alice s1 question",
+    });
+    await appendTranscriptMessage({
+      sessionId: sA1.id,
+      userId: "eval-alice",
+      role: "assistant",
+      content: "alice s1 answer: Dr. Patel",
+    });
+    await appendTranscriptMessage({
+      sessionId: sA2.id,
+      userId: "eval-alice",
+      role: "user",
+      content: "alice s2 question",
+    });
+    await appendTranscriptMessage({
+      sessionId: sB1.id,
+      userId: "eval-bob",
+      role: "user",
+      content: "bob s1 question",
+    });
+
+    const a1 = await alice.getMessages({ sessionKey: aKey1, limit: 50 });
+    check(
+      "[getmessages] author retrieves own session over the wire",
+      a1.messages.length === 2 &&
+        a1.messages[0].role === "user" &&
+        a1.messages[1].content.includes("Patel"),
+    );
+    check(
+      "[getmessages] messages are chronological with ids + createdAt",
+      a1.messages.every((m) => m.id !== "" && m.createdAt !== "") &&
+        Number(a1.messages[0].id) < Number(a1.messages[1].id),
+    );
+    const a2 = await alice.getMessages({ sessionKey: aKey2, limit: 50 });
+    check(
+      "[getmessages] a second session is isolated (multi-session)",
+      a2.messages.length === 1 && a2.messages[0].content.includes("s2"),
+    );
+    const crossB = await alice.getMessages({ sessionKey: bKey, limit: 50 });
+    check(
+      "[getmessages] cross-user GetMessages returns empty (user-scoped)",
+      crossB.messages.length === 0,
+    );
+    const ownB = await bob.getMessages({ sessionKey: bKey, limit: 50 });
+    check("[getmessages] each tenant sees only its own session", ownB.messages.length === 1);
+
+    let rejected = false;
+    try {
+      await makeMobileClient(8798).getMessages({ sessionKey: aKey1, limit: 50 });
+    } catch (err) {
+      rejected = err instanceof ConnectError && err.code === Code.Unauthenticated;
+    }
+    check("[getmessages] unauthenticated GetMessages is rejected at the wire", rejected);
+  } finally {
+    await server.stop();
+    if (!KEEP) {
+      for (const k of [aKey1, aKey2, bKey]) {
+        await getKysely()
+          .deleteFrom("sessions")
+          .where("session_key", "=", k)
+          .execute()
+          .catch(() => undefined);
+      }
+      await removeOrgMembers(ids);
+      for (const id of ids) await purgeSyntheticTenant(id);
+    }
+    await auth.stop();
+  }
+}
+
+async function runCommitments(): Promise<void> {
+  // commitments: proactive promise tracking, per-user scoped (deterministic).
+  const A = "eval-commit-a";
+  const B = "eval-commit-b";
+  await storeCommitments(
+    A,
+    [{ description: "send the quarterly report", deadline: null, contact: null }],
+    "msg-a",
+  );
+  await storeCommitments(
+    B,
+    [{ description: "review the PR", deadline: null, contact: null }],
+    "msg-b",
+  );
+
+  const pendA = await getPendingCommitments(A);
+  check(
+    "[commitments] stored + listed per owner",
+    pendA.length >= 1 && pendA.every((c) => c.user_id === A),
+  );
+  check(
+    "[commitments] B does not see A's commitments",
+    (await getPendingCommitments(B)).every(
+      (c) => c.user_id === B && c.description !== "send the quarterly report",
+    ),
+  );
 }
 
 async function runWikiArticles(): Promise<void> {
@@ -874,7 +1034,10 @@ async function runEval(): Promise<void> {
   // graph, auto-dream consolidation, and the wiki, each with per-user isolation.
   await runGraphBuild();
   await runConsolidation();
+  await runAutoDreamState();
   await runWikiArticles();
+  await runCommitments();
+  await runGetMessagesWire();
 
   // Negative control: a judge that passes everything is worthless. Prove it
   // rejects a response that plainly misses the rubric.
