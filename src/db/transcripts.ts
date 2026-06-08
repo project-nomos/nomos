@@ -25,8 +25,12 @@ export async function appendTranscriptMessage(params: {
       session_id: params.sessionId,
       user_id: params.userId ?? "local",
       role: params.role,
-      content: JSON.stringify(params.content),
-      usage: params.usage ? JSON.stringify(params.usage) : null,
+      // Pass the value (string/array/object), not a pre-stringified JSON string:
+      // the postgres-js driver serializes to jsonb exactly once. A JSON.stringify
+      // here double-encodes into a jsonb *string*, so usage reads back as a string
+      // and usage.input is undefined (and content comes back quote-wrapped).
+      content: params.content as unknown as string,
+      usage: (params.usage ?? null) as unknown as string | null,
     })
     .execute();
 }
