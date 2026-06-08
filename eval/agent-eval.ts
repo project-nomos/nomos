@@ -15,6 +15,9 @@
  *  - a live agent conversation over the gRPC NomosAgent.Chat RPC (judged recall)
  *  - the JWT-gated streaming MobileApi.Chat with a REAL nomos-server token (judged
  *    recall); skipped when nomos-server is not running
+ *  - derived stores built from the vault: the knowledge graph (kg_nodes/kg_edges),
+ *    the wiki (wiki_articles), and auto-dream consolidation -- each per-user scoped
+ *  - transcript_messages persistence (non-ephemeral turns only)
  *
  * It runs against a freshly provisioned, throwaway database (nomos_eval) that is
  * dropped on exit, so it never touches the dev `nomos` DB.
