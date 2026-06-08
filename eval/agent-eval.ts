@@ -28,9 +28,12 @@ config({
   quiet: true,
 });
 
+import postgres from "postgres";
 import { sql } from "kysely";
 import { ConnectError, Code } from "@connectrpc/connect";
 import { closeDb, getKysely } from "../src/db/client.ts";
+import { runMigrations } from "../src/db/migrate.ts";
+import { createDatabase, dropDatabase, withDatabaseName } from "../src/db/migrator.ts";
 import { resolveMemoryUserId } from "../src/auth/tenant-context.ts";
 import { vaultWrite, vaultSearch, vaultRead, vaultDelete } from "../src/memory/vault.ts";
 import { storeMemoryChunk, searchMemoryByText, deleteMemoryByPath } from "../src/db/memory.ts";
@@ -486,9 +489,73 @@ async function finalSweep(): Promise<void> {
     .catch(() => undefined);
 }
 
+const TEST_DB_NAME = "nomos_eval";
+
+/** Maintenance-db admin URL (cannot CREATE/DROP a database while connected to it). */
+function adminUrlFrom(baseUrl: string): string {
+  const u = new URL(baseUrl);
+  u.pathname = "/postgres";
+  return u.toString();
+}
+
+/**
+ * Provision a throwaway, freshly-migrated database and point the process at it,
+ * the same way hosted provisions a per-customer DB. This makes the eval hermetic:
+ * it never reads or writes the dev `nomos` DB, so a bug in cleanup can't touch real
+ * data. Returns the original DATABASE_URL for teardown.
+ */
+async function setupTestDb(): Promise<{ baseUrl: string }> {
+  const baseUrl = process.env.DATABASE_URL ?? "postgresql://localhost:5432/nomos";
+  if (new URL(baseUrl).pathname === `/${TEST_DB_NAME}`) {
+    throw new Error(`DATABASE_URL already points at the test db ${TEST_DB_NAME}; refusing to run`);
+  }
+  const admin = postgres(adminUrlFrom(baseUrl), { max: 1 });
+  try {
+    await dropDatabase(admin, TEST_DB_NAME); // clean any orphan from a crashed run
+    await createDatabase(admin, TEST_DB_NAME);
+  } finally {
+    await admin.end();
+  }
+  process.env.DATABASE_URL = withDatabaseName(baseUrl, TEST_DB_NAME);
+  await runMigrations(); // applies schema.sql to the fresh DB (pgvector/pg_trgm + tables)
+  // eslint-disable-next-line no-console
+  console.log(`Provisioned isolated test DB: ${TEST_DB_NAME}\n`);
+  return { baseUrl };
+}
+
+async function teardownTestDb(baseUrl: string): Promise<void> {
+  await closeDb(); // detach the app pool before DROP (WITH FORCE also kills stragglers)
+  const admin = postgres(adminUrlFrom(baseUrl), { max: 1 });
+  try {
+    await dropDatabase(admin, TEST_DB_NAME);
+  } finally {
+    await admin.end();
+  }
+}
+
 async function main(): Promise<void> {
   // eslint-disable-next-line no-console
   console.log(`Agent eval (LLM judge: ${hasLLM ? "on" : "off"})\n`);
+  const { baseUrl } = await setupTestDb();
+  try {
+    await runEval();
+  } finally {
+    // The throwaway DB is dropped wholesale, so per-row cleanup is belt-and-braces.
+    await finalSweep().catch(() => undefined);
+    await teardownTestDb(baseUrl);
+  }
+
+  const failed = results.filter((r) => !r.pass);
+  const skipped = results.filter((r) => r.skipped);
+  // eslint-disable-next-line no-console
+  console.log(
+    `\n${failed.length === 0 ? "OK" : "FAIL"}: ${results.length - skipped.length} ran, ` +
+      `${failed.length} failed, ${skipped.length} skipped`,
+  );
+  if (failed.length > 0) process.exit(1);
+}
+
+async function runEval(): Promise<void> {
   await runMode("power_user");
   await runMode("hosted");
   await runWire();
@@ -509,19 +576,6 @@ async function main(): Promise<void> {
 
   // Slowest last: a live agent conversation over the gRPC Chat wire.
   await runGrpcChat();
-
-  // Settle-and-sweep any fire-and-forget vault index writes that outraced cleanup.
-  await finalSweep();
-
-  const failed = results.filter((r) => !r.pass);
-  const skipped = results.filter((r) => r.skipped);
-  // eslint-disable-next-line no-console
-  console.log(
-    `\n${failed.length === 0 ? "OK" : "FAIL"}: ${results.length - skipped.length} ran, ` +
-      `${failed.length} failed, ${skipped.length} skipped`,
-  );
-  await closeDb();
-  if (failed.length > 0) process.exit(1);
 }
 
 void main();
