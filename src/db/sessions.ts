@@ -22,15 +22,21 @@ export async function createSession(params: {
   agentId?: string;
   model?: string;
   metadata?: Record<string, unknown>;
+  /** Owner of this session. Drives the per-user GetMessages gate; defaults to 'local'. */
+  userId?: string;
 }): Promise<SessionRow> {
   const db = getKysely();
   const row = await db
     .insertInto("sessions")
     .values({
       session_key: params.sessionKey,
+      user_id: params.userId ?? "local",
       agent_id: params.agentId ?? "default",
       model: params.model ?? null,
-      metadata: JSON.stringify(params.metadata ?? {}),
+      // Pass the object (not JSON.stringify): the driver serializes to jsonb once.
+      // A pre-stringified string double-encodes into a jsonb *string*, which breaks
+      // metadata->>'sdkSessionId' reads (cross-restart resume) and jsonb_set updates.
+      metadata: (params.metadata ?? {}) as unknown as string,
     })
     .onConflict((oc) =>
       oc.column("session_key").doUpdateSet({

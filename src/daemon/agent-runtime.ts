@@ -561,10 +561,12 @@ export class AgentRuntime {
 
     const sessionKey = `${message.platform}:${message.channelId}`;
 
-    // Ensure DB session exists
+    // Ensure DB session exists, owned by the resolved tenant so the per-user
+    // GetMessages gate (sessions.user_id == ctx.userId) returns this user's history.
     await createDbSession({
       sessionKey,
       model: this.config.model,
+      userId: resolveMemoryUserId(message.userId),
     });
 
     // Look up cached SDK session ID for resume
