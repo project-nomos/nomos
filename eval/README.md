@@ -16,7 +16,7 @@ An end-to-end eval of the memory + session management system across **both** pow
 and hosted modes. It boots the daemon's real subsystems (gRPC `NomosAgent`, the Connect
 `MobileApi`, `AgentRuntime`, the message queue) and grades behavior, not just plumbing.
 
-What it checks (42 checks when fully wired):
+What it checks (54 checks when fully wired):
 
 - **Memory recall** from the vault, plus an LLM-as-a-Judge verdict on whether the recalled
   content actually answers the question.
@@ -30,7 +30,16 @@ What it checks (42 checks when fully wired):
   (`wiki_articles` per-owner write + scoped search; full LLM compile is opt-in via
   `EVAL_WIKI_COMPILE=1`), and **auto-dream** consolidation (`consolidateMemory` prunes
   stale chunks, scoped to one user).
-- **Transcripts**: a non-ephemeral turn persists `transcript_messages`; ephemeral does not.
+- **Transcripts + GetMessages**: a non-ephemeral turn persists `transcript_messages`
+  (ephemeral does not); `MobileApi.GetMessages` over the authenticated wire returns a
+  tenant's own sessions (multi-session) and is empty cross-user.
+- **auto_dream_state**: the `autoDream` orchestrator persists its singleton run-state row
+  and the turn gate blocks premature re-runs.
+- **commitments**: per-user proactive-promise store + cross-user isolation.
+
+Session **scope modes** (channel/sender/peer/channel-peer key shapes) are covered by a
+deterministic unit test at `src/sessions/store.test.ts` (runs under `pnpm test`).
+
 - **Mobile endpoints over the Connect wire** (write/list/get/delete vault), and the
   **authenticated hosted wire**: minted EdDSA JWTs prove per-tenant isolation and an
   unauthenticated call is rejected with `Unauthenticated`.
