@@ -238,7 +238,10 @@ Return ONLY a JSON array of article plans:
 Maximum ${MAX_ARTICLES_PER_RUN} articles. Return [] if nothing is worth compiling.`,
       model: COMPILE_MODEL,
       label: "wiki-plan",
-      maxTurns: 1,
+      // Forks run with the full toolset, so a generation task can spend a turn on
+      // a tool detour before answering; maxTurns:1 then dies with "Reached maximum
+      // number of turns". Give the fork default (5) of headroom.
+      maxTurns: 5,
     });
 
     let plans: Array<{ path: string; title: string; category: string; description: string }>;
@@ -380,7 +383,9 @@ Return ONLY the markdown article content.`;
     prompt,
     model: COMPILE_MODEL,
     label: `wiki-compile:${plan.title}`,
-    maxTurns: 1,
+    // 5 turns of headroom so an article body that takes a tool detour still lands
+    // its final answer (maxTurns:1 was dropping ~1 in 6 articles).
+    maxTurns: 5,
   });
 
   return compiled.text.trim();
