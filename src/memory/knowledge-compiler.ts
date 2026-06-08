@@ -31,19 +31,50 @@ import { createLogger } from "../lib/logger.ts";
 
 const log = createLogger("knowledge-compiler");
 
+// Wiki output dir, overridable via NOMOS_WIKI_DIR and resolved at call time (not
+// module load) so the eval can point it at a temp dir to stay out of ~/.nomos.
+function wikiBaseDir(): string {
+  return process.env.NOMOS_WIKI_DIR ?? path.join(homedir(), ".nomos", "wiki");
+}
+
 /** Per-owner lock path so a hosted per-member compile loop does not serialize on
- * one shared lock (which would starve every member after the first). */
+ * one shared lock (which would starve every member after the first). Kept beside
+ * the wiki dir so it follows NOMOS_WIKI_DIR. */
 function lockFileFor(userId: string): string {
   return path.join(
-    homedir(),
-    ".nomos",
+    path.dirname(wikiBaseDir()),
     userId === "local" ? "wiki-compiler.lock" : `wiki-compiler.${userId}.lock`,
   );
 }
-const WIKI_DIR = path.join(homedir(), ".nomos", "wiki");
 const MIN_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
 const MAX_ARTICLES_PER_RUN = 20;
 const COMPILE_MODEL = "claude-sonnet-4-6";
+
+/**
+ * Extract the first balanced JSON array from model text, ignoring brackets inside
+ * strings. Robust to code fences and surrounding prose, where a greedy
+ * `/\[[\s\S]*\]/` (first `[` to LAST `]`) captures junk and fails to parse.
+ */
+function extractJsonArray(text: string): string | null {
+  const start = text.indexOf("[");
+  if (start === -1) return null;
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let i = start; i < text.length; i++) {
+    const ch = text[i];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (ch === "\\") escaped = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') inString = true;
+    else if (ch === "[") depth++;
+    else if (ch === "]" && --depth === 0) return text.slice(start, i + 1);
+  }
+  return null;
+}
 
 interface CompilationResult {
   articlesCreated: number;
@@ -170,8 +201,8 @@ Maximum ${MAX_ARTICLES_PER_RUN} articles. Return [] if nothing is worth compilin
 
     let plans: Array<{ path: string; title: string; category: string; description: string }>;
     try {
-      const jsonMatch = planResult.text.match(/\[[\s\S]*\]/);
-      plans = jsonMatch ? JSON.parse(jsonMatch[0]) : [];
+      const jsonText = extractJsonArray(planResult.text);
+      plans = jsonText ? JSON.parse(jsonText) : [];
     } catch {
       result.errors.push("Failed to parse article plan");
       return result;
@@ -338,7 +369,7 @@ async function updateIndex(userId: string): Promise<void> {
 
 /** Backup wiki articles to managed_files table for DB recovery. */
 async function backupWikiToDb(): Promise<void> {
-  if (!fs.existsSync(WIKI_DIR)) return;
+  if (!fs.existsSync(wikiBaseDir())) return;
 
   const walkDir = (dir: string, prefix: string): void => {
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -353,7 +384,7 @@ async function backupWikiToDb(): Promise<void> {
     }
   };
 
-  walkDir(WIKI_DIR, "");
+  walkDir(wikiBaseDir(), "");
 }
 
 /** Build a summary of all available knowledge for the LLM planner. */

@@ -13,7 +13,11 @@ import { createLogger } from "../lib/logger.ts";
 
 const log = createLogger("wiki-sync");
 
-const WIKI_DIR = path.join(homedir(), ".nomos", "wiki");
+// Resolved at call time (not module load) so NOMOS_WIKI_DIR set later still wins;
+// the eval points it at a temp dir to keep disk writes out of the real ~/.nomos.
+function wikiBaseDir(): string {
+  return process.env.NOMOS_WIKI_DIR ?? path.join(homedir(), ".nomos", "wiki");
+}
 
 /**
  * Per-owner disk cache dir. The single-user 'local' install keeps the original
@@ -21,7 +25,7 @@ const WIKI_DIR = path.join(homedir(), ".nomos", "wiki");
  * does not leak every member's articles into one directory.
  */
 function wikiDir(userId: string): string {
-  return userId === "local" ? WIKI_DIR : path.join(WIKI_DIR, userId);
+  return userId === "local" ? wikiBaseDir() : path.join(wikiBaseDir(), userId);
 }
 
 /** Sync all wiki articles from DB to disk, for one owner. */
