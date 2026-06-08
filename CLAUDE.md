@@ -65,8 +65,14 @@ Tests are colocated with source as `*.test.ts`.
 ```bash
 pnpm eval:recall        # seed facts, probe retrieval, score recall@5 (regression guard)
 pnpm check:isolation    # write as two users via the real fns, assert no cross-user leak
-pnpm eval:agent         # end-to-end agent eval: boots the daemon (power-user + hosted),
-                        # drives gRPC + MobileApi, tests memory + sessions, LLM-as-a-Judge
+pnpm eval:agent         # end-to-end agent eval against a throwaway nomos_eval DB
+                        # (provisioned + migrated + dropped, so the dev DB is never
+                        # touched). Tests memory + sessions in both modes, per-user
+                        # isolation over the authenticated Connect wire (minted JWTs),
+                        # a live gRPC NomosAgent.Chat turn, and the JWT-gated
+                        # MobileApi.Chat with a REAL nomos-server token (skipped if
+                        # nomos-server isn't running on :4000). LLM-as-a-Judge grades
+                        # recall, with a negative-control check.
 ```
 
 ### Key Tooling
