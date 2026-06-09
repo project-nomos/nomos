@@ -35,6 +35,8 @@ export interface ForkedAgentOptions {
   label?: string;
   /** Abort signal for cancellation. */
   signal?: AbortSignal;
+  /** Thinking config (e.g. { type: "adaptive" } for Opus 4.6+ extended thinking). */
+  thinking?: RunSessionParams["thinking"];
 }
 
 export interface ForkedAgentResult {
@@ -76,6 +78,7 @@ export async function runForkedAgent(options: ForkedAgentOptions): Promise<Forke
     permissionMode: "bypassPermissions",
     maxTurns: options.maxTurns ?? DEFAULT_FORK_MAX_TURNS,
     useSubscription,
+    ...(options.thinking ? { thinking: options.thinking } : {}),
     stderr: (data: string) => {
       const trimmed = data.trim();
       if (trimmed) log.error({ label, stream: "stderr" }, trimmed);

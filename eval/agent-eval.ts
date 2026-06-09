@@ -113,6 +113,7 @@ import {
 import { compileKnowledge } from "../src/memory/knowledge-compiler.ts";
 import { listArticles, upsertArticle, searchArticles, getArticle } from "../src/db/wiki.ts";
 import { getRelevantArticles } from "../src/memory/wiki-reader.ts";
+import { runForkedAgent } from "../src/sdk/forked-agent.ts";
 import { isEphemeralSession } from "../src/daemon/memory-indexer.ts";
 import { GrpcServer } from "../src/daemon/grpc-server.ts";
 import { MessageQueue } from "../src/daemon/message-queue.ts";
@@ -132,10 +133,17 @@ const hasLLM =
   process.env.CLAUDE_CODE_USE_VERTEX === "1" ||
   process.env.NOMOS_USE_SUBSCRIPTION === "true";
 
+// `--audit` runs an Opus-4.8-with-thinking pass that inspects the ACTUAL database
+// content and cross-checks it against the deterministic test results (catching
+// false-passes the boolean assertions can't, e.g. double-encoded jsonb). It needs
+// the rows present, so it also skips per-test cleanup.
+const AUDIT = process.argv.slice(2).includes("--audit");
+
 // `--keep` leaves the throwaway DB AND skips the per-test data cleanup, so the
 // rows each check wrote remain in nomos_eval for inspection. Server/connection
-// teardown still runs unconditionally.
-const KEEP = process.argv.slice(2).includes("--keep");
+// teardown still runs unconditionally. `--audit` implies keep-data (but still
+// drops the DB on exit unless --keep is also passed).
+const KEEP = process.argv.slice(2).includes("--keep") || AUDIT;
 
 interface Result {
   label: string;
@@ -1876,6 +1884,139 @@ async function main(): Promise<void> {
   if (failed.length > 0) process.exit(1);
 }
 
+/**
+ * Dump the rows the recent work writes, exposing jsonb_typeof for every jsonb
+ * column. A type of 'string' (instead of 'object'/'array') is the signature of
+ * the double-encoding bug class -- the boolean `typeof === "object"` checks can
+ * pass for the wrong reason, but jsonb_typeof from Postgres is ground truth.
+ */
+async function dumpDbForAudit(): Promise<Record<string, unknown[]>> {
+  const db = getKysely();
+  const q = async (label: string, text: string): Promise<[string, unknown[]]> => {
+    try {
+      const res = await db.executeQuery(sql`${sql.raw(text)}`.compile(db));
+      return [label, res.rows as unknown[]];
+    } catch (err) {
+      return [label, [{ error: err instanceof Error ? err.message : String(err) }]];
+    }
+  };
+  const pairs = await Promise.all([
+    q(
+      "auto_dream_state",
+      `SELECT id, last_turn_count, total_runs, jsonb_typeof(state_json) AS state_json_type, state_json FROM auto_dream_state`,
+    ),
+    q(
+      "magic_doc_state",
+      `SELECT file_path, last_content_hash, jsonb_typeof(state_json) AS state_json_type, state_json FROM magic_doc_state LIMIT 20`,
+    ),
+    q(
+      "style_profiles",
+      `SELECT user_id, scope, jsonb_typeof(profile) AS profile_type, profile, sample_count FROM style_profiles ORDER BY user_id, scope LIMIT 30`,
+    ),
+    q(
+      "user_model",
+      `SELECT user_id, category, key, jsonb_typeof(value) AS value_type, value, confidence, source_ids FROM user_model ORDER BY user_id LIMIT 30`,
+    ),
+    q(
+      "commitments",
+      `SELECT user_id, description, deadline, status, reminded, source_msg FROM commitments ORDER BY user_id LIMIT 30`,
+    ),
+    q(
+      "sessions",
+      `SELECT session_key, model, jsonb_typeof(metadata) AS metadata_type, metadata->>'sdkSessionId' AS sdk_session_id FROM sessions ORDER BY session_key LIMIT 30`,
+    ),
+    q(
+      "ingest_jobs",
+      `SELECT platform, run_type, delta_schedule, delta_enabled FROM ingest_jobs LIMIT 20`,
+    ),
+    q(
+      "transcript_messages",
+      `SELECT session_id, role, jsonb_typeof(usage) AS usage_type, usage, jsonb_typeof(content) AS content_type FROM transcript_messages ORDER BY id DESC LIMIT 20`,
+    ),
+    q(
+      "memory_chunks",
+      `SELECT user_id, source, jsonb_typeof(metadata) AS metadata_type, metadata->>'category' AS category FROM memory_chunks ORDER BY user_id LIMIT 20`,
+    ),
+    q(
+      "wiki_articles",
+      `SELECT user_id, path, title, jsonb_typeof(to_jsonb(backlinks)) AS backlinks_type FROM wiki_articles ORDER BY user_id LIMIT 20`,
+    ),
+  ]);
+  return Object.fromEntries(pairs);
+}
+
+/**
+ * Opus-4.8-with-thinking audit: hand the model the deterministic test results AND
+ * the real database content, and have it independently confirm the rows actually
+ * support each claim -- the cross-check the boolean assertions can't do alone.
+ * Runs only under `--audit` (which keeps the data) and when an LLM is configured.
+ */
+async function runModelDbAudit(): Promise<void> {
+  if (!hasLLM) {
+    skip("[db-audit] Opus 4.8 confirms DB content matches the test results", "no LLM provider");
+    return;
+  }
+  // auto_dream_state is an instance-wide singleton that later gate tests churn to
+  // empty. Re-establish a canonical row through the REAL write path (autoDream ->
+  // saveState) so the audit has current, production-encoded evidence to verify.
+  await getKysely().deleteFrom("auto_dream_state").execute();
+  await autoDream(10, async () => ({ merged: 2, pruned: 1, newChunks: 3, durationMs: 0 }));
+
+  const dump = await dumpDbForAudit();
+
+  // Deterministic first: a dump query only errors when a column it references is
+  // missing -- i.e. the live DB drifted from what the code expects (the exact
+  // class of bug a fresh-DB eval can't see). Catch it without spending the LLM.
+  const errored = Object.entries(dump)
+    .filter(([, rows]) => rows.some((r) => r != null && typeof r === "object" && "error" in r))
+    .map(([t]) => t);
+  check(
+    "[db-audit] every audited table + column exists (no schema drift)",
+    errored.length === 0,
+    errored.length ? `missing/errored: ${errored.join(", ")}` : undefined,
+  );
+
+  const passed = results.filter((r) => r.pass && !r.skipped).map((r) => r.label);
+
+  const prompt = `You are a meticulous database auditor. An eval suite just ran a set of deterministic checks against this PostgreSQL database and they all reported PASS. Your job is to INDEPENDENTLY verify, from the actual table contents below, that the database genuinely supports those claims -- and to catch anything the boolean assertions could have missed.
+
+PASSING TEST LABELS:
+${passed.map((l) => `- ${l}`).join("\n")}
+
+ACTUAL DATABASE CONTENT (jsonb_typeof exposes how each jsonb column is really stored):
+${JSON.stringify(dump, null, 2)}
+
+Verify rigorously and think step by step:
+1. DOUBLE-ENCODING: every *_type field for a jsonb object/array column MUST be "object" or "array". If any is "string", the value was double-encoded (JSON.stringify'd into jsonb) -- a real bug a "typeof === object" JS check would NOT catch. Call it out.
+2. PER-USER SCOPING: style_profiles / user_model / commitments / memory_chunks / wiki_articles rows must carry distinct user_id values where multiple owners were seeded; no row should leak another owner's data.
+3. EXPECTED CONTENT: the rows should be consistent with the passing labels (e.g. a passing "state_json round-trips as an object" implies auto_dream_state.state_json_type = "object").
+4. MISSING DATA: note any passing claim that has NO supporting row in the dump.
+
+End your answer with EXACTLY one final line:
+"AUDIT: PASS" if every check holds, or
+"AUDIT: FAIL — <comma-separated concrete reasons>" otherwise.`;
+
+  const { text } = await runForkedAgent({
+    prompt,
+    model: "claude-opus-4-8",
+    thinking: { type: "adaptive" },
+    label: "db-audit",
+    maxTurns: 1,
+  });
+
+  const verdictLine =
+    text
+      .split("\n")
+      .reverse()
+      .find((l) => /AUDIT:/i.test(l)) ?? text.slice(-300);
+  const pass = /AUDIT:\s*PASS/i.test(text) && !/AUDIT:\s*FAIL/i.test(text);
+  check(
+    "[db-audit] Opus 4.8 (thinking) confirms DB content matches the test results",
+    pass,
+    verdictLine.trim(),
+  );
+}
+
 async function runEval(): Promise<void> {
   await runMode("power_user");
   await runMode("hosted");
@@ -1914,6 +2055,13 @@ async function runEval(): Promise<void> {
     check("[judge] rejects a response that misses the rubric", !neg.pass, neg.reasoning);
   } else {
     skip("[judge] rejects a response that misses the rubric", "no LLM provider configured");
+  }
+
+  // Model-driven DB-content audit (opt-in via --audit; keeps the data so the
+  // model can see it). An Opus-4.8-with-thinking pass cross-checks the actual
+  // rows against the passing test labels -- catches false-passes the booleans miss.
+  if (AUDIT) {
+    await runModelDbAudit();
   }
 
   // Slowest last: live agent conversations. NomosAgent.Chat over gRPC (unauth,
