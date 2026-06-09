@@ -155,11 +155,48 @@ service MobileApi {
   // Push notifications
   rpc RegisterDevice (MDeviceRegister) returns (MAck);
   rpc UnregisterDevice (MDeviceUnregister) returns (MAck);
+
+  // Vault tab (long-term memory / knowledge base)
+  rpc ListVaultNotes (MVaultListRequest) returns (MVaultListResponse);
+  rpc GetVaultNote (MVaultGetRequest) returns (MVaultNote);
+  rpc WriteVaultNote (MVaultWriteRequest) returns (MAck);
+  rpc DeleteVaultNote (MVaultDeleteRequest) returns (MAck);
 }
 
 message MAck {
   bool success = 1;
   string message = 2;
+}
+
+// Vault (long-term memory / knowledge base)
+message MVaultListRequest {
+  string prefix = 1;
+}
+message MVaultNoteSummary {
+  string path = 1;
+  string title = 2;
+  string updated_at = 3;
+}
+message MVaultListResponse {
+  repeated MVaultNoteSummary notes = 1;
+}
+message MVaultGetRequest {
+  string path = 1;
+}
+message MVaultNote {
+  string path = 1;
+  string title = 2;
+  string content = 3;
+  string updated_at = 4;
+  bool exists = 5;
+}
+message MVaultWriteRequest {
+  string path = 1;
+  string content = 2;
+  string title = 3;
+}
+message MVaultDeleteRequest {
+  string path = 1;
 }
 
 // Chat

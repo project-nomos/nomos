@@ -15,6 +15,11 @@ import { createLogger } from "../lib/logger.ts";
 import { verifyJwt, JwtValidationError } from "./jwt-validator.ts";
 import { isOrgMember } from "./org-members.ts";
 import { LOCAL_TENANT, type TenantContext } from "./tenant-context.ts";
+// Single source of truth for "are we hosted": getMode() already folds in
+// AUTH_JWKS_URL, so auth enforcement here and per-user vault scoping in
+// resolveMemoryUserId can never disagree (a skew would collapse authenticated
+// users onto the shared 'local' vault).
+import { isHosted } from "../config/mode.ts";
 
 const log = createLogger("grpc-interceptor");
 
@@ -23,10 +28,6 @@ export const CTX_SYMBOL = Symbol.for("nomos.tenantContext");
 
 /** Methods that bypass JWT validation (mTLS-only). */
 const MTLS_ONLY_METHODS = new Set(["/nomos.OAuthDeposit/Deposit"]);
-
-function isHosted(): boolean {
-  return process.env.NOMOS_MODE === "hosted" || Boolean(process.env.AUTH_JWKS_URL);
-}
 
 function bearerToken(metadata: grpc.Metadata): string | null {
   const raw = metadata.get("authorization");

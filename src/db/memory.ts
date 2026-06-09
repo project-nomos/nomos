@@ -4,6 +4,8 @@ import { cosineDistance, cosineSimilarity, ftsMatch, ftsRank } from "./sql-helpe
 
 export interface MemoryChunk {
   id: string;
+  /** Owner of this chunk (per-user scoping; resolveMemoryUserId at the boundary). */
+  userId: string;
   source: string;
   path?: string;
   text: string;
@@ -29,12 +31,12 @@ export interface MemorySearchResult {
 export async function storeMemoryChunk(chunk: MemoryChunk): Promise<void> {
   const db = getKysely();
   const embeddingStr = chunk.embedding ? `[${chunk.embedding.join(",")}]` : null;
-  const metadataJson = JSON.stringify(chunk.metadata ?? {});
 
   await db
     .insertInto("memory_chunks")
     .values({
       id: chunk.id,
+      user_id: chunk.userId,
       source: chunk.source,
       path: chunk.path ?? null,
       text: chunk.text,
@@ -43,7 +45,11 @@ export async function storeMemoryChunk(chunk: MemoryChunk): Promise<void> {
       end_line: chunk.endLine ?? null,
       hash: chunk.hash ?? null,
       model: chunk.model ?? null,
-      metadata: metadataJson,
+      // Pass the metadata OBJECT, not a pre-stringified string: the postgres-js
+      // driver serializes an object to jsonb exactly once. Passing a JSON string
+      // double-encodes it into a jsonb *string* ("{\"category\":...}") instead of an
+      // object, silently breaking metadata->>'category' filters (category search + prune).
+      metadata: (chunk.metadata ?? {}) as unknown as string,
     })
     .onConflict((oc) =>
       oc.column("id").doUpdateSet({
@@ -59,6 +65,7 @@ export async function storeMemoryChunk(chunk: MemoryChunk): Promise<void> {
 }
 
 export async function searchMemoryByVector(
+  userId: string,
   embedding: number[],
   limit: number = 10,
   category?: string,
@@ -77,6 +84,7 @@ export async function searchMemoryByVector(
       "access_count",
       "metadata",
     ])
+    .where("user_id", "=", userId)
     .where("embedding", "is not", null)
     .orderBy(cosineDistance("embedding", embedding))
     .limit(limit);
@@ -89,6 +97,7 @@ export async function searchMemoryByVector(
 }
 
 export async function searchMemoryByText(
+  userId: string,
   query: string,
   limit: number = 10,
   category?: string,
@@ -107,6 +116,7 @@ export async function searchMemoryByText(
       "access_count",
       "metadata",
     ])
+    .where("user_id", "=", userId)
     .where(ftsMatch("text", query))
     .orderBy("score", "desc")
     .limit(limit);
@@ -119,6 +129,7 @@ export async function searchMemoryByText(
 }
 
 export async function searchMemoryByCategory(
+  userId: string,
   category: string,
   limit: number = 10,
 ): Promise<MemorySearchResult[]> {
@@ -136,6 +147,7 @@ export async function searchMemoryByCategory(
       "access_count",
       "metadata",
     ])
+    .where("user_id", "=", userId)
     .where(sql`metadata->>'category'`, "=", category)
     .orderBy("created_at", "desc")
     .limit(limit)
@@ -144,6 +156,7 @@ export async function searchMemoryByCategory(
 }
 
 export async function updateMemoryMetadata(
+  userId: string,
   id: string,
   metadata: Record<string, unknown>,
 ): Promise<void> {
@@ -156,15 +169,17 @@ export async function updateMemoryMetadata(
       metadata: sql`metadata || ${metadataJson}::jsonb`,
       updated_at: sql`now()`,
     })
+    .where("user_id", "=", userId)
     .where("id", "=", id)
     .execute();
 }
 
 /**
  * Record access to memory chunks (increment access_count, update last_accessed_at).
- * Called after search results are returned to the user.
+ * Called after search results are returned to the user. Scoped to the owner so a
+ * shared chunk id can never bump another user's row.
  */
-export async function recordMemoryAccess(ids: string[]): Promise<void> {
+export async function recordMemoryAccess(userId: string, ids: string[]): Promise<void> {
   if (ids.length === 0) return;
   const db = getKysely();
   await db
@@ -173,21 +188,44 @@ export async function recordMemoryAccess(ids: string[]): Promise<void> {
       access_count: sql`access_count + 1`,
       last_accessed_at: sql`now()`,
     })
+    .where("user_id", "=", userId)
     .where("id", "in", ids)
     .execute();
 }
 
-export async function deleteMemoryBySource(source: string): Promise<number> {
+export async function deleteMemoryBySource(userId: string, source: string): Promise<number> {
   const db = getKysely();
   const result = await db
     .deleteFrom("memory_chunks")
+    .where("user_id", "=", userId)
     .where("source", "=", source)
     .executeTakeFirst();
   return Number(result.numDeletedRows ?? 0n);
 }
 
-export async function deleteMemoryByPath(path: string): Promise<number> {
+export async function deleteMemoryByPath(userId: string, path: string): Promise<number> {
   const db = getKysely();
-  const result = await db.deleteFrom("memory_chunks").where("path", "=", path).executeTakeFirst();
+  const result = await db
+    .deleteFrom("memory_chunks")
+    .where("user_id", "=", userId)
+    .where("path", "=", path)
+    .executeTakeFirst();
+  return Number(result.numDeletedRows ?? 0n);
+}
+
+/**
+ * Delete all chunks whose id starts with `prefix`. Used to remove a single
+ * vault note's chunks by their deterministic, user-namespaced id prefix
+ * (`vault:<hash(userId:path)>:`) so forgetting a note also forgets it from
+ * vector recall. The prefix already encodes the user, but we also filter by
+ * user_id as belt-and-suspenders.
+ */
+export async function deleteMemoryByIdPrefix(userId: string, prefix: string): Promise<number> {
+  const db = getKysely();
+  const result = await db
+    .deleteFrom("memory_chunks")
+    .where("user_id", "=", userId)
+    .where("id", "like", `${prefix}%`)
+    .executeTakeFirst();
   return Number(result.numDeletedRows ?? 0n);
 }

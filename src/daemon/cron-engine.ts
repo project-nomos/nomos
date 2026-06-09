@@ -11,6 +11,7 @@ import type { MessageQueue } from "./message-queue.ts";
 import type { ChannelManager } from "./channel-manager.ts";
 import type { AgentEvent } from "./types.ts";
 import { createLogger } from "../lib/logger.ts";
+import { stripHeartbeatToken } from "../auto-reply/heartbeat.ts";
 
 const log = createLogger("cron-engine");
 
@@ -74,19 +75,173 @@ export class CronEngine {
       return;
     }
 
-    // Intercept wiki compilation sentinel -- run compiler directly
+    // Intercept wiki compilation sentinel -- run compiler directly, once per
+    // owner (power-user: just 'local'; hosted: each member's own wiki).
     if (job.prompt === "__wiki_compile__") {
       log.info("Firing wiki compilation");
-      import("../memory/knowledge-compiler.ts")
-        .then(({ compileKnowledge }) => compileKnowledge())
-        .then((result) => {
+      (async () => {
+        const { compileKnowledge } = await import("../memory/knowledge-compiler.ts");
+        const { listMemoryOwners } = await import("../auth/org-members.ts");
+        let created = 0;
+        let updated = 0;
+        for (const userId of await listMemoryOwners()) {
+          try {
+            const result = await compileKnowledge({ userId });
+            created += result.articlesCreated;
+            updated += result.articlesUpdated;
+          } catch (err) {
+            log.error(
+              { err: err instanceof Error ? err.message : err, userId },
+              "Wiki compilation failed for owner",
+            );
+          }
+        }
+        log.info(`Wiki compilation: ${created} created, ${updated} updated`);
+      })().catch((err) => {
+        log.error({ err: err instanceof Error ? err.message : err }, "Wiki compilation failed");
+      });
+      return;
+    }
+
+    // Intercept auto-dream sentinel -- run background memory consolidation
+    // directly (singleton-gated + leased + fans out per owner internally).
+    if (job.prompt === "__auto_dream__") {
+      log.info("Firing auto-dream consolidation");
+      (async () => {
+        const { runAutoDreamCycle } = await import("../memory/auto-dream.ts");
+        const r = await runAutoDreamCycle();
+        if (r) {
           log.info(
-            `Wiki compilation: ${result.articlesCreated} created, ${result.articlesUpdated} updated`,
+            { merged: r.merged, pruned: r.pruned, newChunks: r.newChunks },
+            "Auto-dream cycle complete",
           );
-        })
-        .catch((err) => {
-          log.error({ err: err instanceof Error ? err.message : err }, "Wiki compilation failed");
+        } else {
+          log.info("Auto-dream skipped (gate not met or already running)");
+        }
+      })().catch((err) => {
+        log.error({ err: err instanceof Error ? err.message : err }, "Auto-dream failed");
+      });
+      return;
+    }
+
+    // Intercept magic-docs sentinel -- refresh stale self-updating docs.
+    if (job.prompt === "__magic_docs__") {
+      log.info("Firing magic-docs refresh");
+      (async () => {
+        const { refreshMagicDocs } = await import("../memory/magic-docs.ts");
+        const r = await refreshMagicDocs();
+        log.info(
+          { scanned: r.scanned, refreshed: r.refreshed, skipped: r.skipped, failed: r.failed },
+          "Magic-docs refresh complete",
+        );
+      })().catch((err) => {
+        log.error({ err: err instanceof Error ? err.message : err }, "Magic-docs refresh failed");
+      });
+      return;
+    }
+
+    // Intercept commitment-reminders sentinel -- check due commitments per owner
+    // and deliver to the default notification channel (no agent turn).
+    if (job.prompt === "__commitment_reminders__") {
+      log.info("Firing commitment reminders");
+      (async () => {
+        const { runCommitmentReminders } = await import("../proactive/scheduler.ts");
+        const results = await runCommitmentReminders();
+        if (results.length === 0) return;
+        const { getNotificationDefault } = await import("../db/notification-defaults.ts");
+        const nd = await getNotificationDefault();
+        if (!nd) {
+          log.warn("No default channel; skipping commitment reminder delivery");
+          return;
+        }
+        for (const r of results) {
+          await this.channelManager.send({
+            inReplyTo: "commitment-reminder",
+            platform: nd.platform,
+            channelId: nd.channelId,
+            content: r.text,
+          });
+        }
+      })().catch((err) => {
+        log.error({ err: err instanceof Error ? err.message : err }, "Commitment reminders failed");
+      });
+      return;
+    }
+
+    // Intercept triage-digest sentinel -- run the daily inbox triage and deliver
+    // (suppressed on a quiet day; no agent turn).
+    if (job.prompt === "__triage_digest__") {
+      log.info("Firing triage digest");
+      (async () => {
+        const { runTriageDigest } = await import("../proactive/scheduler.ts");
+        const summary = await runTriageDigest();
+        if (summary === "No new messages requiring attention.") return; // quiet-day suppression
+        const { getNotificationDefault } = await import("../db/notification-defaults.ts");
+        const nd = await getNotificationDefault();
+        if (!nd) return;
+        await this.channelManager.send({
+          inReplyTo: "triage-digest",
+          platform: nd.platform,
+          channelId: nd.channelId,
+          content: summary,
         });
+      })().catch((err) => {
+        log.error({ err: err instanceof Error ? err.message : err }, "Triage digest failed");
+      });
+      return;
+    }
+
+    // Intercept style-analyze sentinel -- re-derive each owner's writing voice
+    // from sent messages. Self-gates on config.styleMatching (no-op when off).
+    if (job.prompt === "__style_analyze__") {
+      (async () => {
+        const { loadEnvConfig } = await import("../config/env.ts");
+        if (!loadEnvConfig().styleMatching) return;
+        log.info("Firing style analysis");
+        const { analyzeStyle } = await import("../memory/style-model.ts");
+        const { listMemoryOwners } = await import("../auth/org-members.ts");
+        for (const userId of await listMemoryOwners()) {
+          try {
+            const r = await analyzeStyle(userId);
+            log.info({ userId, contactProfiles: r.contactProfiles }, "Style analysis complete");
+          } catch (err) {
+            log.warn(
+              { err: err instanceof Error ? err.message : err, userId },
+              "Style analysis failed for owner",
+            );
+          }
+        }
+      })().catch((err) => {
+        log.error({ err: err instanceof Error ? err.message : err }, "Style analysis failed");
+      });
+      return;
+    }
+
+    // Intercept graph-semantic sentinel -- embed kg_nodes that lack an embedding
+    // and materialize meaning-based edges, per owner. No-op without an embedding
+    // provider (embedMissingNodes returns {embedded:0}).
+    if (job.prompt === "__graph_semantic__") {
+      log.info("Firing graph semantics");
+      (async () => {
+        const { embedMissingNodes, materializeSemanticEdges } =
+          await import("../memory/graph-semantic.ts");
+        const { listMemoryOwners } = await import("../auth/org-members.ts");
+        const orgId = process.env.NOMOS_ORG_ID ?? "local";
+        for (const userId of await listMemoryOwners()) {
+          try {
+            const e = await embedMissingNodes({ orgId, userId });
+            const s = await materializeSemanticEdges({ orgId, userId });
+            log.info({ userId, embedded: e.embedded, edges: s.edges }, "Graph semantics complete");
+          } catch (err) {
+            log.warn(
+              { err: err instanceof Error ? err.message : err, userId },
+              "Graph semantics failed for owner",
+            );
+          }
+        }
+      })().catch((err) => {
+        log.error({ err: err instanceof Error ? err.message : err }, "Graph semantics failed");
+      });
       return;
     }
 
@@ -99,7 +254,7 @@ export class CronEngine {
       id: randomUUID(),
       platform: job.platform ?? "cron",
       channelId: job.channelId ?? sessionKey,
-      userId: "cron-scheduler",
+      userId: job.userId ?? "local",
       content: job.prompt,
       timestamp: new Date(),
     };
@@ -128,13 +283,20 @@ export class CronEngine {
         this.broadcast(event),
       );
 
-      // If job has a delivery channel, send the result — but suppress
-      // when the agent returned the NOACTION sentinel (used by inbox/
-      // calendar/morning-briefing jobs to skip noise on quiet runs).
+      // Suppress the autonomous-loop / heartbeat OK sentinel (the agent is told
+      // to reply with EXACTLY AUTONOMOUS_OK / HEARTBEAT_OK on a quiet run).
+      // stripHeartbeatToken returns null when the whole reply is just the token.
+      const stripped = stripHeartbeatToken(result.content);
+      const suppressed = stripped === null;
+
+      // If job has a delivery channel, send the result — but suppress when the
+      // agent returned the NOACTION sentinel (inbox/calendar/morning-briefing)
+      // or the AUTONOMOUS_OK/HEARTBEAT_OK no-op token.
       if (
         job.deliveryMode === "announce" &&
         job.platform &&
         job.channelId &&
+        !suppressed &&
         !result.content.trimStart().startsWith("[NOACTION]")
       ) {
         await this.channelManager.send(result);
@@ -152,7 +314,8 @@ export class CronEngine {
           jobName: job.name,
           success: true,
           durationMs,
-          contentPreview: result.content.slice(0, 500),
+          // Use the stripped text so the OK sentinel never leaks into the preview.
+          contentPreview: (stripped ?? "(no action needed)").slice(0, 500),
         },
       });
 

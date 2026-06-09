@@ -8,6 +8,7 @@ import { loadSkills } from "../skills/loader.ts";
 import { loadAgentConfigs, getActiveAgent } from "../config/agents.ts";
 import type { NomosConfig } from "../config/env.ts";
 import type { McpServerConfig } from "../sdk/session.ts";
+import { resolveMemoryUserId } from "../auth/tenant-context.ts";
 
 /** Static registry of slash commands for autocomplete and dispatch. */
 export const SLASH_COMMANDS = [
@@ -646,7 +647,7 @@ async function cmdMemory(ctx: CommandContext, args: string[]): Promise<string> {
       const { hybridSearch } = await import("../memory/search.ts");
 
       const embedding = await generateEmbedding(queryText);
-      const results = await hybridSearch(queryText, embedding, 5);
+      const results = await hybridSearch(resolveMemoryUserId(undefined), queryText, embedding, 5);
 
       if (results.length === 0) {
         return chalk.dim("No results found.");
@@ -704,6 +705,7 @@ async function cmdMemory(ctx: CommandContext, args: string[]): Promise<string> {
 
         await storeMemoryChunk({
           id,
+          userId: resolveMemoryUserId(undefined),
           source: "inline",
           path: resolved,
           text: chunk.text,

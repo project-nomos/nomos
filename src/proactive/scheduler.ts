@@ -11,6 +11,7 @@
  */
 
 import { CronStore } from "../cron/store.ts";
+import { systemTenant, resolveMemoryUserId } from "../auth/tenant-context.ts";
 import type { CronJobUpdate } from "../cron/types.ts";
 import {
   getCommitmentsForReminder,
@@ -30,6 +31,8 @@ const log = createLogger("proactive-scheduler");
 const INBOX_JOB_NAME = "proactive:inbox-watcher";
 const CALENDAR_JOB_NAME = "proactive:calendar-watcher";
 const BRIEFING_JOB_NAME = "proactive:morning-briefing";
+const COMMITMENT_JOB_NAME = "proactive:commitment-reminders";
+const TRIAGE_JOB_NAME = "proactive:triage-digest";
 
 /**
  * Register (or update, or remove) the proactive cron jobs based on current
@@ -47,9 +50,23 @@ export async function registerProactiveJobs(): Promise<void> {
 
   let changed = false;
 
+  // Commitment reminders are gated on the commitmentTracking switch (the same
+  // switch that gates capture in the indexer), INDEPENDENT of inbox autonomy --
+  // capture-without-autonomy is still useful. Delivery needs a notification
+  // target, so the sentinel only runs when both are present.
+  changed =
+    (await syncSentinelJob(store, {
+      name: COMMITMENT_JOB_NAME,
+      prompt: "__commitment_reminders__",
+      schedule: "1h",
+      scheduleType: "every",
+      enabled: Boolean(config.commitmentTracking && target),
+    })) || changed;
+
   if (autonomy === "off") {
-    // Disable all proactive jobs (don't delete — preserve run history).
-    for (const name of [INBOX_JOB_NAME, CALENDAR_JOB_NAME, BRIEFING_JOB_NAME]) {
+    // Disable the autonomy-gated jobs (don't delete — preserve run history).
+    // Commitment reminders are NOT in this list (they follow commitmentTracking).
+    for (const name of [INBOX_JOB_NAME, CALENDAR_JOB_NAME, BRIEFING_JOB_NAME, TRIAGE_JOB_NAME]) {
       const existing = await store.getJobByName(name);
       if (existing?.enabled) {
         await store.updateJob(existing.id, { enabled: false });
@@ -65,6 +82,7 @@ export async function registerProactiveJobs(): Promise<void> {
     log.warn(
       "No default notification channel configured — proactive jobs not registered. Set one via the Settings UI.",
     );
+    if (changed) process.emit("cron:refresh" as never);
     return;
   }
 
@@ -75,7 +93,59 @@ export async function registerProactiveJobs(): Promise<void> {
   changed = (await upsertJob(store, calendarScanJobSpec(calendarInterval), target)) || changed;
   changed = (await upsertJob(store, morningBriefingJobSpec(briefingCron), target)) || changed;
 
+  // Daily triage digest -- gated on inbox autonomy (reads ingested inbox msgs).
+  // Code-dispatched sentinel (delivered in-handler), not an agent turn.
+  changed =
+    (await syncSentinelJob(store, {
+      name: TRIAGE_JOB_NAME,
+      prompt: "__triage_digest__",
+      schedule: "0 17 * * *",
+      scheduleType: "cron",
+      enabled: true,
+    })) || changed;
+
   if (changed) process.emit("cron:refresh" as never);
+}
+
+/**
+ * Create/enable/disable a code-dispatched sentinel cron job (one handled
+ * directly by CronEngine, not enqueued as an agent turn). Idempotent: creates
+ * when missing+wanted, flips `enabled` to match `opts.enabled` otherwise.
+ * Returns true when it changed anything (so the caller emits cron:refresh).
+ */
+async function syncSentinelJob(
+  store: CronStore,
+  opts: {
+    name: string;
+    prompt: string;
+    schedule: string;
+    scheduleType: "every" | "cron";
+    enabled: boolean;
+  },
+): Promise<boolean> {
+  const existing = await store.getJobByName(opts.name);
+  if (!existing) {
+    if (!opts.enabled) return false;
+    await store.createJob({
+      userId: systemTenant().userId,
+      name: opts.name,
+      schedule: opts.schedule,
+      scheduleType: opts.scheduleType,
+      sessionTarget: "isolated",
+      deliveryMode: "none", // delivery happens in the cron-engine handler
+      prompt: opts.prompt,
+      enabled: true,
+      errorCount: 0,
+    });
+    log.info({ name: opts.name, schedule: opts.schedule }, "Registered sentinel job");
+    return true;
+  }
+  if (existing.enabled !== opts.enabled) {
+    await store.updateJob(existing.id, { enabled: opts.enabled });
+    log.info({ name: opts.name, enabled: opts.enabled }, "Toggled sentinel job");
+    return true;
+  }
+  return false;
 }
 
 async function upsertJob(
@@ -87,6 +157,7 @@ async function upsertJob(
 
   if (!existing) {
     await store.createJob({
+      userId: systemTenant().userId,
       name: spec.name,
       schedule: spec.schedule,
       scheduleType: spec.scheduleType,
@@ -120,30 +191,40 @@ async function upsertJob(
 }
 
 /**
- * Run commitment reminder check.
- * Called by CronEngine or manually.
+ * Run the commitment reminder check, returning one deliverable text block per
+ * owner that has due reminders (the cron-engine handler sends each). Also marks
+ * those reminded and expires overdue commitments. Called by CronEngine or
+ * manually.
+ *
+ * Per-owner: power-user is just 'local'; a hosted multi-member DB reminds each
+ * member about their own commitments.
  */
-export async function runCommitmentReminders(): Promise<{
-  reminded: number;
-  expired: number;
-}> {
-  const due = await getCommitmentsForReminder();
+export async function runCommitmentReminders(): Promise<Array<{ userId: string; text: string }>> {
+  const { listMemoryOwners } = await import("../auth/org-members.ts");
+  const out: Array<{ userId: string; text: string }> = [];
 
-  if (due.length > 0) {
-    const reminders = due
-      .map((c) => {
-        const deadline = c.deadline ? ` (due: ${c.deadline.toLocaleDateString()})` : "";
-        return `- ${c.description}${deadline}`;
-      })
-      .join("\n");
+  for (const userId of await listMemoryOwners()) {
+    const due = await getCommitmentsForReminder(userId);
 
-    log.info(`Commitment reminders:\n${reminders}`);
-    await markReminded(due.map((c) => c.id));
+    if (due.length > 0) {
+      const reminders = due
+        .map((c) => {
+          const deadline = c.deadline ? ` (due: ${c.deadline.toLocaleDateString()})` : "";
+          return `- ${c.description}${deadline}`;
+        })
+        .join("\n");
+
+      out.push({ userId, text: `*Commitment reminders*\n${reminders}` });
+      await markReminded(
+        userId,
+        due.map((c) => c.id),
+      );
+    }
+
+    await expireOverdueCommitments(userId);
   }
 
-  const expired = await expireOverdueCommitments();
-
-  return { reminded: due.length, expired };
+  return out;
 }
 
 /**
@@ -151,7 +232,9 @@ export async function runCommitmentReminders(): Promise<{
  * Called by CronEngine or manually.
  */
 export async function runTriageDigest(): Promise<string> {
-  const triage = await generateTriage(1);
+  // Scope to the local/instance owner. Per-owner digests in a multi-member DB
+  // would need per-owner notifications (follow-up alongside the analysis jobs).
+  const triage = await generateTriage(resolveMemoryUserId(undefined), 1);
 
   if (triage.items.length === 0) {
     return "No new messages requiring attention.";

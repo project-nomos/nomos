@@ -13,7 +13,7 @@ export async function GET(request: NextRequest) {
         COUNT(*) AS count,
         ROUND(AVG((metadata->>'score')::numeric), 2) AS avg_score
       FROM memory_chunks
-      WHERE metadata->>'category' = 'exemplar'
+      WHERE user_id = 'local' AND metadata->>'category' = 'exemplar'
       GROUP BY metadata->>'context'
       ORDER BY count DESC
     `;
@@ -21,7 +21,7 @@ export async function GET(request: NextRequest) {
     // Total count
     const [total] = await sql`
       SELECT COUNT(*) AS count FROM memory_chunks
-      WHERE metadata->>'category' = 'exemplar'
+      WHERE user_id = 'local' AND metadata->>'category' = 'exemplar'
     `;
 
     // Exemplars (optionally filtered by context)
@@ -37,7 +37,7 @@ export async function GET(request: NextRequest) {
           metadata->>'reasoning' AS reasoning,
           created_at
         FROM memory_chunks
-        WHERE metadata->>'category' = 'exemplar'
+        WHERE user_id = 'local' AND metadata->>'category' = 'exemplar'
           AND metadata->>'context' = ${context}
         ORDER BY (metadata->>'score')::numeric DESC
         LIMIT 50
@@ -53,7 +53,7 @@ export async function GET(request: NextRequest) {
           metadata->>'reasoning' AS reasoning,
           created_at
         FROM memory_chunks
-        WHERE metadata->>'category' = 'exemplar'
+        WHERE user_id = 'local' AND metadata->>'category' = 'exemplar'
         ORDER BY (metadata->>'score')::numeric DESC
         LIMIT 100
       `;

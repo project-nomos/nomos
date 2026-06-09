@@ -3,6 +3,7 @@ import { getKysely } from "./client.ts";
 
 export interface UserModelEntry {
   id: string;
+  userId: string;
   category: string;
   key: string;
   value: unknown;
@@ -15,22 +16,29 @@ export async function upsertUserModel(
   entry: Omit<UserModelEntry, "id" | "updatedAt">,
 ): Promise<void> {
   const db = getKysely();
-  const valueJson = JSON.stringify(entry.value);
 
   await db
     .insertInto("user_model")
     .values({
+      user_id: entry.userId,
       category: entry.category,
       key: entry.key,
-      value: valueJson,
+      // Pass the OBJECT (the driver serializes to jsonb once). JSON.stringify
+      // here double-encodes into a jsonb *string*, so every consumer that casts
+      // value to an object (calibration/reflection/personality-dna) reads
+      // undefined fields.
+      value: entry.value as unknown as string,
       source_ids: entry.sourceIds,
       confidence: entry.confidence,
     })
     .onConflict((oc) =>
-      oc.columns(["category", "key"]).doUpdateSet({
-        value: sql`${valueJson}::jsonb`,
+      oc.columns(["user_id", "category", "key"]).doUpdateSet({
+        value: entry.value as unknown as string,
+        // COALESCE so merging two empty arrays yields '{}' rather than NULL:
+        // array_agg over zero unnested rows returns NULL, which violates the
+        // source_ids NOT NULL constraint.
         source_ids: sql`(
-          SELECT array_agg(DISTINCT s)
+          SELECT COALESCE(array_agg(DISTINCT s), ARRAY[]::text[])
           FROM unnest(user_model.source_ids || ${entry.sourceIds}::text[]) AS s
         )`,
         confidence: entry.confidence,
@@ -40,12 +48,13 @@ export async function upsertUserModel(
     .execute();
 }
 
-export async function getUserModel(category?: string): Promise<UserModelEntry[]> {
+export async function getUserModel(userId: string, category?: string): Promise<UserModelEntry[]> {
   const db = getKysely();
 
   let query = db
     .selectFrom("user_model")
-    .select(["id", "category", "key", "value", "source_ids", "confidence", "updated_at"])
+    .select(["id", "user_id", "category", "key", "value", "source_ids", "confidence", "updated_at"])
+    .where("user_id", "=", userId)
     .orderBy("confidence", "desc")
     .orderBy("updated_at", "desc");
 
@@ -56,6 +65,7 @@ export async function getUserModel(category?: string): Promise<UserModelEntry[]>
   const rows = await query.execute();
   return rows.map((row) => ({
     id: row.id,
+    userId: row.user_id,
     category: row.category,
     key: row.key,
     value: row.value,
@@ -65,10 +75,15 @@ export async function getUserModel(category?: string): Promise<UserModelEntry[]>
   }));
 }
 
-export async function deleteUserModelEntry(category: string, key: string): Promise<boolean> {
+export async function deleteUserModelEntry(
+  userId: string,
+  category: string,
+  key: string,
+): Promise<boolean> {
   const db = getKysely();
   const result = await db
     .deleteFrom("user_model")
+    .where("user_id", "=", userId)
     .where("category", "=", category)
     .where("key", "=", key)
     .executeTakeFirst();

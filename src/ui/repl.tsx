@@ -109,13 +109,20 @@ export async function startRepl(options: ReplOptions): Promise<void> {
   if (options.config.adaptiveMemory) {
     try {
       const { getUserModel } = await import("../db/user-model.ts");
-      userModel = await getUserModel();
+      const { resolveMemoryUserId } = await import("../auth/tenant-context.ts");
+      userModel = await getUserModel(resolveMemoryUserId(undefined));
     } catch {
       // Table may not exist yet
     }
     try {
       const { retrieveExemplars } = await import("../memory/exemplars.ts");
-      const stored = await retrieveExemplars("general conversation", undefined, 3);
+      const { resolveMemoryUserId } = await import("../auth/tenant-context.ts");
+      const stored = await retrieveExemplars(
+        resolveMemoryUserId(undefined),
+        "general conversation",
+        undefined,
+        3,
+      );
       if (stored.length > 0) {
         exemplars = stored.map((e) => ({
           text: e.text,

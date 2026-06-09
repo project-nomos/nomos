@@ -32,6 +32,7 @@ export async function GET(request: NextRequest) {
     "style_profiles",
     "transcript_messages",
     "user_model",
+    "vault_notes",
     "wiki_articles",
   ];
 

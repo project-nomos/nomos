@@ -50,21 +50,26 @@ export interface InboundEnvelopeFields {
  * Bonded senders (those who staked a bond with their envelope) get
  * "bonded" regardless of allowlist state — the bond is the trust signal.
  */
-async function classifyTrustTier(fields: InboundEnvelopeFields): Promise<TrustTier> {
+async function classifyTrustTier(
+  fields: InboundEnvelopeFields,
+  recipientUserId: string,
+): Promise<TrustTier> {
   if (fields.bondAmount && Number(fields.bondAmount) > 0) {
     return "bonded";
   }
 
-  // Contacts the user has explicitly added as friends. The contact_identities
-  // table maps platform user IDs to contacts; we treat the CATE DID as one
-  // such platform identifier with platform='cate' if present.
+  // Contacts the user has explicitly added as friends, scoped to the recipient
+  // owner so one user's friend list never grants trust on another's behalf. The
+  // contact_identities table maps platform user IDs to contacts; we treat the
+  // CATE DID as one such platform identifier with platform='cate' if present.
   try {
     const db = getKysely();
     const r = await db.executeQuery(
       sql<{ id: string }>`
         SELECT contact_id AS id
         FROM contact_identities
-        WHERE platform = 'cate' AND platform_user_id = ${fields.fromDid}
+        WHERE user_id = ${recipientUserId}
+          AND platform = 'cate' AND platform_user_id = ${fields.fromDid}
         LIMIT 1
       `.compile(db),
     );
@@ -83,8 +88,8 @@ async function classifyTrustTier(fields: InboundEnvelopeFields): Promise<TrustTi
  * Returns the new row id, or null on duplicate / permanent failure.
  */
 export async function enqueueInbound(fields: InboundEnvelopeFields): Promise<string | null> {
-  const tier = await classifyTrustTier(fields);
   const userId = fields.userId ?? systemTenant().userId;
+  const tier = await classifyTrustTier(fields, userId);
 
   // Block tier → drop without enqueueing.
   if (tier === "blocked") {

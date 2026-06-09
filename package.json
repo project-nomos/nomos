@@ -39,6 +39,10 @@
     "postinstall": "bash scripts/fetch-anthropic-skills.sh && bash scripts/fetch-plugins.sh && playwright install chromium && (which uvx >/dev/null 2>&1 || (echo 'Installing uv (Python package runner)...' && curl -LsSf https://astral.sh/uv/install.sh | sh))",
     "build": "node scripts/sync-inline-schema.mjs && tsdown",
     "sync-schema": "node scripts/sync-inline-schema.mjs",
+    "codegen": "buf generate",
+    "eval:recall": "tsx scripts/recall-eval.ts",
+    "eval:agent": "tsx eval/agent-eval.ts",
+    "eval:audit": "tsx eval/agent-eval.ts --audit",
     "dev": "tsx src/index.ts",
     "start": "node dist/index.js",
     "check": "pnpm format:check && pnpm typecheck && pnpm lint",
@@ -51,10 +55,15 @@
     "test:watch": "vitest",
     "daemon:dev": "tsx src/daemon/index.ts",
     "daemon:start": "node dist/index.js daemon start",
-    "prepare": "husky"
+    "prepare": "husky",
+    "check:isolation": "tsx scripts/isolation-check.ts"
   },
   "dependencies": {
-    "@anthropic-ai/claude-agent-sdk": "^0.2.119",
+    "@anthropic-ai/claude-agent-sdk": "^0.3.168",
+    "@anthropic-ai/sdk": "^0.93.0",
+    "@bufbuild/protobuf": "^2.12.0",
+    "@connectrpc/connect": "^2.1.1",
+    "@connectrpc/connect-node": "^2.1.1",
     "@googleworkspace/cli": "^0.22.5",
     "@grpc/grpc-js": "^1.14.3",
     "@grpc/proto-loader": "^0.8.0",
@@ -95,6 +104,8 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@bufbuild/buf": "^1.70.0",
+    "@bufbuild/protoc-gen-es": "^2.12.0",
     "@types/better-sqlite3": "^7.6.13",
     "@types/mailparser": "^3.4.6",
     "@types/node": "^22.12.0",

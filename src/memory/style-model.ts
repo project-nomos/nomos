@@ -28,19 +28,20 @@ interface MessageSample {
  * Analyze style from ingested sent messages.
  * Creates a global profile and per-contact profiles.
  */
-export async function analyzeStyle(): Promise<{
+export async function analyzeStyle(userId: string): Promise<{
   globalProfile: StyleProfile;
   contactProfiles: number;
 }> {
   const db = getKysely();
 
-  // Fetch sent messages grouped by contact
+  // Fetch sent messages grouped by contact (owner-scoped)
   const contacts = await db
     .selectFrom("memory_chunks")
     .select([
       sql<string>`metadata->>'contact'`.as("contact"),
       sql<number>`COUNT(*)::int`.as("count"),
     ])
+    .where("user_id", "=", userId)
     .where(sql`metadata->>'source'`, "=", "ingest")
     .where(sql`metadata->>'direction'`, "=", "sent")
     .where(sql`metadata->>'contact'`, "is not", null)
@@ -50,20 +51,21 @@ export async function analyzeStyle(): Promise<{
     .execute();
 
   // Fetch global sample for overall style
-  const globalSamples = await fetchSamples(db, null);
+  const globalSamples = await fetchSamples(db, userId, null);
   const globalProfile = await extractStyleProfile(globalSamples, "global");
-  await upsertStyleProfile(null, "global", globalProfile, globalSamples.length);
+  await upsertStyleProfile(userId, null, "global", globalProfile, globalSamples.length);
 
   // Per-contact profiles
   let contactCount = 0;
   for (const { contact } of contacts) {
     if (!contact) continue;
-    const samples = await fetchSamples(db, contact);
+    const samples = await fetchSamples(db, userId, contact);
     if (samples.length < 5) continue; // Need minimum samples
 
     const profile = await extractStyleProfile(samples, contact);
-    // Store with contact identifier (contact_id FK added when identity graph exists)
-    await upsertStyleProfile(null, `contact:${contact}`, profile, samples.length);
+    // Scoped to the owner; the contact lives in `scope` (contact_id FK is added
+    // when the identity graph supplies a stable id).
+    await upsertStyleProfile(userId, null, `contact:${contact}`, profile, samples.length);
     contactCount++;
   }
 
@@ -72,6 +74,7 @@ export async function analyzeStyle(): Promise<{
 
 async function fetchSamples(
   db: Kysely<Database>,
+  userId: string,
   contact: string | null,
 ): Promise<MessageSample[]> {
   let query = db
@@ -82,6 +85,7 @@ async function fetchSamples(
       sql<string>`text`.as("content"),
       sql<string>`metadata->>'timestamp'`.as("timestamp"),
     ])
+    .where("user_id", "=", userId)
     .where(sql`metadata->>'source'`, "=", "ingest")
     .where(sql`metadata->>'direction'`, "=", "sent");
 

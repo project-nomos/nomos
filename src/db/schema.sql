@@ -213,6 +213,7 @@ CREATE INDEX IF NOT EXISTS idx_memory_metadata ON memory_chunks USING gin(metada
 -- User model: accumulated preferences and facts learned from conversations
 CREATE TABLE IF NOT EXISTS user_model (
   id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id     TEXT NOT NULL DEFAULT 'local',  -- owner; per-person accumulated model
   category    TEXT NOT NULL,
   key         TEXT NOT NULL,
   value       JSONB NOT NULL,
@@ -220,8 +221,28 @@ CREATE TABLE IF NOT EXISTS user_model (
   confidence  FLOAT NOT NULL DEFAULT 0.5,
   created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
-  UNIQUE (category, key)
+  UNIQUE (user_id, category, key)
 );
+
+-- Per-user hardening: the user model used to be global (UNIQUE(category,key)).
+-- Swap to a per-owner key so two members of one DB keep separate models. The
+-- ADD CONSTRAINT references user_id, so on a legacy table (CREATE was a no-op)
+-- the column must be added first, here, not in the later Phase-4b block.
+-- All idempotent.
+DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'user_model' AND column_name = 'user_id'
+  ) THEN
+    ALTER TABLE user_model ADD COLUMN user_id TEXT NOT NULL DEFAULT 'local';
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'user_model_category_key_key') THEN
+    ALTER TABLE user_model DROP CONSTRAINT user_model_category_key_key;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'user_model_user_id_category_key_key') THEN
+    ALTER TABLE user_model ADD CONSTRAINT user_model_user_id_category_key_key UNIQUE (user_id, category, key);
+  END IF;
+END $$;
 
 CREATE INDEX IF NOT EXISTS idx_user_model_category ON user_model(category);
 
@@ -310,21 +331,46 @@ ON CONFLICT (key) DO NOTHING;
 -- Style profiles for communication voice modeling
 CREATE TABLE IF NOT EXISTS style_profiles (
   id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id      TEXT NOT NULL DEFAULT 'local',  -- owner; each person's voice is private
   contact_id   UUID,
-  scope        TEXT NOT NULL DEFAULT 'global',
+  scope        TEXT NOT NULL DEFAULT 'global',  -- 'global' or 'contact:<name>'
   profile      JSONB NOT NULL DEFAULT '{}',
   sample_count INT NOT NULL DEFAULT 0,
   last_updated TIMESTAMPTZ NOT NULL DEFAULT now(),
   created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
-  UNIQUE (contact_id, scope)
+  UNIQUE (user_id, scope)
 );
 
+-- Per-user hardening: style_profiles used to be global with UNIQUE(contact_id,
+-- scope) and no user_id. On an existing DB the CREATE above is a no-op, so add
+-- the column then swap the unique key for a per-owner one. contact_id is always
+-- NULL in practice (the contact lives in scope as 'contact:<name>'), so the
+-- effective key is (user_id, scope). Both idempotent.
+DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'style_profiles' AND column_name = 'user_id'
+  ) THEN
+    ALTER TABLE style_profiles ADD COLUMN user_id TEXT NOT NULL DEFAULT 'local';
+  END IF;
+END $$;
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'style_profiles_contact_id_scope_key') THEN
+    ALTER TABLE style_profiles DROP CONSTRAINT style_profiles_contact_id_scope_key;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'style_profiles_user_id_scope_key') THEN
+    ALTER TABLE style_profiles ADD CONSTRAINT style_profiles_user_id_scope_key UNIQUE (user_id, scope);
+  END IF;
+END $$;
+
 CREATE INDEX IF NOT EXISTS idx_style_contact ON style_profiles(contact_id);
+CREATE INDEX IF NOT EXISTS idx_style_user ON style_profiles(user_id);
 
 -- Knowledge wiki articles (DB-primary, disk as cache)
 CREATE TABLE IF NOT EXISTS wiki_articles (
   id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  path          TEXT UNIQUE NOT NULL,
+  user_id       TEXT NOT NULL DEFAULT 'local',  -- owner; the compiled wiki is per-person
+  path          TEXT NOT NULL,
   title         TEXT NOT NULL,
   content       TEXT NOT NULL,
   category      TEXT NOT NULL,
@@ -333,13 +379,69 @@ CREATE TABLE IF NOT EXISTS wiki_articles (
   compile_model TEXT,
   compiled_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
   created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+  updated_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (user_id, path)
 );
 
+-- Per-user hardening: wiki_articles used to be global with UNIQUE(path) and no
+-- user_id. On an existing DB the CREATE TABLE above is a no-op, so add the column
+-- first, then swap the path-unique for a per-owner one. Both idempotent.
+DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'wiki_articles' AND column_name = 'user_id'
+  ) THEN
+    ALTER TABLE wiki_articles ADD COLUMN user_id TEXT NOT NULL DEFAULT 'local';
+  END IF;
+END $$;
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'wiki_articles_path_key') THEN
+    ALTER TABLE wiki_articles DROP CONSTRAINT wiki_articles_path_key;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'wiki_articles_user_id_path_key') THEN
+    ALTER TABLE wiki_articles ADD CONSTRAINT wiki_articles_user_id_path_key UNIQUE (user_id, path);
+  END IF;
+END $$;
+
 CREATE INDEX IF NOT EXISTS idx_wiki_category ON wiki_articles(category);
-CREATE INDEX IF NOT EXISTS idx_wiki_path ON wiki_articles(path);
+CREATE INDEX IF NOT EXISTS idx_wiki_path ON wiki_articles(user_id, path);
+CREATE INDEX IF NOT EXISTS idx_wiki_user ON wiki_articles(user_id);
 CREATE INDEX IF NOT EXISTS idx_wiki_fts ON wiki_articles
   USING gin(to_tsvector('english', content));
+
+-- Agent long-term memory: the vault. Per-user, agent- and human-authored markdown
+-- notes that are the SOURCE OF TRUTH for what the clone knows. Distinct from
+-- wiki_articles, which holds the DERIVED/compiled wiki (contacts, topic summaries)
+-- projected out of this vault + other sources. The agent reads/writes the vault
+-- in-loop via the memory_* tools; the user edits it directly.
+CREATE TABLE IF NOT EXISTS vault_notes (
+  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id     TEXT NOT NULL DEFAULT 'local',  -- per-person scoping (zero-trust on top of db-per-user)
+  path        TEXT NOT NULL,
+  title       TEXT NOT NULL,
+  content     TEXT NOT NULL,
+  backlinks   TEXT[] NOT NULL DEFAULT '{}',
+  word_count  INT NOT NULL DEFAULT 0,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (user_id, path)
+);
+CREATE INDEX IF NOT EXISTS idx_vault_user ON vault_notes(user_id);
+CREATE INDEX IF NOT EXISTS idx_vault_path ON vault_notes(user_id, path);
+CREATE INDEX IF NOT EXISTS idx_vault_fts ON vault_notes
+  USING gin(to_tsvector('english', content));
+
+-- One-time data migration: the vault used to live in wiki_articles under
+-- category 'memory'. Move those rows into vault_notes. Idempotent: ON CONFLICT
+-- skips already-migrated rows and the DELETE then clears the source, so on every
+-- subsequent migrate this is a no-op (no 'memory' rows remain). Stamps user_id
+-- 'local' because wiki_articles has no user_id column; live writes carry the
+-- real id going forward.
+INSERT INTO vault_notes (user_id, path, title, content, backlinks, word_count, created_at, updated_at)
+SELECT 'local', path, title, content, backlinks, word_count, created_at, updated_at
+FROM wiki_articles WHERE category = 'memory'
+ON CONFLICT (user_id, path) DO NOTHING;
+DELETE FROM wiki_articles WHERE category = 'memory';
 
 -- Wiki config defaults
 INSERT INTO config (key, value) VALUES
@@ -351,6 +453,7 @@ ON CONFLICT (key) DO NOTHING;
 -- Unified contacts (cross-platform identity graph)
 CREATE TABLE IF NOT EXISTS contacts (
   id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id      TEXT NOT NULL DEFAULT 'local',  -- owner; per-person contact graph
   display_name TEXT NOT NULL,
   role         TEXT,
   relationship JSONB NOT NULL DEFAULT '{}',
@@ -368,6 +471,7 @@ CREATE INDEX IF NOT EXISTS idx_contacts_name ON contacts(display_name);
 -- Platform identities linked to contacts
 CREATE TABLE IF NOT EXISTS contact_identities (
   id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id           TEXT NOT NULL DEFAULT 'local',  -- owner; same platform person can belong to two members
   contact_id        UUID NOT NULL REFERENCES contacts(id) ON DELETE CASCADE,
   platform          TEXT NOT NULL,
   platform_user_id  TEXT NOT NULL,
@@ -375,11 +479,31 @@ CREATE TABLE IF NOT EXISTS contact_identities (
   email             TEXT,
   metadata          JSONB NOT NULL DEFAULT '{}',
   created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
-  UNIQUE (platform, platform_user_id)
+  UNIQUE (user_id, platform, platform_user_id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_ci_contact ON contact_identities(contact_id);
 CREATE INDEX IF NOT EXISTS idx_ci_platform ON contact_identities(platform, platform_user_id);
+
+-- Per-user hardening: contacts/contact_identities used to be global. Swap the
+-- old global UNIQUE(platform, platform_user_id) for a per-owner one so two
+-- members of one DB can each have an identity for the same platform person. The
+-- ADD CONSTRAINT references user_id, so on a legacy table the column must be
+-- added first, here, not in the later Phase-4b block. All idempotent.
+DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'contact_identities' AND column_name = 'user_id'
+  ) THEN
+    ALTER TABLE contact_identities ADD COLUMN user_id TEXT NOT NULL DEFAULT 'local';
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'contact_identities_platform_platform_user_id_key') THEN
+    ALTER TABLE contact_identities DROP CONSTRAINT contact_identities_platform_platform_user_id_key;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'contact_identities_user_id_platform_platform_user_id_key') THEN
+    ALTER TABLE contact_identities ADD CONSTRAINT contact_identities_user_id_platform_platform_user_id_key UNIQUE (user_id, platform, platform_user_id);
+  END IF;
+END $$;
 
 -- Commitment tracking for proactive agency
 CREATE TABLE IF NOT EXISTS commitments (
@@ -619,14 +743,14 @@ CREATE EXTENSION IF NOT EXISTS pg_trgm;
 
 CREATE TABLE IF NOT EXISTS kg_nodes (
   id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  kind          TEXT NOT NULL,                 -- person|project|topic|decision|value|event|org|wiki|moc|chunk
+  kind          TEXT NOT NULL,                 -- person|project|topic|decision|value|event|org|vault|wiki|moc|chunk
   name          TEXT NOT NULL,
   canonical_key TEXT NOT NULL,                 -- dedup key, normalized (lowercased)
   aliases       TEXT[] NOT NULL DEFAULT '{}',  -- Obsidian-style alias resolution
   summary       TEXT,
   embedding     vector(768),                   -- gemini-embedding-001; enables semantic edges
-  external_kind TEXT,                           -- 'contact'|'wiki'|'memory_chunk'|'user_model'|null
-  external_ref  TEXT,                           -- contacts.id | wiki_articles.path | memory_chunks.id | …
+  external_kind TEXT,                           -- 'contact'|'vault'|'wiki'|'memory_chunk'|'user_model'|null
+  external_ref  TEXT,                           -- contacts.id | vault_notes.path | wiki_articles.path | memory_chunks.id | …
   attrs         JSONB NOT NULL DEFAULT '{}',
   source_ids    TEXT[] NOT NULL DEFAULT '{}',  -- provenance: memory_chunk ids that created this node
   confidence    REAL NOT NULL DEFAULT 0.5,

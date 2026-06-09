@@ -157,6 +157,7 @@ export function registerCronCommand(program: Command): void {
         }
 
         await store.createJob({
+          userId: "local",
           name,
           schedule,
           scheduleType: "cron",

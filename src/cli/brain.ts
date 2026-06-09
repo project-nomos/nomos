@@ -34,7 +34,7 @@ export function registerBrainCommand(program: Command): void {
         const moc = await syncWikiMOCs(LOCAL_TENANT);
         console.log(
           chalk.green(
-            `Done: +${r.personNodes} person nodes, +${r.wikiNodes} wiki nodes, +${r.linkEdges} backlink edges, +${wl.edges} inline [[link]] edges, +${moc.mocs} topic hubs`,
+            `Done: +${r.personNodes} person nodes, +${r.vaultNodes} vault nodes, +${r.wikiNodes} wiki nodes, +${r.linkEdges} backlink edges, +${wl.edges} inline [[link]] edges, +${moc.mocs} topic hubs`,
           ),
         );
         console.log(chalk.dim("Tip: run `nomos brain semantic` to add meaning-based links."));

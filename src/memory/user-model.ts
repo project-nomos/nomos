@@ -33,17 +33,19 @@ function mergeConfidence(existing: number, incoming: number): number {
  * Upserts preferences, facts, and handles corrections.
  */
 export async function updateUserModel(
+  userId: string,
   extracted: ExtractedKnowledge,
   sourceChunkIds: string[],
 ): Promise<void> {
   // Process preferences
   for (const pref of extracted.preferences) {
-    const existing = await getUserModel("preference");
+    const existing = await getUserModel(userId, "preference");
     const match = existing.find((e) => e.key === pref.key);
 
     const confidence = match ? mergeConfidence(match.confidence, pref.confidence) : pref.confidence;
 
     await upsertUserModel({
+      userId,
       category: "preference",
       key: pref.key,
       value: pref.value,
@@ -60,12 +62,13 @@ export async function updateUserModel(
         ? fact.entities[0].toLowerCase().replace(/\s+/g, "_")
         : fact.text.slice(0, 50).toLowerCase().replace(/\s+/g, "_");
 
-    const existing = await getUserModel("fact");
+    const existing = await getUserModel(userId, "fact");
     const match = existing.find((e) => e.key === key);
 
     const confidence = match ? mergeConfidence(match.confidence, fact.confidence) : fact.confidence;
 
     await upsertUserModel({
+      userId,
       category: "fact",
       key,
       value: { text: fact.text, entities: fact.entities },
@@ -83,9 +86,9 @@ export async function updateUserModel(
       // Update its metadata to mark it as superseded
       try {
         const { searchMemoryByText } = await import("../db/memory.ts");
-        const originals = await searchMemoryByText(corr.original, 1);
+        const originals = await searchMemoryByText(userId, corr.original, 1);
         if (originals.length > 0) {
-          await updateMemoryMetadata(originals[0].id, {
+          await updateMemoryMetadata(userId, originals[0].id, {
             superseded_by: corrChunkId,
           });
         }
@@ -98,12 +101,13 @@ export async function updateUserModel(
     const key = `correction_${corr.corrected.slice(0, 30).toLowerCase().replace(/\s+/g, "_")}`;
 
     // Decrease confidence of any contradicting entries
-    const existing = await getUserModel();
+    const existing = await getUserModel(userId);
     for (const entry of existing) {
       const valueStr = typeof entry.value === "string" ? entry.value : JSON.stringify(entry.value);
       if (valueStr.toLowerCase().includes(corr.original.toLowerCase())) {
         const decreased = Math.max(entry.confidence - 0.2, MIN_CONFIDENCE);
         await upsertUserModel({
+          userId,
           category: entry.category,
           key: entry.key,
           value: entry.value,
@@ -114,6 +118,7 @@ export async function updateUserModel(
     }
 
     await upsertUserModel({
+      userId,
       category: "fact",
       key,
       value: { text: corr.corrected, original: corr.original },
@@ -124,12 +129,12 @@ export async function updateUserModel(
 
   // Process decision patterns
   for (const pattern of extracted.decisionPatterns) {
-    await upsertDecisionPattern(pattern, sourceChunkIds);
+    await upsertDecisionPattern(userId, pattern, sourceChunkIds);
   }
 
   // Process values
   for (const val of extracted.values) {
-    await upsertValue(val, sourceChunkIds);
+    await upsertValue(userId, val, sourceChunkIds);
   }
 }
 
@@ -138,6 +143,7 @@ export async function updateUserModel(
  * If a similar principle already exists, merge evidence and update weight.
  */
 async function upsertDecisionPattern(
+  userId: string,
   pattern: ExtractedDecisionPattern,
   sourceChunkIds: string[],
 ): Promise<void> {
@@ -147,7 +153,7 @@ async function upsertDecisionPattern(
     .replace(/[^a-z0-9]+/g, "_")
     .replace(/^_|_$/g, "");
 
-  const existing = await getUserModel("decision_pattern");
+  const existing = await getUserModel(userId, "decision_pattern");
   const match = existing.find((e) => e.key === key);
 
   if (match) {
@@ -170,6 +176,7 @@ async function upsertDecisionPattern(
     const confidence = mergeConfidence(match.confidence, pattern.confidence);
 
     await upsertUserModel({
+      userId,
       category: "decision_pattern",
       key,
       value: {
@@ -184,6 +191,7 @@ async function upsertDecisionPattern(
     });
   } else {
     await upsertUserModel({
+      userId,
       category: "decision_pattern",
       key,
       value: {
@@ -203,14 +211,18 @@ async function upsertDecisionPattern(
  * Merge a value into the user model.
  * If the same value label exists, accumulate evidence and update description.
  */
-async function upsertValue(val: ExtractedValue, sourceChunkIds: string[]): Promise<void> {
+async function upsertValue(
+  userId: string,
+  val: ExtractedValue,
+  sourceChunkIds: string[],
+): Promise<void> {
   const key = val.value
     .slice(0, 60)
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "_")
     .replace(/^_|_$/g, "");
 
-  const existing = await getUserModel("value");
+  const existing = await getUserModel(userId, "value");
   const match = existing.find((e) => e.key === key);
 
   if (match) {
@@ -224,6 +236,7 @@ async function upsertValue(val: ExtractedValue, sourceChunkIds: string[]): Promi
     const confidence = mergeConfidence(match.confidence, val.confidence);
 
     await upsertUserModel({
+      userId,
       category: "value",
       key,
       value: {
@@ -237,6 +250,7 @@ async function upsertValue(val: ExtractedValue, sourceChunkIds: string[]): Promi
     });
   } else {
     await upsertUserModel({
+      userId,
       category: "value",
       key,
       value: {

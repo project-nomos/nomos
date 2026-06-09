@@ -44,51 +44,55 @@ const MAX_PRUNE_PER_RUN = 100;
  * 3. LLM-powered review: rewrite/merge semantically similar chunks (Haiku)
  * 4. Decay user model confidence for stale entries
  */
-export async function consolidateMemory(): Promise<ConsolidationResult> {
+export async function consolidateMemory(userId: string): Promise<ConsolidationResult> {
   const db = getKysely();
 
-  // Count before
+  // Count before (this owner only)
   const before = await db
     .selectFrom("memory_chunks")
     .select(sql<number>`count(*)::int`.as("count"))
+    .where("user_id", "=", userId)
     .executeTakeFirstOrThrow();
   const totalBefore = before.count;
 
   // Phase 1: Prune old, rarely-accessed chunks
-  const pruned = await pruneStaleChunks();
+  const pruned = await pruneStaleChunks(userId);
 
   // Phase 2: Merge near-duplicate chunks (vector similarity)
-  const merged = await mergeNearDuplicates();
+  const merged = await mergeNearDuplicates(userId);
 
   // Phase 3: LLM-powered review and rewrite
-  const rewritten = await llmConsolidate();
+  const rewritten = await llmConsolidate(userId);
 
   // Phase 4: Decay user model confidence for stale entries
-  await decayUserModelConfidence();
+  await decayUserModelConfidence(userId);
 
   // Count after
   const after = await db
     .selectFrom("memory_chunks")
     .select(sql<number>`count(*)::int`.as("count"))
+    .where("user_id", "=", userId)
     .executeTakeFirstOrThrow();
 
   return { merged, pruned, rewritten, totalBefore, totalAfter: after.count };
 }
 
-/** Remove chunks that are old and rarely accessed. */
-async function pruneStaleChunks(): Promise<number> {
+/** Remove chunks that are old and rarely accessed (for one owner). */
+async function pruneStaleChunks(userId: string): Promise<number> {
   const db = getKysely();
   const cutoffDate = new Date();
   cutoffDate.setDate(cutoffDate.getDate() - MIN_AGE_DAYS);
 
   const deleted = await db
     .deleteFrom("memory_chunks")
+    .where("user_id", "=", userId)
     .where(
       "id",
       "in",
       db
         .selectFrom("memory_chunks")
         .select("id")
+        .where("user_id", "=", userId)
         .where("access_count", "<=", PRUNE_ACCESS_THRESHOLD)
         .where("created_at", "<", cutoffDate)
         .where((eb) =>
@@ -105,15 +109,15 @@ async function pruneStaleChunks(): Promise<number> {
   return deleted.length;
 }
 
-/** Find and merge near-duplicate chunks based on vector similarity. */
-async function mergeNearDuplicates(): Promise<number> {
+/** Find and merge near-duplicate chunks based on vector similarity (for one owner). */
+async function mergeNearDuplicates(userId: string): Promise<number> {
   const db = getKysely();
   let mergeCount = 0;
 
-  // Find pairs of chunks with very high cosine similarity
+  // Find pairs of chunks with very high cosine similarity (same owner only)
   const duplicatePairs = await db
     .selectFrom("memory_chunks as a")
-    .innerJoin("memory_chunks as b", (join) => join.on(sql`a.id < b.id`))
+    .innerJoin("memory_chunks as b", (join) => join.on(sql`a.id < b.id AND a.user_id = b.user_id`))
     .select([
       "a.id as id_a",
       "b.id as id_b",
@@ -125,6 +129,7 @@ async function mergeNearDuplicates(): Promise<number> {
       "b.created_at as created_b",
       sql<number>`1 - (a.embedding <=> b.embedding)`.as("similarity"),
     ])
+    .where("a.user_id", "=", userId)
     .where("a.embedding", "is not", null)
     .where("b.embedding", "is not", null)
     .where(sql`1 - (a.embedding <=> b.embedding)`, ">", MERGE_SIMILARITY_THRESHOLD)
@@ -153,10 +158,15 @@ async function mergeNearDuplicates(): Promise<number> {
     await db
       .updateTable("memory_chunks")
       .set({ access_count: combinedAccess, updated_at: sql`now()` })
+      .where("user_id", "=", userId)
       .where("id", "=", keepId)
       .execute();
 
-    await db.deleteFrom("memory_chunks").where("id", "=", removeId).execute();
+    await db
+      .deleteFrom("memory_chunks")
+      .where("user_id", "=", userId)
+      .where("id", "=", removeId)
+      .execute();
     deletedIds.add(removeId);
     mergeCount++;
   }
@@ -192,7 +202,7 @@ const LLM_BATCH_SIZE = 20;
  * LLM-powered consolidation: sends batches of memory chunks to Haiku
  * for semantic review, rewriting, and intelligent pruning.
  */
-async function llmConsolidate(): Promise<number> {
+async function llmConsolidate(userId: string): Promise<number> {
   const db = getKysely();
   const config = loadEnvConfig();
   const model = config.extractionModel ?? "claude-haiku-4-5";
@@ -201,6 +211,7 @@ async function llmConsolidate(): Promise<number> {
   const candidates = await db
     .selectFrom("memory_chunks")
     .select(["id", "text", "metadata", "access_count", "created_at"])
+    .where("user_id", "=", userId)
     .where("created_at", "<", sql<Date>`now() - interval '3 days'`)
     .orderBy("access_count", "asc")
     .orderBy("created_at", "asc")
@@ -263,7 +274,11 @@ async function llmConsolidate(): Promise<number> {
 
       switch (decision.action.toUpperCase()) {
         case "DROP": {
-          await db.deleteFrom("memory_chunks").where("id", "=", decision.id).execute();
+          await db
+            .deleteFrom("memory_chunks")
+            .where("user_id", "=", userId)
+            .where("id", "=", decision.id)
+            .execute();
           changeCount++;
           break;
         }
@@ -272,6 +287,7 @@ async function llmConsolidate(): Promise<number> {
             await db
               .updateTable("memory_chunks")
               .set({ text: decision.rewrite, updated_at: sql`now()` })
+              .where("user_id", "=", userId)
               .where("id", "=", decision.id)
               .execute();
 
@@ -284,6 +300,7 @@ async function llmConsolidate(): Promise<number> {
                 await db
                   .updateTable("memory_chunks")
                   .set({ embedding: sql`${embeddingStr}::vector` })
+                  .where("user_id", "=", userId)
                   .where("id", "=", decision.id)
                   .execute();
               }
@@ -305,6 +322,7 @@ async function llmConsolidate(): Promise<number> {
             const source = await db
               .selectFrom("memory_chunks")
               .select("access_count")
+              .where("user_id", "=", userId)
               .where("id", "=", decision.id)
               .executeTakeFirst();
             if (target && source) {
@@ -314,7 +332,11 @@ async function llmConsolidate(): Promise<number> {
                 .set({ access_count: combined, updated_at: sql`now()` })
                 .where("id", "=", decision.merge_with)
                 .execute();
-              await db.deleteFrom("memory_chunks").where("id", "=", decision.id).execute();
+              await db
+                .deleteFrom("memory_chunks")
+                .where("user_id", "=", userId)
+                .where("id", "=", decision.id)
+                .execute();
               changeCount++;
             }
           }
@@ -335,8 +357,8 @@ async function llmConsolidate(): Promise<number> {
   }
 }
 
-/** Reduce confidence of user model entries that haven't been reinforced recently. */
-async function decayUserModelConfidence(): Promise<void> {
+/** Reduce confidence of user model entries that haven't been reinforced recently (one owner). */
+async function decayUserModelConfidence(userId: string): Promise<void> {
   const db = getKysely();
   const cutoffDate = new Date();
   cutoffDate.setDate(cutoffDate.getDate() - 30);
@@ -348,7 +370,63 @@ async function decayUserModelConfidence(): Promise<void> {
       confidence: sql`GREATEST(confidence * 0.9, 0.1)`,
       updated_at: sql`now()`,
     })
+    .where("user_id", "=", userId)
     .where("updated_at", "<", cutoffDate)
     .where("confidence", ">", 0.1)
     .execute();
+}
+
+/** Shape of the value-reflection produced by {@link reflectOnValues}, consumed by reRankValues. */
+export interface ValueReflection {
+  values_to_boost?: { key: string; reason: string }[];
+  values_to_decrease?: { key: string; reason: string }[];
+  new_values?: { value: string; description: string; context: string; evidence: string[] }[];
+  pattern_refinements?: { key: string; refinement: string }[];
+}
+
+const REFLECTION_PROMPT = `You are a value re-evaluation system. Given a user's known values and decision patterns, decide what to adjust based on confidence and coherence. Output ONLY one JSON object:
+{
+  "values_to_boost": [{"key":"","reason":""}],
+  "values_to_decrease": [{"key":"","reason":""}],
+  "new_values": [{"value":"","description":"","context":"","evidence":[]}],
+  "pattern_refinements": [{"key":"","refinement":""}]
+}
+For boost/decrease/refine, use ONLY keys that appear in the provided values/patterns. Keep each array small (0-3 items). No prose, no markdown fences.`;
+
+/**
+ * Reflect on a single owner's values + decision patterns and produce a
+ * re-ranking reflection (the Phase-5 output the consolidation prompt describes).
+ *
+ * Returns null when the owner has no values/patterns to re-rank (skips the LLM
+ * call for fresh users) or when the model output can't be parsed. Best-effort.
+ */
+export async function reflectOnValues(userId: string): Promise<ValueReflection | null> {
+  const { getUserModel } = await import("../db/user-model.ts");
+  const values = await getUserModel(userId, "value");
+  const patterns = await getUserModel(userId, "decision_pattern");
+  if (values.length === 0 && patterns.length === 0) return null; // nothing to re-rank
+
+  const model = loadEnvConfig().extractionModel ?? "claude-haiku-4-5";
+  const ctx = [
+    "VALUES:",
+    ...values.map((v) => `- ${v.key} (confidence ${v.confidence})`),
+    "PATTERNS:",
+    ...patterns.map((p) => `- ${p.key}`),
+  ].join("\n");
+
+  try {
+    const { runForkedAgent } = await import("../sdk/forked-agent.ts");
+    const { text } = await runForkedAgent({
+      prompt: `${REFLECTION_PROMPT}\n\n${ctx}`,
+      model,
+      label: "value-reflection",
+      maxTurns: 1,
+    });
+    const m = text.match(/\{[\s\S]*\}/);
+    if (!m) return null;
+    return JSON.parse(m[0]) as ValueReflection;
+  } catch (err) {
+    log.debug({ err, userId }, "reflectOnValues failed");
+    return null;
+  }
 }

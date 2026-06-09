@@ -108,7 +108,7 @@ export class SessionStore {
       const db = getDb();
       await db`
         UPDATE sessions SET
-          metadata = jsonb_set(COALESCE(metadata, '{}'), '{sdkSessionId}', ${JSON.stringify(sessionId)}::jsonb),
+          metadata = jsonb_set(COALESCE(metadata, '{}'), '{sdkSessionId}', to_jsonb(${sessionId}::text)),
           updated_at = now()
         WHERE session_key = ${key}
       `;

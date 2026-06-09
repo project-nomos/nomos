@@ -32,8 +32,8 @@ export function registerContactsCommand(program: Command): void {
     .action(async (opts) => {
       getDb();
       const results = opts.search
-        ? await searchContacts(opts.search)
-        : await listContacts(opts.platform);
+        ? await searchContacts("local", opts.search)
+        : await listContacts("local", opts.platform);
 
       if (results.length === 0) {
         console.log(chalk.dim("No contacts found."));
@@ -47,7 +47,7 @@ export function registerContactsCommand(program: Command): void {
         console.log(`  ${chalk.bold(c.display_name)}${role}${autonomy}`);
         console.log(`    ${chalk.dim("ID:")} ${c.id}`);
 
-        const identities = await listIdentities(c.id);
+        const identities = await listIdentities("local", c.id);
         for (const id of identities) {
           console.log(
             `    ${chalk.blue(id.platform)}: ${id.platform_user_id}${id.display_name ? ` (${id.display_name})` : ""}`,
@@ -63,7 +63,7 @@ export function registerContactsCommand(program: Command): void {
     .description("Show contact details")
     .action(async (id: string) => {
       getDb();
-      const contact = await getContact(id);
+      const contact = await getContact("local", id);
       if (!contact) {
         console.log(chalk.red("Contact not found."));
         return;
@@ -76,7 +76,7 @@ export function registerContactsCommand(program: Command): void {
       console.log(`  ${chalk.dim("Consent:")} ${contact.data_consent}`);
       if (contact.notes) console.log(`  ${chalk.dim("Notes:")} ${contact.notes}`);
 
-      const identities = await listIdentities(contact.id);
+      const identities = await listIdentities("local", contact.id);
       if (identities.length > 0) {
         console.log(`\n  ${chalk.bold("Linked Identities:")}`);
         for (const id of identities) {
@@ -100,13 +100,13 @@ export function registerContactsCommand(program: Command): void {
     .description("Link a platform identity to a contact")
     .action(async (contactId: string, platform: string, userId: string) => {
       getDb();
-      const contact = await getContact(contactId);
+      const contact = await getContact("local", contactId);
       if (!contact) {
         console.log(chalk.red("Contact not found."));
         return;
       }
 
-      const identity = await linkIdentity(contactId, platform, userId);
+      const identity = await linkIdentity("local", contactId, platform, userId);
       console.log(
         chalk.green(`Linked ${platform}:${userId} to "${contact.display_name}" (${identity.id})`),
       );
@@ -118,7 +118,7 @@ export function registerContactsCommand(program: Command): void {
     .description("Unlink a platform identity")
     .action(async (identityId: string) => {
       getDb();
-      const removed = await unlinkIdentity(identityId);
+      const removed = await unlinkIdentity("local", identityId);
       if (removed) {
         console.log(chalk.green("Identity unlinked."));
       } else {
@@ -132,7 +132,7 @@ export function registerContactsCommand(program: Command): void {
     .description("Merge two contacts (keeps first, merges second into it)")
     .action(async (keepId: string, mergeId: string) => {
       getDb();
-      const result = await mergeContacts(keepId, mergeId);
+      const result = await mergeContacts("local", keepId, mergeId);
       if (result) {
         console.log(chalk.green(`Merged into "${result.display_name}" (${result.id})`));
       } else {
@@ -147,7 +147,7 @@ export function registerContactsCommand(program: Command): void {
     .action(async () => {
       getDb();
       console.log(chalk.blue("Running auto-linker..."));
-      const result = await runAutoLinker();
+      const result = await runAutoLinker("local");
       console.log(
         chalk.green(
           `Done. ${result.merged} auto-merged, ${result.candidates} candidates for manual review.`,

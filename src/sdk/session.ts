@@ -7,7 +7,10 @@ import {
   type SDKResultMessage,
   type SdkPluginConfig,
   type OnElicitation,
+  type HookCallbackMatcher,
 } from "@anthropic-ai/claude-agent-sdk";
+import { getPromptCacheTracker } from "./cache-break-detection.ts";
+import { getToolResultStore } from "./tool-result-storage.ts";
 
 export type {
   Query,
@@ -73,6 +76,70 @@ export interface RunSessionParams {
    * automatically declined.
    */
   onElicitation?: OnElicitation;
+  /** SDK-native hook callbacks (PreToolUse blocking, PostToolUse context, etc.) */
+  hooks?: Options["hooks"];
+  /** Reasoning effort ('low'..'max'; 'xhigh' is the ultracode level). */
+  effort?: Options["effort"];
+}
+
+/**
+ * Build a PostToolUse hook that deduplicates large, repeated tool outputs via
+ * the content-addressed ToolResultStore. Opt-in (NOMOS_TOOL_DEDUP) and LOSSY by
+ * design -- once a big result is replaced by a reference the model can only
+ * recall its earlier copy -- so it is off by default. Per-process, not
+ * per-tenant; never persisted.
+ */
+function buildDedupHooks(): Partial<Record<string, HookCallbackMatcher[]>> | undefined {
+  if (process.env.NOMOS_TOOL_DEDUP !== "true") return undefined;
+  const store = getToolResultStore();
+  return {
+    PostToolUse: [
+      {
+        hooks: [
+          async (input) => {
+            const i = input as { tool_name?: string; tool_response?: unknown };
+            const name = i.tool_name ?? "unknown";
+            const resp = i.tool_response;
+            let text: string | undefined;
+            if (typeof resp === "string") {
+              text = resp;
+            } else if (
+              resp &&
+              typeof resp === "object" &&
+              Array.isArray((resp as { content?: unknown }).content)
+            ) {
+              const content = (resp as { content: Array<{ type?: string; text?: string }> })
+                .content;
+              text = content.find((b) => b?.type === "text")?.text;
+            }
+            if (typeof text !== "string") return {};
+            const out = store.processResult(name, text);
+            if (!out.deduplicated) return {};
+            const updated =
+              typeof resp === "string"
+                ? out.content
+                : { ...(resp as object), content: [{ type: "text", text: out.content }] };
+            return {
+              hookSpecificOutput: { hookEventName: "PostToolUse", updatedToolOutput: updated },
+            };
+          },
+        ],
+      },
+    ],
+  };
+}
+
+/** Merge two hook maps, concatenating the matcher arrays per event. */
+function mergeHooks(a: Options["hooks"], b: Options["hooks"]): Options["hooks"] {
+  if (!a) return b;
+  if (!b) return a;
+  const out: Record<string, HookCallbackMatcher[]> = {
+    ...(a as Record<string, HookCallbackMatcher[]>),
+  };
+  for (const [event, matchers] of Object.entries(b as Record<string, HookCallbackMatcher[]>)) {
+    out[event] = [...(out[event] ?? []), ...matchers];
+  }
+  return out as Options["hooks"];
 }
 
 /**
@@ -118,6 +185,24 @@ export function runSession(params: RunSessionParams): Query {
     env.ANTHROPIC_BASE_URL = params.anthropicBaseUrl;
   }
 
+  // Debug-only: warn when the system prompt / tools / model / betas change in a
+  // way that would invalidate the Anthropic prompt cache. Process-wide singleton,
+  // so concurrent sessions can over-report -- keep it a debug log, not a metric.
+  if (process.env.NOMOS_CACHE_DEBUG === "true") {
+    getPromptCacheTracker().check({
+      systemPrompt: params.systemPrompt ?? params.systemPromptAppend ?? "",
+      toolSchemas: Object.keys(params.mcpServers ?? {})
+        .sort()
+        .join(","),
+      model: params.model ?? "",
+      betas: (params.betas ?? []) as string[],
+    });
+  }
+
+  // Merge caller-provided hooks (registry PreToolUse/PostToolUse) with the
+  // opt-in tool-result dedup PostToolUse hook.
+  const hooks = mergeHooks(params.hooks, buildDedupHooks());
+
   return query({
     prompt: params.prompt,
     options: {
@@ -142,6 +227,8 @@ export function runSession(params: RunSessionParams): Query {
       env,
       ...(params.cwd ? { cwd: params.cwd } : {}),
       ...(params.onElicitation ? { onElicitation: params.onElicitation } : {}),
+      ...(hooks ? { hooks } : {}),
+      ...(params.effort ? { effort: params.effort } : {}),
     },
   });
 }

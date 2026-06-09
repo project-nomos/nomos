@@ -39,6 +39,8 @@ export interface SessionsTable {
 export interface TranscriptMessagesTable {
   id: Generated<number>;
   session_id: string;
+  /** Denormalized owner (per-user indexing without a join); defaults to 'local'. */
+  user_id: Generated<string>;
   role: string;
   /** JSONB — string or structured content blocks. */
   content: ColumnType<unknown, string, string>;
@@ -48,6 +50,7 @@ export interface TranscriptMessagesTable {
 
 export interface MemoryChunksTable {
   id: string;
+  user_id: Generated<string>;
   source: string;
   path: string | null;
   text: string;
@@ -66,6 +69,7 @@ export interface MemoryChunksTable {
 
 export interface CronJobsTable {
   id: Generated<string>;
+  user_id: Generated<string>;
   name: string;
   schedule: string;
   schedule_type: "at" | "every" | "cron";
@@ -173,6 +177,7 @@ export interface AgentPermissionsTable {
 
 export interface UserModelTable {
   id: Generated<string>;
+  user_id: Generated<string>;
   category: string;
   key: string;
   /** JSONB — can be any JSON value. */
@@ -204,6 +209,7 @@ export interface IngestJobsTable {
 
 export interface StyleProfilesTable {
   id: Generated<string>;
+  user_id: Generated<string>;
   contact_id: string | null;
   scope: Generated<string>;
   profile: ColumnType<Record<string, unknown>, string | undefined, string>;
@@ -214,6 +220,7 @@ export interface StyleProfilesTable {
 
 export interface WikiArticlesTable {
   id: Generated<string>;
+  user_id: Generated<string>;
   path: string;
   title: string;
   content: string;
@@ -226,8 +233,22 @@ export interface WikiArticlesTable {
   updated_at: Generated<Date>;
 }
 
+/** The vault: per-user agent long-term memory (source of truth). */
+export interface VaultNotesTable {
+  id: Generated<string>;
+  user_id: Generated<string>;
+  path: string;
+  title: string;
+  content: string;
+  backlinks: Generated<string[]>;
+  word_count: Generated<number>;
+  created_at: Generated<Date>;
+  updated_at: Generated<Date>;
+}
+
 export interface ContactsTable {
   id: Generated<string>;
+  user_id: Generated<string>;
   display_name: string;
   role: string | null;
   relationship: ColumnType<Record<string, unknown>, string | undefined, string>;
@@ -240,6 +261,7 @@ export interface ContactsTable {
 
 export interface ContactIdentitiesTable {
   id: Generated<string>;
+  user_id: Generated<string>;
   contact_id: string;
   platform: string;
   platform_user_id: string;
@@ -251,6 +273,7 @@ export interface ContactIdentitiesTable {
 
 export interface CommitmentsTable {
   id: Generated<string>;
+  user_id: Generated<string>;
   contact_id: string | null;
   description: string;
   source_msg: string | null;
@@ -373,6 +396,7 @@ export interface Database {
   ingest_jobs: IngestJobsTable;
   style_profiles: StyleProfilesTable;
   wiki_articles: WikiArticlesTable;
+  vault_notes: VaultNotesTable;
   contacts: ContactsTable;
   contact_identities: ContactIdentitiesTable;
   commitments: CommitmentsTable;

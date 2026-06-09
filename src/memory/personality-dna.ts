@@ -11,6 +11,7 @@
  */
 
 import { homedir } from "node:os";
+import { resolveMemoryUserId } from "../auth/tenant-context.ts";
 import { join } from "node:path";
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { getUserModel, upsertUserModel, type UserModelEntry } from "../db/user-model.ts";
@@ -95,7 +96,7 @@ function getDnaPath(): string {
 export async function compileDNA(): Promise<CompilationResult> {
   let entries: UserModelEntry[];
   try {
-    entries = await getUserModel();
+    entries = await getUserModel(resolveMemoryUserId(undefined));
   } catch {
     entries = [];
   }
@@ -230,6 +231,7 @@ export async function importDNA(
       .replace(/^_|_$/g, "");
 
     await upsertUserModel({
+      userId: resolveMemoryUserId(undefined),
       category: "decision_pattern",
       key,
       value: {
@@ -254,6 +256,7 @@ export async function importDNA(
       .replace(/^_|_$/g, "");
 
     await upsertUserModel({
+      userId: resolveMemoryUserId(undefined),
       category: "value",
       key,
       value: {
@@ -273,6 +276,7 @@ export async function importDNA(
       .replace(/[^a-z0-9]+/gi, "_")
       .toLowerCase()}`;
     await upsertUserModel({
+      userId: resolveMemoryUserId(undefined),
       category: "exemplar",
       key,
       value: {

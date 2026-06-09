@@ -12,6 +12,7 @@ import {
   type SDKMessage,
   type SdkPluginConfig,
 } from "../sdk/session.ts";
+import { buildSdkHooks } from "../hooks/sdk-adapter.ts";
 import { loadInstalledPlugins, toSdkPluginConfigs } from "../plugins/loader.ts";
 import { ensureDefaultPlugins } from "../plugins/installer.ts";
 import { createMemoryMcpServer } from "../sdk/tools.ts";
@@ -28,8 +29,12 @@ import {
 } from "../sdk/telegram-mcp.ts";
 import { isGoogleWorkspaceConfiguredAsync } from "../sdk/google-workspace-mcp.ts";
 import { buildGoogleMcpServers, buildGoogleIntegrationPrompt } from "../sdk/google-mcp.ts";
+import { buildVaultMcpServer } from "../sdk/vault-mcp.ts";
+import { buildMemoryDigest } from "../memory/digest.ts";
+import { getRelevantArticles } from "../memory/wiki-reader.ts";
 import { loadEnvConfig, type NomosConfig } from "../config/env.ts";
 import { FEATURES, isHosted } from "../config/mode.ts";
+import { resolveMemoryUserId } from "../auth/tenant-context.ts";
 
 /**
  * Built-in tools blocked when hosted-mode feature gates demand it. Centralized
@@ -58,6 +63,8 @@ import { loadAgentConfigs, getActiveAgent } from "../config/agents.ts";
 import { loadSkills, formatSkillsForPrompt } from "../skills/loader.ts";
 import { loadMcpConfig } from "../cli/mcp-config.ts";
 import { createSession as createDbSession, getSessionByKey } from "../db/sessions.ts";
+import { appendTranscriptMessage } from "../db/transcripts.ts";
+import { isEphemeralSession } from "./memory-indexer.ts";
 import { runMigrations } from "../db/migrate.ts";
 import type { IncomingMessage, OutgoingMessage, AgentEvent } from "./types.ts";
 import { TheoryOfMindTracker } from "../memory/theory-of-mind.ts";
@@ -306,13 +313,18 @@ export class AgentRuntime {
       // Permissions table may not exist yet on first run — skip
     }
 
-    // Load user model for adaptive behavior
+    // Load user model + exemplars for adaptive behavior, baked into the cached
+    // system prompt. This runs once at init with no per-turn user, so it is only
+    // correct for the single-owner power-user install. In hosted (multi-tenant)
+    // the per-turn `buildMemoryDigest` injects the right user's model+profile, so
+    // we skip the stale init-time load rather than bake one tenant's data into
+    // everyone's prompt.
     let userModel: import("../db/user-model.ts").UserModelEntry[] | undefined;
     let exemplars: import("../config/profile.ts").ExemplarEntry[] | undefined;
-    if (this.config.adaptiveMemory) {
+    if (this.config.adaptiveMemory && !isHosted()) {
       try {
         const { getUserModel } = await import("../db/user-model.ts");
-        userModel = await getUserModel();
+        userModel = await getUserModel(resolveMemoryUserId(undefined));
       } catch {
         // Table may not exist yet -- skip
       }
@@ -320,7 +332,12 @@ export class AgentRuntime {
       // Load exemplars for few-shot personality priming
       try {
         const { retrieveExemplars } = await import("../memory/exemplars.ts");
-        const stored = await retrieveExemplars("general conversation", undefined, 3);
+        const stored = await retrieveExemplars(
+          resolveMemoryUserId(undefined),
+          "general conversation",
+          undefined,
+          3,
+        );
         if (stored.length > 0) {
           exemplars = stored.map((e) => ({
             text: e.text,
@@ -546,10 +563,12 @@ export class AgentRuntime {
 
     const sessionKey = `${message.platform}:${message.channelId}`;
 
-    // Ensure DB session exists
+    // Ensure DB session exists, owned by the resolved tenant so the per-user
+    // GetMessages gate (sessions.user_id == ctx.userId) returns this user's history.
     await createDbSession({
       sessionKey,
       model: this.config.model,
+      userId: resolveMemoryUserId(message.userId),
     });
 
     // Look up cached SDK session ID for resume
@@ -570,6 +589,14 @@ export class AgentRuntime {
     if (this.config.smartRouting) {
       const classification = classifyQuery(message.content);
       model = this.config.modelTiers[classification.tier];
+      // Persist the routed model so the sessions row reflects what actually ran
+      // (createDbSession seeded the base config.model before classification).
+      // Fire-and-forget, and only when it differs, to avoid a redundant write.
+      if (model !== this.config.model) {
+        import("../db/sessions.ts")
+          .then(({ updateSessionModelByKey }) => updateSessionModelByKey(sessionKey, model))
+          .catch(() => {});
+      }
       log.info(
         `Smart routing: "${classification.tier}" (confidence: ${classification.confidence.toFixed(2)}) → ${model}`,
       );
@@ -741,6 +768,29 @@ export class AgentRuntime {
           .catch(() => {});
       }
 
+      // Persist the turn transcript (user + assistant) so MGetMessages and the
+      // load_thread tool have history. Off-the-record (ephemeral) sessions skip it.
+      if (!isEphemeralSession(sessionKey)) {
+        void (async () => {
+          const session = await getSessionByKey(sessionKey);
+          if (!session) return;
+          const uid = resolveMemoryUserId(message.userId);
+          await appendTranscriptMessage({
+            sessionId: session.id,
+            userId: uid,
+            role: "user",
+            content: message.content,
+          });
+          await appendTranscriptMessage({
+            sessionId: session.id,
+            userId: uid,
+            role: "assistant",
+            content: result.text || "",
+            usage: { input: result.inputTokens ?? 0, output: result.outputTokens ?? 0 },
+          });
+        })().catch(() => {});
+      }
+
       return {
         inReplyTo: message.id,
         platform: message.platform,
@@ -890,13 +940,24 @@ export class AgentRuntime {
     // Google's official remote MCP (read/draft/calendar/drive) + our opt-in
     // Gmail send tool, per connected account with fresh tokens (or the direct-
     // REST backup via NOMOS_GOOGLE_BACKEND=rest). Power-user keeps the gws CLI.
-    let mcpServers = this.mcpServers;
+    // Long-term memory (vault) tools, scoped to the vault owner. Both modes.
+    // In power-user mode every channel is the same owner, so collapse the raw
+    // channel sender id to the canonical local id (otherwise the vault fragments
+    // per channel); in hosted mode this is the authenticated per-tenant user.
+    const vaultUserId = resolveMemoryUserId(userId);
+    let mcpServers = {
+      ...this.mcpServers,
+      "nomos-vault": buildVaultMcpServer(vaultUserId),
+      // Rebuild the memory tools per-turn so memory_search is scoped to this
+      // owner (the cached one at init has no user). Overrides the cached entry.
+      "nomos-memory": createMemoryMcpServer(vaultUserId),
+    };
     let googlePrompt = "";
     if (isHosted() && userId) {
       try {
         const googleServers = await buildGoogleMcpServers(userId);
         if (Object.keys(googleServers).length > 0) {
-          mcpServers = { ...this.mcpServers, ...googleServers };
+          mcpServers = { ...mcpServers, ...googleServers };
         }
         // Tell the agent it actually HAS this access, otherwise it trusts the
         // static integrations summary (which lists only power-user channels) and
@@ -909,6 +970,15 @@ export class AgentRuntime {
         );
       }
     }
+
+    // Reasoning-first: always-inject what the agent already knows about the user,
+    // so it stays continuous without having to call a recall tool first.
+    const memoryDigest = await buildMemoryDigest(vaultUserId).catch(() => "");
+
+    // Query-specific: surface the most relevant compiled wiki articles for this
+    // turn (FTS over the owner's wiki, 4000-char budget). Empty when the wiki is
+    // empty or the prompt has no matches. Scoped to the resolved owner.
+    const wikiContext = await getRelevantArticles(vaultUserId, prompt).catch(() => "");
 
     // Auto-approve all tools from our MCP servers
     const allowedTools = Object.keys(mcpServers).map((name) => `mcp__${name}`);
@@ -939,6 +1009,29 @@ export class AgentRuntime {
       systemPromptAppend = systemPromptAppend + "\n\n" + googlePrompt;
     }
 
+    // Inject the reasoning-first memory digest (what the agent knows about the user)
+    if (memoryDigest) {
+      systemPromptAppend = systemPromptAppend + "\n\n" + memoryDigest;
+    }
+
+    // Inject query-relevant wiki articles LAST so the stable prefix (system
+    // prompt, tools, digest) stays prompt-cacheable up to this point.
+    if (wikiContext) {
+      systemPromptAppend = systemPromptAppend + "\n\n" + wikiContext;
+    }
+
+    // Writing-voice guidance (opt-in styleMatching): make the agent write in the
+    // owner's style, derived from their sent messages by the daily analysis job.
+    if (this.config.styleMatching) {
+      try {
+        const { buildStyleGuidance } = await import("../memory/style-prompt.ts");
+        const styleGuidance = await buildStyleGuidance(vaultUserId);
+        if (styleGuidance) systemPromptAppend = systemPromptAppend + "\n\n" + styleGuidance;
+      } catch (err) {
+        log.debug({ err }, "Style guidance injection failed");
+      }
+    }
+
     // Build the elicitation callback for this turn. The `ask_user` MCP
     // tool calls `extra.sendRequest({method: "elicitation/create"})`;
     // the SDK forwards to `onElicitation`, we route to the channel the
@@ -965,6 +1058,9 @@ export class AgentRuntime {
       plugins: this.plugins,
       useSubscription: this.config.useSubscription,
       onElicitation,
+      // PreToolUse blocking from ~/.nomos/hooks.json (no-op when none registered).
+      // Honored even in bypassPermissions mode -- a safety net for unattended runs.
+      hooks: buildSdkHooks({ sessionKey: sessionKey ?? "daemon" }),
       stderr: (data: string) => {
         // Log SDK subprocess stderr so we can diagnose crash reasons
         const trimmed = data.trim();

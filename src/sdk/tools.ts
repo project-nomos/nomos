@@ -4,6 +4,7 @@ import {
   type McpSdkServerConfigWithInstance,
 } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod/v4";
+import { traceMemory } from "../memory/trace.ts";
 import { handleBootstrapComplete } from "../ui/bootstrap.ts";
 import { createLogger } from "../lib/logger.ts";
 import { createAskUserTool } from "./ask-user.ts";
@@ -51,7 +52,7 @@ function formatSubgraph(sub: Subgraph): string {
  * Creates an in-process MCP server that exposes memory tools to the agent.
  * The agent can call `memory_search` to query the pgvector-backed memory store.
  */
-export function createMemoryMcpServer(): McpSdkServerConfigWithInstance {
+export function createMemoryMcpServer(userId: string = "local"): McpSdkServerConfigWithInstance {
   const memorySearchTool = tool(
     "memory_search",
     "Search the long-term memory store using hybrid vector + text search. Returns relevant code snippets, documentation, and previously stored knowledge. Use the category filter for targeted recall.",
@@ -87,17 +88,31 @@ export function createMemoryMcpServer(): McpSdkServerConfigWithInstance {
 
         if (!isEmbeddingAvailable()) {
           // Fall back to text-only search when embeddings are unavailable
-          results = await textOnlySearch(args.query, args.limit ?? 5, args.category);
+          results = await textOnlySearch(userId, args.query, args.limit ?? 5, args.category);
         } else {
           try {
             const embedding = await generateEmbedding(args.query);
-            results = await hybridSearch(args.query, embedding, args.limit ?? 5, args.category);
+            results = await hybridSearch(
+              userId,
+              args.query,
+              embedding,
+              args.limit ?? 5,
+              args.category,
+            );
           } catch {
             // Fall back to text-only search if embedding generation fails
             log.warn("Embedding generation failed, falling back to text-only search");
-            results = await textOnlySearch(args.query, args.limit ?? 5, args.category);
+            results = await textOnlySearch(userId, args.query, args.limit ?? 5, args.category);
           }
         }
+
+        traceMemory({
+          op: "recall_search",
+          userId,
+          query: args.query,
+          resultCount: results.length,
+          ref: args.category,
+        });
 
         if (results.length === 0) {
           return {
@@ -149,7 +164,7 @@ export function createMemoryMcpServer(): McpSdkServerConfigWithInstance {
     async (args) => {
       try {
         const { getUserModel } = await import("../db/user-model.ts");
-        const entries = await getUserModel(args.category);
+        const entries = await getUserModel(userId, args.category);
 
         if (entries.length === 0) {
           return {
@@ -597,6 +612,7 @@ export function createMemoryMcpServer(): McpSdkServerConfigWithInstance {
 
         const store = new CronStore();
         const id = await store.createJob({
+          userId,
           name: args.name,
           prompt: args.prompt,
           schedule: args.schedule,
@@ -1239,7 +1255,7 @@ export function createMemoryMcpServer(): McpSdkServerConfigWithInstance {
     async () => {
       try {
         const { consolidateMemory } = await import("../memory/consolidator.ts");
-        const result = await consolidateMemory();
+        const result = await consolidateMemory(userId);
         return {
           content: [
             {

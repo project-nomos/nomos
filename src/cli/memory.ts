@@ -10,6 +10,7 @@ import { getKysely, closeDb } from "../db/client.ts";
 import { chunkText } from "../memory/chunker.ts";
 import { generateEmbedding, generateEmbeddings } from "../memory/embeddings.ts";
 import { hybridSearch } from "../memory/search.ts";
+import { resolveMemoryUserId } from "../auth/tenant-context.ts";
 
 const TEXT_EXTENSIONS = new Set([
   ".ts",
@@ -114,6 +115,7 @@ export function registerMemoryCommand(program: Command): void {
 
             await storeMemoryChunk({
               id,
+              userId: resolveMemoryUserId(undefined),
               source: opts.source,
               path: filePath,
               text: chunk.text,
@@ -147,7 +149,7 @@ export function registerMemoryCommand(program: Command): void {
         const limit = parseInt(opts.limit, 10);
 
         const embedding = await generateEmbedding(query);
-        const results = await hybridSearch(query, embedding, limit);
+        const results = await hybridSearch(resolveMemoryUserId(undefined), query, embedding, limit);
 
         if (results.length === 0) {
           console.log(chalk.yellow("No results found."));
@@ -215,15 +217,18 @@ export function registerMemoryCommand(program: Command): void {
 
         let count: number;
         if (opts.source) {
-          count = await deleteMemoryBySource(opts.source);
+          count = await deleteMemoryBySource(resolveMemoryUserId(undefined), opts.source);
           console.log(chalk.green(`Deleted ${count} chunk(s) with source "${opts.source}"`));
         } else if (opts.path) {
           const resolvedPath = path.resolve(opts.path);
-          count = await deleteMemoryByPath(resolvedPath);
+          count = await deleteMemoryByPath(resolveMemoryUserId(undefined), resolvedPath);
           console.log(chalk.green(`Deleted ${count} chunk(s) from path "${resolvedPath}"`));
         } else {
           const db = getKysely();
-          const result = await db.deleteFrom("memory_chunks").executeTakeFirst();
+          const result = await db
+            .deleteFrom("memory_chunks")
+            .where("user_id", "=", resolveMemoryUserId(undefined))
+            .executeTakeFirst();
           count = Number(result.numDeletedRows ?? 0n);
           console.log(chalk.green(`Deleted all ${count} memory chunk(s)`));
         }

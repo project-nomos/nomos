@@ -20,6 +20,7 @@ import {
 import type { DraftRow } from "../db/drafts.ts";
 import type { OutgoingMessage, AgentEvent } from "./types.ts";
 import { findContactByIdentity } from "../identity/identities.ts";
+import { resolveMemoryUserId } from "../auth/tenant-context.ts";
 import { getConsentMode, type ConsentMode } from "../db/consent-config.ts";
 import { createLogger } from "../lib/logger.ts";
 
@@ -228,7 +229,11 @@ export class DraftManager {
 
       // Capture the edit as a learning signal (fire-and-forget)
       if (editedContent !== draft.content) {
-        this.captureDraftEdit(draft.content, editedContent).catch(() => {});
+        this.captureDraftEdit(
+          draft.content,
+          editedContent,
+          resolveMemoryUserId(draft.user_id),
+        ).catch(() => {});
       }
 
       this.notifyWs?.({
@@ -325,7 +330,11 @@ export class DraftManager {
     channelId: string,
   ): Promise<"auto" | "draft" | "silent"> {
     try {
-      const contact = await findContactByIdentity(platform, channelId);
+      const contact = await findContactByIdentity(
+        resolveMemoryUserId(undefined),
+        platform,
+        channelId,
+      );
       if (contact) {
         return contact.autonomy;
       }
@@ -339,10 +348,11 @@ export class DraftManager {
    * Capture a draft edit as a learning signal.
    * Feeds the original -> edited diff to the knowledge extractor.
    */
-  private async captureDraftEdit(original: string, edited: string): Promise<void> {
+  private async captureDraftEdit(original: string, edited: string, userId: string): Promise<void> {
     try {
       const { updateUserModel } = await import("../memory/user-model.ts");
       await updateUserModel(
+        userId,
         {
           facts: [],
           preferences: [],

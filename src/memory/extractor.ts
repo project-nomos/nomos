@@ -163,6 +163,7 @@ export async function extractKnowledge(
  * Returns the IDs of stored chunks for user model accumulation.
  */
 export async function extractAndStoreKnowledge(
+  userId: string,
   userMessage: string,
   agentResponse: string,
   sessionKey: string,
@@ -174,7 +175,7 @@ export async function extractAndStoreKnowledge(
   // Store extracted facts
   for (const fact of knowledge.facts) {
     const hash = createHash("sha256").update(fact.text).digest("hex").slice(0, 16);
-    const id = `fact:${hash}`;
+    const id = `fact:${userId}:${hash}`;
 
     let embedding: number[] | undefined;
     if (isEmbeddingAvailable()) {
@@ -187,6 +188,7 @@ export async function extractAndStoreKnowledge(
 
     await storeMemoryChunk({
       id,
+      userId,
       source: "conversation",
       path: sessionKey,
       text: fact.text,
@@ -205,7 +207,7 @@ export async function extractAndStoreKnowledge(
   for (const pref of knowledge.preferences) {
     const text = `Preference: ${pref.key} = ${pref.value}`;
     const hash = createHash("sha256").update(pref.key).digest("hex").slice(0, 16);
-    const id = `pref:${hash}`;
+    const id = `pref:${userId}:${hash}`;
 
     let embedding: number[] | undefined;
     if (isEmbeddingAvailable()) {
@@ -218,6 +220,7 @@ export async function extractAndStoreKnowledge(
 
     await storeMemoryChunk({
       id,
+      userId,
       source: "conversation",
       path: sessionKey,
       text,
@@ -235,7 +238,7 @@ export async function extractAndStoreKnowledge(
   for (const corr of knowledge.corrections) {
     const text = `Correction: "${corr.original}" → "${corr.corrected}"`;
     const hash = createHash("sha256").update(text).digest("hex").slice(0, 16);
-    const id = `corr:${hash}`;
+    const id = `corr:${userId}:${hash}`;
 
     let embedding: number[] | undefined;
     if (isEmbeddingAvailable()) {
@@ -248,6 +251,7 @@ export async function extractAndStoreKnowledge(
 
     await storeMemoryChunk({
       id,
+      userId,
       source: "conversation",
       path: sessionKey,
       text,
@@ -265,7 +269,7 @@ export async function extractAndStoreKnowledge(
   for (const pattern of knowledge.decisionPatterns) {
     const text = `Decision pattern: ${pattern.principle} (context: ${pattern.context})`;
     const hash = createHash("sha256").update(pattern.principle).digest("hex").slice(0, 16);
-    const id = `dp:${hash}`;
+    const id = `dp:${userId}:${hash}`;
 
     let embedding: number[] | undefined;
     if (isEmbeddingAvailable()) {
@@ -278,6 +282,7 @@ export async function extractAndStoreKnowledge(
 
     await storeMemoryChunk({
       id,
+      userId,
       source: "conversation",
       path: sessionKey,
       text,
@@ -300,7 +305,7 @@ export async function extractAndStoreKnowledge(
   for (const val of knowledge.values) {
     const text = `Value: ${val.value} -- ${val.description}`;
     const hash = createHash("sha256").update(val.value).digest("hex").slice(0, 16);
-    const id = `val:${hash}`;
+    const id = `val:${userId}:${hash}`;
 
     let embedding: number[] | undefined;
     if (isEmbeddingAvailable()) {
@@ -313,6 +318,7 @@ export async function extractAndStoreKnowledge(
 
     await storeMemoryChunk({
       id,
+      userId,
       source: "conversation",
       path: sessionKey,
       text,

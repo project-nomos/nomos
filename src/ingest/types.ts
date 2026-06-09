@@ -35,12 +35,16 @@ export interface IngestOptions {
   embeddingBatchSize?: number;
   /** Run type: full (initial) or delta (incremental) */
   runType?: "full" | "delta";
+  /** Cron-style interval for the delta-sync job seeded after a full ingest (e.g. "6h", "1h"). Defaults to the DB default "6h" when omitted. */
+  deltaSchedule?: string;
   /**
    * For sources that support multiple accounts (currently Gmail), restrict
    * to a single account by email. If omitted, the source iterates every
    * authorized account.
    */
   account?: string;
+  /** Owner of the imported memory. Resolved via resolveMemoryUserId; defaults to the local owner. */
+  userId?: string;
 }
 
 export interface IngestProgress {

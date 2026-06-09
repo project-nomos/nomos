@@ -8,11 +8,13 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { systemTenant } from "../auth/tenant-context.ts";
 import { fileURLToPath } from "node:url";
 import { AgentRuntime } from "./agent-runtime.ts";
 import { MessageQueue } from "./message-queue.ts";
 import { DaemonWebSocketServer } from "./websocket-server.ts";
 import { GrpcServer } from "./grpc-server.ts";
+import { ConnectServer } from "./connect-server.ts";
 import { ChannelManager } from "./channel-manager.ts";
 import { CronEngine } from "./cron-engine.ts";
 import { DraftManager } from "./draft-manager.ts";
@@ -52,6 +54,8 @@ export interface GatewayOptions {
   port?: number;
   /** gRPC server port (default: port + 1, i.e., 8766) */
   grpcPort?: number;
+  /** Connect (HTTP) server port for mobile clients (default: grpcPort + 1, i.e., 8767) */
+  connectPort?: number;
   /** Skip channel adapters (useful for testing) */
   skipChannels?: boolean;
   /** Skip cron engine */
@@ -67,6 +71,7 @@ export class Gateway {
   private messageQueue: MessageQueue;
   private wsServer: DaemonWebSocketServer;
   private grpcServer: GrpcServer;
+  private connectServer: ConnectServer;
   private channelManager: ChannelManager;
   private cronEngine: CronEngine;
   private draftManager: DraftManager;
@@ -115,6 +120,14 @@ export class Gateway {
       options.grpcPort ?? (options.port ?? 8765) + 1,
       this.draftManager,
     );
+
+    // 4c. Create Connect server (HTTP/1.1 — mobile clients use this).
+    const grpcPort = options.grpcPort ?? (options.port ?? 8765) + 1;
+    this.connectServer = new ConnectServer({
+      messageQueue: this.messageQueue,
+      draftManager: this.draftManager,
+      port: options.connectPort ?? grpcPort + 1,
+    });
 
     // 5. Create channel manager
     this.channelManager = new ChannelManager();
@@ -198,6 +211,18 @@ export class Gateway {
       log.warn({ err: err instanceof Error ? err.message : err }, "File sync failed");
     }
 
+    // Load the event-driven hook registry (~/.nomos/hooks.json + ./.nomos/hooks.json)
+    // into the process-global singleton so PreToolUse blocking is reachable. No-op
+    // for users without a hooks.json. cwd-tier hooks depend on the daemon's cwd.
+    try {
+      const { initializeHooks } = await import("../hooks/registry.ts");
+      const reg = await initializeHooks();
+      const count = reg.getAllHooks().length;
+      if (count > 0) log.info(`Loaded ${count} hook(s) from hooks.json`);
+    } catch (err) {
+      log.warn({ err: err instanceof Error ? err.message : err }, "Hook registry load failed");
+    }
+
     // Verify LLM access before starting services
     await this.checkLlmAccess();
 
@@ -214,6 +239,16 @@ export class Gateway {
 
     // Start gRPC server
     await this.grpcServer.start();
+
+    // Start Connect server (mobile clients) — same handlers, HTTP-friendly wire.
+    try {
+      await this.connectServer.start();
+    } catch (err) {
+      log.warn(
+        { err: err instanceof Error ? err.message : err },
+        "Connect server failed to start (mobile clients will be unable to reach the daemon)",
+      );
+    }
 
     // Register command handler for hot-reload and ingestion triggers
     this.grpcServer.onCommand((command) => this.handleCommand(command));
@@ -292,6 +327,7 @@ export class Gateway {
       const existingWikiJob = await cronStore.getJobByName("wiki-compile");
       if (!existingWikiJob) {
         await cronStore.createJob({
+          userId: systemTenant().userId,
           name: "wiki-compile",
           schedule: "1h",
           scheduleType: "every",
@@ -308,6 +344,113 @@ export class Gateway {
       log.warn({ err }, "Wiki cron registration failed");
     }
 
+    // Register auto-dream + magic-docs background jobs. Both are sentinel
+    // prompts handled directly by CronEngine.handleCronJob (no agent turn).
+    try {
+      const { CronStore } = await import("../cron/store.ts");
+      const cronStore = new CronStore();
+
+      // Auto-dream consolidation: fire every 6h; the runner is singleton-gated
+      // (1h + >=10 new chunks) and leased, so it no-ops when not yet due.
+      if (!(await cronStore.getJobByName("auto-dream"))) {
+        await cronStore.createJob({
+          userId: systemTenant().userId,
+          name: "auto-dream",
+          schedule: "6h",
+          scheduleType: "every",
+          sessionTarget: "isolated",
+          deliveryMode: "none",
+          prompt: "__auto_dream__",
+          enabled: true,
+          errorCount: 0,
+        });
+        log.info("Registered auto-dream cron job (every 6h)");
+        process.emit("cron:refresh" as never);
+      }
+
+      // Magic-docs refresh: re-sync self-updating docs every 1h (content-gated).
+      if (!(await cronStore.getJobByName("magic-docs-refresh"))) {
+        await cronStore.createJob({
+          userId: systemTenant().userId,
+          name: "magic-docs-refresh",
+          schedule: "1h",
+          scheduleType: "every",
+          sessionTarget: "isolated",
+          deliveryMode: "none",
+          prompt: "__magic_docs__",
+          enabled: true,
+          errorCount: 0,
+        });
+        log.info("Registered magic-docs refresh cron job (every 1h)");
+        process.emit("cron:refresh" as never);
+      }
+
+      // Style analysis: re-derive the user's writing voice daily. Self-gates on
+      // config.styleMatching at fire time, so the job is harmless when the
+      // feature is off (and reflects a later toggle without reseeding).
+      if (!(await cronStore.getJobByName("style-analyze"))) {
+        await cronStore.createJob({
+          userId: systemTenant().userId,
+          name: "style-analyze",
+          schedule: "24h",
+          scheduleType: "every",
+          sessionTarget: "isolated",
+          deliveryMode: "none",
+          prompt: "__style_analyze__",
+          enabled: true,
+          errorCount: 0,
+        });
+        log.info("Registered style-analyze cron job (every 24h)");
+        process.emit("cron:refresh" as never);
+      }
+
+      // Graph semantics: embed kg_nodes that lack an embedding and materialize
+      // meaning-based (semantic_sibling) edges, every 6h. Otherwise the kg_nodes
+      // vector index + semantic traversal stay dormant (only the manual
+      // `nomos brain semantic` CLI populated them).
+      if (!(await cronStore.getJobByName("graph-semantic"))) {
+        await cronStore.createJob({
+          userId: systemTenant().userId,
+          name: "graph-semantic",
+          schedule: "6h",
+          scheduleType: "every",
+          sessionTarget: "isolated",
+          deliveryMode: "none",
+          prompt: "__graph_semantic__",
+          enabled: true,
+          errorCount: 0,
+        });
+        log.info("Registered graph-semantic cron job (every 6h)");
+        process.emit("cron:refresh" as never);
+      }
+    } catch (err) {
+      log.warn({ err }, "Auto-dream/magic-docs cron registration failed");
+    }
+
+    // Reconcile the on-disk wiki cache with the DB at boot, power-user only
+    // (hosted pods share the DB; a per-node disk copy would diverge). Empty DB
+    // hydrates from disk; otherwise the DB is mirrored to disk. Fire-and-forget
+    // so a large disk walk never blocks the rest of boot.
+    try {
+      const { isHosted } = await import("../config/mode.ts");
+      if (!isHosted()) {
+        const { reconcileOnStartup } = await import("../memory/wiki-sync.ts");
+        const { listMemoryOwners } = await import("../auth/org-members.ts");
+        void (async () => {
+          for (const userId of await listMemoryOwners()) {
+            await reconcileOnStartup(userId).catch((err) =>
+              log.warn(
+                { err: err instanceof Error ? err.message : err, userId },
+                "Wiki reconcile failed for owner",
+              ),
+            );
+          }
+        })();
+      }
+    } catch (err) {
+      log.warn({ err: err instanceof Error ? err.message : err }, "Wiki reconcile skipped");
+    }
+
     // Start CATE protocol server (agent-to-agent trust layer)
     try {
       this.cateIntegration = await initCATEIntegration({
@@ -320,7 +463,11 @@ export class Gateway {
             platform: "cate",
             channelId: envelope.header.thread_id,
             threadId: envelope.header.thread_id,
-            userId: envelope.parties.from.did,
+            // The vault/memory owner is the LOCAL recipient, not the remote
+            // sender. The sender DID is surfaced separately (broadcast below) for
+            // trust/display; using it as the owner would spin up a junk per-DID
+            // partition.
+            userId: systemTenant().userId,
             content: payload,
             timestamp: new Date(envelope.header.timestamp),
           };
@@ -411,6 +558,7 @@ export class Gateway {
     this.cronEngine.stop();
     await this.channelManager.stop();
     await this.grpcServer.stop();
+    await this.connectServer.stop();
     await this.wsServer.stop();
     await closeBrowser();
 

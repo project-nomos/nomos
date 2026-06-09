@@ -20,23 +20,24 @@ export function computeMessageHash(msg: IngestMessage): string {
  * Check which hashes already exist in memory_chunks.
  * Returns a Set of hashes that are already stored.
  */
-export async function findExistingHashes(hashes: string[]): Promise<Set<string>> {
+export async function findExistingHashes(userId: string, hashes: string[]): Promise<Set<string>> {
   if (hashes.length === 0) return new Set();
 
   const sql = getDb();
   const rows = await sql<{ hash: string }[]>`
     SELECT hash FROM memory_chunks
-    WHERE hash = ANY(${hashes})
+    WHERE user_id = ${userId} AND hash = ANY(${hashes})
   `;
 
   return new Set(rows.map((r) => r.hash));
 }
 
 /**
- * Filter a batch of messages, returning only those not already stored.
- * Also returns the hash for each message so the pipeline can store it.
+ * Filter a batch of messages, returning only those not already stored for this
+ * owner. Also returns the hash for each message so the pipeline can store it.
  */
 export async function deduplicateBatch(
+  userId: string,
   messages: IngestMessage[],
 ): Promise<Array<{ message: IngestMessage; hash: string }>> {
   const hashMap = new Map<string, IngestMessage>();
@@ -44,7 +45,7 @@ export async function deduplicateBatch(
     hashMap.set(computeMessageHash(msg), msg);
   }
 
-  const existing = await findExistingHashes([...hashMap.keys()]);
+  const existing = await findExistingHashes(userId, [...hashMap.keys()]);
 
   const results: Array<{ message: IngestMessage; hash: string }> = [];
   for (const [hash, message] of hashMap) {

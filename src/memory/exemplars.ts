@@ -136,6 +136,7 @@ export async function scoreExemplar(
  * Only stores messages scoring above the threshold (0.6).
  */
 export async function storeExemplar(
+  userId: string,
   scored: ExemplarScore,
   platform: string,
   sessionKey: string,
@@ -143,7 +144,7 @@ export async function storeExemplar(
   if (scored.score < 0.6) return null;
 
   const hash = createHash("sha256").update(scored.text).digest("hex").slice(0, 16);
-  const id = `exemplar:${hash}`;
+  const id = `exemplar:${userId}:${hash}`;
   const embeddingModel = process.env.EMBEDDING_MODEL ?? "gemini-embedding-001";
 
   let embedding: number[] | undefined;
@@ -157,6 +158,7 @@ export async function storeExemplar(
 
   await storeMemoryChunk({
     id,
+    userId,
     source: "exemplar",
     path: sessionKey,
     text: scored.text,
@@ -180,6 +182,7 @@ export async function storeExemplar(
  * Fire-and-forget -- safe to call without awaiting.
  */
 export async function scoreAndStoreExemplar(
+  userId: string,
   message: string,
   platform: string,
   sessionKey: string,
@@ -187,7 +190,7 @@ export async function scoreAndStoreExemplar(
 ): Promise<void> {
   const scored = await scoreExemplar(message, platform, contextHint);
   if (scored) {
-    await storeExemplar(scored, platform, sessionKey);
+    await storeExemplar(userId, scored, platform, sessionKey);
     if (scored.score >= 0.6) {
       log.debug({ score: scored.score, context: scored.context }, "Stored exemplar");
     }
@@ -199,6 +202,7 @@ export async function scoreAndStoreExemplar(
  * Returns 2-3 best-matching exemplars for few-shot priming.
  */
 export async function retrieveExemplars(
+  userId: string,
   query: string,
   context?: ExemplarContext,
   limit: number = 3,
@@ -209,12 +213,12 @@ export async function retrieveExemplars(
     if (isEmbeddingAvailable()) {
       try {
         const embedding = await generateEmbedding(query);
-        results = await searchMemoryByVector(embedding, limit * 3, "exemplar");
+        results = await searchMemoryByVector(userId, embedding, limit * 3, "exemplar");
       } catch {
-        results = await searchMemoryByText(query, limit * 3, "exemplar");
+        results = await searchMemoryByText(userId, query, limit * 3, "exemplar");
       }
     } else {
-      results = await searchMemoryByText(query, limit * 3, "exemplar");
+      results = await searchMemoryByText(userId, query, limit * 3, "exemplar");
     }
 
     // Filter by context if specified, then take top results

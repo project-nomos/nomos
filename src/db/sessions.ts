@@ -22,15 +22,21 @@ export async function createSession(params: {
   agentId?: string;
   model?: string;
   metadata?: Record<string, unknown>;
+  /** Owner of this session. Drives the per-user GetMessages gate; defaults to 'local'. */
+  userId?: string;
 }): Promise<SessionRow> {
   const db = getKysely();
   const row = await db
     .insertInto("sessions")
     .values({
       session_key: params.sessionKey,
+      user_id: params.userId ?? "local",
       agent_id: params.agentId ?? "default",
       model: params.model ?? null,
-      metadata: JSON.stringify(params.metadata ?? {}),
+      // Pass the object (not JSON.stringify): the driver serializes to jsonb once.
+      // A pre-stringified string double-encodes into a jsonb *string*, which breaks
+      // metadata->>'sdkSessionId' reads (cross-restart resume) and jsonb_set updates.
+      metadata: (params.metadata ?? {}) as unknown as string,
     })
     .onConflict((oc) =>
       oc.column("session_key").doUpdateSet({
@@ -109,12 +115,22 @@ export async function updateSessionModel(sessionId: string, model: string): Prom
     .execute();
 }
 
+/** Like {@link updateSessionModel} but keyed by session_key (what the daemon has on the hot path). */
+export async function updateSessionModelByKey(sessionKey: string, model: string): Promise<void> {
+  const db = getKysely();
+  await db
+    .updateTable("sessions")
+    .set({ model, updated_at: sql`now()` })
+    .where("session_key", "=", sessionKey)
+    .execute();
+}
+
 export async function updateSessionSdkId(sessionKey: string, sdkSessionId: string): Promise<void> {
   const db = getKysely();
   await db
     .updateTable("sessions")
     .set({
-      metadata: sql`jsonb_set(COALESCE(metadata, '{}'), '{sdkSessionId}', ${JSON.stringify(sdkSessionId)}::jsonb)`,
+      metadata: sql`jsonb_set(COALESCE(metadata, '{}'), '{sdkSessionId}', to_jsonb(${sdkSessionId}::text))`,
       updated_at: sql`now()`,
     })
     .where("session_key", "=", sessionKey)

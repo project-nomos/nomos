@@ -15,11 +15,20 @@
  * 4. The doc is rewritten in place, preserving the marker
  */
 
-import { readFile, writeFile, stat } from "node:fs/promises";
+import { readFile, writeFile, readdir } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { homedir } from "node:os";
+import path from "node:path";
 import { getKysely } from "../db/client.ts";
+import { runForkedAgent } from "../sdk/forked-agent.ts";
 import { createLogger } from "../lib/logger.ts";
 
 const log = createLogger("magic-docs");
+
+/** SHA-256 of a doc's content, for content-addressed staleness. */
+function contentHash(content: string): string {
+  return createHash("sha256").update(content, "utf-8").digest("hex");
+}
 
 /** Marker regex to detect magic doc files. */
 const MAGIC_DOC_MARKER = /<!--\s*MAGIC DOC:\s*(.+?)\s*-->/;
@@ -38,31 +47,36 @@ export function detectMagicDoc(content: string): string | null {
 
 /**
  * Check if a magic doc is stale and needs updating.
+ *
+ * Staleness is content-addressed plus time-gated:
+ * - never updated -> stale
+ * - the file content changed since the last update (hash mismatch) -> stale,
+ *   so a manual edit re-syncs the doc immediately
+ * - otherwise, stale once the refresh interval has elapsed (periodic
+ *   re-check that catches drift in the source the doc documents)
  */
 export async function isMagicDocStale(filePath: string): Promise<boolean> {
-  const lastUpdated = await loadLastUpdated(filePath);
+  const state = await loadMagicDocState(filePath);
 
-  if (!lastUpdated) {
-    // Never updated — definitely stale
+  if (!state.lastUpdated) {
+    // Never updated -> definitely stale.
     return true;
   }
 
-  const elapsed = Date.now() - new Date(lastUpdated).getTime();
-  if (elapsed < MIN_UPDATE_INTERVAL_MS) {
-    // Updated recently — not stale
-    return false;
+  // Content-addressed: if the doc's bytes differ from what we last wrote, it
+  // was edited (or never hashed) and should be re-synced now.
+  if (state.lastHash) {
+    try {
+      const current = contentHash(await readFile(filePath, "utf-8"));
+      if (current !== state.lastHash) return true;
+    } catch {
+      return true;
+    }
   }
 
-  // Check if any source files have changed since last update
-  // (heuristic: check if the doc's own mtime is newer than last update)
-  try {
-    const fileStat = await stat(filePath);
-    const fileModified = fileStat.mtime.getTime();
-    const lastUpdate = new Date(lastUpdated).getTime();
-    return fileModified > lastUpdate || elapsed > MIN_UPDATE_INTERVAL_MS;
-  } catch {
-    return true;
-  }
+  // Otherwise refresh on the interval to catch source drift.
+  const elapsed = Date.now() - new Date(state.lastUpdated).getTime();
+  return elapsed >= MIN_UPDATE_INTERVAL_MS;
 }
 
 /**
@@ -99,19 +113,32 @@ Do not wrap in code fences or add explanations.`;
 
 /**
  * Mark a magic doc as updated.
+ *
+ * Persists the content hash (for content-addressed staleness) and an
+ * optional metadata bag (title, model, etc.) into state_json.
  */
-export async function markMagicDocUpdated(filePath: string): Promise<void> {
+export async function markMagicDocUpdated(
+  filePath: string,
+  opts?: { contentHash?: string; state?: Record<string, unknown> },
+): Promise<void> {
   try {
     const db = getKysely();
+    // Pass the OBJECT (not JSON.stringify): postgres-js serializes to jsonb once.
+    // Stringifying first double-encodes into a jsonb *string*.
+    const stateJson = (opts?.state ?? null) as unknown as string | null;
     await db
       .insertInto("magic_doc_state")
       .values({
         file_path: filePath,
         last_updated_at: new Date(),
+        last_content_hash: opts?.contentHash ?? null,
+        state_json: stateJson,
       })
       .onConflict((oc) =>
         oc.column("file_path").doUpdateSet({
           last_updated_at: new Date(),
+          last_content_hash: opts?.contentHash ?? null,
+          state_json: stateJson,
         }),
       )
       .execute();
@@ -122,34 +149,136 @@ export async function markMagicDocUpdated(filePath: string): Promise<void> {
 
 /**
  * Update a magic doc file with new content.
- * Preserves the marker and writes the updated content.
+ * Preserves the marker, writes the content, and records its hash + metadata
+ * so the next staleness check is content-addressed.
  */
 export async function writeMagicDoc(filePath: string, newContent: string): Promise<void> {
   // Ensure the marker is present
-  if (!MAGIC_DOC_MARKER.test(newContent)) {
-    const title = detectMagicDoc(await readFile(filePath, "utf-8"));
+  let title = detectMagicDoc(newContent);
+  if (!title) {
+    title = detectMagicDoc(await readFile(filePath, "utf-8"));
     if (title) {
       newContent = `<!-- MAGIC DOC: ${title} -->\n\n${newContent}`;
     }
   }
 
   await writeFile(filePath, newContent, "utf-8");
-  await markMagicDocUpdated(filePath);
+  await markMagicDocUpdated(filePath, {
+    contentHash: contentHash(newContent),
+    state: { title: title ?? null, chars: newContent.length },
+  });
 }
 
 // ── State Management ──
 
-async function loadLastUpdated(filePath: string): Promise<string | undefined> {
+interface MagicDocState {
+  lastUpdated?: string;
+  lastHash?: string;
+}
+
+async function loadMagicDocState(filePath: string): Promise<MagicDocState> {
   try {
     const db = getKysely();
     const row = await db
       .selectFrom("magic_doc_state")
-      .select("last_updated_at")
+      .select(["last_updated_at", "last_content_hash"])
       .where("file_path", "=", filePath)
       .executeTakeFirst();
-    return row?.last_updated_at ? new Date(row.last_updated_at).toISOString() : undefined;
+    if (!row) return {};
+    return {
+      lastUpdated: row.last_updated_at ? new Date(row.last_updated_at).toISOString() : undefined,
+      lastHash: row.last_content_hash ?? undefined,
+    };
   } catch (err) {
     log.warn({ err, filePath }, "Failed to load magic doc state");
-    return undefined;
+    return {};
   }
+}
+
+// ── Background Runner ──
+
+/** Default roots scanned (shallowly) for magic-doc markdown files. */
+function defaultMagicDocRoots(): string[] {
+  return [process.cwd(), path.join(process.cwd(), ".nomos"), path.join(homedir(), ".nomos")];
+}
+
+/**
+ * Find magic-doc files under the given roots (non-recursive scan of each root,
+ * cheap + bounded). A file qualifies if it ends in `.md` and contains the marker.
+ */
+async function findMagicDocs(roots: string[]): Promise<string[]> {
+  const found: string[] = [];
+  const seen = new Set<string>();
+  for (const root of roots) {
+    let entries: string[];
+    try {
+      entries = await readdir(root);
+    } catch {
+      continue; // root doesn't exist
+    }
+    for (const name of entries) {
+      if (!name.endsWith(".md")) continue;
+      const full = path.join(root, name);
+      if (seen.has(full)) continue;
+      seen.add(full);
+      try {
+        const content = await readFile(full, "utf-8");
+        if (detectMagicDoc(content)) found.push(full);
+      } catch {
+        // unreadable; skip
+      }
+    }
+  }
+  return found;
+}
+
+/**
+ * Refresh all stale magic docs found under `roots` (or a sensible default set).
+ *
+ * For each stale doc, runs a forked agent with the update prompt and writes the
+ * result back in place. Fire-and-forget safe: failures are logged, not thrown.
+ * Returns a summary of what was scanned, refreshed, and skipped.
+ */
+export async function refreshMagicDocs(
+  roots?: string[],
+): Promise<{ scanned: number; refreshed: number; skipped: number; failed: number }> {
+  const docs = await findMagicDocs(roots ?? defaultMagicDocRoots());
+  let refreshed = 0;
+  let skipped = 0;
+  let failed = 0;
+
+  for (const filePath of docs) {
+    try {
+      if (!(await isMagicDocStale(filePath))) {
+        skipped++;
+        continue;
+      }
+      const current = await readFile(filePath, "utf-8");
+      const title = detectMagicDoc(current);
+      if (!title) {
+        skipped++;
+        continue;
+      }
+      const result = await runForkedAgent({
+        prompt: buildMagicDocUpdatePrompt(title, current, filePath),
+        maxTurns: 15,
+        label: "magic-doc",
+      });
+      const next = result.text.trim();
+      if (!next || next.length < 20) {
+        // Agent produced nothing usable; leave the doc untouched.
+        skipped++;
+        continue;
+      }
+      await writeMagicDoc(filePath, next);
+      refreshed++;
+      log.info({ filePath, title }, "Magic doc refreshed");
+    } catch (err) {
+      failed++;
+      log.warn({ err, filePath }, "Failed to refresh magic doc");
+    }
+  }
+
+  log.info({ scanned: docs.length, refreshed, skipped, failed }, "Magic docs refresh complete");
+  return { scanned: docs.length, refreshed, skipped, failed };
 }

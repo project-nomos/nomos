@@ -59,7 +59,7 @@ export function registerWikiCommand(program: Command): void {
       getDb();
       try {
         const { listArticles } = await import("../db/wiki.ts");
-        const articles = await listArticles();
+        const articles = await listArticles("local");
 
         if (articles.length === 0) {
           console.log(chalk.dim("No wiki articles. Run `nomos wiki compile` to generate."));
@@ -100,7 +100,7 @@ export function registerWikiCommand(program: Command): void {
         if (!p.endsWith(".md")) p += ".md";
         if (!p.includes("/")) p = `contacts/${p}`;
 
-        const article = await getArticle(p);
+        const article = await getArticle("local", p);
         if (!article) {
           console.log(chalk.red(`Article not found: ${p}`));
           console.log(chalk.dim("Run `nomos wiki list` to see available articles."));

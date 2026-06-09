@@ -18,7 +18,11 @@ export interface RelationshipData {
   messageCount?: number;
 }
 
-export async function updateRelationship(contactId: string, data: RelationshipData): Promise<void> {
+export async function updateRelationship(
+  userId: string,
+  contactId: string,
+  data: RelationshipData,
+): Promise<void> {
   const db = getKysely();
   const dataJson = JSON.stringify(data);
 
@@ -28,15 +32,20 @@ export async function updateRelationship(contactId: string, data: RelationshipDa
       relationship: sql`relationship || ${dataJson}::jsonb`,
       updated_at: sql`now()`,
     })
+    .where("user_id", "=", userId)
     .where("id", "=", contactId)
     .execute();
 }
 
-export async function getRelationship(contactId: string): Promise<RelationshipData | null> {
+export async function getRelationship(
+  userId: string,
+  contactId: string,
+): Promise<RelationshipData | null> {
   const db = getKysely();
   const row = await db
     .selectFrom("contacts")
     .select("relationship")
+    .where("user_id", "=", userId)
     .where("id", "=", contactId)
     .executeTakeFirst();
   if (!row) return null;
@@ -47,14 +56,16 @@ export async function getRelationship(contactId: string): Promise<RelationshipDa
  * Compute relationship stats from ingested messages.
  */
 export async function computeRelationshipStats(
+  userId: string,
   contactId: string,
 ): Promise<RelationshipData | null> {
   const db = getKysely();
 
-  // Get all identities for this contact
+  // Get all identities for this contact (owner-scoped)
   const identities = await db
     .selectFrom("contact_identities")
     .select("platform_user_id")
+    .where("user_id", "=", userId)
     .where("contact_id", "=", contactId)
     .execute();
 
@@ -69,6 +80,7 @@ export async function computeRelationshipStats(
       sql<string | null>`MIN(metadata->>'timestamp')`.as("first_msg"),
       sql<string | null>`MAX(metadata->>'timestamp')`.as("last_msg"),
     ])
+    .where("user_id", "=", userId)
     .where(sql`metadata->>'source'`, "=", "ingest")
     .where(sql`metadata->>'contact'`, "=", sql`ANY(${userIds})`)
     .executeTakeFirst();

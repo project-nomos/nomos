@@ -64,6 +64,10 @@ export interface NomosConfig {
   openrouterApiKey?: string;
   /** Enable knowledge extraction and user model learning (default: false) */
   adaptiveMemory: boolean;
+  /** Extract + track commitments from each turn and remind on deadlines (default: false; opt-in -- adds an LLM call per turn) */
+  commitmentTracking: boolean;
+  /** Analyze the user's writing voice and write in it (default: false; opt-in -- daily analysis + per-turn style guidance) */
+  styleMatching: boolean;
   /** Model for knowledge extraction (default: haiku) */
   extractionModel?: string;
   /** Enable passive behavioral observation (shadow mode) (default: false) */
@@ -156,6 +160,8 @@ export function loadEnvConfig(): NomosConfig {
     anthropicBaseUrl: process.env.ANTHROPIC_BASE_URL,
     openrouterApiKey: process.env.OPENROUTER_API_KEY,
     adaptiveMemory: process.env.NOMOS_ADAPTIVE_MEMORY !== "false",
+    commitmentTracking: process.env.NOMOS_COMMITMENT_TRACKING === "true",
+    styleMatching: process.env.NOMOS_STYLE_MATCHING === "true",
     extractionModel: process.env.NOMOS_EXTRACTION_MODEL,
     shadowMode: process.env.NOMOS_SHADOW_MODE === "true",
     alternateBuffer: process.env.NOMOS_ALTERNATE_BUFFER === "true",

@@ -29,6 +29,7 @@ export const NODE_KINDS = [
   "event",
   "org",
   "wiki",
+  "vault",
   "moc",
   "chunk",
 ] as const;
@@ -734,6 +735,7 @@ export async function getTrajectory(
 export interface BackfillResult {
   personNodes: number;
   wikiNodes: number;
+  vaultNodes: number;
   linkEdges: number;
 }
 
@@ -741,11 +743,12 @@ export interface BackfillResult {
  * Promote what Nomos already captures into the graph, idempotently:
  *   - contacts            -> person nodes (external_ref = contacts.id)
  *   - contact_identities  -> aliases folded onto the person node
- *   - wiki_articles       -> wiki nodes (external_ref = path)
- *   - wiki backlinks[]    -> links_to edges between wiki nodes
+ *   - vault_notes         -> vault nodes (external_ref = path) [source of truth]
+ *   - wiki_articles       -> wiki nodes (external_ref = path) [derived/compiled]
+ *   - vault + wiki backlinks[] -> links_to edges between note nodes
  *
- * Scoped to one TenantContext. For multi-user (shared-DB) installs call once
- * per user; wiki_articles has no user_id so its rows are stamped with ctx.userId.
+ * Scoped to one TenantContext. vault_notes has its own user_id (filtered on);
+ * wiki_articles has none, so its rows are stamped with ctx.userId.
  */
 export async function backfillGraph(ctx: TenantContext = LOCAL_TENANT): Promise<BackfillResult> {
   const db = getKysely();
@@ -769,7 +772,7 @@ export async function backfillGraph(ctx: TenantContext = LOCAL_TENANT): Promise<
         n.aliases || COALESCE((
           SELECT array_agg(ci.display_name)
           FROM contact_identities ci
-          WHERE ci.contact_id::text = n.external_ref AND ci.display_name IS NOT NULL
+          WHERE ci.contact_id::text = n.external_ref AND ci.user_id = ${uid} AND ci.display_name IS NOT NULL
         ), '{}')
       ) a WHERE a IS NOT NULL AND a <> n.name
     )
@@ -781,20 +784,77 @@ export async function backfillGraph(ctx: TenantContext = LOCAL_TENANT): Promise<
       INSERT INTO kg_nodes (kind, name, canonical_key, external_kind, external_ref, user_id, confidence)
       SELECT 'wiki', w.title, lower(w.path), 'wiki', w.path, ${uid}, 0.8
       FROM wiki_articles w
+      WHERE w.user_id = ${uid}
       ON CONFLICT (user_id, kind, canonical_key) DO NOTHING
       RETURNING 1
     ) SELECT count(*)::text AS n FROM ins
   `.execute(db);
 
-  // wiki_articles.backlinks[] -> links_to edges between wiki nodes.
+  // vault_notes -> vault nodes. The vault is the source of truth; its notes
+  // become first-class graph nodes with their own kind 'vault'. A vault note and
+  // a wiki article that happen to share a path become two distinct nodes (the
+  // UNIQUE key is (user_id, kind, canonical_key)); the links_to backfill below
+  // disambiguates them by kind. vault_notes has its own user_id, so we filter on
+  // it directly.
+  const vaults = await sql<{ n: string }>`
+    WITH ins AS (
+      INSERT INTO kg_nodes (kind, name, canonical_key, external_kind, external_ref, user_id, confidence)
+      SELECT 'vault', v.title, lower(v.path), 'vault', v.path, ${uid}, 0.9
+      FROM vault_notes v
+      WHERE v.user_id = ${uid}
+      ON CONFLICT (user_id, kind, canonical_key) DO NOTHING
+      RETURNING 1
+    ) SELECT count(*)::text AS n FROM ins
+  `.execute(db);
+
+  // Give wiki/vault nodes a summary from their source body (first ~280 chars).
+  // Fills nulls only, so it's idempotent and also enriches nodes created on an
+  // earlier run. The summary feeds node embeddings (graph-semantic) + readers.
+  await sql`
+    UPDATE kg_nodes n SET summary = left(w.content, 280)
+    FROM wiki_articles w
+    WHERE n.external_kind = 'wiki' AND n.external_ref = w.path
+      AND n.user_id = ${uid} AND w.user_id = ${uid} AND n.summary IS NULL
+  `.execute(db);
+  await sql`
+    UPDATE kg_nodes n SET summary = left(v.content, 280)
+    FROM vault_notes v
+    WHERE n.external_kind = 'vault' AND n.external_ref = v.path
+      AND n.user_id = ${uid} AND v.user_id = ${uid} AND n.summary IS NULL
+  `.execute(db);
+
+  // backlinks[] -> links_to edges, within each namespace. We carry the source
+  // `kind` through the UNION and pin BOTH ends of the edge to it, so a wiki
+  // article's backlinks only ever link wiki nodes and a vault note's only link
+  // vault nodes (a path shared by a vault note and a wiki article would otherwise
+  // fan the join out to both and fabricate edges).
+  //
+  // A backlink target is the raw [[label]] the author typed (e.g. "Dana"), not a
+  // path, so we resolve it by node IDENTITY: name, canonical_key (normalized), or
+  // an alias. We keep the path-equality arms as a fallback for notes that link by
+  // path. Self-links are excluded.
   const links = await sql<{ n: string }>`
     WITH ins AS (
       INSERT INTO kg_edges (src_id, dst_id, rel_type, origin, user_id)
-      SELECT src.id, dst.id, 'links_to', 'frontmatter', ${uid}
-      FROM wiki_articles wa
+      SELECT DISTINCT src.id, dst.id, 'links_to', 'frontmatter', ${uid}
+      FROM (
+        SELECT 'wiki' AS kind, path, backlinks FROM wiki_articles WHERE user_id = ${uid}
+        UNION ALL
+        SELECT 'vault' AS kind, path, backlinks FROM vault_notes WHERE user_id = ${uid}
+      ) wa
       CROSS JOIN LATERAL unnest(wa.backlinks) AS bl(target)
-      JOIN kg_nodes src ON src.external_kind = 'wiki' AND src.external_ref = wa.path AND src.user_id = ${uid}
-      JOIN kg_nodes dst ON dst.external_kind = 'wiki' AND dst.external_ref = bl.target AND dst.user_id = ${uid}
+      JOIN kg_nodes src ON src.external_kind = wa.kind AND src.external_ref = wa.path AND src.user_id = ${uid}
+      JOIN kg_nodes dst
+        ON dst.user_id = ${uid}
+       AND dst.external_kind = wa.kind
+       AND dst.id <> src.id
+       AND (
+             lower(trim(dst.name)) = lower(trim(bl.target))
+          OR dst.canonical_key = lower(regexp_replace(trim(bl.target), '\\s+', ' ', 'g'))
+          OR lower(trim(bl.target)) = ANY(SELECT lower(trim(a)) FROM unnest(dst.aliases) a)
+          OR dst.external_ref = bl.target
+          OR dst.external_ref = bl.target || '.md'
+       )
       ON CONFLICT (user_id, src_id, dst_id, rel_type, origin, origin_node) DO NOTHING
       RETURNING 1
     ) SELECT count(*)::text AS n FROM ins
@@ -803,6 +863,7 @@ export async function backfillGraph(ctx: TenantContext = LOCAL_TENANT): Promise<
   return {
     personNodes: Number(persons.rows[0]?.n ?? 0),
     wikiNodes: Number(wikis.rows[0]?.n ?? 0),
+    vaultNodes: Number(vaults.rows[0]?.n ?? 0),
     linkEdges: Number(links.rows[0]?.n ?? 0),
   };
 }

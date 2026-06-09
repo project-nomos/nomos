@@ -1,11 +1,14 @@
 /**
  * Knowledge compiler -- Karpathy-style wiki compilation.
  *
- * Compiles the agent's accumulated knowledge (user model, conversation
- * memory, contacts) into structured markdown wiki articles. The LLM
- * decides what topics deserve articles based on the available data.
+ * Compiles the agent's accumulated knowledge into structured markdown wiki
+ * articles. The compiled wiki is a DERIVED PROJECTION: the vault (the user's
+ * authored memory) is the source of truth, and this distils it (plus the other
+ * signals below) into browsable topic/contact articles. The LLM decides what
+ * topics deserve articles based on the available data.
  *
- * Sources:
+ * Sources (vault first, it is the source of truth):
+ *   - vault_notes: the user's authored long-term memory (the vault)
  *   - user_model: facts, preferences, decision patterns, values
  *   - memory_chunks: conversation history (source = "conversation")
  *   - contacts + contact_identities: identity graph
@@ -22,17 +25,104 @@ import { homedir } from "node:os";
 import { getDb } from "../db/client.ts";
 import { runForkedAgent } from "../sdk/forked-agent.ts";
 import { upsertArticle, getArticle, listArticles } from "../db/wiki.ts";
+import { parseWikiLinks } from "./graph-writer.ts";
 import { syncToDisk } from "./wiki-sync.ts";
 import { syncFileToDb } from "../config/file-sync.ts";
+import { isHosted } from "../config/mode.ts";
+import { isRedisConfigured, getRedis, keyFor } from "../storage/redis.ts";
 import { createLogger } from "../lib/logger.ts";
 
 const log = createLogger("knowledge-compiler");
 
-const LOCK_FILE = path.join(homedir(), ".nomos", "wiki-compiler.lock");
-const WIKI_DIR = path.join(homedir(), ".nomos", "wiki");
+// Wiki output dir, overridable via NOMOS_WIKI_DIR and resolved at call time (not
+// module load) so the eval can point it at a temp dir to stay out of ~/.nomos.
+function wikiBaseDir(): string {
+  return process.env.NOMOS_WIKI_DIR ?? path.join(homedir(), ".nomos", "wiki");
+}
+
+/** Per-owner lock path (power-user fallback when Redis is unavailable). Kept beside
+ * the wiki dir so it follows NOMOS_WIKI_DIR. */
+function lockFileFor(userId: string): string {
+  return path.join(
+    path.dirname(wikiBaseDir()),
+    userId === "local" ? "wiki-compiler.lock" : `wiki-compiler.${userId}.lock`,
+  );
+}
+
+/**
+ * Acquire the per-owner compile slot. This is one guard doing two jobs, like the
+ * old file lock: a cross-node MUTEX (two pods of one customer must not compile
+ * concurrently) AND a cooldown (do not recompile within MIN_INTERVAL_MS). In
+ * hosted (multi-node) it is a Redis key shared across the customer's pods; in
+ * power-user it falls back to the local lock file. Returns false to skip.
+ */
+async function acquireCompileSlot(userId: string, force: boolean): Promise<boolean> {
+  const cooldownSec = Math.floor(MIN_INTERVAL_MS / 1000);
+  const stamp = new Date().toISOString();
+  if (isRedisConfigured()) {
+    const redis = getRedis();
+    const key = keyFor("wiki-compile", userId);
+    if (force) {
+      await redis.set(key, stamp, "EX", cooldownSec);
+      return true;
+    }
+    return (await redis.set(key, stamp, "EX", cooldownSec, "NX")) === "OK";
+  }
+  const lockFile = lockFileFor(userId);
+  if (
+    !force &&
+    fs.existsSync(lockFile) &&
+    Date.now() - fs.statSync(lockFile).mtimeMs < MIN_INTERVAL_MS
+  ) {
+    return false;
+  }
+  fs.mkdirSync(path.dirname(lockFile), { recursive: true });
+  fs.writeFileSync(lockFile, stamp);
+  return true;
+}
+
+/** Re-anchor the cooldown to compile completion (mirrors the old end-of-run lock refresh). */
+async function refreshCompileSlot(userId: string): Promise<void> {
+  const cooldownSec = Math.floor(MIN_INTERVAL_MS / 1000);
+  const stamp = new Date().toISOString();
+  if (isRedisConfigured()) {
+    await getRedis()
+      .set(keyFor("wiki-compile", userId), stamp, "EX", cooldownSec)
+      .catch(() => undefined);
+    return;
+  }
+  const lockFile = lockFileFor(userId);
+  if (fs.existsSync(lockFile)) fs.writeFileSync(lockFile, stamp);
+}
 const MIN_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
 const MAX_ARTICLES_PER_RUN = 20;
 const COMPILE_MODEL = "claude-sonnet-4-6";
+
+/**
+ * Extract the first balanced JSON array from model text, ignoring brackets inside
+ * strings. Robust to code fences and surrounding prose, where a greedy
+ * `/\[[\s\S]*\]/` (first `[` to LAST `]`) captures junk and fails to parse.
+ */
+function extractJsonArray(text: string): string | null {
+  const start = text.indexOf("[");
+  if (start === -1) return null;
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let i = start; i < text.length; i++) {
+    const ch = text[i];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (ch === "\\") escaped = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') inString = true;
+    else if (ch === "[") depth++;
+    else if (ch === "]" && --depth === 0) return text.slice(start, i + 1);
+  }
+  return null;
+}
 
 interface CompilationResult {
   articlesCreated: number;
@@ -48,19 +138,24 @@ interface CompilationResult {
  * 3. Compile/update articles
  * 4. Sync to disk + DB backup
  */
-export async function compileKnowledge(options?: { force?: boolean }): Promise<CompilationResult> {
-  // Lock file coordination
-  if (!options?.force && fs.existsSync(LOCK_FILE)) {
-    const lockAge = Date.now() - fs.statSync(LOCK_FILE).mtimeMs;
-    if (lockAge < MIN_INTERVAL_MS) {
-      return { articlesCreated: 0, articlesUpdated: 0, errors: ["Skipped: too recent"] };
-    }
-    fs.unlinkSync(LOCK_FILE);
+export async function compileKnowledge(options?: {
+  force?: boolean;
+  userId?: string;
+}): Promise<CompilationResult> {
+  // The vault is per-user (zero-trust on top of database-per-customer). Scope the
+  // vault read to one tenant so a multi-user (per-person-brain) DB never blends
+  // members' private notes into the shared compiled wiki. Defaults to the local
+  // single-user install. Per-user wiki compilation in a multi-user DB is a
+  // follow-up (it needs wiki_articles to carry user_id too).
+  const userId = options?.userId ?? "local";
+  // Cross-node mutex + cooldown (Redis in hosted, lock file in power-user).
+  if (!(await acquireCompileSlot(userId, options?.force ?? false))) {
+    return {
+      articlesCreated: 0,
+      articlesUpdated: 0,
+      errors: ["Skipped: compiling elsewhere or too recent"],
+    };
   }
-
-  const lockDir = path.dirname(LOCK_FILE);
-  fs.mkdirSync(lockDir, { recursive: true });
-  fs.writeFileSync(LOCK_FILE, new Date().toISOString());
 
   const result: CompilationResult = { articlesCreated: 0, articlesUpdated: 0, errors: [] };
 
@@ -71,7 +166,7 @@ export async function compileKnowledge(options?: { force?: boolean }): Promise<C
     const userModelEntries = await sql`
       SELECT category, key, value::text as value, confidence
       FROM user_model
-      WHERE confidence >= 0.6
+      WHERE user_id = ${userId} AND confidence >= 0.6
       ORDER BY confidence DESC
       LIMIT 200
     `;
@@ -79,7 +174,7 @@ export async function compileKnowledge(options?: { force?: boolean }): Promise<C
     const recentConversations = await sql`
       SELECT text, path, created_at
       FROM memory_chunks
-      WHERE source = ${"conversation"}
+      WHERE user_id = ${userId} AND source = ${"conversation"}
       ORDER BY created_at DESC
       LIMIT 100
     `;
@@ -94,18 +189,32 @@ export async function compileKnowledge(options?: { force?: boolean }): Promise<C
              )) as identities
       FROM contacts c
       LEFT JOIN contact_identities ci ON ci.contact_id = c.id
+      WHERE c.user_id = ${userId}
       GROUP BY c.id, c.display_name, c.autonomy
     `;
 
-    const existingArticles = await listArticles();
+    // The vault is the SOURCE OF TRUTH: the user's authored long-term memory.
+    // The compiled wiki is a projection over it (+ the other sources below), so
+    // the curator reads the vault first.
+    const vaultNotes = await sql`
+      SELECT path, title, content
+      FROM vault_notes
+      WHERE user_id = ${userId}
+      ORDER BY updated_at DESC
+      LIMIT 100
+    `;
+
+    const existingArticles = await listArticles(userId);
 
     // 2. Ask the LLM what articles to create/update
     type ModelEntry = { category: string; key: string; value: string; confidence: number };
     type ContactRow = { id: string; name: string; identities: unknown[] };
+    type VaultRow = { path: string; title: string; content: string };
     const entries = userModelEntries as unknown as ModelEntry[];
     const contactRows = contacts as unknown as ContactRow[];
+    const vaultRows = vaultNotes as unknown as VaultRow[];
 
-    const knowledgeSummary = buildKnowledgeSummary(entries, contactRows);
+    const knowledgeSummary = buildKnowledgeSummary(entries, contactRows, vaultRows);
 
     const planResult = await runForkedAgent({
       prompt: `You are a knowledge wiki curator. Based on the user's accumulated knowledge, decide which wiki articles to create or update.
@@ -130,13 +239,16 @@ Return ONLY a JSON array of article plans:
 Maximum ${MAX_ARTICLES_PER_RUN} articles. Return [] if nothing is worth compiling.`,
       model: COMPILE_MODEL,
       label: "wiki-plan",
-      maxTurns: 1,
+      // Forks run with the full toolset, so a generation task can spend a turn on
+      // a tool detour before answering; maxTurns:1 then dies with "Reached maximum
+      // number of turns". Give the fork default (5) of headroom.
+      maxTurns: 5,
     });
 
     let plans: Array<{ path: string; title: string; category: string; description: string }>;
     try {
-      const jsonMatch = planResult.text.match(/\[[\s\S]*\]/);
-      plans = jsonMatch ? JSON.parse(jsonMatch[0]) : [];
+      const jsonText = extractJsonArray(planResult.text);
+      plans = jsonText ? JSON.parse(jsonText) : [];
     } catch {
       result.errors.push("Failed to parse article plan");
       return result;
@@ -152,7 +264,7 @@ Maximum ${MAX_ARTICLES_PER_RUN} articles. Return [] if nothing is worth compilin
     // 3. Compile each article
     for (const plan of plans) {
       try {
-        const existing = await getArticle(plan.path);
+        const existing = await getArticle(userId, plan.path);
 
         // Gather relevant data for this article
         const relevantFacts = entries.filter((e) => {
@@ -180,7 +292,15 @@ Maximum ${MAX_ARTICLES_PER_RUN} articles. Return [] if nothing is worth compilin
         );
 
         const isNew = !existing;
-        await upsertArticle(plan.path, plan.title, article, plan.category, [], COMPILE_MODEL);
+        await upsertArticle(
+          userId,
+          plan.path,
+          plan.title,
+          article,
+          plan.category,
+          parseWikiLinks(article), // backlinks: the [[Other Article]] refs the LLM cross-linked
+          COMPILE_MODEL,
+        );
 
         if (isNew) result.articlesCreated++;
         else result.articlesUpdated++;
@@ -190,30 +310,31 @@ Maximum ${MAX_ARTICLES_PER_RUN} articles. Return [] if nothing is worth compilin
     }
 
     // 4. Update index
-    await updateIndex();
+    await updateIndex(userId);
 
-    // 5. Sync to disk
-    await syncToDisk();
-
-    // 6. Backup wiki articles to managed_files table
-    await backupWikiToDb();
+    // 5. Disk mirror is a power-user convenience (browse the wiki as files). In
+    //    hosted the DB (wiki_articles, database-per-customer) is the shared source
+    //    of truth read by the agent + clients; a per-node disk copy would just
+    //    diverge across pods, so skip it (and its managed_files backup).
+    if (!isHosted()) {
+      await syncToDisk(userId);
+      await backupWikiToDb();
+    }
 
     // 7. Wire the (re)compiled wiki into the knowledge graph (zero-LLM [[links]]
     //    + MOC topic hubs).
     try {
       const { syncWikiBodyLinks, syncWikiMOCs } = await import("./graph-writer.ts");
       const { LOCAL_TENANT } = await import("../auth/tenant-context.ts");
-      await syncWikiBodyLinks(LOCAL_TENANT);
-      await syncWikiMOCs(LOCAL_TENANT);
+      await syncWikiBodyLinks({ orgId: process.env.NOMOS_ORG_ID ?? "local", userId });
+      await syncWikiMOCs({ orgId: process.env.NOMOS_ORG_ID ?? "local", userId });
     } catch (err) {
       log.debug({ err }, "Wiki→graph sync failed (non-fatal)");
     }
 
     log.info({ created: result.articlesCreated, updated: result.articlesUpdated }, "Done");
   } finally {
-    if (fs.existsSync(LOCK_FILE)) {
-      fs.writeFileSync(LOCK_FILE, new Date().toISOString());
-    }
+    await refreshCompileSlot(userId);
   }
 
   return result;
@@ -257,20 +378,24 @@ ${convoText || "No recent conversations"}
 
 Write a concise, factual markdown article. Include ALL concrete details found (phone numbers, emails, relationships, roles, preferences). Structure with clear headings. Under 500 words.
 
+When you mention another person, project, company, or topic that likely has its own wiki entry, wrap that name in double brackets like [[Name]] so the wiki cross-links. Only bracket proper nouns that are distinct entities, not generic words.
+
 Return ONLY the markdown article content.`;
 
   const compiled = await runForkedAgent({
     prompt,
     model: COMPILE_MODEL,
     label: `wiki-compile:${plan.title}`,
-    maxTurns: 1,
+    // 5 turns of headroom so an article body that takes a tool detour still lands
+    // its final answer (maxTurns:1 was dropping ~1 in 6 articles).
+    maxTurns: 5,
   });
 
   return compiled.text.trim();
 }
 
-async function updateIndex(): Promise<void> {
-  const articles = await listArticles();
+async function updateIndex(userId: string): Promise<void> {
+  const articles = await listArticles(userId);
   if (articles.length === 0) return;
 
   const indexLines = ["# Knowledge Wiki Index\n"];
@@ -290,12 +415,12 @@ async function updateIndex(): Promise<void> {
     indexLines.push("");
   }
 
-  await upsertArticle("_index.md", "Knowledge Wiki Index", indexLines.join("\n"), "index");
+  await upsertArticle(userId, "_index.md", "Knowledge Wiki Index", indexLines.join("\n"), "index");
 }
 
 /** Backup wiki articles to managed_files table for DB recovery. */
 async function backupWikiToDb(): Promise<void> {
-  if (!fs.existsSync(WIKI_DIR)) return;
+  if (!fs.existsSync(wikiBaseDir())) return;
 
   const walkDir = (dir: string, prefix: string): void => {
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -310,15 +435,28 @@ async function backupWikiToDb(): Promise<void> {
     }
   };
 
-  walkDir(WIKI_DIR, "");
+  walkDir(wikiBaseDir(), "");
 }
 
 /** Build a summary of all available knowledge for the LLM planner. */
 function buildKnowledgeSummary(
   entries: Array<{ category: string; key: string; value: string; confidence: number }>,
   contacts: Array<{ id: string; name: string; identities: unknown[] }>,
+  vaultNotes: Array<{ path: string; title: string; content: string }> = [],
 ): string {
   const lines: string[] = [];
+
+  // The vault first: it is the user's authored memory, the source of truth the
+  // compiled wiki should be derived from.
+  if (vaultNotes.length > 0) {
+    lines.push(`VAULT NOTES (the user's authored memory, source of truth) (${vaultNotes.length}):`);
+    for (const n of vaultNotes.slice(0, 40)) {
+      lines.push(`\n[${n.path}] ${n.title}`);
+      lines.push(`  ${n.content.replace(/\s+/g, " ").slice(0, 300)}`);
+    }
+    if (vaultNotes.length > 40) lines.push(`  ... and ${vaultNotes.length - 40} more`);
+    lines.push("");
+  }
 
   // Group user model by category
   const byCategory = new Map<string, typeof entries>();

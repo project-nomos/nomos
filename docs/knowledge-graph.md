@@ -23,24 +23,68 @@ extraction) and from your existing contacts and wiki.
 
 ## Architecture
 
-```
-                       ┌─────────────────────────────────────────────┐
- conversation turn ──► │ extractor (already runs) → facts + entities  │
-                       └───────────────┬─────────────────────────────┘
-                                       │  graph-writer (zero new LLM calls)
-                       quality gate ──►│  entity resolution ──► nodes
-                       (reject junk)   │  verb patterns      ──► typed edges
-                                       ▼
-   contacts ──────────► ┌───────────────────────────┐ ◄────── wiki [[links]] + MOCs
-   wiki articles ─────► │      kg_nodes / kg_edges   │
-                        │   (typed, bitemporal,      │
-                        │    per-person, pgvector)   │
-                        └───────────────┬───────────┘
-                                        │ recursive CTEs (no GraphQL, no graph engine)
-          ┌─────────────────────────────┼──────────────────────────────┐
-          ▼                             ▼                              ▼
-   MCP graph tools              hybrid search fusion            /admin/graph viz
-   (agent)                      (3rd RRF signal)                + gRPC + JSON Canvas
+The graph sits between the existing memory write path and every surface that reads it.
+Writes are async and off the user-latency path; reads are recursive CTEs, always scoped to
+one person.
+
+```mermaid
+flowchart TB
+    subgraph SRC["Sources"]
+        CONV["Conversation turns<br/>(daemon memory-indexer)"]
+        CONTACTS["contacts /<br/>contact_identities"]
+        WIKI["wiki_articles"]
+    end
+
+    subgraph WRITE["Write path · async, zero new LLM calls"]
+        EXT["extractor.ts<br/>facts + entities (already runs)"]
+        GW["graph-writer.ts"]
+        QG{"quality gate<br/>reject low-conf / noise"}
+        ER["entity resolution<br/>contacts + canonical_key"]
+        VP["verb-pattern edges"]
+        CC["contradiction check<br/>Haiku · single-valued rels"]
+    end
+
+    subgraph STORE["Knowledge graph · Postgres + pgvector"]
+        NODES[("kg_nodes<br/>typed entities + embedding")]
+        EDGES[("kg_edges<br/>typed · bitemporal · provenance")]
+    end
+
+    subgraph BG["Background jobs"]
+        SEM["semantic-edge materializer<br/>pgvector cosine"]
+        WS["wiki sync<br/>&#91;&#91;links&#93;&#93; + MOC hubs"]
+    end
+
+    GRAPH["graph.ts · recursive CTEs<br/>neighborhood · path · trajectory · as-of<br/>(user_id scoped at every hop)"]
+
+    subgraph SURF["Surfaces"]
+        AGENT["Agent · graph_* MCP tools"]
+        SEARCH["hybrid search fusion<br/>3rd RRF signal"]
+        REPL["REPL · /graph"]
+        CLI["CLI · nomos brain"]
+        VIZ["Web viz · /admin/graph<br/>+ JSON Canvas"]
+        MOBILE["Mobile · gRPC Brain tab"]
+    end
+
+    CONV --> EXT --> GW --> QG --> ER
+    ER --> NODES
+    ER --> VP --> EDGES
+    VP --> CC
+    CC -. invalidate old .-> EDGES
+    CONTACTS -. backfill .-> NODES
+    WIKI -. backfill .-> NODES
+    WS --> EDGES
+    SEM --> EDGES
+    NODES -. external_ref .-> CONTACTS
+    NODES -. external_ref .-> WIKI
+
+    NODES --> GRAPH
+    EDGES --> GRAPH
+    GRAPH --> AGENT & SEARCH & REPL & CLI & VIZ & MOBILE
+
+    classDef store fill:#1e1e2e,stroke:#cba6f7,color:#cdd6f4;
+    classDef surf fill:#1e1e2e,stroke:#89b4fa,color:#cdd6f4;
+    class NODES,EDGES store;
+    class AGENT,SEARCH,REPL,CLI,VIZ,MOBILE surf;
 ```
 
 ## Concepts
@@ -64,6 +108,40 @@ fallback). Every edge carries:
 
 Two tables, idempotently migrated alongside the rest of the schema. Requires the `pg_trgm`
 extension (enabled automatically by `nomos db migrate`).
+
+```mermaid
+erDiagram
+    kg_nodes ||--o{ kg_edges : "src_id"
+    kg_nodes ||--o{ kg_edges : "dst_id"
+    kg_nodes {
+        uuid id PK
+        text kind "person|org|project|topic|wiki|moc|…"
+        text name
+        text canonical_key "unique per (kind,user_id)"
+        text_array aliases
+        vector embedding "768-dim, nullable"
+        text external_kind "contact|wiki|memory_chunk"
+        text external_ref "overlay pointer, not a copy"
+        jsonb attrs
+        real confidence
+        text user_id "per-person scope"
+    }
+    kg_edges {
+        uuid id PK
+        uuid src_id FK
+        uuid dst_id FK
+        text rel_type "works_at|member_of|links_to|…"
+        text fact "natural-language assertion"
+        text origin "explicit|inferred|semantic|…"
+        uuid origin_node "scoped reconciliation"
+        real weight
+        timestamptz valid_at "event timeline"
+        timestamptz invalid_at "NULL = currently true"
+        timestamptz created_at "transaction timeline"
+        timestamptz expired_at
+        text user_id "per-person scope"
+    }
+```
 
 ### `kg_nodes`
 

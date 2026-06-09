@@ -5,6 +5,7 @@ import type { CronJob, CronJobUpdate, CronJobFilter, CronRun, CronRunFilter } fr
 
 interface CronJobRow {
   id: string;
+  user_id: string;
   name: string;
   schedule: string;
   schedule_type: string;
@@ -24,6 +25,7 @@ export class CronStore {
   private rowToJob(row: CronJobRow): CronJob {
     return {
       id: row.id,
+      userId: row.user_id,
       name: row.name,
       schedule: row.schedule,
       scheduleType: row.schedule_type as CronJob["scheduleType"],
@@ -47,6 +49,7 @@ export class CronStore {
       .insertInto("cron_jobs")
       .values({
         id,
+        user_id: job.userId ?? "local",
         name: job.name,
         schedule: job.schedule,
         schedule_type: job.scheduleType,

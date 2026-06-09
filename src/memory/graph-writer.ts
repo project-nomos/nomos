@@ -263,7 +263,7 @@ export function parseWikiLinks(content: string): string[] {
 export async function syncWikiBodyLinks(ctx: TenantContext): Promise<{ edges: number }> {
   const db = getKysely();
   const articles = await sql<{ path: string; title: string; content: string }>`
-    SELECT path, title, content FROM wiki_articles
+    SELECT path, title, content FROM wiki_articles WHERE user_id = ${ctx.userId}
   `.execute(db);
 
   const byKey = new Map<string, { path: string; title: string }>();
@@ -310,7 +310,7 @@ export async function syncWikiBodyLinks(ctx: TenantContext): Promise<{ edges: nu
 export async function syncWikiMOCs(ctx: TenantContext): Promise<{ mocs: number; edges: number }> {
   const db = getKysely();
   const rows = await sql<{ path: string; title: string; category: string }>`
-    SELECT path, title, category FROM wiki_articles WHERE category IS NOT NULL AND category <> 'index'
+    SELECT path, title, category FROM wiki_articles WHERE user_id = ${ctx.userId} AND category IS NOT NULL AND category <> 'index'
   `.execute(db);
 
   const categories = new Set<string>();

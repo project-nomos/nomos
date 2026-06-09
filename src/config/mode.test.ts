@@ -3,9 +3,15 @@ import { getMode, isHosted, FEATURES } from "./mode.ts";
 
 describe("getMode", () => {
   const original = process.env.NOMOS_MODE;
+  const originalJwks = process.env.AUTH_JWKS_URL;
+  beforeEach(() => {
+    delete process.env.AUTH_JWKS_URL; // these cases isolate NOMOS_MODE
+  });
   afterEach(() => {
     if (original === undefined) delete process.env.NOMOS_MODE;
     else process.env.NOMOS_MODE = original;
+    if (originalJwks === undefined) delete process.env.AUTH_JWKS_URL;
+    else process.env.AUTH_JWKS_URL = originalJwks;
   });
 
   it("defaults to power_user when unset", () => {
@@ -28,6 +34,16 @@ describe("getMode", () => {
   it("treats unknown values as power_user (fail-open for safety in dev)", () => {
     process.env.NOMOS_MODE = "consumer"; // legacy name should not silently flip the gate on
     expect(getMode()).toBe("power_user");
+  });
+
+  it("treats AUTH_JWKS_URL as hosted even when NOMOS_MODE is unset (auth active = hosted)", () => {
+    // The cross-user-leak guard: if JWT auth is configured, the gRPC interceptor
+    // resolves real per-tenant ids, so the vault scoping must also see hosted,
+    // otherwise every authenticated user collapses onto the 'local' vault.
+    delete process.env.NOMOS_MODE;
+    process.env.AUTH_JWKS_URL = "https://auth.example/jwks.json";
+    expect(getMode()).toBe("hosted");
+    expect(isHosted()).toBe(true);
   });
 });
 
@@ -63,11 +79,15 @@ describe("FEATURES gates in hosted mode", () => {
 
 describe("FEATURES gates in power-user mode", () => {
   const original = process.env.NOMOS_MODE;
+  const originalJwks = process.env.AUTH_JWKS_URL;
   beforeEach(() => {
     delete process.env.NOMOS_MODE;
+    delete process.env.AUTH_JWKS_URL; // else AUTH_JWKS_URL would imply hosted
   });
   afterEach(() => {
     if (original !== undefined) process.env.NOMOS_MODE = original;
+    if (originalJwks === undefined) delete process.env.AUTH_JWKS_URL;
+    else process.env.AUTH_JWKS_URL = originalJwks;
   });
 
   it("allows everything", () => {

@@ -38,6 +38,8 @@ interface ConsolidationState {
   lastRunAt: string;
   lastTurnCount: number;
   totalRuns: number;
+  /** The last run's outcome (merged/pruned/etc.), persisted to state_json. */
+  lastResult?: Record<string, unknown>;
 }
 
 interface DreamResult {
@@ -65,6 +67,7 @@ async function loadState(): Promise<ConsolidationState> {
       lastRunAt: row.last_run_at ? new Date(row.last_run_at).toISOString() : "",
       lastTurnCount: row.last_turn_count,
       totalRuns: row.total_runs,
+      lastResult: (row.state_json as Record<string, unknown> | null) ?? undefined,
     };
   } catch (err) {
     log.warn({ err }, "Failed to load auto-dream state");
@@ -84,12 +87,16 @@ async function saveState(state: ConsolidationState): Promise<void> {
       last_run_at: state.lastRunAt ? new Date(state.lastRunAt) : null,
       last_turn_count: state.lastTurnCount,
       total_runs: state.totalRuns,
+      // Pass the OBJECT (not JSON.stringify): postgres-js serializes to jsonb
+      // once. Stringifying first double-encodes into a jsonb *string*.
+      state_json: (state.lastResult ?? null) as unknown as string | null,
     })
     .onConflict((oc) =>
       oc.column("id").doUpdateSet({
         last_run_at: state.lastRunAt ? new Date(state.lastRunAt) : null,
         last_turn_count: state.lastTurnCount,
         total_runs: state.totalRuns,
+        state_json: (state.lastResult ?? null) as unknown as string | null,
         updated_at: new Date(),
       }),
     )
@@ -204,11 +211,12 @@ export async function autoDream(
         const r = await runConsolidation();
         r.durationMs = Date.now() - start;
 
-        // Update state
+        // Update state, persisting the run outcome to state_json.
         const state = await loadState();
         state.lastRunAt = new Date().toISOString();
         state.lastTurnCount = currentTurnCount;
         state.totalRuns += 1;
+        state.lastResult = { ...r };
         await saveState(state);
 
         log.info(
@@ -243,28 +251,91 @@ export async function getConsolidationState(): Promise<ConsolidationState> {
 }
 
 /**
+ * Instance-wide activity counter used as the auto-dream turn gate.
+ *
+ * Total persisted memory chunks is a cheap monotonic proxy for "how much has
+ * happened since the last consolidation" across all owners on this instance.
+ */
+async function instanceActivityCount(): Promise<number> {
+  try {
+    const db = getKysely();
+    const row = await db
+      .selectFrom("memory_chunks")
+      .select((eb) => eb.fn.countAll<number>().as("count"))
+      .executeTakeFirst();
+    return Number(row?.count ?? 0);
+  } catch (err) {
+    log.warn({ err }, "Failed to count memory chunks for auto-dream gate");
+    return 0;
+  }
+}
+
+/**
+ * Run one autonomous auto-dream cycle.
+ *
+ * This is the production entry point (invoked by the daemon's cron sentinel).
+ * The singleton gate (time + turn) and distributed lease live in `autoDream`;
+ * the consolidation work fans out per memory owner so every tenant on the
+ * instance gets consolidated, and the aggregate result is persisted to
+ * `auto_dream_state.state_json`.
+ */
+export async function runAutoDreamCycle(): Promise<DreamResult | null> {
+  const turnCount = await instanceActivityCount();
+  return autoDream(turnCount, async () => {
+    const { listMemoryOwners } = await import("../auth/org-members.ts");
+    const { consolidateMemory, reflectOnValues } = await import("./consolidator.ts");
+    const owners = await listMemoryOwners();
+    const agg: DreamResult = { merged: 0, pruned: 0, newChunks: 0, durationMs: 0 };
+    for (const userId of owners) {
+      try {
+        const r = await consolidateMemory(userId);
+        agg.merged += r.merged;
+        agg.pruned += r.pruned;
+        // "newChunks" tracks chunks rewritten/regenerated during consolidation.
+        agg.newChunks += r.rewritten;
+        // Phase 5: re-rank the owner's values from a reflection pass (best-effort;
+        // never let it break consolidation). Skips owners with no values/patterns.
+        try {
+          const reflection = await reflectOnValues(userId);
+          if (reflection) await reRankValues(userId, reflection);
+        } catch (err) {
+          log.warn({ err, userId }, "Value re-ranking failed");
+        }
+      } catch (err) {
+        log.warn({ err, userId }, "Per-owner consolidation failed");
+      }
+    }
+    return agg;
+  });
+}
+
+/**
  * Post-consolidation value re-ranking.
  *
  * Adjusts confidence scores on values and weights on decision patterns
  * based on the reflection phase output from consolidation.
  */
-export async function reRankValues(reflection: {
-  values_to_boost?: { key: string; reason: string }[];
-  values_to_decrease?: { key: string; reason: string }[];
-  new_values?: { value: string; description: string; context: string; evidence: string[] }[];
-  pattern_refinements?: { key: string; refinement: string }[];
-}): Promise<{ boosted: number; decreased: number; added: number; refined: number }> {
+export async function reRankValues(
+  userId: string,
+  reflection: {
+    values_to_boost?: { key: string; reason: string }[];
+    values_to_decrease?: { key: string; reason: string }[];
+    new_values?: { value: string; description: string; context: string; evidence: string[] }[];
+    pattern_refinements?: { key: string; refinement: string }[];
+  },
+): Promise<{ boosted: number; decreased: number; added: number; refined: number }> {
   const { getUserModel, upsertUserModel } = await import("../db/user-model.ts");
   const result = { boosted: 0, decreased: 0, added: 0, refined: 0 };
 
   // Boost values reinforced by evidence
   if (reflection.values_to_boost) {
-    const values = await getUserModel("value");
+    const values = await getUserModel(userId, "value");
     for (const boost of reflection.values_to_boost) {
       const entry = values.find((e) => e.key === boost.key);
       if (entry) {
         const newConfidence = Math.min((entry.confidence + 0.1) * 1.05, 0.95);
         await upsertUserModel({
+          userId: userId,
           category: "value",
           key: entry.key,
           value: entry.value,
@@ -278,12 +349,13 @@ export async function reRankValues(reflection: {
 
   // Decrease values contradicted by behavior
   if (reflection.values_to_decrease) {
-    const values = await getUserModel("value");
+    const values = await getUserModel(userId, "value");
     for (const dec of reflection.values_to_decrease) {
       const entry = values.find((e) => e.key === dec.key);
       if (entry) {
         const newConfidence = Math.max(entry.confidence * 0.85 - 0.05, 0.1);
         await upsertUserModel({
+          userId: userId,
           category: "value",
           key: entry.key,
           value: entry.value,
@@ -305,6 +377,7 @@ export async function reRankValues(reflection: {
         .replace(/^_|_$/g, "");
 
       await upsertUserModel({
+        userId: userId,
         category: "value",
         key,
         value: {
@@ -322,13 +395,14 @@ export async function reRankValues(reflection: {
 
   // Refine decision patterns
   if (reflection.pattern_refinements) {
-    const patterns = await getUserModel("decision_pattern");
+    const patterns = await getUserModel(userId, "decision_pattern");
     for (const ref of reflection.pattern_refinements) {
       const entry = patterns.find((e) => e.key === ref.key);
       if (entry) {
         const val = entry.value as Record<string, unknown>;
         const evidence = (val.evidence as string[]) ?? [];
         await upsertUserModel({
+          userId: userId,
           category: "decision_pattern",
           key: entry.key,
           value: {
