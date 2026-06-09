@@ -129,6 +129,9 @@ The memory system has runnable evals (see [eval/README.md](../eval/README.md)):
   cross-user leak.
 - `pnpm eval:agent` -- end-to-end behavioral eval (memory + sessions in both modes, the
   authenticated gRPC/mobile wire, an LLM-as-a-judge), against a throwaway database.
+- `pnpm eval:audit` -- the full gate: `eval:agent`, then the Opus-4.8 label audit + the
+  spec-driven feature-manifest audit (verifies every feature is wired and its DB effects
+  land), then drops the DB.
 
 ## Code map
 

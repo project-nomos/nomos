@@ -22,12 +22,20 @@
  * It runs against a freshly provisioned, throwaway database (nomos_eval) that is
  * dropped on exit, so it never touches the dev `nomos` DB.
  *
+ * The `--audit` modes add two model-graded audits over the just-written DB (see the
+ * Audits section of eval/README.md):
+ *  - the LABEL audit (Opus-4.8 / xhigh): confirms the rows back the passing test labels
+ *  - the SPEC audit (runSpecAudit): reasons against eval/feature-manifest.ts -- liveness
+ *    (every feature has a live caller), a cron sentinel meta-check, per-feature effect SQL
+ *    + jsonb double-encode guards, and an Opus-4.8 reasoning pass. This is what makes an
+ *    unwired or under-populated feature fail; declare new features in the manifest.
+ *
  * Run:  DATABASE_URL=... [NOMOS_USE_SUBSCRIPTION=true] pnpm eval:agent
  *   pnpm eval:agent            fast deterministic + judged checks, drops the DB
- *   pnpm eval:audit            ^ + an Opus-4.8 / xhigh "ultracode" DB-content audit
+ *   pnpm eval:audit            ^ + the label audit AND the spec/manifest audit
  *                              (eval -> audit -> clean, all in one run)
  *   pnpm eval:agent --keep     keep nomos_eval for inspection
- *   pnpm eval:agent --audit-kept   audit a kept DB without re-running the eval
+ *   pnpm eval:agent --audit-kept   audit a kept DB (label + spec) without re-running the eval
  *   pnpm eval:agent --clean    drop a kept nomos_eval
  * Exits non-zero on any failure. Judge + real-token checks skip (reported) when no
  * LLM provider / no nomos-server is available.
