@@ -1856,11 +1856,19 @@ async function main(): Promise<void> {
   const keep = args.includes("--keep");
 
   // eslint-disable-next-line no-console
-  console.log(`Agent eval (LLM judge: ${hasLLM ? "on" : "off"}${keep ? "; --keep" : ""})\n`);
+  console.log(
+    `Agent eval (LLM judge: ${hasLLM ? "on" : "off"}${keep ? "; --keep" : ""}${AUDIT ? "; --audit" : ""})\n`,
+  );
   const { baseUrl } = await setupTestDb();
   try {
+    // Phase 1 -- eval (with keep): run every check against nomos_eval. AUDIT implies
+    // keep-data so nothing is cleaned out from under the audit.
     await runEval();
+    // Phase 2 -- audit: an Opus-4.8 / xhigh ("ultracode") pass reads the PERSISTED
+    // nomos_eval content and cross-checks it against the test results (true e2e).
+    if (AUDIT) await runModelDbAudit();
   } finally {
+    // Phase 3 -- clean: drop the throwaway nomos_eval (unless --keep was passed).
     if (keep) {
       await closeDb(); // release the pool so the process can exit; do NOT drop the DB
       // eslint-disable-next-line no-console
@@ -1953,7 +1961,10 @@ async function dumpDbForAudit(): Promise<Record<string, unknown[]>> {
  */
 async function runModelDbAudit(): Promise<void> {
   if (!hasLLM) {
-    skip("[db-audit] Opus 4.8 confirms DB content matches the test results", "no LLM provider");
+    skip(
+      "[db-audit] Opus 4.8 (thinking) confirms DB content matches the test results",
+      "no LLM provider",
+    );
     return;
   }
   // auto_dream_state is an instance-wide singleton that later gate tests churn to
@@ -2000,6 +2011,7 @@ End your answer with EXACTLY one final line:
     prompt,
     model: "claude-opus-4-8",
     thinking: { type: "adaptive" },
+    effort: "xhigh", // ultracode-level reasoning for the audit
     label: "db-audit",
     maxTurns: 1,
   });
@@ -2055,13 +2067,6 @@ async function runEval(): Promise<void> {
     check("[judge] rejects a response that misses the rubric", !neg.pass, neg.reasoning);
   } else {
     skip("[judge] rejects a response that misses the rubric", "no LLM provider configured");
-  }
-
-  // Model-driven DB-content audit (opt-in via --audit; keeps the data so the
-  // model can see it). An Opus-4.8-with-thinking pass cross-checks the actual
-  // rows against the passing test labels -- catches false-passes the booleans miss.
-  if (AUDIT) {
-    await runModelDbAudit();
   }
 
   // Slowest last: live agent conversations. NomosAgent.Chat over gRPC (unauth,

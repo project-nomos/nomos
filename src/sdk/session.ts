@@ -78,6 +78,8 @@ export interface RunSessionParams {
   onElicitation?: OnElicitation;
   /** SDK-native hook callbacks (PreToolUse blocking, PostToolUse context, etc.) */
   hooks?: Options["hooks"];
+  /** Reasoning effort ('low'..'max'; 'xhigh' is the ultracode level). */
+  effort?: Options["effort"];
 }
 
 /**
@@ -226,6 +228,7 @@ export function runSession(params: RunSessionParams): Query {
       ...(params.cwd ? { cwd: params.cwd } : {}),
       ...(params.onElicitation ? { onElicitation: params.onElicitation } : {}),
       ...(hooks ? { hooks } : {}),
+      ...(params.effort ? { effort: params.effort } : {}),
     },
   });
 }

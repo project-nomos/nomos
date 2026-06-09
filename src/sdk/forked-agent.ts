@@ -37,6 +37,8 @@ export interface ForkedAgentOptions {
   signal?: AbortSignal;
   /** Thinking config (e.g. { type: "adaptive" } for Opus 4.6+ extended thinking). */
   thinking?: RunSessionParams["thinking"];
+  /** Reasoning effort ('xhigh' is the ultracode level; default 'high'). */
+  effort?: RunSessionParams["effort"];
 }
 
 export interface ForkedAgentResult {
@@ -79,6 +81,7 @@ export async function runForkedAgent(options: ForkedAgentOptions): Promise<Forke
     maxTurns: options.maxTurns ?? DEFAULT_FORK_MAX_TURNS,
     useSubscription,
     ...(options.thinking ? { thinking: options.thinking } : {}),
+    ...(options.effort ? { effort: options.effort } : {}),
     stderr: (data: string) => {
       const trimmed = data.trim();
       if (trimmed) log.error({ label, stream: "stderr" }, trimmed);
