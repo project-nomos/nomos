@@ -16,7 +16,6 @@
  */
 
 import { createLogger } from "../lib/logger.ts";
-import { resolveMemoryUserId } from "../auth/tenant-context.ts";
 import { getKysely } from "../db/client.ts";
 import { withLease } from "../storage/leases.ts";
 import { isRedisConfigured } from "../storage/redis.ts";
@@ -284,7 +283,7 @@ export async function runAutoDreamCycle(): Promise<DreamResult | null> {
   const turnCount = await instanceActivityCount();
   return autoDream(turnCount, async () => {
     const { listMemoryOwners } = await import("../auth/org-members.ts");
-    const { consolidateMemory } = await import("./consolidator.ts");
+    const { consolidateMemory, reflectOnValues } = await import("./consolidator.ts");
     const owners = await listMemoryOwners();
     const agg: DreamResult = { merged: 0, pruned: 0, newChunks: 0, durationMs: 0 };
     for (const userId of owners) {
@@ -294,6 +293,14 @@ export async function runAutoDreamCycle(): Promise<DreamResult | null> {
         agg.pruned += r.pruned;
         // "newChunks" tracks chunks rewritten/regenerated during consolidation.
         agg.newChunks += r.rewritten;
+        // Phase 5: re-rank the owner's values from a reflection pass (best-effort;
+        // never let it break consolidation). Skips owners with no values/patterns.
+        try {
+          const reflection = await reflectOnValues(userId);
+          if (reflection) await reRankValues(userId, reflection);
+        } catch (err) {
+          log.warn({ err, userId }, "Value re-ranking failed");
+        }
       } catch (err) {
         log.warn({ err, userId }, "Per-owner consolidation failed");
       }
@@ -308,24 +315,27 @@ export async function runAutoDreamCycle(): Promise<DreamResult | null> {
  * Adjusts confidence scores on values and weights on decision patterns
  * based on the reflection phase output from consolidation.
  */
-export async function reRankValues(reflection: {
-  values_to_boost?: { key: string; reason: string }[];
-  values_to_decrease?: { key: string; reason: string }[];
-  new_values?: { value: string; description: string; context: string; evidence: string[] }[];
-  pattern_refinements?: { key: string; refinement: string }[];
-}): Promise<{ boosted: number; decreased: number; added: number; refined: number }> {
+export async function reRankValues(
+  userId: string,
+  reflection: {
+    values_to_boost?: { key: string; reason: string }[];
+    values_to_decrease?: { key: string; reason: string }[];
+    new_values?: { value: string; description: string; context: string; evidence: string[] }[];
+    pattern_refinements?: { key: string; refinement: string }[];
+  },
+): Promise<{ boosted: number; decreased: number; added: number; refined: number }> {
   const { getUserModel, upsertUserModel } = await import("../db/user-model.ts");
   const result = { boosted: 0, decreased: 0, added: 0, refined: 0 };
 
   // Boost values reinforced by evidence
   if (reflection.values_to_boost) {
-    const values = await getUserModel(resolveMemoryUserId(undefined), "value");
+    const values = await getUserModel(userId, "value");
     for (const boost of reflection.values_to_boost) {
       const entry = values.find((e) => e.key === boost.key);
       if (entry) {
         const newConfidence = Math.min((entry.confidence + 0.1) * 1.05, 0.95);
         await upsertUserModel({
-          userId: resolveMemoryUserId(undefined),
+          userId: userId,
           category: "value",
           key: entry.key,
           value: entry.value,
@@ -339,13 +349,13 @@ export async function reRankValues(reflection: {
 
   // Decrease values contradicted by behavior
   if (reflection.values_to_decrease) {
-    const values = await getUserModel(resolveMemoryUserId(undefined), "value");
+    const values = await getUserModel(userId, "value");
     for (const dec of reflection.values_to_decrease) {
       const entry = values.find((e) => e.key === dec.key);
       if (entry) {
         const newConfidence = Math.max(entry.confidence * 0.85 - 0.05, 0.1);
         await upsertUserModel({
-          userId: resolveMemoryUserId(undefined),
+          userId: userId,
           category: "value",
           key: entry.key,
           value: entry.value,
@@ -367,7 +377,7 @@ export async function reRankValues(reflection: {
         .replace(/^_|_$/g, "");
 
       await upsertUserModel({
-        userId: resolveMemoryUserId(undefined),
+        userId: userId,
         category: "value",
         key,
         value: {
@@ -385,14 +395,14 @@ export async function reRankValues(reflection: {
 
   // Refine decision patterns
   if (reflection.pattern_refinements) {
-    const patterns = await getUserModel(resolveMemoryUserId(undefined), "decision_pattern");
+    const patterns = await getUserModel(userId, "decision_pattern");
     for (const ref of reflection.pattern_refinements) {
       const entry = patterns.find((e) => e.key === ref.key);
       if (entry) {
         const val = entry.value as Record<string, unknown>;
         const evidence = (val.evidence as string[]) ?? [];
         await upsertUserModel({
-          userId: resolveMemoryUserId(undefined),
+          userId: userId,
           category: "decision_pattern",
           key: entry.key,
           value: {

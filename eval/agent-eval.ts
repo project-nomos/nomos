@@ -58,7 +58,12 @@ import {
 import { createContact, listContacts, mergeContacts } from "../src/identity/contacts.ts";
 import { resolveContact, listIdentities } from "../src/identity/identities.ts";
 import { runAutoLinker } from "../src/identity/auto-linker.ts";
-import { createSession, getSessionByKey, updateSessionSdkId } from "../src/db/sessions.ts";
+import {
+  createSession,
+  getSessionByKey,
+  updateSessionSdkId,
+  updateSessionModelByKey,
+} from "../src/db/sessions.ts";
 import { getVaultNote } from "../src/db/vault.ts";
 import {
   markMagicDocUpdated,
@@ -98,6 +103,7 @@ import {
   getConsolidationState,
   shouldConsolidate,
   runAutoDreamCycle,
+  reRankValues,
 } from "../src/memory/auto-dream.ts";
 import { storeCommitments, getPendingCommitments } from "../src/proactive/commitment-tracker.ts";
 import { compileKnowledge } from "../src/memory/knowledge-compiler.ts";
@@ -708,6 +714,93 @@ async function runAutoDreamState(): Promise<void> {
     "[auto-dream-state] runAutoDreamCycle respects the time gate (no-op after a run)",
     gated === null,
   );
+}
+
+async function runQuickFixWiring(): Promise<void> {
+  // Deterministic coverage (no LLM) for the partial-feature fixes:
+  // smart-routed model persistence, ingest delta_schedule default contract, and
+  // (the important one) reRankValues owner-scoping.
+  const db = getKysely();
+  const { upsertUserModel, getUserModel } = await import("../src/db/user-model.ts");
+
+  // ── routed-model persistence (updateSessionModelByKey) ──
+  const rKey = "terminal:eval-routemodel";
+  await db.deleteFrom("sessions").where("session_key", "=", rKey).execute();
+  await createSession({ sessionKey: rKey, model: "claude-haiku-4-5", metadata: {} });
+  await updateSessionModelByKey(rKey, "claude-opus-4-8");
+  check(
+    "[quickfix] updateSessionModelByKey persists the routed model by session_key",
+    (await getSessionByKey(rKey))?.model === "claude-opus-4-8",
+  );
+
+  // ── ingest delta_schedule: omitted -> DB DEFAULT '6h'; explicit -> stored ──
+  await db
+    .deleteFrom("ingest_jobs")
+    .where("platform", "in", ["eval-delta-a", "eval-delta-b"])
+    .execute();
+  await db
+    .insertInto("ingest_jobs")
+    .values({ platform: "eval-delta-a", source_type: "x", status: "running" })
+    .execute();
+  await db
+    .insertInto("ingest_jobs")
+    .values({ platform: "eval-delta-b", source_type: "x", status: "running", delta_schedule: "1h" })
+    .execute();
+  const defRow = await db
+    .selectFrom("ingest_jobs")
+    .select("delta_schedule")
+    .where("platform", "=", "eval-delta-a")
+    .executeTakeFirst();
+  const setRow = await db
+    .selectFrom("ingest_jobs")
+    .select("delta_schedule")
+    .where("platform", "=", "eval-delta-b")
+    .executeTakeFirst();
+  check(
+    "[quickfix] omitting delta_schedule falls back to the DB default '6h'",
+    defRow?.delta_schedule === "6h",
+  );
+  check("[quickfix] explicit delta_schedule round-trips", setRow?.delta_schedule === "1h");
+
+  // ── reRankValues owner-scoping (the tenant-correctness fix) ──
+  const aId = "eval-rerank-a";
+  const bId = "eval-rerank-b";
+  for (const uid of [aId, bId]) {
+    await db.deleteFrom("user_model").where("user_id", "=", uid).execute();
+    await upsertUserModel({
+      userId: uid,
+      category: "value",
+      key: "ship_fast",
+      value: { value: "ship fast" },
+      sourceIds: [],
+      confidence: 0.5,
+    });
+  }
+  await reRankValues(aId, { values_to_boost: [{ key: "ship_fast", reason: "reinforced" }] });
+  const aVal = (await getUserModel(aId, "value")).find((e) => e.key === "ship_fast");
+  const bVal = (await getUserModel(bId, "value")).find((e) => e.key === "ship_fast");
+  check("[quickfix] reRankValues boosts the target owner's value", (aVal?.confidence ?? 0) > 0.5);
+  check(
+    "[quickfix] reRankValues does NOT touch another owner (no cross-tenant write)",
+    bVal?.confidence === 0.5,
+  );
+  // The re-upsert must round-trip value as an object, not a double-encoded
+  // string (consumers cast value to an object).
+  check(
+    "[quickfix] user_model value round-trips as an object after re-upsert (no double-encode)",
+    typeof aVal?.value === "object" &&
+      aVal?.value !== null &&
+      (aVal?.value as Record<string, unknown>).value === "ship fast",
+  );
+
+  if (!KEEP) {
+    await db.deleteFrom("sessions").where("session_key", "=", rKey).execute();
+    await db
+      .deleteFrom("ingest_jobs")
+      .where("platform", "in", ["eval-delta-a", "eval-delta-b"])
+      .execute();
+    await db.deleteFrom("user_model").where("user_id", "in", [aId, bId]).execute();
+  }
 }
 
 async function runGetMessagesWire(): Promise<void> {
@@ -1722,6 +1815,7 @@ async function runEval(): Promise<void> {
   await runMetadataColumns();
   await runMagicDocState();
   await runAutoDreamDeep();
+  await runQuickFixWiring();
   await runGetMessagesWire();
 
   // Negative control: a judge that passes everything is worthless. Prove it

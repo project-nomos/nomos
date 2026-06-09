@@ -375,3 +375,58 @@ async function decayUserModelConfidence(userId: string): Promise<void> {
     .where("confidence", ">", 0.1)
     .execute();
 }
+
+/** Shape of the value-reflection produced by {@link reflectOnValues}, consumed by reRankValues. */
+export interface ValueReflection {
+  values_to_boost?: { key: string; reason: string }[];
+  values_to_decrease?: { key: string; reason: string }[];
+  new_values?: { value: string; description: string; context: string; evidence: string[] }[];
+  pattern_refinements?: { key: string; refinement: string }[];
+}
+
+const REFLECTION_PROMPT = `You are a value re-evaluation system. Given a user's known values and decision patterns, decide what to adjust based on confidence and coherence. Output ONLY one JSON object:
+{
+  "values_to_boost": [{"key":"","reason":""}],
+  "values_to_decrease": [{"key":"","reason":""}],
+  "new_values": [{"value":"","description":"","context":"","evidence":[]}],
+  "pattern_refinements": [{"key":"","refinement":""}]
+}
+For boost/decrease/refine, use ONLY keys that appear in the provided values/patterns. Keep each array small (0-3 items). No prose, no markdown fences.`;
+
+/**
+ * Reflect on a single owner's values + decision patterns and produce a
+ * re-ranking reflection (the Phase-5 output the consolidation prompt describes).
+ *
+ * Returns null when the owner has no values/patterns to re-rank (skips the LLM
+ * call for fresh users) or when the model output can't be parsed. Best-effort.
+ */
+export async function reflectOnValues(userId: string): Promise<ValueReflection | null> {
+  const { getUserModel } = await import("../db/user-model.ts");
+  const values = await getUserModel(userId, "value");
+  const patterns = await getUserModel(userId, "decision_pattern");
+  if (values.length === 0 && patterns.length === 0) return null; // nothing to re-rank
+
+  const model = loadEnvConfig().extractionModel ?? "claude-haiku-4-5";
+  const ctx = [
+    "VALUES:",
+    ...values.map((v) => `- ${v.key} (confidence ${v.confidence})`),
+    "PATTERNS:",
+    ...patterns.map((p) => `- ${p.key}`),
+  ].join("\n");
+
+  try {
+    const { runForkedAgent } = await import("../sdk/forked-agent.ts");
+    const { text } = await runForkedAgent({
+      prompt: `${REFLECTION_PROMPT}\n\n${ctx}`,
+      model,
+      label: "value-reflection",
+      maxTurns: 1,
+    });
+    const m = text.match(/\{[\s\S]*\}/);
+    if (!m) return null;
+    return JSON.parse(m[0]) as ValueReflection;
+  } catch (err) {
+    log.debug({ err, userId }, "reflectOnValues failed");
+    return null;
+  }
+}

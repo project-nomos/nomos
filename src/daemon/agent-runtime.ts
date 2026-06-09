@@ -587,6 +587,14 @@ export class AgentRuntime {
     if (this.config.smartRouting) {
       const classification = classifyQuery(message.content);
       model = this.config.modelTiers[classification.tier];
+      // Persist the routed model so the sessions row reflects what actually ran
+      // (createDbSession seeded the base config.model before classification).
+      // Fire-and-forget, and only when it differs, to avoid a redundant write.
+      if (model !== this.config.model) {
+        import("../db/sessions.ts")
+          .then(({ updateSessionModelByKey }) => updateSessionModelByKey(sessionKey, model))
+          .catch(() => {});
+      }
       log.info(
         `Smart routing: "${classification.tier}" (confidence: ${classification.confidence.toFixed(2)}) → ${model}`,
       );

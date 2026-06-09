@@ -115,6 +115,16 @@ export async function updateSessionModel(sessionId: string, model: string): Prom
     .execute();
 }
 
+/** Like {@link updateSessionModel} but keyed by session_key (what the daemon has on the hot path). */
+export async function updateSessionModelByKey(sessionKey: string, model: string): Promise<void> {
+  const db = getKysely();
+  await db
+    .updateTable("sessions")
+    .set({ model, updated_at: sql`now()` })
+    .where("session_key", "=", sessionKey)
+    .execute();
+}
+
 export async function updateSessionSdkId(sessionKey: string, sdkSessionId: string): Promise<void> {
   const db = getKysely();
   await db

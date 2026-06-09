@@ -225,6 +225,9 @@ async function createIngestJob(
       contact: options.contact ?? null,
       since_date: options.since ?? null,
       run_type: options.runType ?? "full",
+      // Omit the key when unset so the column DEFAULT '6h' applies (explicit NULL
+      // would store NULL instead of the default). TEXT column -- no jsonb/stringify.
+      ...(options.deltaSchedule ? { delta_schedule: options.deltaSchedule } : {}),
     })
     .returning("id")
     .executeTakeFirstOrThrow();

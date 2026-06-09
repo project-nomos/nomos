@@ -53,6 +53,24 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: true });
     }
 
+    if (action === "set-delta-schedule") {
+      const schedule = String(body.schedule ?? "").trim();
+      // Accept only the "every"-style intervals CronStore parses (e.g. "6h", "30m", "1d").
+      if (!/^\d+[smhd]$/.test(schedule)) {
+        return NextResponse.json(
+          { error: "Invalid schedule (expected e.g. 30m, 6h, 1d)" },
+          { status: 400 },
+        );
+      }
+      const sql = getDb();
+      await sql`
+        UPDATE ingest_jobs
+        SET delta_schedule = ${schedule}
+        WHERE platform = ${platform}
+      `;
+      return NextResponse.json({ ok: true });
+    }
+
     if (action === "trigger-ingest") {
       notifyDaemonTriggerIngest(platform);
       return NextResponse.json({ ok: true, message: `Full ingestion triggered for ${platform}` });

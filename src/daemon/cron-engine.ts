@@ -11,6 +11,7 @@ import type { MessageQueue } from "./message-queue.ts";
 import type { ChannelManager } from "./channel-manager.ts";
 import type { AgentEvent } from "./types.ts";
 import { createLogger } from "../lib/logger.ts";
+import { stripHeartbeatToken } from "../auto-reply/heartbeat.ts";
 
 const log = createLogger("cron-engine");
 
@@ -177,13 +178,20 @@ export class CronEngine {
         this.broadcast(event),
       );
 
-      // If job has a delivery channel, send the result — but suppress
-      // when the agent returned the NOACTION sentinel (used by inbox/
-      // calendar/morning-briefing jobs to skip noise on quiet runs).
+      // Suppress the autonomous-loop / heartbeat OK sentinel (the agent is told
+      // to reply with EXACTLY AUTONOMOUS_OK / HEARTBEAT_OK on a quiet run).
+      // stripHeartbeatToken returns null when the whole reply is just the token.
+      const stripped = stripHeartbeatToken(result.content);
+      const suppressed = stripped === null;
+
+      // If job has a delivery channel, send the result — but suppress when the
+      // agent returned the NOACTION sentinel (inbox/calendar/morning-briefing)
+      // or the AUTONOMOUS_OK/HEARTBEAT_OK no-op token.
       if (
         job.deliveryMode === "announce" &&
         job.platform &&
         job.channelId &&
+        !suppressed &&
         !result.content.trimStart().startsWith("[NOACTION]")
       ) {
         await this.channelManager.send(result);
@@ -201,7 +209,8 @@ export class CronEngine {
           jobName: job.name,
           success: true,
           durationMs,
-          contentPreview: result.content.slice(0, 500),
+          // Use the stripped text so the OK sentinel never leaks into the preview.
+          contentPreview: (stripped ?? "(no action needed)").slice(0, 500),
         },
       });
 
