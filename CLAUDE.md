@@ -73,7 +73,16 @@ pnpm eval:agent         # end-to-end agent eval against a throwaway nomos_eval D
                         # MobileApi.Chat with a REAL nomos-server token (skipped if
                         # nomos-server isn't running on :4000). LLM-as-a-Judge grades
                         # recall, with a negative-control check.
+pnpm eval:audit         # FULL gate: runs eval:agent, then the Opus-4.8 label audit
+                        # (DB content vs passing test labels) AND the spec-driven
+                        # manifest audit (wiring + DB effects vs eval/feature-manifest.ts),
+                        # then drops the DB. Prints AUDIT: PASS + SPEC-AUDIT: PASS.
+                        # Inspect a kept DB: --keep, then --audit-kept, then --clean.
 ```
+
+The **spec-driven audit** reasons against an independent target -- `eval/feature-manifest.ts` declares, per feature, its trigger, `entry` symbols, observable `effects` (checkable SQL), and invariants. `runSpecAudit()` then checks liveness (every feature has a live caller, else DORMANT), a cron sentinel meta-check (handled in cron-engine AND seeded in gateway AND declared here), per-feature effect SQL + jsonb double-encode guards, and an Opus-4.8/xhigh reasoning pass. This catches dormant code + under-populated columns that no individual test asserts. The `/run-evals` skill documents the workflow.
+
+**When you add a feature, declare it in `eval/feature-manifest.ts`.** Give it `entry` symbols (must have a real call site -- liveness greps them), an effect `sql` count query (`expect: "nonzero"`, or `notExercised: true` if the eval does not drive it) per durable DB effect, and a `noDoubleEncode` guard for jsonb columns. For a **background (cron)** feature this is mandatory: the meta-check fails until the sentinel is handled, seeded, and declared. Verify a new entry with `--keep`, probe the effect SQL against `nomos_eval`, then promote to a hard check.
 
 ### Key Tooling
 
@@ -255,3 +264,4 @@ See `.env.example` for the full set of optional variables (model, permissions, c
 - DB schema changes must be idempotent (`CREATE TABLE IF NOT EXISTS`, `DO $$ BEGIN ... END $$` blocks)
 - Use **Kysely** for type-safe SQL queries via `getKysely()` from `src/db/client.ts`. Database types are in `src/db/types.ts`. Raw `postgres` (via `getDb()`) is only used in `migrate.ts`, `routing/store.ts`, and `sessions/identity.ts`
 - Validation with `zod` (v4)
+- **New feature → add it to `eval/feature-manifest.ts`** so the spec-driven audit guards its wiring + DB effects (see the Evals section). Background/cron features are enforced by the meta-check.

@@ -131,7 +131,7 @@ import { GrpcClient } from "../src/ui/grpc-client.ts";
 import type { AgentEvent } from "../src/daemon/types.ts";
 import { refreshJwks } from "../src/auth/jwt-validator.ts";
 import { judge } from "./judge.ts";
-import { FEATURES, type FeatureSpec } from "./feature-manifest.ts";
+import { FEATURES } from "./feature-manifest.ts";
 import { startWire, startConnectServer, makeMobileClient } from "./wire.ts";
 import { startHostedAuth } from "./hosted-auth.ts";
 import { provisionRealUser } from "./nomos-server-auth.ts";
@@ -2222,9 +2222,17 @@ async function runSentinelMetaCheck(): Promise<void> {
   const handled = new Set<string>();
   for (const m of engineText.matchAll(/(?:===\s*"|startsWith\(")(__[a-z_]+__)/g)) handled.add(m[1]);
 
-  const declared = new Map<string, FeatureSpec>();
+  // Several features can legitimately share a sentinel (e.g. value-reflection +
+  // stale-decay both ride the __auto_dream__ cron), so collect the set of declared
+  // sentinels AND the full per-feature list -- don't dedupe, or a feature loses its
+  // own handled/seeded check.
+  const declared = new Set<string>();
+  const cronFeatures: { id: string; sentinel: string }[] = [];
   for (const f of FEATURES) {
-    if (f.trigger.kind === "cron") declared.set(f.trigger.sentinel, f);
+    if (f.trigger.kind === "cron") {
+      declared.add(f.trigger.sentinel);
+      cronFeatures.push({ id: f.id, sentinel: f.trigger.sentinel });
+    }
   }
 
   const undeclared = [...handled].filter((s) => !declared.has(s));
@@ -2236,12 +2244,12 @@ async function runSentinelMetaCheck(): Promise<void> {
       : `${handled.size} sentinels declared`,
   );
 
-  for (const [sentinel, f] of declared) {
+  for (const { id, sentinel } of cronFeatures) {
     const refs = filesMentioning(sentinel);
     const inEngine = refs.includes(engine);
     const seeder = refs.find((p) => p !== engine);
     check(
-      `[spec] ${f.id}: cron handled + seeded (not dormant)`,
+      `[spec] ${id}: cron handled + seeded (not dormant)`,
       inEngine && !!seeder,
       !inEngine
         ? "no handler in cron-engine"

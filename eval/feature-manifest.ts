@@ -280,10 +280,21 @@ export const FEATURES: FeatureSpec[] = [
   },
   {
     id: "proactive-jobs",
-    summary: "Register the proactive cron jobs (inbox/calendar/briefing/triage/commitments).",
+    summary:
+      "Register the proactive cron jobs (inbox scan, calendar/meeting brief, morning briefing).",
     trigger: { kind: "boot" },
-    entry: ["registerProactiveJobs"],
-    effects: [{ claim: "seeds the proactive cron_jobs (behavioral)", notExercised: true }],
+    entry: [
+      "registerProactiveJobs",
+      "inboxScanJobSpec",
+      "calendarScanJobSpec",
+      "morningBriefingJobSpec",
+    ],
+    effects: [
+      {
+        claim: "seeds the proactive cron_jobs into the cron engine (behavioral)",
+        notExercised: true,
+      },
+    ],
   },
 
   // ── Wired runtime helpers (dormant-prone) ──
@@ -451,5 +462,211 @@ export const FEATURES: FeatureSpec[] = [
         notExercised: true,
       },
     ],
+  },
+
+  // ── Session management ──
+  {
+    id: "session-continuity",
+    summary: "Create + resume SDK sessions by stable key; durable state survives session rotation.",
+    trigger: { kind: "turn" },
+    entry: ["createSession", "getSessionByKey"],
+    effects: [
+      {
+        claim: "sessions persist under a stable session_key",
+        sql: {
+          query: "SELECT count(*) FROM sessions WHERE session_key IS NOT NULL",
+          expect: "nonzero",
+        },
+      },
+      {
+        claim: "session metadata (incl. sdkSessionId) round-trips as a jsonb object",
+        sql: {
+          query: "SELECT count(*) FROM sessions WHERE metadata->>'sdkSessionId' IS NOT NULL",
+          expect: "nonzero",
+        },
+        noDoubleEncode: { table: "sessions", column: "metadata", where: "metadata IS NOT NULL" },
+      },
+    ],
+    invariants: ["stable key default cli:default enables auto-resume"],
+  },
+  {
+    id: "ephemeral-sessions",
+    summary:
+      "Off-the-record sessions (an 'ephemeral' key segment) skip automatic memory + transcript capture.",
+    trigger: { kind: "turn" },
+    entry: ["isEphemeralSession"],
+    effects: [
+      {
+        claim: "ephemeral turns are NOT indexed into memory_chunks or transcripts (behavioral)",
+        notExercised: true,
+      },
+    ],
+    invariants: ["ephemeral sessions skip the automatic capture path"],
+  },
+  {
+    id: "smart-routing",
+    summary:
+      "Complexity-based model routing: classify the query, persist the routed tier on the session.",
+    trigger: { kind: "turn", gate: "smartRouting" },
+    entry: ["classifyQuery", "updateSessionModelByKey"],
+    effects: [
+      {
+        claim: "routed model tier is written to sessions.model (behavioral; off by default)",
+        notExercised: true,
+      },
+    ],
+  },
+
+  // ── Multi-agent teams ──
+  {
+    id: "multi-agent-teams",
+    summary:
+      "Coordinator/worker orchestration via the /team prefix; parallel workers, synthesized result.",
+    trigger: { kind: "turn", gate: "teamMode" },
+    entry: ["stripTeamPrefix", "TeamRuntime"],
+    effects: [
+      {
+        claim: "spawns parallel workers + synthesizes (transient, no durable DB state)",
+        notExercised: true,
+      },
+    ],
+  },
+
+  // ── Self-improvement (the learning loop) ──
+  {
+    id: "value-reflection-ranking",
+    summary: "Auto-dream reflects on user values + decisions, then re-ranks them by confidence.",
+    trigger: { kind: "cron", sentinel: "__auto_dream__", schedule: "6h", fanOut: true },
+    entry: ["reflectOnValues", "reRankValues"],
+    effects: [
+      {
+        claim: "user_model 'value' entries carry confidence scores",
+        sql: {
+          query: "SELECT count(*) FROM user_model WHERE category='value' AND confidence > 0",
+          expect: "nonzero",
+        },
+      },
+      {
+        claim: "user_model.value is a jsonb object (not double-encoded)",
+        noDoubleEncode: { table: "user_model", column: "value", where: "category='value'" },
+      },
+    ],
+    invariants: ["per-owner scoped", "confidence-weighted (boost/decay/floor)"],
+  },
+  {
+    id: "stale-preference-decay",
+    summary:
+      "Decay confidence of user_model entries untouched for >30 days so aged preferences fade.",
+    trigger: { kind: "cron", sentinel: "__auto_dream__", schedule: "6h", fanOut: true },
+    entry: ["decayUserModelConfidence"],
+    effects: [
+      {
+        claim:
+          "entries older than 30d have confidence decayed toward a floor (no fresh rows to assert in-eval)",
+        notExercised: true,
+      },
+    ],
+    invariants: ["per-owner scoped", "decays, never deletes"],
+  },
+  {
+    id: "draft-edit-learning",
+    summary: "Capture user edits to drafts as corrections that update the user model.",
+    trigger: { kind: "turn" },
+    entry: ["approveWithEdit"],
+    effects: [
+      {
+        claim: "edits land as user_model corrections",
+        sql: {
+          query: "SELECT count(*) FROM user_model WHERE category='correction'",
+          expect: "nonzero",
+        },
+        notExercised: true,
+      },
+    ],
+    invariants: ["per-owner scoped"],
+  },
+  {
+    id: "shadow-observer",
+    summary:
+      "Passive behavioral observation (tool use, corrections) distilled into the user model (opt-in NOMOS_SHADOW_MODE).",
+    trigger: { kind: "turn", gate: "shadowMode" },
+    entry: ["ShadowObserver", "recordToolUse"],
+    effects: [
+      {
+        claim: "observations distill into user_model 'behavior' entries (opt-in; off by default)",
+        notExercised: true,
+      },
+    ],
+  },
+
+  // ── Theory of mind ──
+  {
+    id: "theory-of-mind",
+    summary:
+      "Per-session user mental-state tracker (rule-based each turn + LLM every 3); injected as 'Current User State'.",
+    trigger: { kind: "turn" },
+    entry: ["TheoryOfMindTracker"],
+    effects: [
+      {
+        claim: "state injected into systemPromptAppend (transient, session-scoped, no DB)",
+        notExercised: true,
+      },
+    ],
+  },
+
+  // ── Personalization + identity + extensions ──
+  {
+    id: "persona-switching",
+    summary: "Contextual persona detection + system-prompt injection for multi-role identity.",
+    trigger: { kind: "turn" },
+    entry: ["detectPersona", "buildPersonaPrompt"],
+    effects: [
+      {
+        claim: "matching persona instructions injected into the prompt (behavioral)",
+        notExercised: true,
+      },
+    ],
+  },
+  {
+    id: "auto-linker",
+    summary: "Heuristic cross-channel identity resolution + auto-merge of duplicate contacts.",
+    trigger: { kind: "cli", command: "nomos contacts link" },
+    entry: ["runAutoLinker", "findLinkCandidates"],
+    effects: [
+      {
+        claim: "merges duplicate contacts via the identity graph (behavioral)",
+        notExercised: true,
+      },
+    ],
+  },
+  {
+    id: "plugins",
+    summary:
+      "Claude marketplace plugins; default set auto-installed on first boot, passed to every query.",
+    trigger: { kind: "boot" },
+    entry: ["ensureDefaultPlugins", "loadInstalledPlugins", "toSdkPluginConfigs"],
+    effects: [
+      {
+        claim:
+          "plugin configs are passed to every SDK query (behavioral; state in ~/.nomos/plugins)",
+        notExercised: true,
+      },
+    ],
+  },
+
+  // ── Consent-aware drafting ──
+  {
+    id: "draft-messages",
+    summary:
+      "Consent-aware outgoing-message drafting across all channels (always_ask / auto_approve / notify_only).",
+    trigger: { kind: "turn" },
+    entry: ["DraftManager", "getConsentMode"],
+    effects: [
+      {
+        claim: "draft_messages rows carry an approval status workflow",
+        sql: { query: "SELECT count(*) FROM draft_messages", expect: "nonzero" },
+      },
+    ],
+    invariants: ["per-owner scoped", "default channel (direct agent chat) is exempt"],
   },
 ];
