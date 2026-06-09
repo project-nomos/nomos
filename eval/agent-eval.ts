@@ -63,6 +63,8 @@ import {
 } from "../src/db/memory.ts";
 import { createContact, listContacts, mergeContacts } from "../src/identity/contacts.ts";
 import { resolveContact, listIdentities } from "../src/identity/identities.ts";
+import { embedMissingNodes, materializeSemanticEdges } from "../src/memory/graph-semantic.ts";
+import { isEmbeddingAvailable } from "../src/memory/embeddings.ts";
 import { runAutoLinker } from "../src/identity/auto-linker.ts";
 import {
   createSession,
@@ -622,6 +624,41 @@ async function runGraphBuild(): Promise<void> {
     "[graph] getNodeByExternal is owner-scoped",
     (await getNodeByExternal(ctxB, "vault", "people/alice.md")) === undefined,
   );
+
+  // Newly wired: backfill now gives vault/wiki nodes a summary from their body.
+  const db = getKysely();
+  const sumRow = await db
+    .selectFrom("kg_nodes")
+    .select((eb) => eb.fn.countAll<number>().as("n"))
+    .where("user_id", "=", ctxA.userId)
+    .where("external_kind", "=", "vault")
+    .where("summary", "is not", null)
+    .executeTakeFirst();
+  check("[graph] vault nodes get a summary from their note body", Number(sumRow?.n) >= 2);
+
+  // Newly wired: embedMissingNodes populates kg_nodes.embedding (was always null,
+  // leaving the HNSW index dead) + materializeSemanticEdges builds meaning edges.
+  if (isEmbeddingAvailable()) {
+    const emb = await embedMissingNodes(ctxA);
+    check("[graph] embedMissingNodes embeds nodes that lacked an embedding", emb.embedded >= 1);
+    const embRow = await db
+      .selectFrom("kg_nodes")
+      .select((eb) => eb.fn.countAll<number>().as("n"))
+      .where("user_id", "=", ctxA.userId)
+      .where("embedding", "is not", null)
+      .executeTakeFirst();
+    check(
+      "[graph] kg_nodes.embedding is populated (vector index now live)",
+      Number(embRow?.n) >= 1,
+    );
+    const sem = await materializeSemanticEdges(ctxA);
+    check("[graph] materializeSemanticEdges runs over the embedded nodes", sem.nodes >= 1);
+  } else {
+    skip(
+      "[graph] embedMissingNodes embeds nodes that lacked an embedding",
+      "no embedding provider",
+    );
+  }
 }
 
 async function runConsolidation(): Promise<void> {
@@ -1103,6 +1140,25 @@ async function runAutoLinkerGuard(): Promise<void> {
     "[auto-linker] cross-user mergeContacts does not delete B's contact",
     (await listContacts(B)).some((c) => c.id === b1.contact.id),
   );
+
+  // contact_identities.metadata is now plumbed (was always '{}'); round-trips as
+  // an object (the double-encode guard the agent's JSON.stringify fix would fail).
+  const meta = await resolveContact(A, "discord", "U_META", "Meta User", undefined, {
+    handle: "u-meta",
+    avatar: "a.png",
+  });
+  const ciRow = await getKysely()
+    .selectFrom("contact_identities")
+    .select("metadata")
+    .where("id", "=", meta.identity.id)
+    .executeTakeFirst();
+  check(
+    "[identity] contact_identities.metadata round-trips as an object (not double-encoded)",
+    typeof ciRow?.metadata === "object" &&
+      ciRow?.metadata !== null &&
+      (ciRow?.metadata as Record<string, unknown>).handle === "u-meta",
+  );
+
   if (!KEEP) {
     const db = getKysely();
     for (const uid of [A, B]) {
@@ -1620,6 +1676,12 @@ async function runAutoDreamDeep(): Promise<void> {
   if (!KEEP) {
     await db.deleteFrom("memory_chunks").where("user_id", "=", U).execute();
     await db.deleteFrom("auto_dream_state").execute();
+  } else {
+    // This test's gate cases churn the auto_dream_state singleton to empty. Leave
+    // a canonical row (via the real autoDream path) so a --keep inspection of
+    // nomos_eval reflects production, which always holds the singleton.
+    await db.deleteFrom("auto_dream_state").execute();
+    await autoDream(10, async () => ({ merged: 2, pruned: 1, newChunks: 3, durationMs: 0 }));
   }
 }
 
