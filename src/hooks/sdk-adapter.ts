@@ -17,7 +17,24 @@ import type {
   PostToolUseHookInput,
   SyncHookJSONOutput,
 } from "@anthropic-ai/claude-agent-sdk";
+import type { HookEvent } from "./types.ts";
 import { getHookRegistry } from "./registry.ts";
+
+/**
+ * Lifecycle events the registry can run hooks for but which never block or
+ * mutate the turn -- they fire command/HTTP/prompt hooks for their side effects
+ * (logging, webhooks, notifications). PreToolUse (blocking) and PostToolUse
+ * (context) are handled separately. The SDK exposes all of these by the same
+ * name, so the nomos event string is also the SDK hooks key.
+ */
+const OBSERVE_ONLY_EVENTS: HookEvent[] = [
+  "Notification",
+  "Stop",
+  "SessionStart",
+  "SessionEnd",
+  "PreCompact",
+  "PostCompact",
+];
 
 export function buildSdkHooks(opts: {
   sessionKey: string;
@@ -25,7 +42,6 @@ export function buildSdkHooks(opts: {
   const reg = getHookRegistry();
   const hasPre = reg.getHooksForEvent("PreToolUse").length > 0;
   const hasPost = reg.getHooksForEvent("PostToolUse").length > 0;
-  if (!hasPre && !hasPost) return undefined; // zero-cost when unused
 
   const out: Record<string, HookCallbackMatcher[]> = {};
 
@@ -81,5 +97,21 @@ export function buildSdkHooks(opts: {
     ];
   }
 
-  return out;
+  // Observe-only lifecycle events: run the registry hooks for their side effects
+  // and never block. Gated per-event so an unused event adds nothing.
+  for (const event of OBSERVE_ONLY_EVENTS) {
+    if (reg.getHooksForEvent(event).length === 0) continue;
+    out[event] = [
+      {
+        hooks: [
+          async (): Promise<SyncHookJSONOutput> => {
+            await reg.executeHooksForEvent({ event, sessionKey: opts.sessionKey });
+            return { continue: true };
+          },
+        ],
+      },
+    ];
+  }
+
+  return Object.keys(out).length > 0 ? out : undefined;
 }

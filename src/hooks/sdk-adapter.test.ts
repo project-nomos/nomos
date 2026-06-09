@@ -116,4 +116,30 @@ describe("buildSdkHooks", () => {
       hookSpecificOutput: { hookEventName: "PostToolUse", additionalContext: "extra context here" },
     });
   });
+
+  it("fires observe-only lifecycle hooks (e.g. SessionStart) without blocking", async () => {
+    getHookRegistry().register(
+      "SessionStart",
+      { type: "command", command: "log.sh" },
+      { source: "session" },
+    );
+    mockExec.mockResolvedValue(ok("started"));
+
+    const hooks = buildSdkHooks({ sessionKey: "s1" });
+    expect(hooks?.SessionStart).toBeDefined();
+    const out = await hooks!.SessionStart![0]!.hooks[0]!({} as unknown as HookInput, undefined, {
+      signal: new AbortController().signal,
+    });
+    // Observe-only: runs the registry hook (side effect) and never blocks.
+    expect(out).toEqual({ continue: true });
+    expect(mockExec).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not register an event that has no hooks (zero-cost)", () => {
+    getHookRegistry().register("Stop", { type: "command", command: "x" }, { source: "session" });
+    const hooks = buildSdkHooks({ sessionKey: "s1" });
+    expect(hooks?.Stop).toBeDefined();
+    expect(hooks?.SessionEnd).toBeUndefined();
+    expect(hooks?.PreToolUse).toBeUndefined();
+  });
 });
