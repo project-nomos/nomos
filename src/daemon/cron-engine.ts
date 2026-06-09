@@ -191,6 +191,32 @@ export class CronEngine {
       return;
     }
 
+    // Intercept style-analyze sentinel -- re-derive each owner's writing voice
+    // from sent messages. Self-gates on config.styleMatching (no-op when off).
+    if (job.prompt === "__style_analyze__") {
+      (async () => {
+        const { loadEnvConfig } = await import("../config/env.ts");
+        if (!loadEnvConfig().styleMatching) return;
+        log.info("Firing style analysis");
+        const { analyzeStyle } = await import("../memory/style-model.ts");
+        const { listMemoryOwners } = await import("../auth/org-members.ts");
+        for (const userId of await listMemoryOwners()) {
+          try {
+            const r = await analyzeStyle(userId);
+            log.info({ userId, contactProfiles: r.contactProfiles }, "Style analysis complete");
+          } catch (err) {
+            log.warn(
+              { err: err instanceof Error ? err.message : err, userId },
+              "Style analysis failed for owner",
+            );
+          }
+        }
+      })().catch((err) => {
+        log.error({ err: err instanceof Error ? err.message : err }, "Style analysis failed");
+      });
+      return;
+    }
+
     log.info(`Triggering job: ${job.name} (${job.id})`);
 
     const sessionKey =

@@ -26,6 +26,7 @@ const CONFIG_KEY_MAP: Record<string, keyof NomosConfig> = {
   "app.anthropicBaseUrl": "anthropicBaseUrl",
   "app.adaptiveMemory": "adaptiveMemory",
   "app.commitmentTracking": "commitmentTracking",
+  "app.styleMatching": "styleMatching",
   "app.extractionModel": "extractionModel",
   "app.shadowMode": "shadowMode",
   "app.imageGeneration": "imageGeneration",

@@ -384,6 +384,25 @@ export class Gateway {
         log.info("Registered magic-docs refresh cron job (every 1h)");
         process.emit("cron:refresh" as never);
       }
+
+      // Style analysis: re-derive the user's writing voice daily. Self-gates on
+      // config.styleMatching at fire time, so the job is harmless when the
+      // feature is off (and reflects a later toggle without reseeding).
+      if (!(await cronStore.getJobByName("style-analyze"))) {
+        await cronStore.createJob({
+          userId: systemTenant().userId,
+          name: "style-analyze",
+          schedule: "24h",
+          scheduleType: "every",
+          sessionTarget: "isolated",
+          deliveryMode: "none",
+          prompt: "__style_analyze__",
+          enabled: true,
+          errorCount: 0,
+        });
+        log.info("Registered style-analyze cron job (every 24h)");
+        process.emit("cron:refresh" as never);
+      }
     } catch (err) {
       log.warn({ err }, "Auto-dream/magic-docs cron registration failed");
     }

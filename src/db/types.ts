@@ -209,6 +209,7 @@ export interface IngestJobsTable {
 
 export interface StyleProfilesTable {
   id: Generated<string>;
+  user_id: Generated<string>;
   contact_id: string | null;
   scope: Generated<string>;
   profile: ColumnType<Record<string, unknown>, string | undefined, string>;

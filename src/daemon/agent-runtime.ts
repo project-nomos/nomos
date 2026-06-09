@@ -1020,6 +1020,18 @@ export class AgentRuntime {
       systemPromptAppend = systemPromptAppend + "\n\n" + wikiContext;
     }
 
+    // Writing-voice guidance (opt-in styleMatching): make the agent write in the
+    // owner's style, derived from their sent messages by the daily analysis job.
+    if (this.config.styleMatching) {
+      try {
+        const { buildStyleGuidance } = await import("../memory/style-prompt.ts");
+        const styleGuidance = await buildStyleGuidance(vaultUserId);
+        if (styleGuidance) systemPromptAppend = systemPromptAppend + "\n\n" + styleGuidance;
+      } catch (err) {
+        log.debug({ err }, "Style guidance injection failed");
+      }
+    }
+
     // Build the elicitation callback for this turn. The `ask_user` MCP
     // tool calls `extra.sendRequest({method: "elicitation/create"})`;
     // the SDK forwards to `onElicitation`, we route to the channel the

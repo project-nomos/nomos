@@ -1126,6 +1126,56 @@ async function runManagedFiles(): Promise<void> {
   if (!KEEP) await getKysely().deleteFrom("managed_files").where("path", "=", path).execute();
 }
 
+async function runStyleProfiles(): Promise<void> {
+  // style_profiles: the per-turn voice guidance reads row.profile as an object,
+  // so this guards the jsonb double-encode (real DB only) + per-user scoping.
+  const { upsertStyleProfile, getStyleProfile } = await import("../src/db/style-profiles.ts");
+  const db = getKysely();
+  const A = "eval-style-a";
+  const B = "eval-style-b";
+  await db.deleteFrom("style_profiles").where("user_id", "in", [A, B]).execute();
+
+  const mk = (formality: number) => ({
+    formality,
+    avgLength: 12,
+    emojiUsage: "rare" as const,
+    punctuation: "standard",
+    greetingStyle: "none",
+    signoffStyle: "none",
+    vocabulary: ["lgtm"],
+    tone: "direct",
+    casing: "standard",
+    responseSpeed: "brief",
+  });
+
+  await upsertStyleProfile(A, null, "global", mk(1), 10);
+  await upsertStyleProfile(B, null, "global", mk(5), 7);
+
+  const rowA = await getStyleProfile(A, "global");
+  check(
+    "[style] profile round-trips as a jsonb object (not a double-encoded string)",
+    typeof rowA?.profile === "object" &&
+      rowA?.profile !== null &&
+      (rowA?.profile as Record<string, unknown>).formality === 1,
+  );
+  check(
+    "[style] B's global profile is its own (per-user scoped)",
+    (await getStyleProfile(B, "global"))?.profile &&
+      ((await getStyleProfile(B, "global"))?.profile as Record<string, unknown>).formality === 5,
+  );
+  // Re-upsert A: the unique key is (user_id, scope), so it updates in place.
+  await upsertStyleProfile(A, null, "global", mk(2), 11);
+  const reA = await db
+    .selectFrom("style_profiles")
+    .select((eb) => eb.fn.countAll<number>().as("n"))
+    .where("user_id", "=", A)
+    .where("scope", "=", "global")
+    .executeTakeFirst();
+  check("[style] upsert by (user_id, scope) updates in place (no duplicate)", Number(reA?.n) === 1);
+
+  if (!KEEP) await db.deleteFrom("style_profiles").where("user_id", "in", [A, B]).execute();
+}
+
 async function runWikiArticles(): Promise<void> {
   // Derived store: wiki_articles. Deterministic write + per-user isolation, then
   // the full LLM compile (2 Sonnet passes) pointed at a temp NOMOS_WIKI_DIR so it
@@ -1844,6 +1894,7 @@ async function runEval(): Promise<void> {
   await runDrafts();
   await runAutoLinkerGuard();
   await runManagedFiles();
+  await runStyleProfiles();
   await runGraphMetadata();
   await runBacklinks();
   await runMetadataColumns();

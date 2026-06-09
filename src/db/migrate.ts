@@ -390,16 +390,36 @@ ON CONFLICT (key) DO NOTHING;
 -- Style profiles for communication voice modeling
 CREATE TABLE IF NOT EXISTS style_profiles (
   id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id      TEXT NOT NULL DEFAULT 'local',
   contact_id   UUID,
   scope        TEXT NOT NULL DEFAULT 'global',
   profile      JSONB NOT NULL DEFAULT '{}',
   sample_count INT NOT NULL DEFAULT 0,
   last_updated TIMESTAMPTZ NOT NULL DEFAULT now(),
   created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
-  UNIQUE (contact_id, scope)
+  UNIQUE (user_id, scope)
 );
 
+-- Per-user hardening for legacy style_profiles (mirror of wiki_articles).
+DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'style_profiles' AND column_name = 'user_id'
+  ) THEN
+    ALTER TABLE style_profiles ADD COLUMN user_id TEXT NOT NULL DEFAULT 'local';
+  END IF;
+END $$;
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'style_profiles_contact_id_scope_key') THEN
+    ALTER TABLE style_profiles DROP CONSTRAINT style_profiles_contact_id_scope_key;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'style_profiles_user_id_scope_key') THEN
+    ALTER TABLE style_profiles ADD CONSTRAINT style_profiles_user_id_scope_key UNIQUE (user_id, scope);
+  END IF;
+END $$;
+
 CREATE INDEX IF NOT EXISTS idx_style_contact ON style_profiles(contact_id);
+CREATE INDEX IF NOT EXISTS idx_style_user ON style_profiles(user_id);
 
 -- Knowledge wiki articles (DB-primary, disk as cache)
 CREATE TABLE IF NOT EXISTS wiki_articles (

@@ -9,13 +9,14 @@ import { getStyleProfile, type StyleProfile } from "../db/style-profiles.ts";
 
 /**
  * Build style guidance text for the system prompt.
- * Merges global profile with per-contact overrides.
+ * Merges the owner's global profile with per-contact overrides.
  *
+ * @param userId - The profile owner (resolved memory user id)
  * @param contact - Optional contact identifier for per-contact style
  * @returns Style guidance string, or empty string if no profiles exist
  */
-export async function buildStyleGuidance(contact?: string): Promise<string> {
-  const globalRow = await getStyleProfile(null, "global");
+export async function buildStyleGuidance(userId: string, contact?: string): Promise<string> {
+  const globalRow = await getStyleProfile(userId, "global");
   if (!globalRow) return "";
 
   const global = globalRow.profile as unknown as StyleProfile;
@@ -23,7 +24,7 @@ export async function buildStyleGuidance(contact?: string): Promise<string> {
   // Check for per-contact override
   let effective = global;
   if (contact) {
-    const contactRow = await getStyleProfile(null, `contact:${contact}`);
+    const contactRow = await getStyleProfile(userId, `contact:${contact}`);
     if (contactRow) {
       const contactProfile = contactRow.profile as unknown as StyleProfile;
       effective = mergeProfiles(global, contactProfile);

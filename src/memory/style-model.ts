@@ -53,7 +53,7 @@ export async function analyzeStyle(userId: string): Promise<{
   // Fetch global sample for overall style
   const globalSamples = await fetchSamples(db, userId, null);
   const globalProfile = await extractStyleProfile(globalSamples, "global");
-  await upsertStyleProfile(null, "global", globalProfile, globalSamples.length);
+  await upsertStyleProfile(userId, null, "global", globalProfile, globalSamples.length);
 
   // Per-contact profiles
   let contactCount = 0;
@@ -63,8 +63,9 @@ export async function analyzeStyle(userId: string): Promise<{
     if (samples.length < 5) continue; // Need minimum samples
 
     const profile = await extractStyleProfile(samples, contact);
-    // Store with contact identifier (contact_id FK added when identity graph exists)
-    await upsertStyleProfile(null, `contact:${contact}`, profile, samples.length);
+    // Scoped to the owner; the contact lives in `scope` (contact_id FK is added
+    // when the identity graph supplies a stable id).
+    await upsertStyleProfile(userId, null, `contact:${contact}`, profile, samples.length);
     contactCount++;
   }
 
