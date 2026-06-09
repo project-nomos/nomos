@@ -62,6 +62,10 @@ export function registerChatCommand(program: Command): void {
       // Run DB migrations
       await runMigrations();
 
+      // Load the hook registry into the singleton for the in-process (--direct)
+      // REPL path, so PreToolUse blocking from hooks.json applies here too.
+      await import("../hooks/registry.ts").then((m) => m.initializeHooks()).catch(() => {});
+
       // Build MCP server map
       const mcpServers: Record<string, McpServerConfig> = {};
 

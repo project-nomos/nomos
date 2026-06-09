@@ -5,6 +5,7 @@ import type { AgentIdentity } from "../../config/profile.ts";
 import { appendTranscriptMessage } from "../../db/transcripts.ts";
 import { updateSessionUsage, updateSessionSdkId } from "../../db/sessions.ts";
 import { runSession, type McpServerConfig, type SDKMessage } from "../../sdk/session.ts";
+import { buildSdkHooks } from "../../hooks/sdk-adapter.ts";
 import { TeamRuntime, stripTeamPrefix } from "../../daemon/team-runtime.ts";
 import { dispatchSlashCommand, type CommandContext, type CommandState } from "../slash-commands.ts";
 import { shouldBootstrap, getBootstrapPrompt } from "../bootstrap.ts";
@@ -514,6 +515,9 @@ export function App({
           resume: sdkSessionIdRef.current ?? undefined,
           thinking,
           allowedTools,
+          // PreToolUse blocking from hooks.json (matters most in CLI-direct mode,
+          // which runs tools on the user's machine). No-op when no hooks registered.
+          hooks: buildSdkHooks({ sessionKey: session.session_key }),
           stderr: stderrCallback,
         });
 
@@ -538,6 +542,7 @@ export function App({
                 permissionMode: stateRef.current.permissionMode ?? config.permissionMode,
                 thinking,
                 allowedTools,
+                hooks: buildSdkHooks({ sessionKey: session.session_key }),
                 stderr: stderrCallback,
               });
               for await (const msg of sdkQuery) {

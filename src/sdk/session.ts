@@ -73,6 +73,8 @@ export interface RunSessionParams {
    * automatically declined.
    */
   onElicitation?: OnElicitation;
+  /** SDK-native hook callbacks (PreToolUse blocking, PostToolUse context, etc.) */
+  hooks?: Options["hooks"];
 }
 
 /**
@@ -142,6 +144,7 @@ export function runSession(params: RunSessionParams): Query {
       env,
       ...(params.cwd ? { cwd: params.cwd } : {}),
       ...(params.onElicitation ? { onElicitation: params.onElicitation } : {}),
+      ...(params.hooks ? { hooks: params.hooks } : {}),
     },
   });
 }

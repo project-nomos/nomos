@@ -12,6 +12,7 @@ import {
   type SDKMessage,
   type SdkPluginConfig,
 } from "../sdk/session.ts";
+import { buildSdkHooks } from "../hooks/sdk-adapter.ts";
 import { loadInstalledPlugins, toSdkPluginConfigs } from "../plugins/loader.ts";
 import { ensureDefaultPlugins } from "../plugins/installer.ts";
 import { createMemoryMcpServer } from "../sdk/tools.ts";
@@ -1033,6 +1034,9 @@ export class AgentRuntime {
       plugins: this.plugins,
       useSubscription: this.config.useSubscription,
       onElicitation,
+      // PreToolUse blocking from ~/.nomos/hooks.json (no-op when none registered).
+      // Honored even in bypassPermissions mode -- a safety net for unattended runs.
+      hooks: buildSdkHooks({ sessionKey: sessionKey ?? "daemon" }),
       stderr: (data: string) => {
         // Log SDK subprocess stderr so we can diagnose crash reasons
         const trimmed = data.trim();

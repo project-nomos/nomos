@@ -211,6 +211,18 @@ export class Gateway {
       log.warn({ err: err instanceof Error ? err.message : err }, "File sync failed");
     }
 
+    // Load the event-driven hook registry (~/.nomos/hooks.json + ./.nomos/hooks.json)
+    // into the process-global singleton so PreToolUse blocking is reachable. No-op
+    // for users without a hooks.json. cwd-tier hooks depend on the daemon's cwd.
+    try {
+      const { initializeHooks } = await import("../hooks/registry.ts");
+      const reg = await initializeHooks();
+      const count = reg.getAllHooks().length;
+      if (count > 0) log.info(`Loaded ${count} hook(s) from hooks.json`);
+    } catch (err) {
+      log.warn({ err: err instanceof Error ? err.message : err }, "Hook registry load failed");
+    }
+
     // Verify LLM access before starting services
     await this.checkLlmAccess();
 
