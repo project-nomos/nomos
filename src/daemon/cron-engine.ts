@@ -217,21 +217,34 @@ export class CronEngine {
       return;
     }
 
-    // Intercept graph-semantic sentinel -- embed kg_nodes that lack an embedding
-    // and materialize meaning-based edges, per owner. No-op without an embedding
-    // provider (embedMissingNodes returns {embedded:0}).
+    // Intercept graph-semantic sentinel -- the full graph self-population pass,
+    // per owner: (1) backfillGraph promotes vault notes / wiki articles / contacts
+    // into kg_nodes (+ summaries) and frontmatter link edges, (2) embedMissingNodes
+    // embeds the new nodes, (3) materializeSemanticEdges adds meaning-based edges.
+    // Without this, the graph only filled via the manual `nomos brain` CLIs. No-op
+    // embeddings without a provider (embedMissingNodes returns {embedded:0}).
     if (job.prompt === "__graph_semantic__") {
-      log.info("Firing graph semantics");
+      log.info("Firing graph backfill + semantics");
       (async () => {
+        const { backfillGraph } = await import("../memory/graph.ts");
         const { embedMissingNodes, materializeSemanticEdges } =
           await import("../memory/graph-semantic.ts");
         const { listMemoryOwners } = await import("../auth/org-members.ts");
         const orgId = process.env.NOMOS_ORG_ID ?? "local";
         for (const userId of await listMemoryOwners()) {
           try {
+            const b = await backfillGraph({ orgId, userId });
             const e = await embedMissingNodes({ orgId, userId });
             const s = await materializeSemanticEdges({ orgId, userId });
-            log.info({ userId, embedded: e.embedded, edges: s.edges }, "Graph semantics complete");
+            log.info(
+              {
+                userId,
+                nodes: b.vaultNodes + b.wikiNodes + b.personNodes,
+                embedded: e.embedded,
+                edges: s.edges,
+              },
+              "Graph backfill + semantics complete",
+            );
           } catch (err) {
             log.warn(
               { err: err instanceof Error ? err.message : err, userId },
