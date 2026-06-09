@@ -29,7 +29,7 @@
 
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
-import { writeFile, rm, mkdir } from "node:fs/promises";
+import { writeFile, readFile, rm, mkdir } from "node:fs/promises";
 import { config } from "dotenv";
 // Load .env the same way the app entry point does, so DATABASE_URL and the LLM
 // provider key are present when this script runs standalone (the judge runs only
@@ -1843,45 +1843,10 @@ async function teardownTestDb(baseUrl: string): Promise<void> {
   await dropTestDb(baseUrl);
 }
 
-async function main(): Promise<void> {
-  const args = process.argv.slice(2);
+/** Where a `--keep` run drops its test results so a later `--audit` can cross-check them. */
+const RESULTS_FILE = join(tmpdir(), "nomos-eval-results.json");
 
-  // `--clean`: just drop a previously kept test DB and exit (tidy up after --keep).
-  if (args.includes("--clean")) {
-    await dropTestDb(process.env.DATABASE_URL ?? "postgresql://localhost:5432/nomos");
-    return;
-  }
-  // `--keep`: run normally but leave the test DB (and everything the run wrote) intact
-  // so it can be inspected; drop it later with `pnpm eval:agent --clean`.
-  const keep = args.includes("--keep");
-
-  // eslint-disable-next-line no-console
-  console.log(
-    `Agent eval (LLM judge: ${hasLLM ? "on" : "off"}${keep ? "; --keep" : ""}${AUDIT ? "; --audit" : ""})\n`,
-  );
-  const { baseUrl } = await setupTestDb();
-  try {
-    // Phase 1 -- eval (with keep): run every check against nomos_eval. AUDIT implies
-    // keep-data so nothing is cleaned out from under the audit.
-    await runEval();
-    // Phase 2 -- audit: an Opus-4.8 / xhigh ("ultracode") pass reads the PERSISTED
-    // nomos_eval content and cross-checks it against the test results (true e2e).
-    if (AUDIT) await runModelDbAudit();
-  } finally {
-    // Phase 3 -- clean: drop the throwaway nomos_eval (unless --keep was passed).
-    if (keep) {
-      await closeDb(); // release the pool so the process can exit; do NOT drop the DB
-      // eslint-disable-next-line no-console
-      console.log(
-        `\nKept test DB for inspection:\n  psql "${process.env.DATABASE_URL}"\n  drop it with: pnpm eval:agent --clean`,
-      );
-    } else {
-      // The throwaway DB is dropped wholesale, so per-row cleanup is belt-and-braces.
-      await finalSweep().catch(() => undefined);
-      await teardownTestDb(baseUrl);
-    }
-  }
-
+function printSummary(): void {
   const failed = results.filter((r) => !r.pass);
   const skipped = results.filter((r) => r.skipped);
   // eslint-disable-next-line no-console
@@ -1890,6 +1855,79 @@ async function main(): Promise<void> {
       `${failed.length} failed, ${skipped.length} skipped`,
   );
   if (failed.length > 0) process.exit(1);
+}
+
+async function main(): Promise<void> {
+  const args = process.argv.slice(2);
+  const keep = args.includes("--keep");
+
+  // `--clean`: just drop a previously kept test DB and exit (tidy up after --keep).
+  if (args.includes("--clean")) {
+    await dropTestDb(process.env.DATABASE_URL ?? "postgresql://localhost:5432/nomos");
+    return;
+  }
+
+  // `--audit`: STANDALONE second phase. Audit the nomos_eval a prior `pnpm eval:agent
+  // --keep` left behind -- connect to that persisted DB (never recreate/migrate it),
+  // load the kept test results, run the Opus-4.8 / xhigh ("ultracode") audit, then
+  // drop it (clean). This is the true e2e: a fresh process verifies the real DB.
+  if (AUDIT) {
+    const baseUrl = process.env.DATABASE_URL ?? "postgresql://localhost:5432/nomos";
+    if (new URL(baseUrl).pathname === `/${TEST_DB_NAME}`) {
+      throw new Error(`DATABASE_URL already points at ${TEST_DB_NAME}; refusing to run`);
+    }
+    process.env.DATABASE_URL = withDatabaseName(baseUrl, TEST_DB_NAME); // point at the kept DB
+    // eslint-disable-next-line no-console
+    console.log(`Auditing kept test DB: ${TEST_DB_NAME} (Opus 4.8, xhigh)\n`);
+
+    let priorLabels: string[] = [];
+    try {
+      const raw = JSON.parse(await readFile(RESULTS_FILE, "utf-8")) as Result[];
+      priorLabels = raw.filter((r) => r.pass && !r.skipped).map((r) => r.label);
+    } catch {
+      // eslint-disable-next-line no-console
+      console.log(
+        "No kept results found -- run `pnpm eval:agent --keep` first. Auditing DB content without test labels.",
+      );
+    }
+
+    try {
+      await runModelDbAudit(priorLabels);
+    } finally {
+      // Clean unless --keep is also passed (so you can re-audit / inspect).
+      if (keep) {
+        await closeDb();
+      } else {
+        await teardownTestDb(baseUrl);
+      }
+    }
+    printSummary();
+    return;
+  }
+
+  // eslint-disable-next-line no-console
+  console.log(`Agent eval (LLM judge: ${hasLLM ? "on" : "off"}${keep ? "; --keep" : ""})\n`);
+  const { baseUrl } = await setupTestDb();
+  try {
+    await runEval();
+  } finally {
+    if (keep) {
+      // Persist the results so a separate `pnpm eval:audit` can cross-check them
+      // against the kept DB, then release the pool (do NOT drop the DB).
+      await writeFile(RESULTS_FILE, JSON.stringify(results), "utf-8").catch(() => undefined);
+      await closeDb();
+      // eslint-disable-next-line no-console
+      console.log(
+        `\nKept test DB. Next:\n  pnpm eval:audit   # Opus-4.8 audit of ${TEST_DB_NAME}, then drops it\n  (or inspect: psql "${process.env.DATABASE_URL}", drop: pnpm eval:agent --clean)`,
+      );
+    } else {
+      // The throwaway DB is dropped wholesale, so per-row cleanup is belt-and-braces.
+      await finalSweep().catch(() => undefined);
+      await teardownTestDb(baseUrl);
+    }
+  }
+
+  printSummary();
 }
 
 /**
@@ -1959,7 +1997,7 @@ async function dumpDbForAudit(): Promise<Record<string, unknown[]>> {
  * support each claim -- the cross-check the boolean assertions can't do alone.
  * Runs only under `--audit` (which keeps the data) and when an LLM is configured.
  */
-async function runModelDbAudit(): Promise<void> {
+async function runModelDbAudit(passedLabels: string[]): Promise<void> {
   if (!hasLLM) {
     skip(
       "[db-audit] Opus 4.8 (thinking) confirms DB content matches the test results",
@@ -1987,7 +2025,7 @@ async function runModelDbAudit(): Promise<void> {
     errored.length ? `missing/errored: ${errored.join(", ")}` : undefined,
   );
 
-  const passed = results.filter((r) => r.pass && !r.skipped).map((r) => r.label);
+  const passed = passedLabels;
 
   const prompt = `You are a meticulous database auditor. An eval suite just ran a set of deterministic checks against this PostgreSQL database and they all reported PASS. Your job is to INDEPENDENTLY verify, from the actual table contents below, that the database genuinely supports those claims -- and to catch anything the boolean assertions could have missed.
 
