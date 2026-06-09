@@ -6,6 +6,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 A TypeScript CLI and multi-channel AI agent built on `@anthropic-ai/claude-agent-sdk`. It wraps Claude Code to get all built-in tools (Bash, Read, Write, Edit, Glob, Grep, WebSearch, etc.), agent loop, compaction, and streaming -- then adds persistent sessions, vector memory, a daemon with channel integrations, scheduled tasks, 60+ bundled skills, multi-agent team orchestration, smart model routing, custom API endpoint support, personalization, event-driven hooks, background memory consolidation (auto-dream), cost tracking, context visualization, bash safety analysis, and self-updating documentation (magic docs).
 
+## Working Method: define expected results first, then loop to green
+
+**Define the expected result BEFORE building, then iterate until the code actually produces it.** A feature is not "done" because the code exists -- it is done when a check OBSERVES its expected effect. Skipping this is how features end up wired in name only: the function exists, nothing calls it, and no column is ever populated.
+
+1. **Define the target first.** State the expected observable result -- the DB rows/columns it must populate, the behavior, the invariants. For anything with durable state, declare it in [`eval/feature-manifest.ts`](eval/feature-manifest.ts) (trigger, `entry` symbols, effect SQL, invariants) as the contract to verify against.
+2. **Build to the target.**
+3. **Loop until the actual result matches the expected one.** Run the relevant check (`pnpm eval:audit` for features + DB effects, `pnpm test`, or a targeted SQL/CLI probe) and iterate -- fix, re-run -- until it passes. Verify against a REAL run, never by inspection alone: if you cannot observe the expected effect, it is not done.
+4. **Only then report done**, and cite the check that confirmed it.
+
+This applies to features, bug fixes, and migrations alike. The spec-driven audit (`runSpecAudit`, run via `pnpm eval:audit`) enforces it for features: the liveness layer fails on code with no live caller, and effect SQL fails on a column nothing populates -- so an unwired feature cannot pass. When you add a feature, add its contract to the manifest in the same change (see the Evals section).
+
 ## Build & Development
 
 Package manager is **pnpm** (v10.23+). Requires **Node >= 22**. All commands run from the repo root.
