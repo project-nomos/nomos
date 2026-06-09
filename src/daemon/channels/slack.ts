@@ -27,10 +27,42 @@ export class SlackAdapter implements ChannelAdapter {
   private botUserId: string | null = null;
   private onMessage: (msg: IncomingMessage) => void;
   private draftManager: DraftManager | null;
+  /** Cache of resolved Slack user profiles, so we only call users.info once per sender. */
+  private profileCache = new Map<string, Record<string, unknown>>();
 
   constructor(onMessage: (msg: IncomingMessage) => void, draftManager?: DraftManager) {
     this.onMessage = onMessage;
     this.draftManager = draftManager ?? null;
+  }
+
+  /**
+   * Resolve a Slack user's profile (display name + avatar) for the message
+   * metadata, so the identity graph records a real name instead of just the
+   * user id. Cached + best-effort: returns {} on any error.
+   */
+  private async senderMetadata(userId: string): Promise<Record<string, unknown>> {
+    const cached = this.profileCache.get(userId);
+    if (cached) return cached;
+    let meta: Record<string, unknown> = {};
+    try {
+      const res = await this.app?.client.users.info({ user: userId });
+      const u = res?.user as
+        | {
+            real_name?: string;
+            profile?: { display_name?: string; real_name_normalized?: string; image_72?: string };
+          }
+        | undefined;
+      const senderName =
+        u?.profile?.display_name || u?.profile?.real_name_normalized || u?.real_name;
+      meta = {
+        ...(senderName ? { senderName } : {}),
+        ...(u?.profile?.image_72 ? { avatar: u.profile.image_72 } : {}),
+      };
+    } catch (err) {
+      log.debug({ err, userId }, "users.info lookup failed");
+    }
+    this.profileCache.set(userId, meta);
+    return meta;
   }
 
   async start(): Promise<void> {
@@ -57,6 +89,7 @@ export class SlackAdapter implements ChannelAdapter {
         threadId: event.thread_ts ?? event.ts,
         content,
         timestamp: new Date(),
+        metadata: await this.senderMetadata(event.user),
       });
     });
 
@@ -80,6 +113,7 @@ export class SlackAdapter implements ChannelAdapter {
         threadId: e.thread_ts ?? e.ts,
         content: e.text.trim(),
         timestamp: new Date(),
+        metadata: await this.senderMetadata(e.user),
       });
     });
 
