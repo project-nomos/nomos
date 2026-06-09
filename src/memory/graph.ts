@@ -807,6 +807,22 @@ export async function backfillGraph(ctx: TenantContext = LOCAL_TENANT): Promise<
     ) SELECT count(*)::text AS n FROM ins
   `.execute(db);
 
+  // Give wiki/vault nodes a summary from their source body (first ~280 chars).
+  // Fills nulls only, so it's idempotent and also enriches nodes created on an
+  // earlier run. The summary feeds node embeddings (graph-semantic) + readers.
+  await sql`
+    UPDATE kg_nodes n SET summary = left(w.content, 280)
+    FROM wiki_articles w
+    WHERE n.external_kind = 'wiki' AND n.external_ref = w.path
+      AND n.user_id = ${uid} AND w.user_id = ${uid} AND n.summary IS NULL
+  `.execute(db);
+  await sql`
+    UPDATE kg_nodes n SET summary = left(v.content, 280)
+    FROM vault_notes v
+    WHERE n.external_kind = 'vault' AND n.external_ref = v.path
+      AND n.user_id = ${uid} AND v.user_id = ${uid} AND n.summary IS NULL
+  `.execute(db);
+
   // backlinks[] -> links_to edges, within each namespace. We carry the source
   // `kind` through the UNION and pin BOTH ends of the edge to it, so a wiki
   // article's backlinks only ever link wiki nodes and a vault note's only link

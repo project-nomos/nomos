@@ -101,6 +101,14 @@ export async function indexConversationTurn(
       endLine: chunk.endLine,
       hash: chunkHash,
       model: embeddings?.[i] ? embeddingModel : undefined,
+      // Provenance so metadata->>'source'/'platform' filters work uniformly with
+      // ingest chunks (this is the highest-volume writer and stored {} before).
+      metadata: {
+        source: "conversation",
+        platform: incoming.platform,
+        sessionKey,
+        timestamp,
+      },
     });
   }
 

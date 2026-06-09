@@ -25,6 +25,7 @@ import { homedir } from "node:os";
 import { getDb } from "../db/client.ts";
 import { runForkedAgent } from "../sdk/forked-agent.ts";
 import { upsertArticle, getArticle, listArticles } from "../db/wiki.ts";
+import { parseWikiLinks } from "./graph-writer.ts";
 import { syncToDisk } from "./wiki-sync.ts";
 import { syncFileToDb } from "../config/file-sync.ts";
 import { isHosted } from "../config/mode.ts";
@@ -297,7 +298,7 @@ Maximum ${MAX_ARTICLES_PER_RUN} articles. Return [] if nothing is worth compilin
           plan.title,
           article,
           plan.category,
-          [],
+          parseWikiLinks(article), // backlinks: the [[Other Article]] refs the LLM cross-linked
           COMPILE_MODEL,
         );
 
@@ -376,6 +377,8 @@ RELEVANT CONVERSATIONS:
 ${convoText || "No recent conversations"}
 
 Write a concise, factual markdown article. Include ALL concrete details found (phone numbers, emails, relationships, roles, preferences). Structure with clear headings. Under 500 words.
+
+When you mention another person, project, company, or topic that likely has its own wiki entry, wrap that name in double brackets like [[Name]] so the wiki cross-links. Only bracket proper nouns that are distinct entities, not generic words.
 
 Return ONLY the markdown article content.`;
 

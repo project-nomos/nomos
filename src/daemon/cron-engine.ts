@@ -217,6 +217,34 @@ export class CronEngine {
       return;
     }
 
+    // Intercept graph-semantic sentinel -- embed kg_nodes that lack an embedding
+    // and materialize meaning-based edges, per owner. No-op without an embedding
+    // provider (embedMissingNodes returns {embedded:0}).
+    if (job.prompt === "__graph_semantic__") {
+      log.info("Firing graph semantics");
+      (async () => {
+        const { embedMissingNodes, materializeSemanticEdges } =
+          await import("../memory/graph-semantic.ts");
+        const { listMemoryOwners } = await import("../auth/org-members.ts");
+        const orgId = process.env.NOMOS_ORG_ID ?? "local";
+        for (const userId of await listMemoryOwners()) {
+          try {
+            const e = await embedMissingNodes({ orgId, userId });
+            const s = await materializeSemanticEdges({ orgId, userId });
+            log.info({ userId, embedded: e.embedded, edges: s.edges }, "Graph semantics complete");
+          } catch (err) {
+            log.warn(
+              { err: err instanceof Error ? err.message : err, userId },
+              "Graph semantics failed for owner",
+            );
+          }
+        }
+      })().catch((err) => {
+        log.error({ err: err instanceof Error ? err.message : err }, "Graph semantics failed");
+      });
+      return;
+    }
+
     log.info(`Triggering job: ${job.name} (${job.id})`);
 
     const sessionKey =

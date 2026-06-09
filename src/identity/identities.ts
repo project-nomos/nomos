@@ -32,6 +32,8 @@ export async function linkIdentity(
   platformUserId: string,
   displayName?: string,
   email?: string,
+  /** Extra platform profile data (avatar, handle, locale, raw...) -- merged on conflict. */
+  metadata?: Record<string, unknown>,
 ): Promise<ContactIdentityRow> {
   const db = getKysely();
   const row = await db
@@ -43,12 +45,16 @@ export async function linkIdentity(
       platform_user_id: platformUserId,
       display_name: displayName ?? null,
       email: email ?? null,
+      // Pass the OBJECT (driver serializes to jsonb once); JSON.stringify would
+      // double-encode into a jsonb string.
+      ...(metadata ? { metadata: metadata as unknown as string } : {}),
     })
     .onConflict((oc) =>
       oc.columns(["user_id", "platform", "platform_user_id"]).doUpdateSet({
         contact_id: contactId,
         display_name: sql`COALESCE(EXCLUDED.display_name, contact_identities.display_name)`,
         email: sql`COALESCE(EXCLUDED.email, contact_identities.email)`,
+        ...(metadata ? { metadata: sql`contact_identities.metadata || EXCLUDED.metadata` } : {}),
       }),
     )
     .returningAll()
@@ -75,6 +81,7 @@ export async function resolveContact(
   platformUserId: string,
   displayName?: string,
   email?: string,
+  metadata?: Record<string, unknown>,
 ): Promise<{ contact: ContactRow; identity: ContactIdentityRow; created: boolean }> {
   const db = getKysely();
 
@@ -113,6 +120,7 @@ export async function resolveContact(
     platformUserId,
     displayName,
     email,
+    metadata,
   );
 
   return { contact, identity, created: true };

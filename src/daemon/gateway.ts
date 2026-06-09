@@ -403,6 +403,26 @@ export class Gateway {
         log.info("Registered style-analyze cron job (every 24h)");
         process.emit("cron:refresh" as never);
       }
+
+      // Graph semantics: embed kg_nodes that lack an embedding and materialize
+      // meaning-based (semantic_sibling) edges, every 6h. Otherwise the kg_nodes
+      // vector index + semantic traversal stay dormant (only the manual
+      // `nomos brain semantic` CLI populated them).
+      if (!(await cronStore.getJobByName("graph-semantic"))) {
+        await cronStore.createJob({
+          userId: systemTenant().userId,
+          name: "graph-semantic",
+          schedule: "6h",
+          scheduleType: "every",
+          sessionTarget: "isolated",
+          deliveryMode: "none",
+          prompt: "__graph_semantic__",
+          enabled: true,
+          errorCount: 0,
+        });
+        log.info("Registered graph-semantic cron job (every 6h)");
+        process.emit("cron:refresh" as never);
+      }
     } catch (err) {
       log.warn({ err }, "Auto-dream/magic-docs cron registration failed");
     }
