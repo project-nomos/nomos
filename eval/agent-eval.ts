@@ -112,6 +112,7 @@ import {
 } from "../src/proactive/commitment-tracker.ts";
 import { compileKnowledge } from "../src/memory/knowledge-compiler.ts";
 import { listArticles, upsertArticle, searchArticles, getArticle } from "../src/db/wiki.ts";
+import { getRelevantArticles } from "../src/memory/wiki-reader.ts";
 import { isEphemeralSession } from "../src/daemon/memory-indexer.ts";
 import { GrpcServer } from "../src/daemon/grpc-server.ts";
 import { MessageQueue } from "../src/daemon/message-queue.ts";
@@ -1146,6 +1147,17 @@ async function runWikiArticles(): Promise<void> {
   check(
     "[wiki] A cannot see B's article",
     (await listArticles(A)).every((a) => a.path !== "contacts/zara.md"),
+  );
+
+  // getRelevantArticles is what the live turn path injects into the prompt.
+  const relA = await getRelevantArticles(A, "Alice");
+  check(
+    "[wiki] getRelevantArticles surfaces the owner's matching article",
+    relA.includes("Alice is A's contact.") && relA.includes("Personal Knowledge Wiki"),
+  );
+  check(
+    "[wiki] getRelevantArticles is owner-scoped (B's query never returns A's content)",
+    !(await getRelevantArticles(B, "Alice")).includes("Alice is A's contact."),
   );
 
   if (!hasLLM) {

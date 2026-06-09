@@ -388,6 +388,30 @@ export class Gateway {
       log.warn({ err }, "Auto-dream/magic-docs cron registration failed");
     }
 
+    // Reconcile the on-disk wiki cache with the DB at boot, power-user only
+    // (hosted pods share the DB; a per-node disk copy would diverge). Empty DB
+    // hydrates from disk; otherwise the DB is mirrored to disk. Fire-and-forget
+    // so a large disk walk never blocks the rest of boot.
+    try {
+      const { isHosted } = await import("../config/mode.ts");
+      if (!isHosted()) {
+        const { reconcileOnStartup } = await import("../memory/wiki-sync.ts");
+        const { listMemoryOwners } = await import("../auth/org-members.ts");
+        void (async () => {
+          for (const userId of await listMemoryOwners()) {
+            await reconcileOnStartup(userId).catch((err) =>
+              log.warn(
+                { err: err instanceof Error ? err.message : err, userId },
+                "Wiki reconcile failed for owner",
+              ),
+            );
+          }
+        })();
+      }
+    } catch (err) {
+      log.warn({ err: err instanceof Error ? err.message : err }, "Wiki reconcile skipped");
+    }
+
     // Start CATE protocol server (agent-to-agent trust layer)
     try {
       this.cateIntegration = await initCATEIntegration({

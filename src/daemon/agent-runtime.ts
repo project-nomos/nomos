@@ -31,6 +31,7 @@ import { isGoogleWorkspaceConfiguredAsync } from "../sdk/google-workspace-mcp.ts
 import { buildGoogleMcpServers, buildGoogleIntegrationPrompt } from "../sdk/google-mcp.ts";
 import { buildVaultMcpServer } from "../sdk/vault-mcp.ts";
 import { buildMemoryDigest } from "../memory/digest.ts";
+import { getRelevantArticles } from "../memory/wiki-reader.ts";
 import { loadEnvConfig, type NomosConfig } from "../config/env.ts";
 import { FEATURES, isHosted } from "../config/mode.ts";
 import { resolveMemoryUserId } from "../auth/tenant-context.ts";
@@ -974,6 +975,11 @@ export class AgentRuntime {
     // so it stays continuous without having to call a recall tool first.
     const memoryDigest = await buildMemoryDigest(vaultUserId).catch(() => "");
 
+    // Query-specific: surface the most relevant compiled wiki articles for this
+    // turn (FTS over the owner's wiki, 4000-char budget). Empty when the wiki is
+    // empty or the prompt has no matches. Scoped to the resolved owner.
+    const wikiContext = await getRelevantArticles(vaultUserId, prompt).catch(() => "");
+
     // Auto-approve all tools from our MCP servers
     const allowedTools = Object.keys(mcpServers).map((name) => `mcp__${name}`);
 
@@ -1006,6 +1012,12 @@ export class AgentRuntime {
     // Inject the reasoning-first memory digest (what the agent knows about the user)
     if (memoryDigest) {
       systemPromptAppend = systemPromptAppend + "\n\n" + memoryDigest;
+    }
+
+    // Inject query-relevant wiki articles LAST so the stable prefix (system
+    // prompt, tools, digest) stays prompt-cacheable up to this point.
+    if (wikiContext) {
+      systemPromptAppend = systemPromptAppend + "\n\n" + wikiContext;
     }
 
     // Build the elicitation callback for this turn. The `ask_user` MCP
