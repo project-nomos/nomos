@@ -105,7 +105,11 @@ import {
   runAutoDreamCycle,
   reRankValues,
 } from "../src/memory/auto-dream.ts";
-import { storeCommitments, getPendingCommitments } from "../src/proactive/commitment-tracker.ts";
+import {
+  storeCommitments,
+  getPendingCommitments,
+  getCommitmentsForReminder,
+} from "../src/proactive/commitment-tracker.ts";
 import { compileKnowledge } from "../src/memory/knowledge-compiler.ts";
 import { listArticles, upsertArticle, searchArticles, getArticle } from "../src/db/wiki.ts";
 import { isEphemeralSession } from "../src/daemon/memory-indexer.ts";
@@ -915,10 +919,28 @@ async function runCommitments(): Promise<void> {
     pendA.length >= 1 && pendA.every((c) => c.user_id === A),
   );
   check(
+    "[commitments] source_msg round-trips (reminder context)",
+    pendA.some((c) => c.source_msg === "msg-a"),
+  );
+  check(
     "[commitments] B does not see A's commitments",
     (await getPendingCommitments(B)).every(
       (c) => c.user_id === B && c.description !== "send the quarterly report",
     ),
+  );
+
+  // Reminder window: a commitment due within 24h surfaces for reminders; the
+  // earlier no-deadline one does not. Drives the __commitment_reminders__ path.
+  const soon = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString();
+  await storeCommitments(A, [{ description: "ping the client", deadline: soon, contact: null }]);
+  const remind = await getCommitmentsForReminder(A);
+  check(
+    "[commitments] near-deadline commitment surfaces for reminder",
+    remind.some((c) => c.description === "ping the client"),
+  );
+  check(
+    "[commitments] no-deadline commitment is not in the reminder set",
+    remind.every((c) => c.description !== "send the quarterly report"),
   );
 }
 

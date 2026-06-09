@@ -119,6 +119,32 @@ export async function indexConversationTurn(
       log.debug({ err }, "Exemplar scoring failed");
     });
   }
+
+  // Commitment tracking: extract promises/follow-ups from the turn and store them
+  // for deadline reminders. Separate opt-in flag (default off) since it adds its
+  // own LLM call -- don't piggyback on adaptiveMemory (which defaults on).
+  if (config.commitmentTracking) {
+    extractAndStoreCommitmentsFromTurn(incoming, outgoing, userId).catch((err) => {
+      log.debug({ err }, "Commitment extraction failed");
+    });
+  }
+}
+
+/**
+ * Extract commitments from a conversation turn and store them for reminders.
+ * Fire-and-forget; gated on config.commitmentTracking by the caller.
+ */
+async function extractAndStoreCommitmentsFromTurn(
+  incoming: IncomingMessage,
+  outgoing: OutgoingMessage,
+  userId: string,
+): Promise<void> {
+  const { extractCommitments, storeCommitments } =
+    await import("../proactive/commitment-tracker.ts");
+  const commitments = await extractCommitments(incoming.content, outgoing.content);
+  if (commitments.length === 0) return;
+  await storeCommitments(userId, commitments, incoming.content.slice(0, 500));
+  log.debug(`Stored ${commitments.length} commitment(s) for ${userId}`);
 }
 
 /**

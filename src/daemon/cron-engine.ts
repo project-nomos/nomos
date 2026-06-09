@@ -140,6 +140,57 @@ export class CronEngine {
       return;
     }
 
+    // Intercept commitment-reminders sentinel -- check due commitments per owner
+    // and deliver to the default notification channel (no agent turn).
+    if (job.prompt === "__commitment_reminders__") {
+      log.info("Firing commitment reminders");
+      (async () => {
+        const { runCommitmentReminders } = await import("../proactive/scheduler.ts");
+        const results = await runCommitmentReminders();
+        if (results.length === 0) return;
+        const { getNotificationDefault } = await import("../db/notification-defaults.ts");
+        const nd = await getNotificationDefault();
+        if (!nd) {
+          log.warn("No default channel; skipping commitment reminder delivery");
+          return;
+        }
+        for (const r of results) {
+          await this.channelManager.send({
+            inReplyTo: "commitment-reminder",
+            platform: nd.platform,
+            channelId: nd.channelId,
+            content: r.text,
+          });
+        }
+      })().catch((err) => {
+        log.error({ err: err instanceof Error ? err.message : err }, "Commitment reminders failed");
+      });
+      return;
+    }
+
+    // Intercept triage-digest sentinel -- run the daily inbox triage and deliver
+    // (suppressed on a quiet day; no agent turn).
+    if (job.prompt === "__triage_digest__") {
+      log.info("Firing triage digest");
+      (async () => {
+        const { runTriageDigest } = await import("../proactive/scheduler.ts");
+        const summary = await runTriageDigest();
+        if (summary === "No new messages requiring attention.") return; // quiet-day suppression
+        const { getNotificationDefault } = await import("../db/notification-defaults.ts");
+        const nd = await getNotificationDefault();
+        if (!nd) return;
+        await this.channelManager.send({
+          inReplyTo: "triage-digest",
+          platform: nd.platform,
+          channelId: nd.channelId,
+          content: summary,
+        });
+      })().catch((err) => {
+        log.error({ err: err instanceof Error ? err.message : err }, "Triage digest failed");
+      });
+      return;
+    }
+
     log.info(`Triggering job: ${job.name} (${job.id})`);
 
     const sessionKey =
