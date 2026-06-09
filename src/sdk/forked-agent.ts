@@ -10,6 +10,7 @@
  */
 
 import { runSession, type RunSessionParams } from "./session.ts";
+import { withRetry } from "./retry.ts";
 import { getCostTracker } from "./cost-tracker.ts";
 import { createLogger } from "../lib/logger.ts";
 
@@ -81,35 +82,53 @@ export async function runForkedAgent(options: ForkedAgentOptions): Promise<Forke
     },
   };
 
-  const sdkQuery = runSession(params);
-
   let fullText = "";
   let totalCostUsd = 0;
   let inputTokens = 0;
   let outputTokens = 0;
 
-  for await (const msg of sdkQuery) {
-    if (options.signal?.aborted) {
-      break;
-    }
+  // Retry the whole build-and-drain on transient (429/529) errors -- the SDK
+  // surfaces those during generator iteration, not from runSession() itself.
+  // Reset the accumulators at the top of each attempt so a partial failed
+  // attempt never leaks into the next one (and cost is tallied only once, after
+  // the loop, from the final successful attempt).
+  await withRetry(
+    async () => {
+      fullText = "";
+      totalCostUsd = 0;
+      inputTokens = 0;
+      outputTokens = 0;
+      const sdkQuery = runSession(params);
+      for await (const msg of sdkQuery) {
+        if (options.signal?.aborted) break;
 
-    if (msg.type === "assistant") {
-      for (const block of msg.message.content) {
-        if (block.type === "text" && block.text) {
-          if (fullText && !fullText.endsWith("\n")) fullText += "\n";
-          fullText += block.text;
+        if (msg.type === "assistant") {
+          for (const block of msg.message.content) {
+            if (block.type === "text" && block.text) {
+              if (fullText && !fullText.endsWith("\n")) fullText += "\n";
+              fullText += block.text;
+            }
+          }
+        } else if (msg.type === "result") {
+          totalCostUsd = msg.total_cost_usd ?? 0;
+          inputTokens = msg.usage?.input_tokens ?? 0;
+          outputTokens = msg.usage?.output_tokens ?? 0;
+
+          if ("result" in msg) {
+            fullText += msg.result;
+          }
         }
       }
-    } else if (msg.type === "result") {
-      totalCostUsd = msg.total_cost_usd ?? 0;
-      inputTokens = msg.usage?.input_tokens ?? 0;
-      outputTokens = msg.usage?.output_tokens ?? 0;
-
-      if ("result" in msg) {
-        fullText += msg.result;
-      }
-    }
-  }
+    },
+    {
+      signal: options.signal,
+      onRetry: (attempt, delayMs, err) =>
+        log.warn(
+          { label, attempt, delayMs, err: err instanceof Error ? err.message : err },
+          `${label} retry`,
+        ),
+    },
+  );
 
   const durationMs = Date.now() - start;
 
