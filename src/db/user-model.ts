@@ -16,7 +16,6 @@ export async function upsertUserModel(
   entry: Omit<UserModelEntry, "id" | "updatedAt">,
 ): Promise<void> {
   const db = getKysely();
-  const valueJson = JSON.stringify(entry.value);
 
   await db
     .insertInto("user_model")
@@ -24,15 +23,22 @@ export async function upsertUserModel(
       user_id: entry.userId,
       category: entry.category,
       key: entry.key,
-      value: valueJson,
+      // Pass the OBJECT (the driver serializes to jsonb once). JSON.stringify
+      // here double-encodes into a jsonb *string*, so every consumer that casts
+      // value to an object (calibration/reflection/personality-dna) reads
+      // undefined fields.
+      value: entry.value as unknown as string,
       source_ids: entry.sourceIds,
       confidence: entry.confidence,
     })
     .onConflict((oc) =>
       oc.columns(["user_id", "category", "key"]).doUpdateSet({
-        value: sql`${valueJson}::jsonb`,
+        value: entry.value as unknown as string,
+        // COALESCE so merging two empty arrays yields '{}' rather than NULL:
+        // array_agg over zero unnested rows returns NULL, which violates the
+        // source_ids NOT NULL constraint.
         source_ids: sql`(
-          SELECT array_agg(DISTINCT s)
+          SELECT COALESCE(array_agg(DISTINCT s), ARRAY[]::text[])
           FROM unnest(user_model.source_ids || ${entry.sourceIds}::text[]) AS s
         )`,
         confidence: entry.confidence,
