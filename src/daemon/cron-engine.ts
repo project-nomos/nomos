@@ -141,20 +141,21 @@ export class CronEngine {
     }
 
     // Intercept commitment-reminders sentinel -- check due commitments per owner
-    // and deliver to the default notification channel (no agent turn).
+    // and deliver each owner's reminders to THAT owner's notification channel
+    // (per-owner with global fallback; no agent turn).
     if (job.prompt === "__commitment_reminders__") {
       log.info("Firing commitment reminders");
       (async () => {
         const { runCommitmentReminders } = await import("../proactive/scheduler.ts");
         const results = await runCommitmentReminders();
         if (results.length === 0) return;
-        const { getNotificationDefault } = await import("../db/notification-defaults.ts");
-        const nd = await getNotificationDefault();
-        if (!nd) {
-          log.warn("No default channel; skipping commitment reminder delivery");
-          return;
-        }
+        const { getNotificationDefaultFor } = await import("../db/notification-defaults.ts");
         for (const r of results) {
+          const nd = await getNotificationDefaultFor(r.userId);
+          if (!nd) {
+            log.warn({ userId: r.userId }, "No notification channel; skipping commitment reminder");
+            continue;
+          }
           await this.channelManager.send({
             inReplyTo: "commitment-reminder",
             platform: nd.platform,
@@ -168,23 +169,25 @@ export class CronEngine {
       return;
     }
 
-    // Intercept triage-digest sentinel -- run the daily inbox triage and deliver
-    // (suppressed on a quiet day; no agent turn).
+    // Intercept triage-digest sentinel -- run the daily inbox triage per owner and
+    // deliver each to that owner's channel (suppressed on a quiet day; no agent turn).
     if (job.prompt === "__triage_digest__") {
       log.info("Firing triage digest");
       (async () => {
         const { runTriageDigest } = await import("../proactive/scheduler.ts");
-        const summary = await runTriageDigest();
-        if (summary === "No new messages requiring attention.") return; // quiet-day suppression
-        const { getNotificationDefault } = await import("../db/notification-defaults.ts");
-        const nd = await getNotificationDefault();
-        if (!nd) return;
-        await this.channelManager.send({
-          inReplyTo: "triage-digest",
-          platform: nd.platform,
-          channelId: nd.channelId,
-          content: summary,
-        });
+        const results = await runTriageDigest();
+        if (results.length === 0) return;
+        const { getNotificationDefaultFor } = await import("../db/notification-defaults.ts");
+        for (const r of results) {
+          const nd = await getNotificationDefaultFor(r.userId);
+          if (!nd) continue;
+          await this.channelManager.send({
+            inReplyTo: "triage-digest",
+            platform: nd.platform,
+            channelId: nd.channelId,
+            content: r.text,
+          });
+        }
       })().catch((err) => {
         log.error({ err: err instanceof Error ? err.message : err }, "Triage digest failed");
       });
