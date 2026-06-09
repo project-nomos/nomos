@@ -23,6 +23,12 @@
  * dropped on exit, so it never touches the dev `nomos` DB.
  *
  * Run:  DATABASE_URL=... [NOMOS_USE_SUBSCRIPTION=true] pnpm eval:agent
+ *   pnpm eval:agent            fast deterministic + judged checks, drops the DB
+ *   pnpm eval:audit            ^ + an Opus-4.8 / xhigh "ultracode" DB-content audit
+ *                              (eval -> audit -> clean, all in one run)
+ *   pnpm eval:agent --keep     keep nomos_eval for inspection
+ *   pnpm eval:agent --audit-kept   audit a kept DB without re-running the eval
+ *   pnpm eval:agent --clean    drop a kept nomos_eval
  * Exits non-zero on any failure. Judge + real-token checks skip (reported) when no
  * LLM provider / no nomos-server is available.
  */
@@ -133,16 +139,17 @@ const hasLLM =
   process.env.CLAUDE_CODE_USE_VERTEX === "1" ||
   process.env.NOMOS_USE_SUBSCRIPTION === "true";
 
-// `--audit` runs an Opus-4.8-with-thinking pass that inspects the ACTUAL database
-// content and cross-checks it against the deterministic test results (catching
-// false-passes the boolean assertions can't, e.g. double-encoded jsonb). It needs
-// the rows present, so it also skips per-test cleanup.
-const AUDIT = process.argv.slice(2).includes("--audit");
+// `--audit` (the default `pnpm eval:audit`) runs the full eval, then an
+// Opus-4.8 / xhigh ("ultracode") pass that inspects the ACTUAL nomos_eval content
+// and cross-checks it against the deterministic test results -- all in ONE run
+// (eval -> audit -> clean). It catches false-passes the boolean assertions can't
+// (e.g. double-encoded jsonb). It needs the rows present, so it skips per-test
+// cleanup. `--audit-kept` instead audits a DB a prior `--keep` run left behind
+// (no eval re-run), for inspect-then-audit.
+const AUDIT_KEPT = process.argv.slice(2).includes("--audit-kept");
+const AUDIT = process.argv.slice(2).includes("--audit") || AUDIT_KEPT;
 
-// `--keep` leaves the throwaway DB AND skips the per-test data cleanup, so the
-// rows each check wrote remain in nomos_eval for inspection. Server/connection
-// teardown still runs unconditionally. `--audit` implies keep-data (but still
-// drops the DB on exit unless --keep is also passed).
+// Skip per-test cleanup so the audit (or a manual inspector) sees the rows.
 const KEEP = process.argv.slice(2).includes("--keep") || AUDIT;
 
 interface Result {
@@ -1867,11 +1874,11 @@ async function main(): Promise<void> {
     return;
   }
 
-  // `--audit`: STANDALONE second phase. Audit the nomos_eval a prior `pnpm eval:agent
-  // --keep` left behind -- connect to that persisted DB (never recreate/migrate it),
-  // load the kept test results, run the Opus-4.8 / xhigh ("ultracode") audit, then
-  // drop it (clean). This is the true e2e: a fresh process verifies the real DB.
-  if (AUDIT) {
+  // `--audit-kept`: STANDALONE audit of a DB a prior `--keep` run left behind --
+  // connect to that persisted nomos_eval (never recreate/migrate it), load the kept
+  // test labels, run the Opus-4.8 / xhigh audit, then drop it (clean). For
+  // inspect-then-audit; the default `--audit` does eval+audit in one run instead.
+  if (AUDIT_KEPT) {
     const baseUrl = process.env.DATABASE_URL ?? "postgresql://localhost:5432/nomos";
     if (new URL(baseUrl).pathname === `/${TEST_DB_NAME}`) {
       throw new Error(`DATABASE_URL already points at ${TEST_DB_NAME}; refusing to run`);
@@ -1894,31 +1901,36 @@ async function main(): Promise<void> {
     try {
       await runModelDbAudit(priorLabels);
     } finally {
-      // Clean unless --keep is also passed (so you can re-audit / inspect).
-      if (keep) {
-        await closeDb();
-      } else {
-        await teardownTestDb(baseUrl);
-      }
+      if (keep) await closeDb();
+      else await teardownTestDb(baseUrl);
     }
     printSummary();
     return;
   }
 
   // eslint-disable-next-line no-console
-  console.log(`Agent eval (LLM judge: ${hasLLM ? "on" : "off"}${keep ? "; --keep" : ""})\n`);
+  console.log(
+    `Agent eval (LLM judge: ${hasLLM ? "on" : "off"}${AUDIT ? "; --audit (eval+audit+clean)" : keep ? "; --keep" : ""})\n`,
+  );
   const { baseUrl } = await setupTestDb();
   try {
+    // Phase 1 -- eval: every deterministic check, against the fresh nomos_eval.
     await runEval();
+    // Phase 2 -- audit (same run): the Opus-4.8 / xhigh pass reads the just-written,
+    // committed nomos_eval and cross-checks it against this run's passing labels.
+    if (AUDIT) {
+      const passed = results.filter((r) => r.pass && !r.skipped).map((r) => r.label);
+      await runModelDbAudit(passed);
+    }
   } finally {
+    // Phase 3 -- clean (or keep). --audit drops the DB unless --keep is also given.
     if (keep) {
-      // Persist the results so a separate `pnpm eval:audit` can cross-check them
-      // against the kept DB, then release the pool (do NOT drop the DB).
+      // Persist the results so `--audit-kept` can cross-check a manually-kept DB.
       await writeFile(RESULTS_FILE, JSON.stringify(results), "utf-8").catch(() => undefined);
       await closeDb();
       // eslint-disable-next-line no-console
       console.log(
-        `\nKept test DB. Next:\n  pnpm eval:audit   # Opus-4.8 audit of ${TEST_DB_NAME}, then drops it\n  (or inspect: psql "${process.env.DATABASE_URL}", drop: pnpm eval:agent --clean)`,
+        `\nKept test DB. Inspect: psql "${process.env.DATABASE_URL}"\n  audit it:  pnpm eval:agent --audit-kept\n  drop it:   pnpm eval:agent --clean`,
       );
     } else {
       // The throwaway DB is dropped wholesale, so per-row cleanup is belt-and-braces.
