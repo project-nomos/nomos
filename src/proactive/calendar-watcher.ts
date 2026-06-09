@@ -4,8 +4,8 @@
  * starting in the next 10-30 minutes.
  *
  * Like the inbox watcher, this runs through the main AgentRuntime so the
- * agent has gws calendar tools and can call into the meeting-briefer logic
- * indirectly (via contact lookups + memory search).
+ * agent has gws calendar tools and assembles the brief itself (via contact
+ * lookups + memory search) from the scan prompt.
  */
 
 import { NOACTION_PREFIX, parseIntervalMinutes, type ProactiveJobSpec } from "./inbox-watcher.ts";
