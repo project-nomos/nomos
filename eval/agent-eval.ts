@@ -992,6 +992,21 @@ async function runCommitments(): Promise<void> {
     ),
   );
 
+  // Commitment -> contact linking: the extractor names who a promise is to, and
+  // storeCommitments must resolve that name to a contact_id (regression guard for
+  // the dropped-on-insert bug). An unnamed commitment stays unlinked (null).
+  const sarah = await createContact(A, { displayName: "Sarah Lin" });
+  const [linked] = await storeCommitments(
+    A,
+    [{ description: "send Sarah the deck", deadline: null, contact: "Sarah" }],
+    "msg-link",
+  );
+  check(
+    "[commitments] a named contact resolves to contact_id",
+    linked?.contact_id === sarah.id,
+    `contact_id=${linked?.contact_id ?? "null"} expected=${sarah.id}`,
+  );
+
   // Reminder window: a commitment due within 24h surfaces for reminders; the
   // earlier no-deadline one does not. Drives the __commitment_reminders__ path.
   const soon = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString();

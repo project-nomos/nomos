@@ -235,6 +235,14 @@ export const FEATURES: FeatureSpec[] = [
         claim: "commitments rows are stored with a description + owner",
         sql: { query: "SELECT count(*) FROM commitments", expect: "nonzero" },
       },
+      {
+        claim:
+          "a commitment naming a known contact resolves to a contact_id (not dropped on insert)",
+        sql: {
+          query: "SELECT count(*) FROM commitments WHERE contact_id IS NOT NULL",
+          expect: "nonzero",
+        },
+      },
     ],
     invariants: ["per-owner scoped"],
   },
