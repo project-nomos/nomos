@@ -27,6 +27,65 @@ const SOURCE_META: Record<string, { label: string; icon: typeof Bot; cls: string
   system: { label: "System", icon: Cog, cls: "bg-sky-500/15 text-sky-300" },
 };
 
+const DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+
+/** Format a clock time from cron minute + hour fields (single numeric values). */
+function clockTime(min: string, hour: string): string | null {
+  if (!/^\d{1,2}$/.test(min) || !/^\d{1,2}$/.test(hour)) return null;
+  const h = parseInt(hour, 10);
+  const m = parseInt(min, 10);
+  if (h > 23 || m > 59) return null;
+  const period = h < 12 ? "AM" : "PM";
+  const h12 = h % 12 === 0 ? 12 : h % 12;
+  return `${h12}:${String(m).padStart(2, "0")} ${period}`;
+}
+
+/** Describe the day-of-week field of a cron expression in plain English. */
+function dayPhrase(dow: string): string {
+  if (dow === "*") return "every day";
+  if (dow === "1-5") return "on weekdays";
+  if (dow === "0,6" || dow === "6,0" || dow === "0,6,") return "on weekends";
+  const single = dow.match(/^\d$/) ? DAY_NAMES[parseInt(dow, 10) % 7] : null;
+  if (single) return `on ${single}s`;
+  return `on days ${dow}`;
+}
+
+/** Turn a schedule into human-readable text. Falls back to the raw value. */
+function formatSchedule(scheduleType: string, schedule: string): string {
+  if (scheduleType === "every") {
+    const m = schedule.match(/^(\d+)\s*([smhd])$/);
+    if (m) {
+      const n = parseInt(m[1], 10);
+      const unit = { s: "second", m: "minute", h: "hour", d: "day" }[m[2]] ?? m[2];
+      return `Every ${n} ${unit}${n === 1 ? "" : "s"}`;
+    }
+    return `Every ${schedule}`;
+  }
+  if (scheduleType === "cron") {
+    const parts = schedule.trim().split(/\s+/);
+    if (parts.length === 5) {
+      const [min, hour, dom, month, dow] = parts;
+      // "*/N * * * *" -> every N minutes
+      const everyMin = min.match(/^\*\/(\d+)$/);
+      if (everyMin && hour === "*" && dom === "*" && month === "*" && dow === "*") {
+        const n = parseInt(everyMin[1], 10);
+        return `Every ${n} minute${n === 1 ? "" : "s"}`;
+      }
+      // "M H * * dow" -> at a fixed time
+      if (dom === "*" && month === "*") {
+        const t = clockTime(min, hour);
+        if (t) {
+          const day = dayPhrase(dow);
+          return day === "every day" ? `Daily at ${t}` : `At ${t} ${day}`;
+        }
+      }
+    }
+    return schedule; // unrecognized cron -> show it raw
+  }
+  if (scheduleType === "at") return `Once at ${schedule}`;
+  return schedule;
+}
+
 export default function LoopsAdminPage() {
   const { addToast } = useToast();
   const [loops, setLoops] = useState<Loop[]>([]);
@@ -147,9 +206,12 @@ export default function LoopsAdminPage() {
                       )}
                     </div>
                     <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-overlay0">
-                      <code className="font-mono text-subtext0">
-                        {loop.scheduleType}:{loop.schedule}
-                      </code>
+                      <span
+                        className="text-subtext0"
+                        title={`${loop.scheduleType}: ${loop.schedule}`}
+                      >
+                        {formatSchedule(loop.scheduleType, loop.schedule)}
+                      </span>
                       <span>{loop.deliveryMode}</span>
                       {loop.lastRun && (
                         <span>last run {loop.lastRun.slice(0, 16).replace("T", " ")}</span>
