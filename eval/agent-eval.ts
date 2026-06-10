@@ -131,12 +131,12 @@ import { compileKnowledge } from "../src/memory/knowledge-compiler.ts";
 import { listArticles, upsertArticle, searchArticles, getArticle } from "../src/db/wiki.ts";
 import { getRelevantArticles } from "../src/memory/wiki-reader.ts";
 import { runForkedAgent } from "../src/sdk/forked-agent.ts";
-import { isEphemeralSession } from "../src/daemon/memory-indexer.ts";
+import { isEphemeralSession, indexConversationTurn } from "../src/daemon/memory-indexer.ts";
 import { GrpcServer } from "../src/daemon/grpc-server.ts";
 import { MessageQueue } from "../src/daemon/message-queue.ts";
 import { AgentRuntime } from "../src/daemon/agent-runtime.ts";
 import { GrpcClient } from "../src/ui/grpc-client.ts";
-import type { AgentEvent } from "../src/daemon/types.ts";
+import type { AgentEvent, IncomingMessage, OutgoingMessage } from "../src/daemon/types.ts";
 import { refreshJwks } from "../src/auth/jwt-validator.ts";
 import { judge } from "./judge.ts";
 import { FEATURES } from "./feature-manifest.ts";
@@ -2465,6 +2465,61 @@ async function runSpecAudit(): Promise<void> {
   await runSpecReasoning(liveness, effects);
 }
 
+/**
+ * Conversation memory must be SEMANTICALLY searchable, not FTS-only: prove that
+ * indexConversationTurn embeds the chunks it writes. The live gRPC path indexes
+ * fire-and-forget (so a raw DB scan can catch it mid-flight); awaiting the real
+ * function here is the deterministic check that conversation recall is accurate.
+ */
+async function runConversationEmbedding(): Promise<void> {
+  const path = "evalconv:embed";
+  const incoming: IncomingMessage = {
+    id: "conv-embed-1",
+    platform: "evalconv",
+    channelId: "embed",
+    userId: "eval-conv-embed",
+    content:
+      "Remember the product launch is next Tuesday at the downtown loft, and Priya owns the demo.",
+    timestamp: new Date(),
+  };
+  const outgoing: OutgoingMessage = {
+    inReplyTo: "conv-embed-1",
+    platform: "evalconv",
+    channelId: "embed",
+    content:
+      "Got it: launch next Tuesday at the downtown loft, Priya on the demo. I'll remind you.",
+  };
+  await indexConversationTurn(incoming, outgoing);
+
+  const db = getKysely();
+  const res = await db.executeQuery(
+    sql`SELECT count(*) AS total, count(embedding) AS embedded FROM memory_chunks WHERE path = ${path} AND source = 'conversation'`.compile(
+      db,
+    ),
+  );
+  const row = res.rows[0] as { total: string; embedded: string } | undefined;
+  const total = Number(row?.total ?? 0);
+  const embedded = Number(row?.embedded ?? 0);
+  check(
+    "[conversation] indexConversationTurn persists conversation chunks",
+    total >= 1,
+    `total=${total}`,
+  );
+  if (isEmbeddingAvailable()) {
+    check(
+      "[conversation] conversation chunks are embedded (semantic recall, not FTS-only)",
+      total >= 1 && embedded === total,
+      `${embedded}/${total} embedded`,
+    );
+  } else {
+    skip(
+      "[conversation] conversation chunks are embedded (semantic recall, not FTS-only)",
+      "embeddings unavailable",
+    );
+  }
+  if (!KEEP) await db.deleteFrom("memory_chunks").where("path", "=", path).execute();
+}
+
 async function runEval(): Promise<void> {
   await runMode("power_user");
   await runMode("hosted");
@@ -2491,6 +2546,7 @@ async function runEval(): Promise<void> {
   await runAutoDreamDeep();
   await runQuickFixWiring();
   await runGetMessagesWire();
+  await runConversationEmbedding();
 
   // Negative control: a judge that passes everything is worthless. Prove it
   // rejects a response that plainly misses the rubric.

@@ -205,6 +205,14 @@ export const FEATURES: FeatureSpec[] = [
         },
         noDoubleEncode: { table: "memory_chunks", column: "metadata", where: "metadata <> '{}'" },
       },
+      {
+        claim: "conversation chunks are embedded for semantic recall (not FTS-only)",
+        sql: {
+          query:
+            "SELECT count(*) FROM memory_chunks WHERE source='conversation' AND embedding IS NOT NULL",
+          expect: "nonzero",
+        },
+      },
     ],
     invariants: ["per-owner scoped", "ephemeral sessions skipped"],
   },
