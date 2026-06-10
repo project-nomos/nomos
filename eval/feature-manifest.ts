@@ -450,6 +450,36 @@ export const FEATURES: FeatureSpec[] = [
     invariants: ["per-owner scoped (UNIQUE user_id, platform, platform_user_id)"],
   },
   {
+    id: "relationship-enrichment",
+    summary:
+      "Enrich a contact on resolution (role from job title, relationship interaction stats) + derive frequency from ingested history.",
+    trigger: { kind: "turn" },
+    entry: ["enrichContactRelationship", "computeRelationshipStats", "refreshRelationshipStats"],
+    effects: [
+      {
+        claim: "an inbound job title lands on contacts.role",
+        sql: { query: "SELECT count(*) FROM contacts WHERE role IS NOT NULL", expect: "nonzero" },
+      },
+      {
+        claim: "contacts.relationship is enriched with interaction stats (not the default '{}')",
+        sql: {
+          query: "SELECT count(*) FROM contacts WHERE relationship <> '{}'",
+          expect: "nonzero",
+        },
+      },
+      {
+        claim:
+          "contacts.relationship merges as a jsonb object (never an array/string from a double-encode)",
+        sql: {
+          query:
+            "SELECT count(*) FROM contacts WHERE relationship <> '{}' AND jsonb_typeof(relationship) <> 'object'",
+          expect: "zero",
+        },
+      },
+    ],
+    invariants: ["per-owner scoped"],
+  },
+  {
     id: "ingestion-pipeline",
     summary: "Import historical channel conversations into vector memory with dedup.",
     trigger: { kind: "cli", command: "nomos ingest" },

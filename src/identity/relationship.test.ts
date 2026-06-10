@@ -1,5 +1,25 @@
 import { describe, it, expect } from "vitest";
-import { buildInboundRelationship } from "./relationship.ts";
+import { buildInboundRelationship, frequencyFromStats } from "./relationship.ts";
+
+describe("frequencyFromStats", () => {
+  const day = 24 * 60 * 60 * 1000;
+  const span = (days: number) => ({
+    first: new Date(0).toISOString(),
+    last: new Date(days * day).toISOString(),
+  });
+
+  it("is 'rare' without a date range", () => {
+    expect(frequencyFromStats(100, null, null)).toBe("rare");
+  });
+
+  it("buckets by messages-per-day", () => {
+    const { first, last } = span(10);
+    expect(frequencyFromStats(30, first, last)).toBe("daily"); // 3/day
+    expect(frequencyFromStats(5, first, last)).toBe("weekly"); // 0.5/day
+    expect(frequencyFromStats(1, first, last)).toBe("monthly"); // 0.1/day
+    expect(frequencyFromStats(0, first, last)).toBe("rare"); // 0/day
+  });
+});
 
 describe("buildInboundRelationship", () => {
   const now = "2026-06-09T00:00:00.000Z";

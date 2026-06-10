@@ -72,6 +72,7 @@ import {
 } from "../src/db/memory.ts";
 import { createContact, listContacts, mergeContacts } from "../src/identity/contacts.ts";
 import { resolveContact, listIdentities } from "../src/identity/identities.ts";
+import { refreshRelationshipStats } from "../src/identity/relationship.ts";
 import { embedMissingNodes, materializeSemanticEdges } from "../src/memory/graph-semantic.ts";
 import { isEmbeddingAvailable } from "../src/memory/embeddings.ts";
 import { runAutoLinker } from "../src/identity/auto-linker.ts";
@@ -2217,6 +2218,9 @@ type EffectEvidence = {
   claim: string;
   notExercised: boolean;
   count?: number;
+  expect?: "nonzero" | "zero";
+  /** Authoritative deterministic pass/fail (respects `expect`); the LLM must trust this. */
+  ok?: boolean;
   doubleEncoded?: { bad: number; total: number };
   error?: string;
 };
@@ -2340,13 +2344,16 @@ async function runEffectChecks(): Promise<EffectEvidence[]> {
 
       if (e.sql) {
         const c = await scalar(e.sql.query);
+        ev.expect = e.sql.expect;
         if (typeof c === "number") {
           ev.count = c;
           const ok = e.sql.expect === "nonzero" ? c > 0 : c === 0;
+          ev.ok = ok;
           if (!e.notExercised)
             check(`[spec] ${f.id}: ${e.claim}`, ok, `count=${c} (expect ${e.sql.expect})`);
         } else {
           ev.error = c.error;
+          ev.ok = false;
           if (!e.notExercised) check(`[spec] ${f.id}: ${e.claim}`, false, c.error);
         }
       }
@@ -2418,12 +2425,12 @@ ${JSON.stringify(manifestView, null, 2)}
 LIVENESS EVIDENCE (static call-site search; a feature with no live caller is dead code):
 ${JSON.stringify(liveness, null, 2)}
 
-EFFECT EVIDENCE (deterministic SQL against the populated DB. count = rows matching the effect; "exercised" effects should have count>0; "notExercised" are behavioral and the eval does not drive them, so absence is EXPECTED. doubleEncoded.bad>0 means a jsonb column was JSON.stringify'd):
+EFFECT EVIDENCE (deterministic SQL against the populated DB. count = rows matching the query; "expect" is the required direction ("nonzero" = the effect should be present; "zero" = the query counts a BAD condition and must be 0); "ok" is the AUTHORITATIVE deterministic pass/fail that already respects "expect" -- TRUST IT. "notExercised" are behavioral and the eval does not drive them, so absence is EXPECTED. doubleEncoded.bad>0 means a jsonb column was JSON.stringify'd):
 ${JSON.stringify(effects, null, 2)}
 
 Reason per feature, then judge:
 1. DORMANT: a feature with no live call site, or a cron sentinel handled but never seeded, runs in no real path. Flag it.
-2. MISSING EFFECT: an EXERCISED effect with count=0 means the feature did not produce what the manifest promises. Flag it. (A small but nonzero count is fine -- the eval seeds limited data; nonzero satisfies the claim.)
+2. MISSING EFFECT: an EXERCISED effect (notExercised=false) FAILS only when ok=false. Do NOT infer pass/fail from count yourself -- a count=0 with expect="zero" is a PASS (ok=true), and a small nonzero count with expect="nonzero" is fine. Flag an effect only if ok=false.
 3. DOUBLE-ENCODING: any effect with doubleEncoded.bad>0 is a real storage bug. Flag it.
 4. DRIFT: note anything inconsistent with a feature's declared intent or per-owner isolation.
 
@@ -2551,6 +2558,56 @@ async function runConversationEmbedding(): Promise<void> {
   if (!KEEP) await db.deleteFrom("memory_chunks").where("path", "=", path).execute();
 }
 
+/**
+ * Relationship stats from ingested history: computeRelationshipStats was dormant
+ * (no caller). refreshRelationshipStats now runs post-ingestion. Seed a contact +
+ * ingested messages referencing its platform id, then assert the derived
+ * frequency + message count land in the relationship jsonb.
+ */
+async function runRelationshipStats(): Promise<void> {
+  const U = "eval-relstats";
+  const { contact } = await resolveContact(U, "slack", "U_ING", "Ingested Person");
+
+  const db = getKysely();
+  const base = Date.parse("2026-01-01T00:00:00.000Z");
+  for (let i = 0; i < 6; i++) {
+    const ts = new Date(base + i * 2 * 24 * 60 * 60 * 1000).toISOString(); // every 2 days
+    await db
+      .insertInto("memory_chunks")
+      .values({
+        id: `relstat:${i}`,
+        user_id: U,
+        source: "ingest",
+        path: "slack/c",
+        text: `ingested message ${i}`,
+        // object passthrough -> jsonb (JSON.stringify would double-encode)
+        metadata: { source: "ingest", contact: "U_ING", timestamp: ts } as unknown as string,
+      })
+      .onConflict((oc) => oc.column("id").doNothing())
+      .execute();
+  }
+
+  const n = await refreshRelationshipStats(U);
+  const row = await db
+    .selectFrom("contacts")
+    .select("relationship")
+    .where("id", "=", contact.id)
+    .executeTakeFirstOrThrow();
+  const rel = (row.relationship ?? {}) as Record<string, unknown>;
+  check("[relationship-stats] computeRelationshipStats wired post-ingest", n >= 1, `updated=${n}`);
+  check(
+    "[relationship-stats] ingested history yields message count + frequency",
+    Number(rel.messageCount) >= 6 && typeof rel.frequency === "string",
+    `relationship=${JSON.stringify(rel)}`,
+  );
+
+  if (!KEEP) {
+    await db.deleteFrom("memory_chunks").where("user_id", "=", U).execute();
+    await db.deleteFrom("contact_identities").where("user_id", "=", U).execute();
+    await db.deleteFrom("contacts").where("user_id", "=", U).execute();
+  }
+}
+
 async function runEval(): Promise<void> {
   await runMode("power_user");
   await runMode("hosted");
@@ -2568,6 +2625,7 @@ async function runEval(): Promise<void> {
   await runCron();
   await runDrafts();
   await runAutoLinkerGuard();
+  await runRelationshipStats();
   await runManagedFiles();
   await runStyleProfiles();
   await runGraphMetadata();
