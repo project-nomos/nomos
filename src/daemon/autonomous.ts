@@ -135,12 +135,19 @@ export function loadAllLoops(): AutonomousLoop[] {
  * Uses INSERT ... ON CONFLICT (name) DO NOTHING for idempotency.
  * Safe to call on every daemon start.
  */
+/** Map a loader tier to a persisted provenance: bundled stays bundled, a user's
+ * own personal/project LOOP.md is theirs (user). */
+function tierToSource(tier: string): "bundled" | "user" {
+  return tier === "bundled" ? "bundled" : "user";
+}
+
 export async function seedAutonomousLoops(): Promise<void> {
   const db = getKysely();
   const loops = loadAllLoops();
   let seeded = 0;
 
   for (const loop of loops) {
+    const source = tierToSource(loop.source);
     const result = await db
       .insertInto("cron_jobs")
       .values({
@@ -152,6 +159,7 @@ export async function seedAutonomousLoops(): Promise<void> {
         prompt: loop.prompt,
         enabled: loop.enabled,
         error_count: 0,
+        source,
       })
       .onConflict((oc) => oc.column("name").doNothing())
       .returning("id")
@@ -159,6 +167,17 @@ export async function seedAutonomousLoops(): Promise<void> {
     if (result.length > 0) {
       seeded++;
     }
+
+    // Backfill provenance for installs that seeded this loop before the `source`
+    // column existed (they default to 'system'). Only relabel rows still
+    // untouched (source = 'system') so user/agent re-tagging is never clobbered.
+    // The insert stays DO NOTHING so a user's enabled/schedule edits survive.
+    await db
+      .updateTable("cron_jobs")
+      .set({ source })
+      .where("name", "=", loop.name)
+      .where("source", "=", "system")
+      .execute();
   }
 
   if (seeded > 0) {

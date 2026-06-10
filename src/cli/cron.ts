@@ -166,6 +166,7 @@ export function registerCronCommand(program: Command): void {
           prompt,
           enabled: false,
           errorCount: 0,
+          source: "user",
         });
 
         console.log(chalk.green(`Created cron job: ${name}`));

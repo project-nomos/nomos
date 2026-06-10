@@ -41,3 +41,8 @@ export function notifyDaemonTriggerDelta(platform: string): void {
 export function notifyDaemonReloadProactive(): void {
   void notify("reload-proactive");
 }
+
+/** Reload the cron schedule from the DB after a loop enable/disable/delete/edit. */
+export function notifyDaemonReloadCron(): void {
+  void notify("reload-cron");
+}

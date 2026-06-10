@@ -19,6 +19,7 @@ interface CronJobRow {
   last_run: Date | null;
   last_error: string | null;
   created_at: Date;
+  source: string;
 }
 
 export class CronStore {
@@ -39,6 +40,7 @@ export class CronStore {
       lastRun: row.last_run ?? undefined,
       lastError: row.last_error ?? undefined,
       createdAt: row.created_at,
+      source: (row.source as CronJob["source"]) ?? "system",
     };
   }
 
@@ -60,6 +62,7 @@ export class CronStore {
         channel_id: job.channelId ?? null,
         enabled: job.enabled,
         error_count: job.errorCount,
+        source: job.source ?? "system",
       })
       .execute();
     return id;
@@ -124,6 +127,12 @@ export class CronStore {
     }
     if (filter?.sessionTarget !== undefined) {
       query = query.where("session_target", "=", filter.sessionTarget);
+    }
+    if (filter?.userId !== undefined) {
+      query = query.where("user_id", "=", filter.userId);
+    }
+    if (filter?.source !== undefined) {
+      query = query.where("source", "=", filter.source);
     }
 
     const rows = await query.execute();

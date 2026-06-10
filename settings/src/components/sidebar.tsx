@@ -23,6 +23,7 @@ import {
   BookOpen,
   Upload,
   Bell,
+  Repeat,
   BellRing,
   Sparkles,
 } from "lucide-react";
@@ -52,6 +53,7 @@ const advancedItems = [
   { href: "/admin/wiki", label: "Wiki", icon: BookOpen },
   { href: "/admin/ingestion", label: "Ingestion", icon: Upload },
   { href: "/admin/proactive", label: "Proactive", icon: Bell },
+  { href: "/admin/loops", label: "Loops", icon: Repeat },
   { href: "/admin/notifications", label: "Notifications", icon: BellRing },
   { href: "/admin/extensions", label: "Extensions", icon: Puzzle },
   { href: "/admin/costs", label: "Costs", icon: DollarSign },

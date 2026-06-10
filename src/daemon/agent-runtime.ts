@@ -31,6 +31,7 @@ import { isGoogleWorkspaceConfiguredAsync } from "../sdk/google-workspace-mcp.ts
 import { buildGoogleMcpServers, buildGoogleIntegrationPrompt } from "../sdk/google-mcp.ts";
 import { buildVaultMcpServer } from "../sdk/vault-mcp.ts";
 import { buildThinkMcpServer } from "../sdk/think-mcp.ts";
+import { buildLoopMcpServer } from "../sdk/loop-mcp.ts";
 import { buildMemoryDigest } from "../memory/digest.ts";
 import { getRelevantArticles } from "../memory/wiki-reader.ts";
 import { loadEnvConfig, type NomosConfig } from "../config/env.ts";
@@ -954,6 +955,13 @@ export class AgentRuntime {
       // Rebuild the memory tools per-turn so memory_search is scoped to this
       // owner (the cached one at init has no user). Overrides the cached entry.
       "nomos-memory": createMemoryMcpServer(vaultUserId),
+      // Loop self-management, scoped to this owner so loops the agent creates are
+      // owned by (and auditable by) the right user. The cron engine runs in this
+      // process; block self-replication when this turn is itself a loop fire.
+      "nomos-loops": buildLoopMcpServer(vaultUserId, {
+        hasCronEngine: true,
+        isLoopContext: source?.platform === "cron" || (sessionKey?.startsWith("cron:") ?? false),
+      }),
     };
     let googlePrompt = "";
     if (isHosted() && userId) {

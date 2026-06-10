@@ -1,6 +1,6 @@
 ---
 name: email-triage
-description: Triage inbox for unread emails and draft replies
+description: "Triage inbox for unread emails and draft replies (example loop). Overlaps the built-in proactive triage + inbox autonomy -- enable only to customize."
 schedule: "*/15 * * * *"
 session-target: main
 delivery-mode: none

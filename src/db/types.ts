@@ -83,6 +83,8 @@ export interface CronJobsTable {
   last_run: ColumnType<Date | null, Date | null, Date | null>;
   last_error: string | null;
   created_at: Generated<Date>;
+  /** Provenance: system (infra crons), bundled (LOOP.md examples), user (CLI/UI), agent (self-authored). */
+  source: Generated<"system" | "bundled" | "user" | "agent">;
 }
 
 export interface CronRunsTable {

@@ -6,6 +6,7 @@ import { loadEnvConfig, validateConfig } from "../config/env.ts";
 import { runMigrations } from "../db/migrate.ts";
 import { createMemoryMcpServer } from "../sdk/tools.ts";
 import { buildThinkMcpServer } from "../sdk/think-mcp.ts";
+import { buildLoopMcpServer } from "../sdk/loop-mcp.ts";
 import { isSlackMcpConfigured, createSlackMcpConfigs } from "../sdk/nomos-slack-mcp.ts";
 import { isDiscordConfigured, createDiscordMcpServer } from "../sdk/discord-mcp.ts";
 import { isTelegramConfigured, createTelegramMcpServer } from "../sdk/telegram-mcp.ts";
@@ -82,6 +83,9 @@ export function registerChatCommand(program: Command): void {
       mcpServers["nomos-memory"] = createMemoryMcpServer();
       // "Think Like You" tools (reflect / calibrate / dna skills).
       mcpServers["nomos-think"] = buildThinkMcpServer();
+      // Loop self-management (power-user owner is the local tenant). No cron
+      // engine in the in-process REPL, so loop_create says so in its reply.
+      mcpServers["nomos-loops"] = buildLoopMcpServer("local", { hasCronEngine: false });
 
       // Add in-process channel MCP servers (when tokens are configured)
       if (isSlackMcpConfigured()) {

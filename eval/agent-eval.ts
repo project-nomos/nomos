@@ -2906,6 +2906,59 @@ async function runConfigScalars(): Promise<void> {
   );
 }
 
+/**
+ * Autonomous loops: bundled LOOP.md files seed into cron_jobs (disabled), and the
+ * agent can author its own owner-scoped loops (source='agent') via the loop tools.
+ */
+async function runAutonomousLoops(): Promise<void> {
+  const { seedAutonomousLoops } = await import("../src/daemon/autonomous.ts");
+  const { CronStore } = await import("../src/cron/store.ts");
+  await seedAutonomousLoops();
+  const store = new CronStore();
+
+  const bundled = await store.listJobs({ source: "bundled" });
+  const names = new Set(bundled.map((j) => j.name));
+  check(
+    "[loops] bundled LOOP.md definitions are seeded into cron_jobs",
+    ["calendar-prep", "email-triage", "memory-consolidation", "slack-digest"].every((n) =>
+      names.has(n),
+    ),
+    `bundled=${bundled.length}: ${[...names].slice(0, 8).join(", ")}`,
+  );
+  check(
+    "[loops] bundled loops are seeded disabled (opt-in, never auto-fire)",
+    bundled.length > 0 && bundled.every((j) => j.enabled === false),
+  );
+
+  // Agent self-authoring: a loop created in-loop is owner-scoped + source='agent'.
+  const owner = "eval-loops-user";
+  const id = await store.createJob({
+    userId: owner,
+    name: "__eval_agent_loop__",
+    schedule: "0 9 * * 1",
+    scheduleType: "cron",
+    sessionTarget: "isolated",
+    deliveryMode: "none",
+    prompt: "review then AUTONOMOUS_OK",
+    enabled: true,
+    errorCount: 0,
+    source: "agent",
+  });
+  const mine = await store.listJobs({ userId: owner, source: "agent" });
+  check(
+    "[loops] agent-created loop is owner-scoped + tagged source=agent",
+    mine.length === 1 && mine[0]?.name === "__eval_agent_loop__" && mine[0]?.source === "agent",
+    `mine=${mine.length}`,
+  );
+  check(
+    "[loops] agent loop is invisible to other owners (per-user isolation)",
+    (await store.listJobs({ userId: "eval-other-user" })).every(
+      (j) => j.name !== "__eval_agent_loop__",
+    ),
+  );
+  if (!KEEP) await store.deleteJob(id);
+}
+
 async function runEval(): Promise<void> {
   await runMode("power_user");
   await runMode("hosted");
@@ -2939,6 +2992,7 @@ async function runEval(): Promise<void> {
   await runDocumentPersistence();
   await runHeartbeat();
   await runConfigScalars();
+  await runAutonomousLoops();
 
   // Negative control: a judge that passes everything is worthless. Prove it
   // rejects a response that plainly misses the rubric.

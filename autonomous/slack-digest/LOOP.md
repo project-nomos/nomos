@@ -1,6 +1,6 @@
 ---
 name: slack-digest
-description: Scan Slack channels for messages needing attention
+description: "Scan Slack channels for messages needing attention (example loop). Overlaps the built-in proactive triage digest -- enable only to customize."
 schedule: "*/30 * * * *"
 session-target: main
 delivery-mode: none

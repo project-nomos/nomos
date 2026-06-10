@@ -1,6 +1,6 @@
 ---
 name: memory-consolidation
-description: Periodic memory maintenance — merges duplicates, prunes stale chunks, decays confidence
+description: "Periodic memory maintenance (example loop). Overlaps the built-in auto-dream consolidation, which runs by default -- enable only to customize."
 schedule: "0 3 * * *"
 session-target: isolated
 delivery-mode: none
