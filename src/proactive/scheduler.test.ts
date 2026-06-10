@@ -54,7 +54,8 @@ describe("runCommitmentReminders", () => {
 describe("runTriageDigest", () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it("formats high/medium priority items", async () => {
+  it("returns one digest per owner, formatting high/medium priority items", async () => {
+    owners.mockResolvedValue(["alice"]);
     triage.mockResolvedValue({
       items: [
         {
@@ -69,14 +70,17 @@ describe("runTriageDigest", () => {
       ],
     });
     const out = await runTriageDigest();
-    expect(out).toContain("High priority:");
-    expect(out).toContain("Dana");
-    expect(out).toContain("Needs attention:");
-    expect(out).toContain("Sam");
+    expect(out).toHaveLength(1);
+    expect(out[0]!.userId).toBe("alice");
+    expect(out[0]!.text).toContain("High priority:");
+    expect(out[0]!.text).toContain("Dana");
+    expect(out[0]!.text).toContain("Needs attention:");
+    expect(out[0]!.text).toContain("Sam");
   });
 
-  it("returns the quiet-day sentinel when there are no items", async () => {
+  it("omits owners with a quiet day (no items)", async () => {
+    owners.mockResolvedValue(["alice"]);
     triage.mockResolvedValue({ items: [] });
-    expect(await runTriageDigest()).toBe("No new messages requiring attention.");
+    expect(await runTriageDigest()).toEqual([]);
   });
 });

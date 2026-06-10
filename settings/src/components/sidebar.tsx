@@ -23,6 +23,7 @@ import {
   BookOpen,
   Upload,
   Bell,
+  BellRing,
   Sparkles,
 } from "lucide-react";
 import { DaemonStatus } from "@/components/daemon-status";
@@ -51,6 +52,7 @@ const advancedItems = [
   { href: "/admin/wiki", label: "Wiki", icon: BookOpen },
   { href: "/admin/ingestion", label: "Ingestion", icon: Upload },
   { href: "/admin/proactive", label: "Proactive", icon: Bell },
+  { href: "/admin/notifications", label: "Notifications", icon: BellRing },
   { href: "/admin/extensions", label: "Extensions", icon: Puzzle },
   { href: "/admin/costs", label: "Costs", icon: DollarSign },
   { href: "/admin/context", label: "Context", icon: Activity },

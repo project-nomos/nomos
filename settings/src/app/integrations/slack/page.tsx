@@ -538,7 +538,11 @@ export default function SlackSettingsPage() {
           </h2>
           <p className="text-xs text-overlay0 mb-3">
             Where the agent sends summaries, alerts, and scheduled task results. Defaults to DM with
-            the connected user.
+            the connected user. On a multi-member instance, set per-owner overrides on the{" "}
+            <a href="/admin/notifications" className="text-mauve hover:underline">
+              Notifications
+            </a>{" "}
+            page.
           </p>
           {notifDefault ? (
             <div className="flex items-center justify-between rounded-lg border border-surface0 bg-base p-3 mb-3">

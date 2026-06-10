@@ -11,14 +11,14 @@
  */
 
 import { CronStore } from "../cron/store.ts";
-import { systemTenant, resolveMemoryUserId } from "../auth/tenant-context.ts";
+import { systemTenant } from "../auth/tenant-context.ts";
 import type { CronJobUpdate } from "../cron/types.ts";
 import {
   getCommitmentsForReminder,
   markReminded,
   expireOverdueCommitments,
 } from "./commitment-tracker.ts";
-import { generateTriage } from "./priority-triage.ts";
+import { generateTriage, type TriageSummary } from "./priority-triage.ts";
 import { inboxScanJobSpec, type ProactiveJobSpec } from "./inbox-watcher.ts";
 import { calendarScanJobSpec } from "./calendar-watcher.ts";
 import { morningBriefingJobSpec, DEFAULT_BRIEFING_CRON } from "./morning-briefing.ts";
@@ -227,21 +227,11 @@ export async function runCommitmentReminders(): Promise<Array<{ userId: string; 
   return out;
 }
 
-/**
- * Run daily triage digest.
- * Called by CronEngine or manually.
- */
-export async function runTriageDigest(): Promise<string> {
-  // Scope to the local/instance owner. Per-owner digests in a multi-member DB
-  // would need per-owner notifications (follow-up alongside the analysis jobs).
-  const triage = await generateTriage(resolveMemoryUserId(undefined), 1);
-
-  if (triage.items.length === 0) {
-    return "No new messages requiring attention.";
-  }
+/** Format a triage summary into a deliverable digest, or null on a quiet day. */
+function formatTriage(triage: TriageSummary): string | null {
+  if (triage.items.length === 0) return null;
 
   const lines = ["*Daily triage*\n"];
-
   const highPriority = triage.items.filter((i) => i.urgency === "high");
   const mediumPriority = triage.items.filter((i) => i.urgency === "medium");
 
@@ -264,7 +254,26 @@ export async function runTriageDigest(): Promise<string> {
     }
   }
 
-  const summary = lines.join("\n");
-  log.info(summary);
-  return summary;
+  return lines.join("\n");
+}
+
+/**
+ * Run the daily triage digest per owner, returning one deliverable text block per
+ * owner that has anything to report (quiet owners are omitted). The cron handler
+ * delivers each to that owner's notification channel. Called by CronEngine or
+ * manually.
+ */
+export async function runTriageDigest(): Promise<Array<{ userId: string; text: string }>> {
+  const { listMemoryOwners } = await import("../auth/org-members.ts");
+  const out: Array<{ userId: string; text: string }> = [];
+
+  for (const userId of await listMemoryOwners()) {
+    const text = formatTriage(await generateTriage(userId, 1));
+    if (text) {
+      out.push({ userId, text });
+      log.info({ userId }, "Triage digest");
+    }
+  }
+
+  return out;
 }
