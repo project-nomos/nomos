@@ -16,6 +16,16 @@ Interactive scenario-based calibration sessions that extract your decision heuri
 4. **Disagreement Probes** -- Challenge your answer to surface nuance and exceptions
 5. **Knowledge Storage** -- Extract and store decision patterns and values at high confidence
 
+## Backend tools (use these, don't improvise)
+
+- **`calibration_status`** (`mcp__nomos-think__calibration_status`) -- the real
+  gap analysis (per-domain coverage from the documented `patterns*0.6 +
+values*0.4` formula). Use for `/calibrate status` and to pick the focus domain.
+- **`calibration_next_scenario`** (`mcp__nomos-think__calibration_next_scenario`)
+  -- returns the next scenario (from the curated library) targeting the biggest
+  gap. Pass `completedIds` for scenarios already shown this session. Present the
+  scenario it returns; do not invent your own.
+
 ## Commands
 
 - `/calibrate` -- Start a calibration session (auto-picks the least-covered domain)

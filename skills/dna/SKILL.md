@@ -15,6 +15,14 @@ Distills the entire personality model into a single ~2000-token JSON document th
 3. **Export** -- Save as a portable JSON file at `~/.nomos/personality-dna.json`
 4. **Import** -- Load DNA to seed an empty user model (cold-start a new instance)
 
+## Backend tool (use this, don't improvise)
+
+Call the **`personality_dna`** tool (`mcp__nomos-think__personality_dna`) to
+compile the DNA -- it runs the real compiler (top decision patterns + values +
+style genome + exemplar fingerprints, within the ~2000-token budget) and returns
+a preview. For `/dna export` / `/dna show`, pass `export: true` to get the full
+portable document. Do not hand-assemble the DNA; use the compiler's output.
+
 ## Commands
 
 - `/dna export` -- Compile and export personality DNA

@@ -729,4 +729,24 @@ export const FEATURES: FeatureSpec[] = [
     ],
     invariants: ["per-owner scoped", "default channel (direct agent chat) is exempt"],
   },
+  {
+    id: "think-like-you-tools",
+    summary:
+      "Bridge the /reflect, /calibrate, /dna skills to their backends via the nomos-think MCP tools, so they run the documented logic (gap formula, scenario library, DNA budget) instead of improvising. See docs/think-like-you.md.",
+    trigger: { kind: "mcp-tool", name: "nomos-think" },
+    entry: [
+      "buildThinkMcpServer",
+      "generateReflectionData",
+      "analyzeCalibrationGaps",
+      "getNextScenario",
+      "compileDNA",
+    ],
+    effects: [
+      {
+        claim:
+          "reflect/calibrate/dna backends run end-to-end via in-loop tools (exercised by runThinkTools; no durable DB effect)",
+        notExercised: true,
+      },
+    ],
+  },
 ];

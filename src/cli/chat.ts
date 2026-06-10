@@ -5,6 +5,7 @@ import type { McpServerConfig } from "@anthropic-ai/claude-agent-sdk";
 import { loadEnvConfig, validateConfig } from "../config/env.ts";
 import { runMigrations } from "../db/migrate.ts";
 import { createMemoryMcpServer } from "../sdk/tools.ts";
+import { buildThinkMcpServer } from "../sdk/think-mcp.ts";
 import { isSlackMcpConfigured, createSlackMcpConfigs } from "../sdk/nomos-slack-mcp.ts";
 import { isDiscordConfigured, createDiscordMcpServer } from "../sdk/discord-mcp.ts";
 import { isTelegramConfigured, createTelegramMcpServer } from "../sdk/telegram-mcp.ts";
@@ -79,6 +80,8 @@ export function registerChatCommand(program: Command): void {
 
       // Add in-process memory search MCP server
       mcpServers["nomos-memory"] = createMemoryMcpServer();
+      // "Think Like You" tools (reflect / calibrate / dna skills).
+      mcpServers["nomos-think"] = buildThinkMcpServer();
 
       // Add in-process channel MCP servers (when tokens are configured)
       if (isSlackMcpConfigured()) {
