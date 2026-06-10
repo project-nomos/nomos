@@ -19,6 +19,10 @@ import type {
 } from "@anthropic-ai/claude-agent-sdk";
 import type { HookEvent } from "./types.ts";
 import { getHookRegistry } from "./registry.ts";
+import { ToolApprovalChecker, type ApprovalPolicy } from "../security/tool-approval.ts";
+
+// Stateless danger classifier; reused across turns.
+const approvalChecker = new ToolApprovalChecker();
 
 /**
  * Lifecycle events the registry can run hooks for but which never block or
@@ -38,28 +42,55 @@ const OBSERVE_ONLY_EVENTS: HookEvent[] = [
 
 export function buildSdkHooks(opts: {
   sessionKey: string;
+  /**
+   * Enforce TOOL_APPROVAL_POLICY even under bypassPermissions (the daemon is
+   * unattended, so "approval" means block). block_critical (default) blocks only
+   * critical-severity dangerous tools; disabled/undefined adds no gate.
+   */
+  approvalPolicy?: ApprovalPolicy;
 }): Record<string, HookCallbackMatcher[]> | undefined {
   const reg = getHookRegistry();
   const hasPre = reg.getHooksForEvent("PreToolUse").length > 0;
   const hasPost = reg.getHooksForEvent("PostToolUse").length > 0;
+  const policy = opts.approvalPolicy;
+  const gateActive = !!policy && policy !== "disabled";
 
   const out: Record<string, HookCallbackMatcher[]> = {};
 
-  if (hasPre) {
+  if (hasPre || gateActive) {
     out.PreToolUse = [
       {
         hooks: [
           async (input: HookInput): Promise<SyncHookJSONOutput> => {
             const i = input as PreToolUseHookInput;
-            const reason = await reg.checkToolBlocked(i.tool_name, i.tool_input, opts.sessionKey);
-            if (reason) {
-              return {
-                hookSpecificOutput: {
-                  hookEventName: "PreToolUse",
-                  permissionDecision: "deny",
-                  permissionDecisionReason: reason,
-                },
-              };
+            // Approval-policy gate first: block a dangerous tool the policy won't
+            // auto-approve. PreToolUse deny is honored even in bypassPermissions.
+            if (gateActive) {
+              const danger = approvalChecker.isDangerous(
+                i.tool_name,
+                (i.tool_input ?? {}) as Record<string, unknown>,
+              );
+              if (danger.dangerous && !approvalChecker.shouldExecute(policy, danger)) {
+                return {
+                  hookSpecificOutput: {
+                    hookEventName: "PreToolUse",
+                    permissionDecision: "deny",
+                    permissionDecisionReason: `Blocked by TOOL_APPROVAL_POLICY=${policy} (${danger.severity}): ${danger.reason}`,
+                  },
+                };
+              }
+            }
+            if (hasPre) {
+              const reason = await reg.checkToolBlocked(i.tool_name, i.tool_input, opts.sessionKey);
+              if (reason) {
+                return {
+                  hookSpecificOutput: {
+                    hookEventName: "PreToolUse",
+                    permissionDecision: "deny",
+                    permissionDecisionReason: reason,
+                  },
+                };
+              }
             }
             return { continue: true };
           },

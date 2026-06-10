@@ -286,6 +286,20 @@ export const FEATURES: FeatureSpec[] = [
     ],
   },
   {
+    id: "tool-approval-gate",
+    summary:
+      "Enforce TOOL_APPROVAL_POLICY: a PreToolUse gate blocks dangerous tools the policy won't auto-approve, even under the daemon's bypassPermissions.",
+    trigger: { kind: "turn" },
+    entry: ["ToolApprovalChecker"],
+    effects: [
+      {
+        claim:
+          "block_critical (default) denies critical-severity tools via the SDK PreToolUse deny (behavioral)",
+        notExercised: true,
+      },
+    ],
+  },
+  {
     id: "wiki-disk-reconcile",
     summary: "Reconcile the on-disk wiki cache with the DB at boot (power-user only).",
     trigger: { kind: "boot" },

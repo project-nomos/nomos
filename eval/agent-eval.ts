@@ -2608,6 +2608,47 @@ async function runRelationshipStats(): Promise<void> {
   }
 }
 
+/**
+ * Exercise the TOOL_APPROVAL_POLICY gate (ToolApprovalChecker wired into the
+ * PreToolUse hook): block_critical denies a critical tool, allows a safe one, and
+ * disabled adds no gate. Deterministic -- no DB or LLM -- but proves the gate is
+ * actually reachable end-to-end, not just unit-tested in isolation.
+ */
+async function runToolApprovalGate(): Promise<void> {
+  const { buildSdkHooks } = await import("../src/hooks/sdk-adapter.ts");
+  const fire = async (policy: "block_critical" | "disabled", command: string) => {
+    const hooks = buildSdkHooks({ sessionKey: "eval-approval", approvalPolicy: policy });
+    const cb = hooks?.PreToolUse?.[0]?.hooks?.[0];
+    if (!cb) return { gate: false as const };
+    const out = await cb(
+      { tool_name: "Bash", tool_input: { command } } as unknown as Parameters<typeof cb>[0],
+      undefined as unknown as Parameters<typeof cb>[1],
+      { signal: new AbortController().signal } as unknown as Parameters<typeof cb>[2],
+    );
+    return { gate: true as const, out };
+  };
+
+  const denied = await fire("block_critical", "rm -rf /tmp/eval-x");
+  const decision =
+    denied.gate &&
+    (denied.out as { hookSpecificOutput?: { permissionDecision?: string } }).hookSpecificOutput
+      ?.permissionDecision;
+  check(
+    "[tool-approval] block_critical denies a critical tool (rm -rf)",
+    decision === "deny",
+    `decision=${decision || "none"}`,
+  );
+
+  const safe = await fire("block_critical", "ls -la");
+  check(
+    "[tool-approval] block_critical allows a safe tool",
+    safe.gate && JSON.stringify(safe.out) === JSON.stringify({ continue: true }),
+  );
+
+  const off = buildSdkHooks({ sessionKey: "eval-approval", approvalPolicy: "disabled" });
+  check("[tool-approval] disabled policy adds no gate (zero-cost)", off === undefined);
+}
+
 async function runEval(): Promise<void> {
   await runMode("power_user");
   await runMode("hosted");
@@ -2636,6 +2677,7 @@ async function runEval(): Promise<void> {
   await runQuickFixWiring();
   await runGetMessagesWire();
   await runConversationEmbedding();
+  await runToolApprovalGate();
 
   // Negative control: a judge that passes everything is worthless. Prove it
   // rejects a response that plainly misses the rubric.

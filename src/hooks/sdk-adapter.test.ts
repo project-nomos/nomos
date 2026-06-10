@@ -142,4 +142,40 @@ describe("buildSdkHooks", () => {
     expect(hooks?.SessionEnd).toBeUndefined();
     expect(hooks?.PreToolUse).toBeUndefined();
   });
+
+  // TOOL_APPROVAL_POLICY gate (ToolApprovalChecker wired into PreToolUse) --
+  // enforces the policy even under bypassPermissions, with no registry hooks.
+  const preDecision = (out: unknown) =>
+    (
+      out as {
+        hookSpecificOutput?: { permissionDecision?: string; permissionDecisionReason?: string };
+      }
+    ).hookSpecificOutput;
+
+  it("approval gate: block_critical denies a critical tool (gate active without registry hooks)", async () => {
+    const hooks = buildSdkHooks({ sessionKey: "t", approvalPolicy: "block_critical" });
+    expect(hooks?.PreToolUse).toBeDefined();
+    const out = await hooks!.PreToolUse![0]!.hooks[0]!(
+      { tool_name: "Bash", tool_input: { command: "rm -rf /tmp/x" } } as unknown as HookInput,
+      undefined,
+      { signal: new AbortController().signal },
+    );
+    expect(preDecision(out)?.permissionDecision).toBe("deny");
+    expect(preDecision(out)?.permissionDecisionReason).toContain("TOOL_APPROVAL_POLICY");
+  });
+
+  it("approval gate: block_critical allows a warning-severity tool", async () => {
+    const cb = buildSdkHooks({ sessionKey: "t", approvalPolicy: "block_critical" })!.PreToolUse![0]!
+      .hooks[0]!;
+    const out = await cb(
+      { tool_name: "Bash", tool_input: { command: "chmod -R 777 ." } } as unknown as HookInput,
+      undefined,
+      { signal: new AbortController().signal },
+    );
+    expect(out).toEqual({ continue: true });
+  });
+
+  it("approval gate: disabled adds no gate (zero-cost)", () => {
+    expect(buildSdkHooks({ sessionKey: "t", approvalPolicy: "disabled" })).toBeUndefined();
+  });
 });
