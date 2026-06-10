@@ -320,16 +320,33 @@ export class Gateway {
       log.warn({ err }, "Proactive jobs registration failed");
     }
 
-    // Register wiki compilation cron job (compile knowledge every 6 hours)
+    // Register / reconcile the wiki compilation cron job. Cadence comes from
+    // app.wikiCompileInterval (the same value drives the compiler's cooldown);
+    // fall back to "1h" if unset or not a valid duration. The compiler self-gates
+    // on app.wikiEnabled at fire time, so the job stays registered and honours
+    // runtime enable/disable toggles. We reconcile an existing job's schedule on
+    // boot (mirrors registerDeltaSyncJobs) so a changed interval takes effect on
+    // restart -- the cooldown picks it up live, the cron cadence on the next boot.
     try {
       const { CronStore } = await import("../cron/store.ts");
+      const { loadEnvConfigAsync } = await import("../config/env.ts");
+      const { parseInterval } = await import("../cron/scheduler.ts");
       const cronStore = new CronStore();
+
+      const cfg = await loadEnvConfigAsync();
+      let schedule = cfg.wikiCompileInterval ?? "1h";
+      try {
+        parseInterval(schedule);
+      } catch {
+        schedule = "1h"; // invalid duration string -> safe default
+      }
+
       const existingWikiJob = await cronStore.getJobByName("wiki-compile");
       if (!existingWikiJob) {
         await cronStore.createJob({
           userId: systemTenant().userId,
           name: "wiki-compile",
-          schedule: "1h",
+          schedule,
           scheduleType: "every",
           sessionTarget: "isolated",
           deliveryMode: "none",
@@ -337,7 +354,14 @@ export class Gateway {
           enabled: true,
           errorCount: 0,
         });
-        log.info("Registered wiki compilation cron job (every 6h)");
+        log.info({ schedule }, "Registered wiki compilation cron job");
+        process.emit("cron:refresh" as never);
+      } else if (existingWikiJob.schedule !== schedule) {
+        await cronStore.updateJob(existingWikiJob.id, { schedule });
+        log.info(
+          { from: existingWikiJob.schedule, to: schedule },
+          "Reconciled wiki compilation cron cadence",
+        );
         process.emit("cron:refresh" as never);
       }
     } catch (err) {

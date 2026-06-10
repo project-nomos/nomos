@@ -1338,6 +1338,38 @@ async function runWikiArticles(): Promise<void> {
     !(await getRelevantArticles(B, "Alice")).includes("Alice is A's contact."),
   );
 
+  // Config wiring: the four app.wiki* settings the compiler reads (resolveWiki)
+  // must be seeded, else the feature silently falls back to constants.
+  const wikiCfgRows = await getKysely()
+    .selectFrom("config")
+    .select(["key"])
+    .where("key", "in", [
+      "app.wikiEnabled",
+      "app.wikiCompileInterval",
+      "app.wikiCompileModel",
+      "app.wikiMaxArticlesPerRun",
+    ])
+    .execute();
+  check(
+    "[wiki-config] all four app.wiki* settings are seeded in the config table",
+    wikiCfgRows.length === 4,
+    `found ${wikiCfgRows.length}/4: ${wikiCfgRows.map((r) => r.key).join(", ")}`,
+  );
+
+  // The on/off gate: app.wikiEnabled=false makes compileKnowledge a no-op on every
+  // path (no LLM call -- the gate returns before any work).
+  const disabled = await compileKnowledge({
+    userId: A,
+    force: true,
+    wikiConfig: { enabled: false },
+  });
+  check(
+    "[wiki-config] wikiEnabled=false makes the compiler a no-op (hard off-switch)",
+    disabled.articlesCreated + disabled.articlesUpdated === 0 &&
+      disabled.errors.some((e) => e.includes("disabled")),
+    disabled.errors.join("; "),
+  );
+
   if (!hasLLM) {
     skip("[wiki] LLM compile produces articles from the vault", "no LLM provider configured");
     return;
@@ -1366,7 +1398,14 @@ async function runWikiArticles(): Promise<void> {
       Number(vaultCount?.n ?? 0) >= 6,
     );
 
-    const res = await compileKnowledge({ userId: A, force: true });
+    // Inject a NON-default model so honoring it is observable in the compile_model
+    // column (proves resolveWiki -> wiki.model threads end-to-end, not the constant).
+    const injectedModel = "claude-haiku-4-5";
+    const res = await compileKnowledge({
+      userId: A,
+      force: true,
+      wikiConfig: { model: injectedModel },
+    });
     check(
       "[wiki] LLM compile produces multiple articles from the vault",
       res.articlesCreated + res.articlesUpdated >= 2,
@@ -1375,6 +1414,14 @@ async function runWikiArticles(): Promise<void> {
     check(
       "[wiki] compiled articles are owner-scoped",
       (await listArticles(A)).every((a) => a.user_id === A),
+    );
+    // Only LLM-compiled content articles carry a compile_model (deterministic
+    // upserts + _index leave it null), so this isolates the config-driven path.
+    const modeled = (await listArticles(A)).filter((a) => a.compile_model);
+    check(
+      "[wiki-config] compiler honors app.wikiCompileModel (compiled articles carry the injected model)",
+      modeled.length >= 1 && modeled.every((a) => a.compile_model === injectedModel),
+      `models=${[...new Set(modeled.map((a) => a.compile_model))].join(", ") || "none"}`,
     );
     check(
       "[wiki] hosted compile keeps the wiki in the DB, not on disk (multi-node safe)",
@@ -2829,6 +2876,36 @@ async function runHeartbeat(): Promise<void> {
   }
 }
 
+/**
+ * Config store round-trips every jsonb scalar + object. Regression guard for the
+ * postgres-js boolean hazard: a raw JS boolean infers as bool OID and Postgres
+ * refuses the implicit bool->jsonb cast, so setConfigValue must serialize + cast.
+ */
+async function runConfigScalars(): Promise<void> {
+  const { setConfigValue, getConfigValue, deleteConfigValue } = await import("../src/db/config.ts");
+  const cases: Array<[string, unknown]> = [
+    ["app.__eval_bool_false__", false],
+    ["app.__eval_bool_true__", true],
+    ["app.__eval_num__", 20],
+    ["app.__eval_str__", "1h"],
+    ["app.__eval_obj__", { a: 1, b: "x" }],
+  ];
+  const mismatches: string[] = [];
+  for (const [k, v] of cases) {
+    await setConfigValue(k, v);
+    const back = await getConfigValue(k);
+    if (JSON.stringify(back) !== JSON.stringify(v)) {
+      mismatches.push(`${k}: wrote ${JSON.stringify(v)} read ${JSON.stringify(back)}`);
+    }
+    if (!KEEP) await deleteConfigValue(k);
+  }
+  check(
+    "[config] bool/number/string/object values round-trip through jsonb",
+    mismatches.length === 0,
+    mismatches.join("; "),
+  );
+}
+
 async function runEval(): Promise<void> {
   await runMode("power_user");
   await runMode("hosted");
@@ -2861,6 +2938,7 @@ async function runEval(): Promise<void> {
   await runThinkTools();
   await runDocumentPersistence();
   await runHeartbeat();
+  await runConfigScalars();
 
   // Negative control: a judge that passes everything is worthless. Prove it
   // rejects a response that plainly misses the rubric.

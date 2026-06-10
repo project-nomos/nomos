@@ -70,6 +70,14 @@ export interface NomosConfig {
   styleMatching: boolean;
   /** Model for knowledge extraction (default: haiku) */
   extractionModel?: string;
+  /** Enable the compiled knowledge wiki (default: true). When false the compiler does no work. */
+  wikiEnabled?: boolean;
+  /** How often the wiki compiler runs / its cooldown, as a duration string (default: "1h"). */
+  wikiCompileInterval?: string;
+  /** Model for wiki compilation (default: claude-sonnet-4-6). */
+  wikiCompileModel?: string;
+  /** Cap on articles touched per wiki compilation run (default: 20). */
+  wikiMaxArticlesPerRun?: number;
   /** Enable passive behavioral observation (shadow mode) (default: false) */
   shadowMode: boolean;
   /** Enable alternate screen buffer for full-screen TUI experience (default: false) */
@@ -163,6 +171,12 @@ export function loadEnvConfig(): NomosConfig {
     commitmentTracking: process.env.NOMOS_COMMITMENT_TRACKING === "true",
     styleMatching: process.env.NOMOS_STYLE_MATCHING === "true",
     extractionModel: process.env.NOMOS_EXTRACTION_MODEL,
+    wikiEnabled: process.env.NOMOS_WIKI_ENABLED !== "false",
+    wikiCompileInterval: process.env.NOMOS_WIKI_COMPILE_INTERVAL ?? "1h",
+    wikiCompileModel: process.env.NOMOS_WIKI_COMPILE_MODEL ?? "claude-sonnet-4-6",
+    wikiMaxArticlesPerRun: process.env.NOMOS_WIKI_MAX_ARTICLES_PER_RUN
+      ? parseInt(process.env.NOMOS_WIKI_MAX_ARTICLES_PER_RUN, 10)
+      : 20,
     shadowMode: process.env.NOMOS_SHADOW_MODE === "true",
     alternateBuffer: process.env.NOMOS_ALTERNATE_BUFFER === "true",
     imageGeneration: process.env.NOMOS_IMAGE_GENERATION === "true",
