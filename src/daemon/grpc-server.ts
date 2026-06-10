@@ -85,6 +85,9 @@ export class GrpcServer {
         ListDrafts: this.handleListDrafts.bind(this),
         ApproveDraft: this.handleApproveDraft.bind(this),
         RejectDraft: this.handleRejectDraft.bind(this),
+        ListLoops: this.handleListLoops.bind(this),
+        SetLoopEnabled: this.handleSetLoopEnabled.bind(this),
+        DeleteLoop: this.handleDeleteLoop.bind(this),
         Ping: this.handlePing.bind(this),
       });
       this.server.addService(OAuthDepositService, {
@@ -283,6 +286,85 @@ export class GrpcServer {
     callback: grpc.sendUnaryData<{ drafts: unknown[] }>,
   ): void {
     callback(null, { drafts: [] });
+  }
+
+  /** Handle ListLoops RPC -- the local owner's autonomous loops + their status. */
+  private async handleListLoops(
+    _call: grpc.ServerUnaryCall<unknown, unknown>,
+    callback: grpc.sendUnaryData<{ loops: unknown[] }>,
+  ): Promise<void> {
+    try {
+      const { CronStore } = await import("../cron/store.ts");
+      const jobs = await new CronStore().listJobs({ userId: "local" });
+      callback(null, {
+        loops: jobs
+          .sort((a, b) => a.name.localeCompare(b.name))
+          .map((j) => ({
+            id: j.id,
+            name: j.name,
+            schedule: j.schedule,
+            enabled: j.enabled,
+            source: j.source ?? "system",
+            errorCount: j.errorCount,
+            lastRun: j.lastRun ? j.lastRun.toISOString() : "",
+            prompt: j.prompt,
+          })),
+      });
+    } catch (err) {
+      callback(err as grpc.ServiceError, null);
+    }
+  }
+
+  /** Handle SetLoopEnabled RPC -- toggle a loop (never a system infra job). */
+  private async handleSetLoopEnabled(
+    call: grpc.ServerUnaryCall<{ name: string; enabled: boolean }, unknown>,
+    callback: grpc.sendUnaryData<{ success: boolean; message: string }>,
+  ): Promise<void> {
+    try {
+      const { name, enabled } = call.request;
+      const { CronStore } = await import("../cron/store.ts");
+      const store = new CronStore();
+      const job = await store.getJobByName(name);
+      if (!job || job.userId !== "local") {
+        callback(null, { success: false, message: "loop_not_found" });
+        return;
+      }
+      if (job.source === "system") {
+        callback(null, { success: false, message: "system_job_read_only" });
+        return;
+      }
+      await store.updateJob(job.id, { enabled: Boolean(enabled) });
+      process.emit("cron:refresh" as never);
+      callback(null, { success: true, message: enabled ? "enabled" : "disabled" });
+    } catch (err) {
+      callback(err as grpc.ServiceError, null);
+    }
+  }
+
+  /** Handle DeleteLoop RPC -- delete a loop (never a system infra job). */
+  private async handleDeleteLoop(
+    call: grpc.ServerUnaryCall<{ name: string }, unknown>,
+    callback: grpc.sendUnaryData<{ success: boolean; message: string }>,
+  ): Promise<void> {
+    try {
+      const { name } = call.request;
+      const { CronStore } = await import("../cron/store.ts");
+      const store = new CronStore();
+      const job = await store.getJobByName(name);
+      if (!job || job.userId !== "local") {
+        callback(null, { success: false, message: "loop_not_found" });
+        return;
+      }
+      if (job.source === "system") {
+        callback(null, { success: false, message: "system_job_read_only" });
+        return;
+      }
+      await store.deleteJob(job.id);
+      process.emit("cron:refresh" as never);
+      callback(null, { success: true, message: "deleted" });
+    } catch (err) {
+      callback(err as grpc.ServiceError, null);
+    }
   }
 
   /** Handle ApproveDraft RPC. */

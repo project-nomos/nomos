@@ -21,11 +21,43 @@ service NomosAgent {
   rpc ApproveDraft (DraftAction) returns (DraftResponse);
   rpc RejectDraft (DraftAction) returns (DraftResponse);
 
+  // Autonomous loops (recurring background jobs — audit + disable)
+  rpc ListLoops (Empty) returns (LoopList);
+  rpc SetLoopEnabled (SetLoopEnabledRequest) returns (LoopActionResponse);
+  rpc DeleteLoop (LoopDeleteRequest) returns (LoopActionResponse);
+
   // Health check
   rpc Ping (Empty) returns (PongResponse);
 }
 
 message Empty {}
+
+// ── Autonomous loops ──
+
+message LoopInfo {
+  string id = 1;
+  string name = 2;
+  string schedule = 3;
+  bool enabled = 4;
+  string source = 5;       // system | bundled | user | agent
+  int32 error_count = 6;
+  string last_run = 7;     // ISO-8601, empty if never run
+  string prompt = 8;
+}
+message LoopList {
+  repeated LoopInfo loops = 1;
+}
+message SetLoopEnabledRequest {
+  string name = 1;
+  bool enabled = 2;
+}
+message LoopDeleteRequest {
+  string name = 1;
+}
+message LoopActionResponse {
+  bool success = 1;
+  string message = 2;
+}
 
 // ── Chat ──
 
@@ -161,6 +193,33 @@ service MobileApi {
   rpc GetVaultNote (MVaultGetRequest) returns (MVaultNote);
   rpc WriteVaultNote (MVaultWriteRequest) returns (MAck);
   rpc DeleteVaultNote (MVaultDeleteRequest) returns (MAck);
+
+  // Loops tab (autonomous recurring jobs — audit + disable agent-created loops)
+  rpc ListLoops (Empty) returns (MLoopsResponse);
+  rpc SetLoopEnabled (MSetLoopEnabledRequest) returns (MAck);
+  rpc DeleteLoop (MLoopDeleteRequest) returns (MAck);
+}
+
+// Loops (autonomous recurring jobs)
+message MLoop {
+  string id = 1;
+  string name = 2;
+  string schedule = 3;
+  bool enabled = 4;
+  string source = 5;       // system | bundled | user | agent
+  int32 error_count = 6;
+  string last_run = 7;     // ISO-8601, empty if never run
+  string prompt = 8;
+}
+message MLoopsResponse {
+  repeated MLoop loops = 1;
+}
+message MSetLoopEnabledRequest {
+  string name = 1;
+  bool enabled = 2;
+}
+message MLoopDeleteRequest {
+  string name = 1;
 }
 
 message MAck {
