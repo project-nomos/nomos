@@ -1,6 +1,6 @@
 ---
 name: calendar-upcoming
-description: Pre-meeting preparation for upcoming meetings
+description: "Pre-meeting preparation for upcoming meetings (example loop). Overlaps the built-in meeting briefer + calendar autonomy -- enable only to customize."
 schedule: "*/15 * * * *"
 session-target: main
 delivery-mode: none

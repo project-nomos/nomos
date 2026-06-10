@@ -623,6 +623,14 @@ export class Gateway {
       return "Proactive jobs reloaded";
     }
 
+    if (command === "reload-cron") {
+      // A loop was enabled/disabled/edited/deleted in the Settings UI (a separate
+      // process). Make the in-process cron engine re-read the DB so the change is
+      // live without a daemon restart.
+      process.emit("cron:refresh" as never);
+      return "Cron schedule reloaded";
+    }
+
     return `Unknown command: ${command}`;
   }
 

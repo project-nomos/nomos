@@ -340,6 +340,35 @@ export const FEATURES: FeatureSpec[] = [
       },
     ],
   },
+  {
+    id: "autonomous-loops",
+    summary:
+      "Load bundled LOOP.md definitions (3-tier: bundled/personal/project) and seed them into cron_jobs at boot (disabled by default). The agent authors + manages its OWN loops in-loop via the nomos-loops tools (source='agent'); the user audits/disables them in Settings.",
+    trigger: { kind: "boot" },
+    entry: ["seedAutonomousLoops", "loadAllLoops", "buildLoopMcpServer"],
+    effects: [
+      {
+        claim: "the bundled autonomous loops are seeded into cron_jobs by name",
+        sql: {
+          query:
+            "SELECT count(*) FROM cron_jobs WHERE source = 'bundled' AND name IN ('calendar-prep','calendar-upcoming','digital-marketing','email-triage','memory-consolidation','slack-digest')",
+          expect: "nonzero",
+        },
+      },
+      {
+        claim: "bundled loops are seeded disabled (opt-in, never auto-fire)",
+        sql: {
+          query: "SELECT count(*) FROM cron_jobs WHERE source = 'bundled' AND enabled = true",
+          expect: "zero",
+        },
+      },
+    ],
+    invariants: [
+      "seeded idempotently (INSERT ON CONFLICT (name) DO NOTHING)",
+      "bundled loops ship enabled:false; only the user or the agent enables them",
+      "agent-created loops carry source='agent' + the owner's user_id (auditable + per-owner scoped)",
+    ],
+  },
 
   // ── Wired runtime helpers (dormant-prone) ──
   {

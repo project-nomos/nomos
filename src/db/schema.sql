@@ -648,6 +648,18 @@ BEGIN
     CREATE INDEX IF NOT EXISTS idx_cron_user ON cron_jobs(user_id, enabled);
   END IF;
 
+  -- cron_jobs provenance: system (infra crons) | bundled (LOOP.md examples) |
+  -- user (CLI/UI) | agent (self-authored). Default 'system' so the existing infra
+  -- jobs (wiki-compile, proactive, delta-sync) are labelled correctly on backfill.
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'cron_jobs' AND column_name = 'source'
+  ) THEN
+    ALTER TABLE cron_jobs ADD COLUMN source TEXT NOT NULL DEFAULT 'system'
+      CHECK (source IN ('system', 'bundled', 'user', 'agent'));
+    CREATE INDEX IF NOT EXISTS idx_cron_source ON cron_jobs(source);
+  END IF;
+
   -- slack_user_tokens
   IF NOT EXISTS (
     SELECT 1 FROM information_schema.columns

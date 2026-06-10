@@ -1,6 +1,6 @@
 ---
 name: calendar-prep
-description: Morning calendar briefing with meeting context
+description: "Morning calendar briefing with meeting context (example loop). Overlaps the built-in meeting briefer -- enable only to customize."
 schedule: "0 8 * * *"
 session-target: main
 delivery-mode: none
