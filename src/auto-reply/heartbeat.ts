@@ -1,6 +1,10 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { getConfigValue, setConfigValue } from "../db/config.ts";
+
+/** DB config key holding the heartbeat instructions (source of truth). */
+const HEARTBEAT_CONFIG_KEY = "heartbeat.content";
 
 /**
  * Constant returned by the agent to signal "no action needed" on heartbeat check.
@@ -98,4 +102,32 @@ export function stripHeartbeatToken(text: string): string | null {
 
   // Return original text if not just a suppression token
   return text;
+}
+
+/**
+ * Persist the heartbeat instructions to the DB (the source of truth).
+ */
+export async function setHeartbeat(content: string): Promise<void> {
+  await setConfigValue(HEARTBEAT_CONFIG_KEY, content);
+}
+
+/**
+ * Load the heartbeat instructions. The DB is the source of truth; if the DB has
+ * none but a HEARTBEAT.md file exists, the file is migrated into the DB on first
+ * read (so it stops being a file-only config). Falls back to the file when the DB
+ * is unavailable.
+ */
+export async function getHeartbeat(): Promise<string | null> {
+  try {
+    const fromDb = await getConfigValue<string>(HEARTBEAT_CONFIG_KEY);
+    if (fromDb) return fromDb;
+  } catch {
+    return loadHeartbeatFile(); // DB unavailable -> file fallback
+  }
+  const fromFile = loadHeartbeatFile();
+  if (fromFile) {
+    // Migrate the on-disk file into the DB so it becomes the source of truth.
+    await setHeartbeat(fromFile).catch(() => undefined);
+  }
+  return fromFile;
 }

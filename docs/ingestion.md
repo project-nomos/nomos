@@ -88,12 +88,12 @@ Delta sync uses the `last_cursor` from the `ingest_jobs` table to fetch only new
 
 ## Rate Limiting
 
-| Platform                      | Limit               | Strategy                                      |
-| ----------------------------- | ------------------- | --------------------------------------------- |
-| Slack `conversations.history` | ~50 req/min         | Exponential backoff, 1.2s delay between pages |
-| Gmail API                     | 250 quota units/sec | Batch API calls, respect 429 responses        |
-| iMessage                      | Local SQLite        | Batch 1000 rows per query                     |
-| WhatsApp                      | Local file          | Stream-parse line by line                     |
+| Platform                      | Limit               | Strategy                                     |
+| ----------------------------- | ------------------- | -------------------------------------------- |
+| Slack `conversations.history` | ~50 req/min         | Exponential backoff, 10s delay between pages |
+| Gmail API                     | 250 quota units/sec | Batch API calls, respect 429 responses       |
+| iMessage                      | Local SQLite        | Batch 1000 rows per query                    |
+| WhatsApp                      | Local file          | Stream-parse line by line                    |
 
 ## Settings UI
 

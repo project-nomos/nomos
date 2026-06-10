@@ -41,7 +41,7 @@ The `.proto` file can generate native clients for iOS (Swift), Android (Kotlin),
 
 ## WebSocket (Legacy)
 
-The WebSocket server runs on `ws://localhost:8765` for backwards compatibility. New client features should use gRPC instead. See the [protocol documentation](websocket-protocol.md) for message formats.
+The WebSocket server runs on `ws://localhost:8765` for backwards compatibility. New client features should use gRPC instead. The message formats are described in the Connection Flow below; the server implementation is `src/daemon/websocket-server.ts`.
 
 ### Connection Flow
 

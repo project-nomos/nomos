@@ -28,12 +28,12 @@ nomos contacts merge <id1> <id2>
 
 ## Auto-Linking
 
-After ingestion, the auto-linker runs heuristics to merge contacts:
+The auto-linker (`nomos contacts auto-link`) runs two deterministic, owner-scoped heuristics to merge a user's own duplicate contacts:
 
-1. **Exact display name match** — Same name across platforms
-2. **Email match** — Platform profile email matches
-3. **Fuzzy name match** — Similar names with high confidence
-4. **User confirmation** — Suggested merges presented for approval
+1. **Exact email match** — same email across platforms
+2. **Case-insensitive display-name match** — same name (any case) across platforms
+
+Merges apply directly (review with `nomos contacts list`/`show`, split via `merge`). There is no fuzzy-similarity matching or inline confirmation flow.
 
 ## Contact Fields
 
@@ -68,25 +68,13 @@ Per-contact autonomy controls how the agent handles outgoing messages:
 | `draft`  | Draft created for user approval before sending (default) |
 | `silent` | Messages discarded — agent observes but doesn't respond  |
 
-Set via CLI or Settings UI:
-
-```bash
-# Set autonomy for a contact
-nomos contacts set-autonomy <contact-id> auto
-```
+Autonomy defaults to `draft` per contact. (A `set-autonomy` CLI subcommand is not yet implemented; the field is set programmatically via `updateContact`.)
 
 ## Privacy & Data Rights
 
-- **Per-contact deletion** — `nomos contacts forget <id>` removes all ingested messages, wiki articles, style profiles, and memory chunks
-- **Data consent tracking** — `data_consent` field tracks consent status per contact
+- **Data consent tracking** — `data_consent` field tracks consent status per contact (`inferred` / `explicit` / `withdrawn`)
 - **No outbound sharing** — Learned data about contacts never leaves the system in responses to third parties
 
 ## Settings UI
 
-Contact management is available at `/admin/contacts`:
-
-- List contacts with linked identities
-- Search and filter by platform, name, or role
-- Merge/split contacts
-- Set autonomy levels
-- View relationship metadata
+A dedicated `/admin/contacts` page is planned but not yet built. Contacts are managed today via the CLI (`nomos contacts list/show/link/unlink/merge/auto-link`); the identity graph also surfaces in the `/admin/graph` knowledge-graph view.

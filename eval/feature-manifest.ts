@@ -778,4 +778,20 @@ export const FEATURES: FeatureSpec[] = [
     ],
     invariants: ["per-owner scoped (UNIQUE user_id, kind)", "no jsonb double-encode"],
   },
+  {
+    id: "heartbeat-config",
+    summary:
+      "Heartbeat (auto-reply) instructions persist in the DB (config key heartbeat.content), migrated from any HEARTBEAT.md file on first read. The REPL reads DB-first.",
+    trigger: { kind: "turn" },
+    entry: ["getHeartbeat", "setHeartbeat"],
+    effects: [
+      {
+        claim: "heartbeat instructions are stored in the config table (not a file)",
+        sql: {
+          query: "SELECT count(*) FROM config WHERE key = 'heartbeat.content'",
+          expect: "nonzero",
+        },
+      },
+    ],
+  },
 ];

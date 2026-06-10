@@ -16,15 +16,15 @@ The style model analyzes your sent messages to extract writing patterns: formali
 
 ## Profile Fields
 
-| Field               | Type     | Description                                    |
-| ------------------- | -------- | ---------------------------------------------- |
-| `formality`         | 1-5      | 1 = very casual, 5 = very formal               |
-| `avg_length`        | number   | Average message length in words                |
-| `vocabulary`        | string[] | Characteristic words/phrases                   |
-| `emoji_usage`       | string   | none, rare, moderate, frequent                 |
-| `punctuation`       | object   | Capitalization, exclamation, ellipsis patterns |
-| `greeting_patterns` | string[] | Common greetings ("hey", "Hi Sarah,")          |
-| `signoff_patterns`  | string[] | Common sign-offs ("cheers", "best,")           |
+| Field           | Type     | Description                                    |
+| --------------- | -------- | ---------------------------------------------- |
+| `formality`     | 1-5      | 1 = very casual, 5 = very formal               |
+| `avg_length`    | number   | Average message length in words                |
+| `vocabulary`    | string[] | Characteristic words/phrases                   |
+| `emojiUsage`    | string   | none, rare, moderate, frequent                 |
+| `punctuation`   | object   | Capitalization, exclamation, ellipsis patterns |
+| `greetingStyle` | string   | Common greeting style ("hey", "Hi Sarah,")     |
+| `signoffStyle`  | string   | Common sign-off style ("cheers", "best,")      |
 
 ## Global vs Per-Contact
 
@@ -35,13 +35,7 @@ When drafting a message, the system merges global + per-contact: per-contact fie
 
 ## Triggering Analysis
 
-Style analysis runs automatically after ingestion with the `--analyze-style` flag:
-
-```bash
-nomos ingest imessage --since 2024-01-01 --analyze-style
-```
-
-It can also be triggered from the Settings UI at `/admin/style` with the "Re-analyze" button.
+Style analysis runs in the background via the `__style_analyze__` cron (opt-in: set `NOMOS_STYLE_MATCHING=true` / `app.styleMatching`). It re-derives each owner's voice from their sent messages on a schedule via `analyzeStyle()`. iMessage/email ingestion (`nomos ingest`) supplies the `direction='sent'` messages it learns from.
 
 ## Confidence
 
@@ -49,8 +43,7 @@ Each profile tracks `sample_count` — the number of messages analyzed. Below 20
 
 ## Configuration
 
-- `app.styleMaxContactsPerBatch` — Max contacts analyzed per batch (default: 50)
-- Style profiles are stored in the `style_profiles` table with a unique constraint on `(contact_id, scope)`
+- Style profiles are stored in the `style_profiles` table with a unique constraint on `(user_id, scope)` (per-owner; `contact_id` is a nullable column used for per-contact overrides)
 
 ## Example Prompt Output
 
