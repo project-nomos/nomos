@@ -75,10 +75,10 @@ On first startup, CATE generates two Ed25519 key pairs:
 - **Agent DID** (`did:key:z6Mk...`) — The agent's decentralized identifier
 - **User DID** — The user's identifier, used to issue "acts-for" VCs
 
-The agent's DID is logged at startup:
+The agent's DID is logged at startup via the structured logger (`createLogger("cate-integration")`) — `log.info({ port, agentDid }, "Server started")` — so the fields are emitted as structured data (pretty-printed in development, JSON in production), for example:
 
 ```
-[cate] Server started on port 8801 (DID: did:key:z6Mk...)
+INFO (cate-integration): Server started  port=8801 agentDid=did:key:z6Mk...
 ```
 
 ## CATE Protocol SDK

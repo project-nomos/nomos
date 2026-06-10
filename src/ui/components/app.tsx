@@ -9,7 +9,7 @@ import { buildSdkHooks } from "../../hooks/sdk-adapter.ts";
 import { TeamRuntime, stripTeamPrefix } from "../../daemon/team-runtime.ts";
 import { dispatchSlashCommand, type CommandContext, type CommandState } from "../slash-commands.ts";
 import { shouldBootstrap, getBootstrapPrompt } from "../bootstrap.ts";
-import { loadHeartbeatFile, isHeartbeatEmpty } from "../../auto-reply/heartbeat.ts";
+import { getHeartbeat, isHeartbeatEmpty } from "../../auto-reply/heartbeat.ts";
 import type { GrpcClient, ConnectionState } from "../grpc-client.ts";
 import type { AgentEvent } from "../../daemon/types.ts";
 import { theme } from "../theme.ts";
@@ -859,12 +859,12 @@ export function App({
       // Only send heartbeat when input is active (agent is idle)
       if (!isInputActive) return;
 
-      const heartbeatContent = loadHeartbeatFile();
-      if (!heartbeatContent || isHeartbeatEmpty(heartbeatContent)) return;
-
-      // Send heartbeat content as a user message with a system note
-      const heartbeatMessage = `${heartbeatContent}\n\n<!-- Heartbeat check — review HEARTBEAT.md for pending tasks -->`;
-      handleUserMessage(heartbeatMessage);
+      // DB is the source of truth (a HEARTBEAT.md file migrates in on first read).
+      void getHeartbeat().then((heartbeatContent) => {
+        if (!heartbeatContent || isHeartbeatEmpty(heartbeatContent)) return;
+        const heartbeatMessage = `${heartbeatContent}\n\n<!-- Heartbeat check: review your HEARTBEAT instructions for pending tasks -->`;
+        handleUserMessage(heartbeatMessage);
+      });
     }, config.heartbeatIntervalMs);
 
     return () => clearInterval(intervalId);

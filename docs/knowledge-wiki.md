@@ -12,7 +12,7 @@ Pure vector search (RAG) works for fuzzy recall, but at personal scale (~100K me
 Raw messages (pgvector)  -->  Knowledge Compiler (LLM)  -->  Wiki (DB + disk)
                                      ^                          |
                                Periodic cron job           Agent reads wiki first,
-                               (every 2h)                  falls back to RAG
+                               (every 1h)                  falls back to RAG
 ```
 
 ## Wiki Structure
@@ -62,11 +62,11 @@ Wiki articles are stored in the `wiki_articles` database table (source of truth)
 
 When processing a message, the agent runtime:
 
-1. Checks the wiki for relevant articles via `wiki-reader.ts` (reads `_index.md`, identifies matches by topic/contact)
-2. Injects matched articles as context
+1. Calls `getRelevantArticles(userId, prompt)` (`wiki-reader.ts`), which runs **FTS over the owner's `wiki_articles`** for the turn and returns the top matches within a ~4000-char budget
+2. Appends those articles to `systemPromptAppend` (after the stable prefix, so the prompt cache is preserved)
 3. Falls back to vector search (`memory_search`) for details not in the wiki
 
-The `wiki_search` MCP tool is also available for explicit wiki queries.
+There is no separate `wiki_search` MCP tool — wiki retrieval is automatic per turn, and the agent can also reach the same content through `memory_search`.
 
 ## Relationship to Other Systems
 
@@ -80,15 +80,21 @@ All three coexist — they serve different knowledge layers.
 
 ## Configuration
 
-| Key                         | Default             | Description                             |
-| --------------------------- | ------------------- | --------------------------------------- |
-| `app.wikiEnabled`           | `true`              | Enable/disable knowledge compilation    |
-| `app.wikiCompileInterval`   | `"2h"`              | How often the compiler runs             |
-| `app.wikiCompileModel`      | `claude-sonnet-4-6` | Model for compilation (quality matters) |
-| `app.wikiMaxArticlesPerRun` | `20`                | Cap articles per compilation run        |
+The compilation knobs are currently **compile-time constants** in
+`src/memory/knowledge-compiler.ts`, not runtime config:
+
+| Constant               | Value               | Meaning                                             |
+| ---------------------- | ------------------- | --------------------------------------------------- |
+| `MIN_INTERVAL_MS`      | `1h`                | Cooldown — the compiler refuses to recompile sooner |
+| `MAX_ARTICLES_PER_RUN` | `20`                | Cap on articles touched per compilation run         |
+| `COMPILE_MODEL`        | `claude-sonnet-4-6` | Model for compilation (quality matters)             |
+
+The migration seeds `app.wikiCompileInterval` and `app.wikiCompileModel` config rows,
+but the compiler does not read them yet — they are placeholders for making these
+constants configurable later. Treat the table above as the source of truth.
 
 ## Privacy
 
 - No PII in wiki article titles — uses contact IDs, resolves names at read time
 - Wiki/style data never leaves the system in agent responses to third parties
-- Per-contact data deletion: `nomos contacts forget <id>` removes all associated wiki articles
+- All wiki articles are `user_id`-scoped, so deleting an owner's rows (or dropping their per-customer database in hosted mode) removes their wiki entirely

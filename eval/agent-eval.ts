@@ -2810,6 +2810,25 @@ async function runDocumentPersistence(): Promise<void> {
   }
 }
 
+/**
+ * Heartbeat (auto-reply) instructions persist in the DB (config), not a
+ * ~/.nomos/HEARTBEAT.md file. Round-trip setHeartbeat -> getHeartbeat through the DB.
+ */
+async function runHeartbeat(): Promise<void> {
+  const { setHeartbeat, getHeartbeat } = await import("../src/auto-reply/heartbeat.ts");
+  const content = "## Heartbeat\n- ping the team channel if a deploy is pending";
+  await setHeartbeat(content);
+  const back = await getHeartbeat();
+  check(
+    "[heartbeat] persists to + loads from the DB (not a file)",
+    back === content,
+    `len=${back?.length ?? 0}`,
+  );
+  if (!KEEP) {
+    await getKysely().deleteFrom("config").where("key", "=", "heartbeat.content").execute();
+  }
+}
+
 async function runEval(): Promise<void> {
   await runMode("power_user");
   await runMode("hosted");
@@ -2841,6 +2860,7 @@ async function runEval(): Promise<void> {
   await runToolApprovalGate();
   await runThinkTools();
   await runDocumentPersistence();
+  await runHeartbeat();
 
   // Negative control: a judge that passes everything is worthless. Prove it
   // rejects a response that plainly misses the rubric.

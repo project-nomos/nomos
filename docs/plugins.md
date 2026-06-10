@@ -84,11 +84,13 @@ Plugins are fetched at install/build time via `scripts/fetch-plugins.sh` — the
 | -------------- | --------------------------------------------------------------- |
 | **discord**    | Discord messaging bridge with access control                    |
 | **github**     | GitHub MCP server: issues, PRs, code review, search             |
-| **imessage**   | iMessage channel via chat.db with access control                |
+| **imessage**\* | iMessage channel via chat.db with access control                |
 | **linear**     | Linear issue tracking: create, manage, search across workspaces |
 | **playwright** | Browser automation and E2E testing via Microsoft's MCP server   |
 | **telegram**   | Telegram messaging bridge with access control                   |
 | **terraform**  | Terraform IaC automation and interaction                        |
+
+\* The **imessage** plugin is still fetched and installable, but it is excluded from the auto-installed defaults (`DEFAULT_PLUGINS` in `src/plugins/types.ts`) because it conflicts with the built-in iMessage adapter and the `imessage_send` tool. Install it explicitly only if you are not using the native adapter.
 
 Plugins can be removed with `nomos plugin remove <name>` and additional ones installed with `nomos plugin install <name>`.
 

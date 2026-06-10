@@ -41,9 +41,10 @@ A session key decides what shares one conversation. The scope mode is set by
 | `peer`              | `<platform>:<userId>`             | user, globally across channels         |
 | `channel-peer`      | `<platform>:<channelId>:<userId>` | user per channel (most granular)       |
 
-The default CLI key is `cli:default` (not timestamp-based), which is what enables
-auto-resume: restart the CLI and you are back in the same conversation. In the daemon, the
-runtime derives the key as `<platform>:<channelId>` from the incoming message.
+Each CLI session gets a unique key `cli:<uuid>`; pass `--continue` to resume the most
+recent CLI session (it searches recent sessions whose key starts with `cli:`), rather than
+auto-resuming a fixed key. In the daemon, the runtime derives the key as
+`<platform>:<channelId>` from the incoming message.
 
 Per-user **memory** scoping is a separate axis from session scoping: memory is keyed by the
 owner that `resolveMemoryUserId` resolves (see [memory-system.md](memory-system.md)), so

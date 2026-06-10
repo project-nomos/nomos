@@ -85,7 +85,7 @@ A TypeScript CLI and multi-channel AI agent built on the `@anthropic-ai/claude-a
 |  - transcript_messages (conversation messages, JSONB)           |
 |  - memory_chunks       (text chunks + 768-dim embeddings +      |
 |                         metadata JSONB for categorization)      |
-|  - memory_files        (source file tracking for indexer)       |
+|  - vault_notes         (per-user long-term memory / the vault)  |
 |  - user_model          (accumulated user preferences/facts)     |
 |  - cron_jobs           (scheduled task definitions)             |
 |  - pairing_requests    (channel pairing codes with TTL)         |
@@ -111,7 +111,7 @@ src/
 │   ├── daemon.ts             Daemon lifecycle (start/stop/restart/status/logs/run)
 │   ├── slack.ts              Slack workspace management (auth/workspaces/remove)
 │   ├── wizard.ts             First-run setup wizard
-│   ├── doctor.ts             Security audit
+│   ├── service.ts            launchd background-service lifecycle (install/status)
 │   ├── send.ts               Proactive messaging
 │   ├── config.ts             Config management
 │   ├── session.ts            Session management
@@ -120,6 +120,9 @@ src/
 │   ├── mcp-config.ts         MCP server config loader
 │   ├── ingest.ts             Data ingestion CLI (nomos ingest <platform>)
 │   ├── contacts.ts           Contact management CLI (nomos contacts list|link|merge)
+│   ├── cron.ts               Scheduled-task / autonomous-loop management
+│   ├── plugin.ts             Claude marketplace plugin management
+│   ├── brain.ts / wiki.ts    Vault + compiled knowledge wiki inspection
 │   └── program.ts            Commander.js program builder
 ├── sdk/                      Claude Agent SDK wrapper
 │   ├── session.ts            SDK query() wrapper, V2 session API
@@ -270,29 +273,31 @@ Provider switching is handled entirely by the SDK based on which environment var
 
 ### 4.2 Persistence Layer (PostgreSQL + pgvector)
 
-All state lives in PostgreSQL. Schema defined in `src/db/schema.sql` (17 tables) with inline fallback in `src/db/migrate.ts` for bundled builds.
+All state lives in PostgreSQL. Schema defined in `src/db/schema.sql` (~30 tables) with inline fallback in `src/db/migrate.ts` for bundled builds.
 
 #### Tables
 
-| Table                 | Purpose                                          | Key Columns                                                                        |
-| --------------------- | ------------------------------------------------ | ---------------------------------------------------------------------------------- |
-| `config`              | Key-value settings store                         | `key` (PK), `value` (JSONB)                                                        |
-| `sessions`            | Session metadata and SDK session IDs             | `session_key` (unique), `agent_id`, `model`, `metadata` (JSONB)                    |
-| `transcript_messages` | Conversation messages                            | `session_id` (FK), `role`, `content` (JSONB)                                       |
-| `memory_chunks`       | Text chunks with vector embeddings + metadata    | `source`, `text`, `embedding` (vector(768)), `hash`, `metadata` (JSONB)            |
-| `memory_files`        | Source file tracking for incremental re-indexing | `path` (PK), `source`, `hash`, `mtime`                                             |
-| `user_model`          | Accumulated user preferences and facts           | `category` + `key` (unique), `value` (JSONB), `confidence`, `source_ids`           |
-| `cron_jobs`           | Scheduled task definitions                       | `schedule`, `schedule_type`, `prompt`, `enabled`                                   |
-| `pairing_requests`    | Channel pairing codes with TTL                   | `code` (unique), `status`, `expires_at`                                            |
-| `channel_allowlists`  | Per-platform user allowlists                     | `platform` + `user_id` (unique)                                                    |
-| `draft_messages`      | Slack User Mode approve-before-send drafts       | `platform`, `channel_id`, `content`, `status`                                      |
-| `slack_user_tokens`   | Multi-workspace Slack OAuth tokens               | `team_id` (unique), `access_token`, `team_name`                                    |
-| `ingest_jobs`         | Ingestion pipeline tracking and delta sync       | `platform`, `status`, `messages_processed`, `last_cursor`, `delta_schedule`        |
-| `style_profiles`      | Per-contact communication style models           | `contact_id` (FK, nullable for global), `scope`, `profile` (JSONB), `sample_count` |
-| `wiki_articles`       | Compiled knowledge wiki articles (DB-primary)    | `path` (unique), `title`, `content`, `category`, `backlinks` (TEXT[])              |
-| `contacts`            | Cross-channel unified contact records            | `display_name`, `role`, `autonomy` (auto/draft/silent), `data_consent`             |
-| `contact_identities`  | Platform identity → contact linkage              | `contact_id` (FK), `platform` + `platform_user_id` (unique), `email`               |
-| `commitments`         | Tracked promises and follow-ups                  | `contact_id` (FK), `description`, `deadline`, `status` (pending/completed/expired) |
+The core tables are below; the schema also includes the long-term memory `vault_notes`, the knowledge-graph `kg_nodes`/`kg_edges`, `personality_documents` + `fidelity_scores`, `agent_permissions`, `cron_runs`, `integrations`, and `slack_workspaces`. See `src/db/schema.sql` for the full set.
+
+| Table                 | Purpose                                       | Key Columns                                                                        |
+| --------------------- | --------------------------------------------- | ---------------------------------------------------------------------------------- |
+| `config`              | Key-value settings store                      | `key` (PK), `value` (JSONB)                                                        |
+| `sessions`            | Session metadata and SDK session IDs          | `session_key` (unique), `agent_id`, `model`, `metadata` (JSONB)                    |
+| `transcript_messages` | Conversation messages                         | `session_id` (FK), `role`, `content` (JSONB)                                       |
+| `memory_chunks`       | Text chunks with vector embeddings + metadata | `source`, `text`, `embedding` (vector(768)), `hash`, `metadata` (JSONB)            |
+| `vault_notes`         | Per-user long-term memory (the vault)         | `user_id`, `path`, `content`, FTS `tsv`                                            |
+| `user_model`          | Accumulated user preferences and facts        | `category` + `key` (unique), `value` (JSONB), `confidence`, `source_ids`           |
+| `cron_jobs`           | Scheduled task definitions                    | `schedule`, `schedule_type`, `prompt`, `enabled`                                   |
+| `pairing_requests`    | Channel pairing codes with TTL                | `code` (unique), `status`, `expires_at`                                            |
+| `channel_allowlists`  | Per-platform user allowlists                  | `platform` + `user_id` (unique)                                                    |
+| `draft_messages`      | Slack User Mode approve-before-send drafts    | `platform`, `channel_id`, `content`, `status`                                      |
+| `slack_user_tokens`   | Multi-workspace Slack OAuth tokens            | `team_id` (unique), `access_token`, `team_name`                                    |
+| `ingest_jobs`         | Ingestion pipeline tracking and delta sync    | `platform`, `status`, `messages_processed`, `last_cursor`, `delta_schedule`        |
+| `style_profiles`      | Per-contact communication style models        | `contact_id` (FK, nullable for global), `scope`, `profile` (JSONB), `sample_count` |
+| `wiki_articles`       | Compiled knowledge wiki articles (DB-primary) | `path` (unique), `title`, `content`, `category`, `backlinks` (TEXT[])              |
+| `contacts`            | Cross-channel unified contact records         | `display_name`, `role`, `autonomy` (auto/draft/silent), `data_consent`             |
+| `contact_identities`  | Platform identity → contact linkage           | `contact_id` (FK), `platform` + `platform_user_id` (unique), `email`               |
+| `commitments`         | Tracked promises and follow-ups               | `contact_id` (FK), `description`, `deadline`, `status` (pending/completed/expired) |
 
 #### Indexes
 
