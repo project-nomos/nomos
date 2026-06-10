@@ -411,7 +411,7 @@ export class AgentRuntime {
     if (this.config.shadowMode) {
       this.shadowObserver = new ShadowObserver(true);
       try {
-        await this.shadowObserver.loadFromDisk();
+        await this.shadowObserver.load();
       } catch {
         // No prior observations -- start fresh
       }

@@ -794,6 +794,35 @@ CREATE INDEX IF NOT EXISTS idx_kg_edges_origin ON kg_edges(origin_node, origin);
 CREATE INDEX IF NOT EXISTS idx_kg_edges_attrs  ON kg_edges USING gin(attrs);
 CREATE INDEX IF NOT EXISTS idx_kg_edges_user   ON kg_edges(user_id);
 
+-- ── Personality documents (wiki pattern: DB is the source of truth) ──────────
+-- Singleton-per-(owner, kind) documents the "Think Like You" features produce
+-- (personality DNA, shadow-mode observations). Replaces ~/.nomos/*.json files so
+-- the canonical store is the database, per-user scoped, like wiki_articles.
+CREATE TABLE IF NOT EXISTS personality_documents (
+  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id     TEXT NOT NULL DEFAULT 'local',
+  kind        TEXT NOT NULL,                 -- 'dna' | 'shadow_observations'
+  content     JSONB NOT NULL DEFAULT '{}',
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (user_id, kind)
+);
+CREATE INDEX IF NOT EXISTS idx_personality_docs_user ON personality_documents(user_id);
+
+-- ── Twin-test fidelity scores (history) ──────────────────────────────────────
+-- Each /twin-test run records a fidelity score (fraction the discriminator was
+-- fooled, 0-1) so "/twin-test score" can show the trend over time. Per-owner.
+CREATE TABLE IF NOT EXISTS fidelity_scores (
+  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id     TEXT NOT NULL DEFAULT 'local',
+  score       REAL NOT NULL,
+  pairs       INT  NOT NULL DEFAULT 0,
+  fooled      INT  NOT NULL DEFAULT 0,
+  detail      JSONB NOT NULL DEFAULT '{}',
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_fidelity_user ON fidelity_scores(user_id, created_at DESC);
+
 -- ── Repair: un-double-encode integrations JSONB ──────────────────────────────
 -- Earlier code wrote integrations.config / .metadata via JSON.stringify(...),
 -- which the postgres-js driver re-encoded into a json *string* scalar

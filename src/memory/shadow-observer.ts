@@ -14,9 +14,8 @@
  * Privacy-first: opt-in via NOMOS_SHADOW_MODE config flag.
  */
 
-import { homedir } from "node:os";
-import { join } from "node:path";
-import { readFile, writeFile, mkdir } from "node:fs/promises";
+import { resolveMemoryUserId } from "../auth/tenant-context.ts";
+import { getPersonalityDocument, upsertPersonalityDocument } from "../db/personality-documents.ts";
 
 // ── Types ──
 
@@ -71,12 +70,10 @@ const MIN_OBSERVATIONS = 20;
 /** Maximum observations to keep in buffer before forced flush. */
 const MAX_BUFFER_SIZE = 200;
 
-/** State directory for shadow observations. */
-function getShadowDir(): string {
-  return join(homedir(), ".nomos", "shadow-mode");
-}
-
-const STATE_FILE = "observations.json";
+/** Shadow observations are stored in the DB (personality_documents, kind
+ * 'shadow_observations'), per the instance owner -- the source of truth, not a
+ * ~/.nomos file. */
+const SHADOW_KIND = "shadow_observations" as const;
 
 // ── Observer ──
 
@@ -195,15 +192,12 @@ export class ShadowObserver {
   }
 
   /**
-   * Persist observations to disk (called on session end or periodically).
+   * Persist observations to the DB (called on session end or periodically).
    */
   async save(): Promise<void> {
     if (!this.enabled) return;
 
-    const dir = getShadowDir();
-    await mkdir(dir, { recursive: true });
-
-    // Merge with any existing observations on disk
+    // Merge with any existing observations already stored.
     const existing = await loadStoredObservations();
     const merged: SessionObservations = {
       tools: [...existing.tools, ...this.observations.tools],
@@ -212,17 +206,15 @@ export class ShadowObserver {
       turnTimestamps: [...existing.turnTimestamps, ...this.observations.turnTimestamps],
     };
 
-    await writeFile(join(dir, STATE_FILE), JSON.stringify(merged, null, 2), "utf-8");
+    await upsertPersonalityDocument(resolveMemoryUserId(undefined), SHADOW_KIND, merged);
   }
 
   /**
-   * Load stored observations from disk (for cross-session continuity).
+   * Load stored observations from the DB (for cross-session continuity).
    */
-  async loadFromDisk(): Promise<void> {
+  async load(): Promise<void> {
     if (!this.enabled) return;
-
-    const stored = await loadStoredObservations();
-    this.observations = stored;
+    this.observations = await loadStoredObservations();
   }
 
   private trimBuffer(): void {
@@ -237,11 +229,15 @@ export class ShadowObserver {
 
 async function loadStoredObservations(): Promise<SessionObservations> {
   try {
-    const content = await readFile(join(getShadowDir(), STATE_FILE), "utf-8");
-    return JSON.parse(content) as SessionObservations;
+    const stored = await getPersonalityDocument<SessionObservations>(
+      resolveMemoryUserId(undefined),
+      SHADOW_KIND,
+    );
+    if (stored && Array.isArray(stored.tools)) return stored;
   } catch {
-    return { tools: [], corrections: [], fileAccesses: [], turnTimestamps: [] };
+    // fall through to empty
   }
+  return { tools: [], corrections: [], fileAccesses: [], turnTimestamps: [] };
 }
 
 // ── Distillation Prompt ──

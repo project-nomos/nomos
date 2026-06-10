@@ -732,7 +732,7 @@ export const FEATURES: FeatureSpec[] = [
   {
     id: "think-like-you-tools",
     summary:
-      "Bridge the /reflect, /calibrate, /dna skills to their backends via the nomos-think MCP tools, so they run the documented logic (gap formula, scenario library, DNA budget) instead of improvising. See docs/think-like-you.md.",
+      "Bridge the /reflect, /calibrate, /dna, /twin-test skills to their backends via the nomos-think MCP tools, so they run the documented logic (gap formula, scenario library, DNA budget, fidelity scoring) instead of improvising. See docs/think-like-you.md.",
     trigger: { kind: "mcp-tool", name: "nomos-think" },
     entry: [
       "buildThinkMcpServer",
@@ -740,13 +740,42 @@ export const FEATURES: FeatureSpec[] = [
       "analyzeCalibrationGaps",
       "getNextScenario",
       "compileDNA",
+      "sampleRealMessages",
+      "calculateFidelityScore",
     ],
     effects: [
       {
         claim:
-          "reflect/calibrate/dna backends run end-to-end via in-loop tools (exercised by runThinkTools; no durable DB effect)",
+          "reflect/calibrate/dna/twin-test backends run end-to-end via in-loop tools (exercised by runThinkTools/runDocumentPersistence)",
         notExercised: true,
       },
     ],
+  },
+  {
+    id: "personality-documents",
+    summary:
+      "Personality documents (DNA, shadow observations) + twin-test fidelity scores persist in the DB (wiki pattern), not ~/.nomos files -- the database is the source of truth.",
+    trigger: { kind: "turn" },
+    entry: [
+      "upsertPersonalityDocument",
+      "getPersonalityDocument",
+      "recordFidelityScore",
+      "getFidelityHistory",
+    ],
+    effects: [
+      {
+        claim: "personality_documents rows are stored (DNA / shadow observations)",
+        sql: { query: "SELECT count(*) FROM personality_documents", expect: "nonzero" },
+      },
+      {
+        claim: "personality_documents.content is a jsonb object (not double-encoded)",
+        noDoubleEncode: { table: "personality_documents", column: "content" },
+      },
+      {
+        claim: "twin-test fidelity scores persist for the history trend",
+        sql: { query: "SELECT count(*) FROM fidelity_scores", expect: "nonzero" },
+      },
+    ],
+    invariants: ["per-owner scoped (UNIQUE user_id, kind)", "no jsonb double-encode"],
   },
 ];

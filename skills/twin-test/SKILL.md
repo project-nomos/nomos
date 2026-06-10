@@ -16,6 +16,17 @@ A blind taste test where the clone generates responses to the same contexts as r
 4. **Score** -- Calculate fidelity (% of times the discriminator is fooled)
 5. **Correct** -- Extract specific style corrections from discriminator feedback
 
+## Backend tools (use these, don't improvise)
+
+- **`twin_test_sample`** (`mcp__nomos-think__twin_test_sample`) -- pulls N real
+  messages + their contexts to test against. Use this for the Sample phase.
+- **`twin_test_record`** (`mcp__nomos-think__twin_test_record`) -- after you've
+  discriminated each pair, pass `results` (per pair: true = the judge spotted the
+  real message, false = fooled). It computes the fidelity score with the
+  documented formula and PERSISTS it to the DB for the trend.
+- **`twin_test_history`** (`mcp__nomos-think__twin_test_history`) -- the stored
+  score history. Use for `/twin-test score` (do not keep scores in chat memory).
+
 ## Commands
 
 - `/twin-test` -- Run a full twin test session (3-5 message pairs)

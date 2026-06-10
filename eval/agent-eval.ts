@@ -2735,6 +2735,81 @@ async function runThinkTools(): Promise<void> {
   }
 }
 
+/**
+ * Personality documents (DNA, shadow observations) + twin-test fidelity scores
+ * live in the DB now (wiki pattern), not ~/.nomos files. Round-trip each store +
+ * assert the jsonb content is a clean object (not double-encoded).
+ */
+async function runDocumentPersistence(): Promise<void> {
+  const { upsertPersonalityDocument, getPersonalityDocument } =
+    await import("../src/db/personality-documents.ts");
+  const { loadExportedDNA } = await import("../src/memory/personality-dna.ts");
+  const { recordFidelityScore, getFidelityHistory } = await import("../src/db/fidelity-scores.ts");
+  const { calculateFidelityScore } = await import("../src/memory/twin-test.ts");
+  const db = getKysely();
+  const owner = resolveMemoryUserId(undefined);
+
+  // DNA: the DB is the source of truth; loadExportedDNA reads it back.
+  await upsertPersonalityDocument(owner, "dna", {
+    version: "1.0",
+    identity: { summary: "eval clone" },
+    patterns: [],
+    values: [],
+  });
+  const loaded = await loadExportedDNA();
+  check(
+    "[documents] personality DNA persists to + loads from the DB",
+    !!loaded && typeof loaded === "object",
+  );
+
+  // Shadow observations round-trip.
+  await upsertPersonalityDocument(owner, "shadow_observations", {
+    tools: [{ name: "Bash" }],
+    corrections: [],
+    fileAccesses: [],
+    turnTimestamps: [1],
+  });
+  const shadow = await getPersonalityDocument<{ tools: unknown[] }>(owner, "shadow_observations");
+  check(
+    "[documents] shadow observations round-trip via the DB",
+    !!shadow && Array.isArray(shadow.tools) && shadow.tools.length === 1,
+  );
+
+  // jsonb content is a real object, not a double-encoded string.
+  const res = await db.executeQuery(
+    sql`SELECT count(*) FILTER (WHERE jsonb_typeof(content) NOT IN ('object','array')) AS bad, count(*) AS total FROM personality_documents`.compile(
+      db,
+    ),
+  );
+  const row = res.rows[0] as { bad: string; total: string };
+  check(
+    "[documents] personality_documents.content is a jsonb object (not double-encoded)",
+    Number(row.bad) === 0 && Number(row.total) >= 1,
+    `bad=${row.bad} total=${row.total}`,
+  );
+
+  // Twin-test fidelity: the documented formula + DB history.
+  const score = calculateFidelityScore(
+    [true, false, false].map((c) => ({ discriminatorCorrect: c }) as never),
+  );
+  check(
+    "[documents] fidelity score = fraction fooled (formula)",
+    Math.abs(score - 2 / 3) < 1e-9,
+    `score=${score}`,
+  );
+  await recordFidelityScore({ userId: owner, score, pairs: 3, fooled: 2 });
+  const hist = await getFidelityHistory(owner);
+  check(
+    "[documents] twin-test fidelity scores persist + read back as history",
+    hist.length >= 1 && hist[0]!.pairs === 3 && hist[0]!.fooled === 2,
+  );
+
+  if (!KEEP) {
+    await db.deleteFrom("personality_documents").where("user_id", "=", owner).execute();
+    await db.deleteFrom("fidelity_scores").where("user_id", "=", owner).execute();
+  }
+}
+
 async function runEval(): Promise<void> {
   await runMode("power_user");
   await runMode("hosted");
@@ -2765,6 +2840,7 @@ async function runEval(): Promise<void> {
   await runConversationEmbedding();
   await runToolApprovalGate();
   await runThinkTools();
+  await runDocumentPersistence();
 
   // Negative control: a judge that passes everything is worthless. Prove it
   // rejects a response that plainly misses the rubric.
