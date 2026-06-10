@@ -105,6 +105,16 @@ export default function AssistantSettingsPage() {
   const [extractionModel, setExtractionModel] = useState("claude-haiku-4-5");
   const [initialExtractionModel, setInitialExtractionModel] = useState("claude-haiku-4-5");
 
+  // Knowledge wiki compilation
+  const [wikiEnabled, setWikiEnabled] = useState(true);
+  const [initialWikiEnabled, setInitialWikiEnabled] = useState(true);
+  const [wikiCompileInterval, setWikiCompileInterval] = useState("1h");
+  const [initialWikiCompileInterval, setInitialWikiCompileInterval] = useState("1h");
+  const [wikiCompileModel, setWikiCompileModel] = useState("claude-sonnet-4-6");
+  const [initialWikiCompileModel, setInitialWikiCompileModel] = useState("claude-sonnet-4-6");
+  const [wikiMaxArticles, setWikiMaxArticles] = useState("20");
+  const [initialWikiMaxArticles, setInitialWikiMaxArticles] = useState("20");
+
   // Proactive / voice (opt-in; each adds a background LLM call)
   const [commitmentTracking, setCommitmentTracking] = useState(false);
   const [initialCommitmentTracking, setInitialCommitmentTracking] = useState(false);
@@ -170,6 +180,10 @@ export default function AssistantSettingsPage() {
     commitmentTracking !== initialCommitmentTracking ||
     styleMatching !== initialStyleMatching ||
     extractionModel !== initialExtractionModel ||
+    wikiEnabled !== initialWikiEnabled ||
+    wikiCompileInterval !== initialWikiCompileInterval ||
+    wikiCompileModel !== initialWikiCompileModel ||
+    wikiMaxArticles !== initialWikiMaxArticles ||
     embeddingModel !== initialEmbeddingModel ||
     googleApiKeyDirty ||
     imageGeneration !== initialImageGeneration ||
@@ -277,6 +291,20 @@ export default function AssistantSettingsPage() {
       const em = envData.NOMOS_EXTRACTION_MODEL ?? "claude-haiku-4-5";
       setExtractionModel(em);
       setInitialExtractionModel(em);
+
+      // Knowledge wiki compilation
+      const we = envData.NOMOS_WIKI_ENABLED !== "false";
+      setWikiEnabled(we);
+      setInitialWikiEnabled(we);
+      const wci = envData.NOMOS_WIKI_COMPILE_INTERVAL ?? "1h";
+      setWikiCompileInterval(wci);
+      setInitialWikiCompileInterval(wci);
+      const wcm = envData.NOMOS_WIKI_COMPILE_MODEL ?? "claude-sonnet-4-6";
+      setWikiCompileModel(wcm);
+      setInitialWikiCompileModel(wcm);
+      const wma = envData.NOMOS_WIKI_MAX_ARTICLES_PER_RUN ?? "20";
+      setWikiMaxArticles(wma);
+      setInitialWikiMaxArticles(wma);
 
       // Embeddings
       const ebm = envData.EMBEDDING_MODEL ?? "gemini-embedding-001";
@@ -410,6 +438,15 @@ export default function AssistantSettingsPage() {
           envUpdates.NOMOS_STYLE_MATCHING = styleMatching ? "true" : "";
         if (extractionModel !== initialExtractionModel)
           envUpdates.NOMOS_EXTRACTION_MODEL = extractionModel;
+        // Explicit "true"/"false" so disabling round-trips (resolveWiki coerces both).
+        if (wikiEnabled !== initialWikiEnabled)
+          envUpdates.NOMOS_WIKI_ENABLED = wikiEnabled ? "true" : "false";
+        if (wikiCompileInterval !== initialWikiCompileInterval)
+          envUpdates.NOMOS_WIKI_COMPILE_INTERVAL = wikiCompileInterval;
+        if (wikiCompileModel !== initialWikiCompileModel)
+          envUpdates.NOMOS_WIKI_COMPILE_MODEL = wikiCompileModel;
+        if (wikiMaxArticles !== initialWikiMaxArticles)
+          envUpdates.NOMOS_WIKI_MAX_ARTICLES_PER_RUN = wikiMaxArticles;
         if (embeddingModel !== initialEmbeddingModel) envUpdates.EMBEDDING_MODEL = embeddingModel;
         if (googleApiKeyDirty) envUpdates.GOOGLE_API_KEY = googleApiKey;
         if (imageGeneration !== initialImageGeneration)
@@ -1036,6 +1073,82 @@ export default function AssistantSettingsPage() {
               </p>
             </div>
           </label>
+        </div>
+      </section>
+
+      {/* Knowledge Wiki */}
+      <section className="mb-8 rounded-xl border border-surface0 bg-mantle p-5">
+        <h2 className="text-sm font-semibold text-subtext1 uppercase tracking-wider mb-4">
+          Knowledge Wiki
+        </h2>
+        <div className="space-y-4">
+          <label className="flex items-center gap-3 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={wikiEnabled}
+              onChange={(e) => setWikiEnabled(e.target.checked)}
+              className="accent-mauve w-4 h-4 rounded"
+            />
+            <div>
+              <span className="text-sm font-medium text-text">Compile a knowledge wiki</span>
+              <p className="text-xs text-overlay0">
+                Periodically distil your vault, conversations, and contacts into browsable wiki
+                articles the agent reads first. Turning this off stops all compilation.
+              </p>
+            </div>
+          </label>
+
+          {wikiEnabled && (
+            <div className="space-y-4 pl-7 border-l-2 border-surface1 ml-2">
+              <div className="space-y-1.5">
+                <label className="block text-sm font-medium text-subtext1">Compile interval</label>
+                <input
+                  type="text"
+                  value={wikiCompileInterval}
+                  onChange={(e) => setWikiCompileInterval(e.target.value)}
+                  placeholder="1h"
+                  className="w-full rounded-lg border border-surface1 bg-surface0 px-3 py-2 text-sm text-text focus:outline-none focus:border-mauve focus:ring-1 focus:ring-mauve/30"
+                />
+                <p className="text-xs text-overlay0">
+                  How often the compiler runs and the cooldown between runs (e.g. 30m, 1h, 6h).
+                </p>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="block text-sm font-medium text-subtext1">Compile model</label>
+                <select
+                  value={wikiCompileModel}
+                  onChange={(e) => setWikiCompileModel(e.target.value)}
+                  className="w-full rounded-lg border border-surface1 bg-surface0 px-3 py-2 text-sm text-text focus:outline-none focus:border-mauve focus:ring-1 focus:ring-mauve/30"
+                >
+                  {MODELS.map((m) => (
+                    <option key={m.value} value={m.value}>
+                      {m.label}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-xs text-overlay0">
+                  Model used to write articles. Quality matters here, so Sonnet is recommended.
+                </p>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="block text-sm font-medium text-subtext1">
+                  Max articles per run
+                </label>
+                <input
+                  type="number"
+                  min={1}
+                  value={wikiMaxArticles}
+                  onChange={(e) => setWikiMaxArticles(e.target.value)}
+                  className="w-full rounded-lg border border-surface1 bg-surface0 px-3 py-2 text-sm text-text focus:outline-none focus:border-mauve focus:ring-1 focus:ring-mauve/30"
+                />
+                <p className="text-xs text-overlay0">
+                  Cap on how many articles a single compilation run will create or update.
+                </p>
+              </div>
+            </div>
+          )}
         </div>
       </section>
 

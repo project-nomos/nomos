@@ -80,18 +80,26 @@ All three coexist — they serve different knowledge layers.
 
 ## Configuration
 
-The compilation knobs are currently **compile-time constants** in
-`src/memory/knowledge-compiler.ts`, not runtime config:
+The compilation knobs are runtime config. `resolveWiki()` (in
+`src/memory/knowledge-compiler.ts`) reads them on every run with the standard
+precedence (DB `config` row > env var > built-in default), so editing the model,
+max-articles, or the on/off gate in the Settings UI or the DB takes effect on the
+next compile without a redeploy:
 
-| Constant               | Value               | Meaning                                             |
-| ---------------------- | ------------------- | --------------------------------------------------- |
-| `MIN_INTERVAL_MS`      | `1h`                | Cooldown — the compiler refuses to recompile sooner |
-| `MAX_ARTICLES_PER_RUN` | `20`                | Cap on articles touched per compilation run         |
-| `COMPILE_MODEL`        | `claude-sonnet-4-6` | Model for compilation (quality matters)             |
+| Config key (DB)             | Env var                           | Default             | Meaning                                            |
+| --------------------------- | --------------------------------- | ------------------- | -------------------------------------------------- |
+| `app.wikiEnabled`           | `NOMOS_WIKI_ENABLED`              | `true`              | Master on/off. `false` makes the compiler a no-op  |
+| `app.wikiCompileInterval`   | `NOMOS_WIKI_COMPILE_INTERVAL`     | `"1h"`              | Cron cadence **and** the cooldown between compiles |
+| `app.wikiCompileModel`      | `NOMOS_WIKI_COMPILE_MODEL`        | `claude-sonnet-4-6` | Model for compilation (quality matters)            |
+| `app.wikiMaxArticlesPerRun` | `NOMOS_WIKI_MAX_ARTICLES_PER_RUN` | `20`                | Cap on articles touched per compilation run        |
 
-The migration seeds `app.wikiCompileInterval` and `app.wikiCompileModel` config rows,
-but the compiler does not read them yet — they are placeholders for making these
-constants configurable later. Treat the table above as the source of truth.
+The interval drives two gates that together set "how often it runs": the seeded
+`wiki-compile` cron cadence (`src/daemon/gateway.ts`) and the per-owner cooldown
+that refuses to recompile sooner (a Redis key in hosted mode, a lock file in
+power-user mode). The cooldown picks up a changed interval immediately (it is read
+every compile); the cron cadence is reconciled to the config value on daemon
+**boot**, so a changed interval fully takes effect after the next restart. An
+invalid duration string falls back to `1h`.
 
 ## Privacy
 

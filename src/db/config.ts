@@ -1,3 +1,4 @@
+import { sql } from "kysely";
 import { getKysely } from "./client.ts";
 
 export async function getConfigValue<T = unknown>(key: string): Promise<T | null> {
@@ -26,9 +27,16 @@ export async function getConfigValue<T = unknown>(key: string): Promise<T | null
 
 export async function setConfigValue(key: string, value: unknown): Promise<void> {
   const db = getKysely();
-  // Pass the OBJECT (the driver serializes to jsonb once). JSON.stringify here
-  // double-encodes into a jsonb string -- the bug getConfigValue now unwraps.
-  const jsonbValue = value as unknown as string;
+  // Serialize to JSON text, then cast ::text::jsonb. The ::text step is load-
+  // bearing: it forces postgres-js to bind the param as text instead of inferring
+  // a type. A bare ::jsonb makes the driver JSON-encode the string again (storing
+  // jsonb "false" instead of boolean false), and a raw JS boolean infers as bool
+  // OID which Postgres refuses to implicitly cast to jsonb. ::text::jsonb is
+  // uniform: 'false'->boolean, '20'->number, '"1h"'->string, '{...}'->object.
+  // Single encode, so getConfigValue reads it back natively (its unwrap still
+  // covers any legacy double-encoded rows).
+  const jsonbText = JSON.stringify(value ?? null);
+  const jsonbValue = sql<string>`${jsonbText}::text::jsonb`;
   await db
     .insertInto("config")
     .values({ key, value: jsonbValue, updated_at: new Date() })

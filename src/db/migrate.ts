@@ -498,11 +498,12 @@ FROM wiki_articles WHERE category = 'memory'
 ON CONFLICT (user_id, path) DO NOTHING;
 DELETE FROM wiki_articles WHERE category = 'memory';
 
--- Wiki config defaults
+-- Wiki config defaults (consumed by the knowledge compiler's config resolver).
 INSERT INTO config (key, value) VALUES
-  ('app.wikiEnabled',          '"true"'),
-  ('app.wikiCompileInterval',  '"2h"'),
-  ('app.wikiCompileModel',     '"claude-sonnet-4-6"')
+  ('app.wikiEnabled',           '"true"'),
+  ('app.wikiCompileInterval',   '"1h"'),
+  ('app.wikiCompileModel',      '"claude-sonnet-4-6"'),
+  ('app.wikiMaxArticlesPerRun', '20')
 ON CONFLICT (key) DO NOTHING;
 
 -- Unified contacts (cross-platform identity graph)

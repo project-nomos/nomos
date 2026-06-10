@@ -31,6 +31,8 @@ import { syncFileToDb } from "../config/file-sync.ts";
 import { isHosted } from "../config/mode.ts";
 import { isRedisConfigured, getRedis, keyFor } from "../storage/redis.ts";
 import { createLogger } from "../lib/logger.ts";
+import { loadEnvConfigAsync, type NomosConfig } from "../config/env.ts";
+import { parseInterval } from "../cron/scheduler.ts";
 
 const log = createLogger("knowledge-compiler");
 
@@ -52,12 +54,16 @@ function lockFileFor(userId: string): string {
 /**
  * Acquire the per-owner compile slot. This is one guard doing two jobs, like the
  * old file lock: a cross-node MUTEX (two pods of one customer must not compile
- * concurrently) AND a cooldown (do not recompile within MIN_INTERVAL_MS). In
+ * concurrently) AND a cooldown (do not recompile within intervalMs). In
  * hosted (multi-node) it is a Redis key shared across the customer's pods; in
  * power-user it falls back to the local lock file. Returns false to skip.
  */
-async function acquireCompileSlot(userId: string, force: boolean): Promise<boolean> {
-  const cooldownSec = Math.floor(MIN_INTERVAL_MS / 1000);
+async function acquireCompileSlot(
+  userId: string,
+  force: boolean,
+  intervalMs: number,
+): Promise<boolean> {
+  const cooldownSec = Math.floor(intervalMs / 1000);
   const stamp = new Date().toISOString();
   if (isRedisConfigured()) {
     const redis = getRedis();
@@ -72,7 +78,7 @@ async function acquireCompileSlot(userId: string, force: boolean): Promise<boole
   if (
     !force &&
     fs.existsSync(lockFile) &&
-    Date.now() - fs.statSync(lockFile).mtimeMs < MIN_INTERVAL_MS
+    Date.now() - fs.statSync(lockFile).mtimeMs < intervalMs
   ) {
     return false;
   }
@@ -82,8 +88,8 @@ async function acquireCompileSlot(userId: string, force: boolean): Promise<boole
 }
 
 /** Re-anchor the cooldown to compile completion (mirrors the old end-of-run lock refresh). */
-async function refreshCompileSlot(userId: string): Promise<void> {
-  const cooldownSec = Math.floor(MIN_INTERVAL_MS / 1000);
+async function refreshCompileSlot(userId: string, intervalMs: number): Promise<void> {
+  const cooldownSec = Math.floor(intervalMs / 1000);
   const stamp = new Date().toISOString();
   if (isRedisConfigured()) {
     await getRedis()
@@ -94,9 +100,48 @@ async function refreshCompileSlot(userId: string): Promise<void> {
   const lockFile = lockFileFor(userId);
   if (fs.existsSync(lockFile)) fs.writeFileSync(lockFile, stamp);
 }
-const MIN_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
-const MAX_ARTICLES_PER_RUN = 20;
-const COMPILE_MODEL = "claude-sonnet-4-6";
+
+// Fallback defaults, used when the corresponding app.wiki* config is unset/invalid.
+const DEFAULT_MIN_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
+const DEFAULT_MAX_ARTICLES_PER_RUN = 20;
+const DEFAULT_COMPILE_MODEL = "claude-sonnet-4-6";
+
+/** Resolved, ready-to-use wiki compile settings (every field has a concrete value). */
+export interface ResolvedWikiConfig {
+  enabled: boolean;
+  /** Cooldown between compiles AND the seeded cron cadence, in ms. */
+  intervalMs: number;
+  model: string;
+  maxArticles: number;
+}
+
+/**
+ * Resolve wiki compile settings from NomosConfig, falling back to the constants
+ * above for any unset/invalid value. wikiEnabled is coerced defensively: the
+ * config store seeds booleans as JSON strings, so treat the string "false" (and
+ * boolean false) as disabled and everything else as enabled.
+ */
+export function resolveWiki(config: Partial<NomosConfig>): ResolvedWikiConfig {
+  const rawEnabled = config.wikiEnabled;
+  const enabled = rawEnabled !== false && String(rawEnabled) !== "false";
+
+  let intervalMs = DEFAULT_MIN_INTERVAL_MS;
+  if (config.wikiCompileInterval) {
+    try {
+      intervalMs = parseInterval(config.wikiCompileInterval);
+    } catch {
+      // Invalid duration string -> keep the default cadence.
+    }
+  }
+
+  const maxRaw = Number(config.wikiMaxArticlesPerRun);
+  const maxArticles =
+    Number.isFinite(maxRaw) && maxRaw > 0 ? Math.floor(maxRaw) : DEFAULT_MAX_ARTICLES_PER_RUN;
+
+  const model = config.wikiCompileModel || DEFAULT_COMPILE_MODEL;
+
+  return { enabled, intervalMs, model, maxArticles };
+}
 
 /**
  * Extract the first balanced JSON array from model text, ignoring brackets inside
@@ -141,6 +186,11 @@ interface CompilationResult {
 export async function compileKnowledge(options?: {
   force?: boolean;
   userId?: string;
+  /**
+   * Override the resolved wiki settings (tests/eval). Merged over the
+   * DB-resolved config, so a partial like `{ enabled: false }` flips one field.
+   */
+  wikiConfig?: Partial<ResolvedWikiConfig>;
 }): Promise<CompilationResult> {
   // The vault is per-user (zero-trust on top of database-per-customer). Scope the
   // vault read to one tenant so a multi-user (per-person-brain) DB never blends
@@ -148,8 +198,24 @@ export async function compileKnowledge(options?: {
   // single-user install. Per-user wiki compilation in a multi-user DB is a
   // follow-up (it needs wiki_articles to carry user_id too).
   const userId = options?.userId ?? "local";
+
+  // Resolve settings from config (DB > env > defaults), then apply any override.
+  const wiki: ResolvedWikiConfig = {
+    ...resolveWiki(await loadEnvConfigAsync()),
+    ...(options?.wikiConfig ?? {}),
+  };
+
+  // Hard off-switch: a disabled wiki does no work, on every path (cron/CLI/eval).
+  if (!wiki.enabled) {
+    return {
+      articlesCreated: 0,
+      articlesUpdated: 0,
+      errors: ["Skipped: wiki compilation disabled (app.wikiEnabled=false)"],
+    };
+  }
+
   // Cross-node mutex + cooldown (Redis in hosted, lock file in power-user).
-  if (!(await acquireCompileSlot(userId, options?.force ?? false))) {
+  if (!(await acquireCompileSlot(userId, options?.force ?? false, wiki.intervalMs))) {
     return {
       articlesCreated: 0,
       articlesUpdated: 0,
@@ -236,8 +302,8 @@ Skip:
 Return ONLY a JSON array of article plans:
 [{"path": "contacts/suren.md", "title": "Suren", "category": "contacts", "description": "compile contact card"}, ...]
 
-Maximum ${MAX_ARTICLES_PER_RUN} articles. Return [] if nothing is worth compiling.`,
-      model: COMPILE_MODEL,
+Maximum ${wiki.maxArticles} articles. Return [] if nothing is worth compiling.`,
+      model: wiki.model,
       label: "wiki-plan",
       // Forks run with the full toolset, so a generation task can spend a turn on
       // a tool detour before answering; maxTurns:1 then dies with "Reached maximum
@@ -289,6 +355,7 @@ Maximum ${MAX_ARTICLES_PER_RUN} articles. Return [] if nothing is worth compilin
           relevantConvos,
           relevantContact,
           existing?.content ?? null,
+          wiki.model,
         );
 
         const isNew = !existing;
@@ -299,7 +366,7 @@ Maximum ${MAX_ARTICLES_PER_RUN} articles. Return [] if nothing is worth compilin
           article,
           plan.category,
           parseWikiLinks(article), // backlinks: the [[Other Article]] refs the LLM cross-linked
-          COMPILE_MODEL,
+          wiki.model,
         );
 
         if (isNew) result.articlesCreated++;
@@ -334,7 +401,7 @@ Maximum ${MAX_ARTICLES_PER_RUN} articles. Return [] if nothing is worth compilin
 
     log.info({ created: result.articlesCreated, updated: result.articlesUpdated }, "Done");
   } finally {
-    await refreshCompileSlot(userId);
+    await refreshCompileSlot(userId, wiki.intervalMs);
   }
 
   return result;
@@ -346,6 +413,7 @@ async function compileArticle(
   conversations: Array<{ text: string; path: string }>,
   contact: { name: string; identities: unknown[] } | undefined,
   existingContent: string | null,
+  model: string,
 ): Promise<string> {
   const factsText = facts
     .map((f) => `[${f.category}] ${f.key}: ${f.value} (confidence: ${f.confidence})`)
@@ -384,7 +452,7 @@ Return ONLY the markdown article content.`;
 
   const compiled = await runForkedAgent({
     prompt,
-    model: COMPILE_MODEL,
+    model,
     label: `wiki-compile:${plan.title}`,
     // 5 turns of headroom so an article body that takes a tool detour still lands
     // its final answer (maxTurns:1 was dropping ~1 in 6 articles).

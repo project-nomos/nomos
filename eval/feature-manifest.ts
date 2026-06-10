@@ -54,9 +54,10 @@ export const FEATURES: FeatureSpec[] = [
   // ── Background (cron sentinels) ──
   {
     id: "wiki-compile",
-    summary: "Compile the per-owner knowledge wiki from the vault on a schedule.",
+    summary:
+      "Compile the per-owner knowledge wiki from the vault on a schedule. Cadence, cooldown, model, max-articles and an on/off gate are read from app.wiki* config (resolveWiki), not hardcoded.",
     trigger: { kind: "cron", sentinel: "__wiki_compile__", schedule: "1h", fanOut: true },
-    entry: ["compileKnowledge"],
+    entry: ["compileKnowledge", "resolveWiki"],
     effects: [
       {
         claim: "wiki_articles are produced with content + a compile_model for content articles",
@@ -72,8 +73,21 @@ export const FEATURES: FeatureSpec[] = [
           expect: "nonzero",
         },
       },
+      {
+        claim:
+          "the wiki compile settings are present in the config table (so resolveWiki reads them, not constants)",
+        sql: {
+          query:
+            "SELECT count(*) FROM config WHERE key IN ('app.wikiEnabled','app.wikiCompileInterval','app.wikiCompileModel','app.wikiMaxArticlesPerRun')",
+          expect: "nonzero",
+        },
+      },
     ],
-    invariants: ["per-owner scoped (user_id)"],
+    invariants: [
+      "per-owner scoped (user_id)",
+      "interval/model/maxArticles/enabled resolved from app.wiki* config via resolveWiki (constants are fallback defaults only)",
+      "app.wikiEnabled=false makes compileKnowledge a no-op (hard off-switch)",
+    ],
   },
   {
     id: "auto-dream",
