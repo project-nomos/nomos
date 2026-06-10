@@ -11,7 +11,26 @@
 
 import { sql } from "kysely";
 import { getKysely } from "../db/client.ts";
-import { createContact, type ContactRow } from "./contacts.ts";
+import { createContact, updateContact, type ContactRow } from "./contacts.ts";
+import { enrichContactRelationship } from "./relationship.ts";
+
+/**
+ * Pull the contact fields a channel may carry about a sender. Pure (no DB) so it
+ * is unit-testable: a job title (Slack `profile.title`) becomes a role; an
+ * explicit role/company is honored too.
+ */
+export function contactFieldsFromMetadata(metadata?: Record<string, unknown>): {
+  role?: string;
+  company?: string;
+} {
+  const md = metadata ?? {};
+  const str = (v: unknown): string | undefined =>
+    typeof v === "string" && v.trim() ? v.trim() : undefined;
+  return {
+    role: str(md.role) ?? str(md.title),
+    company: str(md.company),
+  };
+}
 
 export interface ContactIdentityRow {
   id: string;
@@ -96,13 +115,21 @@ export async function resolveContact(
     .where("ci.platform_user_id", "=", platformUserId)
     .executeTakeFirst();
 
+  // Whatever the channel knew about the sender (job title -> role, company).
+  const { role, company } = contactFieldsFromMetadata(metadata);
+
   if (existing) {
-    const contact = await db
+    let contact = await db
       .selectFrom("contacts")
       .selectAll()
       .where("user_id", "=", userId)
       .where("id", "=", existing.contact_id)
       .executeTakeFirstOrThrow();
+    // Fill an unknown role from the channel, but never clobber a user-set one.
+    if (role && !contact.role) {
+      contact = (await updateContact(userId, existing.contact_id, { role })) ?? contact;
+    }
+    await enrichContactRelationship(userId, existing.contact_id, { created: false, role, company });
     return {
       contact: contact as unknown as ContactRow,
       identity: existing as unknown as ContactIdentityRow,
@@ -110,9 +137,15 @@ export async function resolveContact(
     };
   }
 
-  // Create new contact and link identity
+  // Create new contact and link identity. Seed role from the channel and stamp a
+  // provenance note so the contact records where it first came from.
   const name = displayName ?? platformUserId;
-  const contact = await createContact(userId, { displayName: name });
+  const seenOn = new Date().toISOString().slice(0, 10);
+  const contact = await createContact(userId, {
+    displayName: name,
+    ...(role ? { role } : {}),
+    notes: `First seen via ${platform} on ${seenOn}`,
+  });
   const identity = await linkIdentity(
     userId,
     contact.id,
@@ -122,6 +155,7 @@ export async function resolveContact(
     email,
     metadata,
   );
+  await enrichContactRelationship(userId, contact.id, { created: true, role, company });
 
   return { contact, identity, created: true };
 }

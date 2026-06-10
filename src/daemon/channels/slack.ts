@@ -49,7 +49,12 @@ export class SlackAdapter implements ChannelAdapter {
       const u = res?.user as
         | {
             real_name?: string;
-            profile?: { display_name?: string; real_name_normalized?: string; image_72?: string };
+            profile?: {
+              display_name?: string;
+              real_name_normalized?: string;
+              image_72?: string;
+              title?: string;
+            };
           }
         | undefined;
       const senderName =
@@ -57,6 +62,7 @@ export class SlackAdapter implements ChannelAdapter {
       meta = {
         ...(senderName ? { senderName } : {}),
         ...(u?.profile?.image_72 ? { avatar: u.profile.image_72 } : {}),
+        ...(u?.profile?.title ? { title: u.profile.title } : {}),
       };
     } catch (err) {
       log.debug({ err, userId }, "users.info lookup failed");
