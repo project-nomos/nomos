@@ -233,6 +233,27 @@ export interface WikiArticlesTable {
   updated_at: Generated<Date>;
 }
 
+/** Personality documents (DNA, shadow observations) -- DB is source of truth. */
+export interface PersonalityDocumentsTable {
+  id: Generated<string>;
+  user_id: Generated<string>;
+  kind: string;
+  content: unknown;
+  updated_at: Generated<Date>;
+  created_at: Generated<Date>;
+}
+
+/** Twin-test fidelity score history (per /twin-test run). */
+export interface FidelityScoresTable {
+  id: Generated<string>;
+  user_id: Generated<string>;
+  score: number;
+  pairs: Generated<number>;
+  fooled: Generated<number>;
+  detail: Generated<unknown>;
+  created_at: Generated<Date>;
+}
+
 /** The vault: per-user agent long-term memory (source of truth). */
 export interface VaultNotesTable {
   id: Generated<string>;
@@ -396,6 +417,8 @@ export interface Database {
   ingest_jobs: IngestJobsTable;
   style_profiles: StyleProfilesTable;
   wiki_articles: WikiArticlesTable;
+  personality_documents: PersonalityDocumentsTable;
+  fidelity_scores: FidelityScoresTable;
   vault_notes: VaultNotesTable;
   contacts: ContactsTable;
   contact_identities: ContactIdentitiesTable;

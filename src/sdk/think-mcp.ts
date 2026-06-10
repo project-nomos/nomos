@@ -22,6 +22,13 @@ import {
   formatCalibrationStatus,
 } from "../memory/calibration.ts";
 import { compileDNA, exportDNA, formatDNAPreview } from "../memory/personality-dna.ts";
+import {
+  sampleRealMessages,
+  calculateFidelityScore,
+  type TwinTestPair,
+} from "../memory/twin-test.ts";
+import { recordFidelityScore, getFidelityHistory } from "../db/fidelity-scores.ts";
+import { resolveMemoryUserId } from "../auth/tenant-context.ts";
 
 const ok = (text: string) => ({ content: [{ type: "text" as const, text }] });
 const fail = (text: string) => ({ content: [{ type: "text" as const, text }], isError: true });
@@ -102,9 +109,110 @@ export function buildThinkMcpServer(): McpSdkServerConfigWithInstance {
     { annotations: { readOnlyHint: true } },
   );
 
+  const twinSample = tool(
+    "twin_test_sample",
+    "Pull N diverse real user messages (each with its conversational context) for a twin test. Generate a clone reply for each, then judge which is real. Backs /twin-test.",
+    {
+      count: z
+        .number()
+        .int()
+        .min(1)
+        .max(10)
+        .optional()
+        .describe("how many message pairs (default 5)"),
+    },
+    async (args) => {
+      try {
+        const pairs = await sampleRealMessages(args.count ?? 5);
+        if (pairs.length === 0)
+          return ok("No real messages available yet to sample for a twin test.");
+        return ok(
+          JSON.stringify(
+            pairs.map((p) => ({
+              id: p.id,
+              context: p.context,
+              realMessage: p.realMessage,
+              platform: p.platform,
+            })),
+            null,
+            2,
+          ),
+        );
+      } catch (e) {
+        return fail(`twin_test_sample failed: ${e instanceof Error ? e.message : e}`);
+      }
+    },
+    { annotations: { readOnlyHint: true } },
+  );
+
+  const twinRecord = tool(
+    "twin_test_record",
+    "Record a twin-test run. Pass per-pair `results`: true = the discriminator correctly spotted the REAL message, false = it was fooled. Computes the fidelity score (fraction fooled) and stores it for the trend. Backs /twin-test scoring.",
+    {
+      results: z
+        .array(z.boolean())
+        .min(1)
+        .describe("per pair: did the discriminator correctly identify the REAL message?"),
+    },
+    async (args) => {
+      try {
+        const owner = resolveMemoryUserId(undefined);
+        const pairs = args.results.map((c) => ({ discriminatorCorrect: c }) as TwinTestPair);
+        const score = calculateFidelityScore(pairs);
+        const fooled = args.results.filter((c) => !c).length;
+        const prev = (await getFidelityHistory(owner, 1))[0]?.score;
+        await recordFidelityScore({ userId: owner, score, pairs: args.results.length, fooled });
+        const trend =
+          prev === undefined
+            ? "first recorded run"
+            : score > prev
+              ? `up from ${(prev * 100).toFixed(0)}%`
+              : score < prev
+                ? `down from ${(prev * 100).toFixed(0)}%`
+                : "unchanged";
+        return ok(
+          `Fidelity ${(score * 100).toFixed(0)}% (${fooled}/${args.results.length} fooled) -- ${trend}.`,
+        );
+      } catch (e) {
+        return fail(`twin_test_record failed: ${e instanceof Error ? e.message : e}`);
+      }
+    },
+  );
+
+  const twinHistory = tool(
+    "twin_test_history",
+    "Show the fidelity score history (most recent first) so you can report the trend over time. Backs /twin-test score.",
+    {},
+    async () => {
+      try {
+        const hist = await getFidelityHistory(resolveMemoryUserId(undefined));
+        if (hist.length === 0) return ok("No twin-test runs recorded yet.");
+        return ok(
+          hist
+            .map(
+              (h) =>
+                `${h.createdAt.toISOString().slice(0, 10)}: ${(h.score * 100).toFixed(0)}% (${h.fooled}/${h.pairs} fooled)`,
+            )
+            .join("\n"),
+        );
+      } catch (e) {
+        return fail(`twin_test_history failed: ${e instanceof Error ? e.message : e}`);
+      }
+    },
+    { annotations: { readOnlyHint: true } },
+  );
+
   return createSdkMcpServer({
     name: "nomos-think",
     version: "1.0.0",
-    tools: [reflect, calibrationStatus, calibrationNext, personalityDna],
+    tools: [
+      reflect,
+      calibrationStatus,
+      calibrationNext,
+      personalityDna,
+      twinSample,
+      twinRecord,
+      twinHistory,
+    ],
   });
 }

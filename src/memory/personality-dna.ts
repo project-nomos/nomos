@@ -15,7 +15,7 @@ import { resolveMemoryUserId } from "../auth/tenant-context.ts";
 import { join } from "node:path";
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { getUserModel, upsertUserModel, type UserModelEntry } from "../db/user-model.ts";
-import { getConfigValue, setConfigValue } from "../db/config.ts";
+import { getPersonalityDocument, upsertPersonalityDocument } from "../db/personality-documents.ts";
 
 // ── Types ──
 
@@ -79,7 +79,6 @@ export interface CompilationResult {
 
 const DNA_VERSION = "1.0";
 const DNA_FILE = "personality-dna.json";
-const DNA_CONFIG_KEY = "personality.dna";
 const MAX_PATTERNS = 10;
 const MAX_VALUES = 5;
 const MAX_EXEMPLARS = 5;
@@ -193,20 +192,17 @@ export async function compileDNA(): Promise<CompilationResult> {
  * Export the compiled DNA to file and DB config.
  */
 export async function exportDNA(dna: PersonalityDNA): Promise<string> {
-  const filePath = getDnaPath();
-  const dir = join(homedir(), ".nomos");
-  await mkdir(dir, { recursive: true });
-
-  const jsonStr = JSON.stringify(dna, null, 2);
-  await writeFile(filePath, jsonStr, "utf-8");
-
-  // Also store in DB config
+  // DB is the source of truth (wiki pattern). The file is a portable copy -- the
+  // point of DNA is to be shareable / cold-start another instance.
   try {
-    await setConfigValue(DNA_CONFIG_KEY, dna);
+    await upsertPersonalityDocument(resolveMemoryUserId(undefined), "dna", dna);
   } catch {
-    // DB may not be available
+    // DB may be unavailable; the portable file below still works.
   }
 
+  const filePath = getDnaPath();
+  await mkdir(join(homedir(), ".nomos"), { recursive: true });
+  await writeFile(filePath, JSON.stringify(dna, null, 2), "utf-8");
   return filePath;
 }
 
@@ -296,16 +292,20 @@ export async function importDNA(
  * Load the last exported DNA from file.
  */
 export async function loadExportedDNA(): Promise<PersonalityDNA | null> {
+  // DB first (source of truth), then the portable file as a fallback.
   try {
-    const content = await readFile(getDnaPath(), "utf-8");
-    return JSON.parse(content) as PersonalityDNA;
+    const fromDb = await getPersonalityDocument<PersonalityDNA>(
+      resolveMemoryUserId(undefined),
+      "dna",
+    );
+    if (fromDb) return fromDb;
   } catch {
-    // Also try DB config
-    try {
-      return (await getConfigValue<PersonalityDNA>(DNA_CONFIG_KEY)) ?? null;
-    } catch {
-      return null;
-    }
+    // fall through to the file
+  }
+  try {
+    return JSON.parse(await readFile(getDnaPath(), "utf-8")) as PersonalityDNA;
+  } catch {
+    return null;
   }
 }
 
