@@ -13,6 +13,7 @@ import { resolveMemoryUserId } from "../auth/tenant-context.ts";
 import { sql } from "kysely";
 import { getKysely } from "../db/client.ts";
 import { deduplicateBatch } from "./dedup.ts";
+import { refreshRelationshipStats } from "../identity/relationship.ts";
 import type {
   IngestSource,
   IngestOptions,
@@ -88,6 +89,11 @@ export async function runIngestionPipeline(
 
     progress.done = true;
     await completeIngestJob(jobId, progress);
+    // Derive relationship stats (frequency + message counts) from the freshly
+    // ingested history for this owner's contacts. Best-effort: never fail the run.
+    if (!options.dryRun) {
+      await refreshRelationshipStats(resolveMemoryUserId(options.userId)).catch(() => undefined);
+    }
     callbacks?.onProgress?.(progress);
   } catch (err) {
     const error = err instanceof Error ? err : new Error(String(err));

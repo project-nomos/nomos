@@ -97,6 +97,24 @@ export async function getRelationship(
 }
 
 /**
+ * Bucket a contact into a contact frequency from message volume over the span of
+ * the relationship. Pure (no DB) so the thresholds are unit-testable.
+ */
+export function frequencyFromStats(
+  msgCount: number,
+  firstMsg: string | null,
+  lastMsg: string | null,
+): RelationshipData["frequency"] {
+  if (!firstMsg || !lastMsg) return "rare";
+  const days = (new Date(lastMsg).getTime() - new Date(firstMsg).getTime()) / (1000 * 60 * 60 * 24);
+  const msgsPerDay = days > 0 ? msgCount / days : 0;
+  if (msgsPerDay > 1) return "daily";
+  if (msgsPerDay > 0.15) return "weekly";
+  if (msgsPerDay > 0.03) return "monthly";
+  return "rare";
+}
+
+/**
  * Compute relationship stats from ingested messages.
  */
 export async function computeRelationshipStats(
@@ -131,22 +149,35 @@ export async function computeRelationshipStats(
 
   if (!stats || stats.msg_count === 0) return null;
 
-  // Determine frequency from message count and date range
-  let frequency: RelationshipData["frequency"] = "rare";
-  if (stats.first_msg && stats.last_msg) {
-    const days =
-      (new Date(stats.last_msg).getTime() - new Date(stats.first_msg).getTime()) /
-      (1000 * 60 * 60 * 24);
-    const msgsPerDay = days > 0 ? stats.msg_count / days : 0;
-    if (msgsPerDay > 1) frequency = "daily";
-    else if (msgsPerDay > 0.15) frequency = "weekly";
-    else if (msgsPerDay > 0.03) frequency = "monthly";
-  }
-
   return {
-    frequency,
+    frequency: frequencyFromStats(stats.msg_count, stats.first_msg, stats.last_msg),
     firstContact: stats.first_msg ?? undefined,
     lastContact: stats.last_msg ?? undefined,
     messageCount: stats.msg_count,
   };
+}
+
+/**
+ * Refresh every contact's relationship stats from the owner's ingested history.
+ * Wires computeRelationshipStats onto a live path (post-ingestion): a contact
+ * with ingested messages gets its frequency + message count merged into the
+ * relationship jsonb. Best-effort and owner-scoped; returns how many were updated.
+ */
+export async function refreshRelationshipStats(userId: string): Promise<number> {
+  const db = getKysely();
+  const contacts = await db
+    .selectFrom("contacts")
+    .select("id")
+    .where("user_id", "=", userId)
+    .execute();
+
+  let updated = 0;
+  for (const c of contacts) {
+    const stats = await computeRelationshipStats(userId, c.id);
+    if (stats) {
+      await updateRelationship(userId, c.id, stats);
+      updated++;
+    }
+  }
+  return updated;
 }
