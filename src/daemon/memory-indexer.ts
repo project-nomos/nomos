@@ -136,6 +136,41 @@ export async function indexConversationTurn(
       log.debug({ err }, "Commitment extraction failed");
     });
   }
+
+  // Identity graph: resolve external-channel senders into contacts +
+  // contact_identities (carrying the adapter's profile as metadata). Cheap DB
+  // upsert, no LLM. Skips the owner's own direct-agent channels (cli/terminal/...).
+  if (EXTERNAL_PLATFORMS.has(incoming.platform)) {
+    resolveInboundIdentity(incoming, userId).catch((err) => {
+      log.debug({ err }, "Identity resolution failed");
+    });
+  }
+}
+
+/** Real external channels whose senders are other people worth tracking as contacts. */
+export const EXTERNAL_PLATFORMS = new Set([
+  "slack",
+  "discord",
+  "telegram",
+  "whatsapp",
+  "imessage",
+  "email",
+]);
+
+/**
+ * Resolve the sender of an inbound external-channel message into the identity
+ * graph, attaching whatever profile the adapter put on the message
+ * (metadata.senderName + any platform extras) to contact_identities.metadata.
+ */
+export async function resolveInboundIdentity(
+  incoming: IncomingMessage,
+  ownerUserId: string,
+): Promise<void> {
+  if (!incoming.userId) return;
+  const { resolveContact } = await import("../identity/identities.ts");
+  const md = incoming.metadata ?? {};
+  const senderName = typeof md.senderName === "string" ? md.senderName : undefined;
+  await resolveContact(ownerUserId, incoming.platform, incoming.userId, senderName, undefined, md);
 }
 
 /**

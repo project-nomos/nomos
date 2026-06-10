@@ -24,17 +24,61 @@ export async function updateRelationship(
   data: RelationshipData,
 ): Promise<void> {
   const db = getKysely();
-  const dataJson = JSON.stringify(data);
 
   await db
     .updateTable("contacts")
     .set({
-      relationship: sql`relationship || ${dataJson}::jsonb`,
+      // Pass the OBJECT (the driver serializes to jsonb once). JSON.stringify here
+      // double-encodes into a jsonb STRING, and `relationship || "<string>"`
+      // produces an ARRAY [{}, "..."] instead of a merged object.
+      relationship: sql`relationship || ${data as unknown as string}::jsonb`,
       updated_at: sql`now()`,
     })
     .where("user_id", "=", userId)
     .where("id", "=", contactId)
     .execute();
+}
+
+/**
+ * Build the relationship patch for one inbound interaction. Pure (no DB) so the
+ * shape is unit-testable: stamps lastContact, bumps the message count, records
+ * firstContact on the first touch, and folds in any role/company the channel knew.
+ */
+export function buildInboundRelationship(opts: {
+  created: boolean;
+  priorMessageCount: number;
+  nowIso: string;
+  role?: string;
+  company?: string;
+}): RelationshipData {
+  return {
+    lastContact: opts.nowIso,
+    messageCount: opts.priorMessageCount + 1,
+    ...(opts.created ? { firstContact: opts.nowIso } : {}),
+    ...(opts.role ? { role: opts.role } : {}),
+    ...(opts.company ? { company: opts.company } : {}),
+  };
+}
+
+/**
+ * Enrich a contact's relationship on resolution: refresh interaction stats and
+ * fold in any role/company. This is what wires the relationship subsystem onto
+ * the live inbound identity path (it was dormant -- the column stayed '{}').
+ */
+export async function enrichContactRelationship(
+  userId: string,
+  contactId: string,
+  opts: { created: boolean; role?: string; company?: string; nowIso?: string },
+): Promise<void> {
+  const current = opts.created ? null : await getRelationship(userId, contactId);
+  const patch = buildInboundRelationship({
+    created: opts.created,
+    priorMessageCount: current?.messageCount ?? 0,
+    nowIso: opts.nowIso ?? new Date().toISOString(),
+    role: opts.role,
+    company: opts.company,
+  });
+  await updateRelationship(userId, contactId, patch);
 }
 
 export async function getRelationship(

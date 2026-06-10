@@ -1159,6 +1159,37 @@ async function runAutoLinkerGuard(): Promise<void> {
       (ciRow?.metadata as Record<string, unknown>).handle === "u-meta",
   );
 
+  // Contact enrichment on resolution: a job title in the inbound metadata lands on
+  // contacts.role, a new contact gets a provenance note, and each resolution
+  // records interaction stats in the relationship jsonb -- wiring the previously
+  // dormant relationship subsystem onto the live inbound identity path.
+  const enr = await resolveContact(A, "slack", "U_ENR", "Priya R", undefined, {
+    title: "Engineering Manager",
+  });
+  const erow = await getKysely()
+    .selectFrom("contacts")
+    .selectAll()
+    .where("id", "=", enr.contact.id)
+    .executeTakeFirstOrThrow();
+  const rel = (erow.relationship ?? {}) as Record<string, unknown>;
+  check(
+    "[identity] inbound job title enriches contacts.role",
+    erow.role === "Engineering Manager",
+    `role=${erow.role ?? "null"}`,
+  );
+  check(
+    "[identity] a new contact gets a provenance note",
+    typeof erow.notes === "string" && (erow.notes ?? "").length > 0,
+    `notes=${erow.notes ?? "null"}`,
+  );
+  check(
+    "[identity] resolution records relationship interaction stats (jsonb)",
+    typeof rel.lastContact === "string" &&
+      Number(rel.messageCount) >= 1 &&
+      rel.role === "Engineering Manager",
+    `relationship=${JSON.stringify(rel)}`,
+  );
+
   if (!KEEP) {
     const db = getKysely();
     for (const uid of [A, B]) {
