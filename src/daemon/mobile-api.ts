@@ -41,6 +41,7 @@ import type { GraphNode, GraphEdge } from "../memory/graph.ts";
 import { withAuthUnary, withAuthStream } from "../auth/grpc-interceptor.ts";
 import { registerDevice, unregisterDevice } from "./push-notifications.ts";
 import { vaultDelete, vaultList, vaultRead, vaultWrite } from "../memory/vault.ts";
+import { CronStore } from "../cron/store.ts";
 import { createLogger } from "../lib/logger.ts";
 import type { TenantContext } from "../auth/tenant-context.ts";
 import { resolveMemoryUserId } from "../auth/tenant-context.ts";
@@ -134,6 +135,13 @@ export function buildMobileApiHandlers(deps: MobileApiDeps) {
     ),
     DeleteVaultNote: withAuthUnary("/nomos.MobileApi/DeleteVaultNote", (call, ctx) =>
       handleDeleteVaultNote(call, ctx),
+    ),
+    ListLoops: withAuthUnary("/nomos.MobileApi/ListLoops", (_, ctx) => handleListLoops(ctx)),
+    SetLoopEnabled: withAuthUnary("/nomos.MobileApi/SetLoopEnabled", (call, ctx) =>
+      handleSetLoopEnabled(call, ctx),
+    ),
+    DeleteLoop: withAuthUnary("/nomos.MobileApi/DeleteLoop", (call, ctx) =>
+      handleDeleteLoop(call, ctx),
     ),
   };
 }
@@ -827,6 +835,73 @@ async function handleDeleteVaultNote(
   } catch (err) {
     return { success: false, message: err instanceof Error ? err.message : "delete_failed" };
   }
+}
+
+// ──────────── Loops (autonomous recurring jobs) ────────────
+// Owner-scoped via the JWT-resolved user. System infra jobs are never mutable
+// here (they belong to the daemon); these handlers run in the daemon process, so
+// they emit cron:refresh directly to apply a change live.
+
+async function handleListLoops(ctx: TenantContext): Promise<{
+  loops: Array<{
+    id: string;
+    name: string;
+    schedule: string;
+    enabled: boolean;
+    source: string;
+    errorCount: number;
+    lastRun: string;
+    prompt: string;
+  }>;
+}> {
+  const userId = resolveMemoryUserId(ctx.userId);
+  const jobs = await new CronStore().listJobs({ userId });
+  return {
+    loops: jobs
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .map((j) => ({
+        id: j.id,
+        name: j.name,
+        schedule: j.schedule,
+        enabled: j.enabled,
+        source: j.source ?? "system",
+        errorCount: j.errorCount,
+        lastRun: j.lastRun ? j.lastRun.toISOString() : "",
+        prompt: j.prompt,
+      })),
+  };
+}
+
+async function handleSetLoopEnabled(
+  call: grpc.ServerUnaryCall<unknown, unknown>,
+  ctx: TenantContext,
+): Promise<{ success: boolean; message: string }> {
+  const req = call.request as { name?: string; enabled?: boolean };
+  if (!req.name) return { success: false, message: "missing_name" };
+  const userId = resolveMemoryUserId(ctx.userId);
+  const store = new CronStore();
+  const job = await store.getJobByName(req.name);
+  if (!job || job.userId !== userId) return { success: false, message: "loop_not_found" };
+  if (job.source === "system") return { success: false, message: "system_job_read_only" };
+  await store.updateJob(job.id, { enabled: Boolean(req.enabled) });
+  process.emit("cron:refresh" as never);
+  return { success: true, message: req.enabled ? "enabled" : "disabled" };
+}
+
+async function handleDeleteLoop(
+  call: grpc.ServerUnaryCall<unknown, unknown>,
+  ctx: TenantContext,
+): Promise<{ success: boolean; message: string }> {
+  const req = call.request as { name?: string };
+  if (!req.name) return { success: false, message: "missing_name" };
+  const userId = resolveMemoryUserId(ctx.userId);
+  const store = new CronStore();
+  const job = await store.getJobByName(req.name);
+  if (!job || job.userId !== userId) return { success: false, message: "loop_not_found" };
+  if (job.source === "system") return { success: false, message: "system_job_read_only" };
+  await store.deleteJob(job.id);
+  process.emit("cron:refresh" as never);
+  return { success: true, message: "deleted" };
 }
 
 // Helpers
