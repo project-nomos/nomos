@@ -16,6 +16,14 @@ A meta-learning loop where the clone examines its own model of the user, generat
 4. **Identify gaps** -- Surface areas of low confidence or missing coverage
 5. **Invite correction** -- Present findings and ask the user to confirm, adjust, or reject
 
+## Backend tool (use this, don't improvise)
+
+Call the **`reflect`** tool (`mcp__nomos-think__reflect`) first. It runs the real
+reflection backend over the user model and returns structured `synthesis`,
+`predictions`, and `blindSpots` with the documented confidence logic. Present and
+discuss THAT output rather than reconstructing the user's profile from scratch.
+`/reflect gaps` -> use `blindSpots`; `/reflect predictions` -> use `predictions`.
+
 ## Commands
 
 - `/reflect` -- Start a full reflection session

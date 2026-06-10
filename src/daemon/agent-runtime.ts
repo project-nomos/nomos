@@ -30,6 +30,7 @@ import {
 import { isGoogleWorkspaceConfiguredAsync } from "../sdk/google-workspace-mcp.ts";
 import { buildGoogleMcpServers, buildGoogleIntegrationPrompt } from "../sdk/google-mcp.ts";
 import { buildVaultMcpServer } from "../sdk/vault-mcp.ts";
+import { buildThinkMcpServer } from "../sdk/think-mcp.ts";
 import { buildMemoryDigest } from "../memory/digest.ts";
 import { getRelevantArticles } from "../memory/wiki-reader.ts";
 import { loadEnvConfig, type NomosConfig } from "../config/env.ts";
@@ -233,6 +234,8 @@ export class AgentRuntime {
       }
     }
     this.mcpServers["nomos-memory"] = createMemoryMcpServer();
+    // "Think Like You" tools: bridge reflect/calibrate/dna skills to their backends.
+    this.mcpServers["nomos-think"] = buildThinkMcpServer();
 
     // Pre-load DB-backed tokens for integrations that use sync getters
     await Promise.all([loadDiscordTokenFromDb(), loadTelegramTokenFromDb()]);

@@ -2225,10 +2225,14 @@ type EffectEvidence = {
   error?: string;
 };
 
-/** Lines in tracked `src` that reference `symbol` as a whole word (working tree). */
+/**
+ * Lines in `src` that reference `symbol` (working tree). `--untracked` so a new,
+ * not-yet-committed file still counts as a caller -- otherwise a feature wired by
+ * an untracked file is falsely flagged DORMANT during development.
+ */
 function gitGrep(args: string[]): string[] {
   try {
-    return execFileSync("git", ["grep", ...args, "--", "src"], {
+    return execFileSync("git", ["grep", "--untracked", ...args, "--", "src"], {
       cwd: process.cwd(),
       encoding: "utf-8",
       maxBuffer: 16 * 1024 * 1024,
@@ -2649,6 +2653,88 @@ async function runToolApprovalGate(): Promise<void> {
   check("[tool-approval] disabled policy adds no gate (zero-cost)", off === undefined);
 }
 
+/**
+ * "Think Like You" tool bridge (/reflect, /calibrate, /dna): the nomos-think MCP
+ * tools call these backends, which run on the instance owner's user_model. Seed a
+ * pattern + value + preference, then exercise each backend end-to-end. Proves the
+ * skills are wired to the documented logic (docs/think-like-you.md), not orphaned.
+ */
+async function runThinkTools(): Promise<void> {
+  const { upsertUserModel } = await import("../src/db/user-model.ts");
+  const { generateReflectionData } = await import("../src/memory/reflection.ts");
+  const { analyzeCalibrationGaps, getNextScenario } = await import("../src/memory/calibration.ts");
+  const { compileDNA } = await import("../src/memory/personality-dna.ts");
+
+  const owner = resolveMemoryUserId(undefined);
+  await upsertUserModel({
+    userId: owner,
+    category: "decision_pattern",
+    key: "eval-think-ship",
+    value: {
+      text: "Ships first unless tech debt is actively causing bugs",
+      context: "prioritization",
+    },
+    sourceIds: [],
+    confidence: 0.8,
+  });
+  await upsertUserModel({
+    userId: owner,
+    category: "value",
+    key: "eval-think-reliability",
+    value: { text: "Reliability over features" },
+    sourceIds: [],
+    confidence: 0.85,
+  });
+  await upsertUserModel({
+    userId: owner,
+    category: "preference",
+    key: "eval-think-pnpm",
+    value: { text: "pnpm not npm" },
+    sourceIds: [],
+    confidence: 0.9,
+  });
+
+  const r = await generateReflectionData();
+  check(
+    "[think] /reflect backend returns synthesis + predictions + blind spots",
+    !!r &&
+      typeof r.synthesis === "object" &&
+      Array.isArray(r.predictions) &&
+      Array.isArray(r.blindSpots),
+    `patterns=${r?.patternCount} values=${r?.valueCount}`,
+  );
+
+  const cal = await analyzeCalibrationGaps();
+  check(
+    "[think] /calibrate backend computes per-domain coverage + gaps",
+    !!cal && Array.isArray(cal.gaps) && typeof cal.overallCoverage === "number",
+    `coverage=${cal?.overallCoverage} gaps=${cal?.gaps?.length}`,
+  );
+  const scenario = await getNextScenario();
+  check(
+    "[think] /calibrate returns a scenario (or null when covered)",
+    scenario === null || (typeof scenario.id === "string" && typeof scenario.domain === "string"),
+  );
+
+  const dna = await compileDNA();
+  check(
+    "[think] /dna compiles a portable identity within a token budget",
+    !!dna &&
+      !!dna.dna &&
+      typeof dna.stats?.estimatedTokens === "number" &&
+      dna.stats.estimatedTokens > 0,
+    `tokens~${dna?.stats?.estimatedTokens}`,
+  );
+
+  if (!KEEP) {
+    await getKysely()
+      .deleteFrom("user_model")
+      .where("user_id", "=", owner)
+      .where("key", "in", ["eval-think-ship", "eval-think-reliability", "eval-think-pnpm"])
+      .execute();
+  }
+}
+
 async function runEval(): Promise<void> {
   await runMode("power_user");
   await runMode("hosted");
@@ -2678,6 +2764,7 @@ async function runEval(): Promise<void> {
   await runGetMessagesWire();
   await runConversationEmbedding();
   await runToolApprovalGate();
+  await runThinkTools();
 
   // Negative control: a judge that passes everything is worthless. Prove it
   // rejects a response that plainly misses the rubric.
