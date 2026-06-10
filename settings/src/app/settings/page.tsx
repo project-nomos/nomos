@@ -105,6 +105,12 @@ export default function AssistantSettingsPage() {
   const [extractionModel, setExtractionModel] = useState("claude-haiku-4-5");
   const [initialExtractionModel, setInitialExtractionModel] = useState("claude-haiku-4-5");
 
+  // Proactive / voice (opt-in; each adds a background LLM call)
+  const [commitmentTracking, setCommitmentTracking] = useState(false);
+  const [initialCommitmentTracking, setInitialCommitmentTracking] = useState(false);
+  const [styleMatching, setStyleMatching] = useState(false);
+  const [initialStyleMatching, setInitialStyleMatching] = useState(false);
+
   // Embeddings
   const [embeddingModel, setEmbeddingModel] = useState("gemini-embedding-001");
   const [initialEmbeddingModel, setInitialEmbeddingModel] = useState("gemini-embedding-001");
@@ -161,6 +167,8 @@ export default function AssistantSettingsPage() {
     maxTeamWorkers !== initialMaxTeamWorkers ||
     workerBudgetUsd !== initialWorkerBudgetUsd ||
     adaptiveMemory !== initialAdaptiveMemory ||
+    commitmentTracking !== initialCommitmentTracking ||
+    styleMatching !== initialStyleMatching ||
     extractionModel !== initialExtractionModel ||
     embeddingModel !== initialEmbeddingModel ||
     googleApiKeyDirty ||
@@ -257,6 +265,14 @@ export default function AssistantSettingsPage() {
       const am = envData.NOMOS_ADAPTIVE_MEMORY !== "false";
       setAdaptiveMemory(am);
       setInitialAdaptiveMemory(am);
+
+      // Proactive / voice (opt-in; default off)
+      const ct = envData.NOMOS_COMMITMENT_TRACKING === "true";
+      setCommitmentTracking(ct);
+      setInitialCommitmentTracking(ct);
+      const sm = envData.NOMOS_STYLE_MATCHING === "true";
+      setStyleMatching(sm);
+      setInitialStyleMatching(sm);
 
       const em = envData.NOMOS_EXTRACTION_MODEL ?? "claude-haiku-4-5";
       setExtractionModel(em);
@@ -388,6 +404,10 @@ export default function AssistantSettingsPage() {
           envUpdates.NOMOS_WORKER_BUDGET_USD = workerBudgetUsd;
         if (adaptiveMemory !== initialAdaptiveMemory)
           envUpdates.NOMOS_ADAPTIVE_MEMORY = adaptiveMemory ? "true" : "";
+        if (commitmentTracking !== initialCommitmentTracking)
+          envUpdates.NOMOS_COMMITMENT_TRACKING = commitmentTracking ? "true" : "";
+        if (styleMatching !== initialStyleMatching)
+          envUpdates.NOMOS_STYLE_MATCHING = styleMatching ? "true" : "";
         if (extractionModel !== initialExtractionModel)
           envUpdates.NOMOS_EXTRACTION_MODEL = extractionModel;
         if (embeddingModel !== initialEmbeddingModel) envUpdates.EMBEDDING_MODEL = embeddingModel;
@@ -984,6 +1004,38 @@ export default function AssistantSettingsPage() {
               </p>
             </div>
           )}
+
+          <label className="flex items-center gap-3 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={commitmentTracking}
+              onChange={(e) => setCommitmentTracking(e.target.checked)}
+              className="accent-mauve w-4 h-4 rounded"
+            />
+            <div>
+              <span className="text-sm font-medium text-text">Track commitments</span>
+              <p className="text-xs text-overlay0">
+                Extract promises and follow-ups from conversations and remind you before deadlines.
+                Adds a background LLM call per turn (off by default).
+              </p>
+            </div>
+          </label>
+
+          <label className="flex items-center gap-3 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={styleMatching}
+              onChange={(e) => setStyleMatching(e.target.checked)}
+              className="accent-mauve w-4 h-4 rounded"
+            />
+            <div>
+              <span className="text-sm font-medium text-text">Match my writing voice</span>
+              <p className="text-xs text-overlay0">
+                Learn your writing style from sent messages and write drafts in your voice. Runs a
+                daily analysis (off by default).
+              </p>
+            </div>
+          </label>
         </div>
       </section>
 
