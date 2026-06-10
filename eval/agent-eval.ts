@@ -22,12 +22,20 @@
  * It runs against a freshly provisioned, throwaway database (nomos_eval) that is
  * dropped on exit, so it never touches the dev `nomos` DB.
  *
+ * The `--audit` modes add two model-graded audits over the just-written DB (see the
+ * Audits section of eval/README.md):
+ *  - the LABEL audit (Opus-4.8 / xhigh): confirms the rows back the passing test labels
+ *  - the SPEC audit (runSpecAudit): reasons against eval/feature-manifest.ts -- liveness
+ *    (every feature has a live caller), a cron sentinel meta-check, per-feature effect SQL
+ *    + jsonb double-encode guards, and an Opus-4.8 reasoning pass. This is what makes an
+ *    unwired or under-populated feature fail; declare new features in the manifest.
+ *
  * Run:  DATABASE_URL=... [NOMOS_USE_SUBSCRIPTION=true] pnpm eval:agent
  *   pnpm eval:agent            fast deterministic + judged checks, drops the DB
- *   pnpm eval:audit            ^ + an Opus-4.8 / xhigh "ultracode" DB-content audit
+ *   pnpm eval:audit            ^ + the label audit AND the spec/manifest audit
  *                              (eval -> audit -> clean, all in one run)
  *   pnpm eval:agent --keep     keep nomos_eval for inspection
- *   pnpm eval:agent --audit-kept   audit a kept DB without re-running the eval
+ *   pnpm eval:agent --audit-kept   audit a kept DB (label + spec) without re-running the eval
  *   pnpm eval:agent --clean    drop a kept nomos_eval
  * Exits non-zero on any failure. Judge + real-token checks skip (reported) when no
  * LLM provider / no nomos-server is available.
@@ -36,6 +44,7 @@
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { writeFile, readFile, rm, mkdir } from "node:fs/promises";
+import { execFileSync } from "node:child_process";
 import { config } from "dotenv";
 // Load .env the same way the app entry point does, so DATABASE_URL and the LLM
 // provider key are present when this script runs standalone (the judge runs only
@@ -122,14 +131,15 @@ import { compileKnowledge } from "../src/memory/knowledge-compiler.ts";
 import { listArticles, upsertArticle, searchArticles, getArticle } from "../src/db/wiki.ts";
 import { getRelevantArticles } from "../src/memory/wiki-reader.ts";
 import { runForkedAgent } from "../src/sdk/forked-agent.ts";
-import { isEphemeralSession } from "../src/daemon/memory-indexer.ts";
+import { isEphemeralSession, indexConversationTurn } from "../src/daemon/memory-indexer.ts";
 import { GrpcServer } from "../src/daemon/grpc-server.ts";
 import { MessageQueue } from "../src/daemon/message-queue.ts";
 import { AgentRuntime } from "../src/daemon/agent-runtime.ts";
 import { GrpcClient } from "../src/ui/grpc-client.ts";
-import type { AgentEvent } from "../src/daemon/types.ts";
+import type { AgentEvent, IncomingMessage, OutgoingMessage } from "../src/daemon/types.ts";
 import { refreshJwks } from "../src/auth/jwt-validator.ts";
 import { judge } from "./judge.ts";
+import { FEATURES } from "./feature-manifest.ts";
 import { startWire, startConnectServer, makeMobileClient } from "./wire.ts";
 import { startHostedAuth } from "./hosted-auth.ts";
 import { provisionRealUser } from "./nomos-server-auth.ts";
@@ -980,6 +990,21 @@ async function runCommitments(): Promise<void> {
     (await getPendingCommitments(B)).every(
       (c) => c.user_id === B && c.description !== "send the quarterly report",
     ),
+  );
+
+  // Commitment -> contact linking: the extractor names who a promise is to, and
+  // storeCommitments must resolve that name to a contact_id (regression guard for
+  // the dropped-on-insert bug). An unnamed commitment stays unlinked (null).
+  const sarah = await createContact(A, { displayName: "Sarah Lin" });
+  const [linked] = await storeCommitments(
+    A,
+    [{ description: "send Sarah the deck", deadline: null, contact: "Sarah" }],
+    "msg-link",
+  );
+  check(
+    "[commitments] a named contact resolves to contact_id",
+    linked?.contact_id === sarah.id,
+    `contact_id=${linked?.contact_id ?? "null"} expected=${sarah.id}`,
   );
 
   // Reminder window: a commitment due within 24h surfaces for reminders; the
@@ -1993,6 +2018,7 @@ async function main(): Promise<void> {
 
     try {
       await runModelDbAudit(priorLabels);
+      await runSpecAudit();
     } finally {
       if (keep) await closeDb();
       else await teardownTestDb(baseUrl);
@@ -2014,6 +2040,9 @@ async function main(): Promise<void> {
     if (AUDIT) {
       const passed = results.filter((r) => r.pass && !r.skipped).map((r) => r.label);
       await runModelDbAudit(passed);
+      // Spec audit: reason DB + wiring against the independent feature manifest,
+      // catching dormant code + missing effects the label audit can't see.
+      await runSpecAudit();
     }
   } finally {
     // Phase 3 -- clean (or keep). --audit drops the DB unless --keep is also given.
@@ -2172,6 +2201,356 @@ End your answer with EXACTLY one final line:
   );
 }
 
+// ── Spec-driven audit ────────────────────────────────────────────────────────
+// The label audit above asks "does the DB back the PASSING TEST LABELS?" -- but
+// the labels share the tests' blind spots, so a feature/column no test asserts is
+// invisible to it. The spec audit instead reasons against an INDEPENDENT target:
+// eval/feature-manifest.ts states, per feature, what should be wired and what it
+// should produce. That lets it catch the three classes regression tests miss:
+// dormant code (no live caller), empty outputs (a declared effect never lands),
+// and drift. See runSpecAudit at the bottom of this block.
+
+type LivenessSite = { symbol: string; wired: boolean; sites: string[] };
+type FeatureLiveness = { id: string; wired: boolean; symbols: LivenessSite[] };
+type EffectEvidence = {
+  feature: string;
+  claim: string;
+  notExercised: boolean;
+  count?: number;
+  doubleEncoded?: { bad: number; total: number };
+  error?: string;
+};
+
+/** Lines in tracked `src` that reference `symbol` as a whole word (working tree). */
+function gitGrep(args: string[]): string[] {
+  try {
+    return execFileSync("git", ["grep", ...args, "--", "src"], {
+      cwd: process.cwd(),
+      encoding: "utf-8",
+      maxBuffer: 16 * 1024 * 1024,
+    })
+      .split("\n")
+      .filter(Boolean);
+  } catch {
+    return []; // git grep exits 1 when there are no matches
+  }
+}
+
+/**
+ * A symbol is "wired" if some non-test source line references it that is NOT its
+ * own definition and NOT a barrel re-export -- i.e. a real import/call site. This
+ * is the deterministic dead-code signal: the dormant features we hit by hand had
+ * only a definition (+ a barrel), zero call sites.
+ */
+function classifyLiveness(symbol: string): LivenessSite {
+  const def = new RegExp(
+    `export\\s+(async\\s+)?(function|const|let|class|interface|type)\\s+${symbol}\\b`,
+  );
+  const barrel = /export\s*(\{[^}]*\}|\*)\s*from/;
+  const sites = gitGrep(["-n", "-w", symbol]).filter((line) => {
+    const path = line.slice(0, line.indexOf(":"));
+    if (path.endsWith(".test.ts")) return false;
+    if (def.test(line)) return false;
+    if (barrel.test(line)) return false;
+    return true;
+  });
+  return { symbol, wired: sites.length > 0, sites: sites.slice(0, 3) };
+}
+
+/** Files under `src` that mention a token (used to locate cron handlers + seeders). */
+function filesMentioning(token: string): string[] {
+  return gitGrep(["-l", token]);
+}
+
+/**
+ * Meta-check: keep the manifest and the running system in lockstep. Every cron
+ * sentinel handled in cron-engine MUST be declared here (so a new background
+ * feature can't ship without a contract), and every declared cron sentinel must
+ * be BOTH handled and seeded somewhere outside cron-engine -- a handler that is
+ * never seeded is the exact "code exists but never runs" dormancy that bit us.
+ */
+async function runSentinelMetaCheck(): Promise<void> {
+  const engine = "src/daemon/cron-engine.ts";
+  // Parse the sentinels the engine actually dispatches on (=== "__x__" / startsWith).
+  const engineText = await readFile(engine, "utf-8");
+  const handled = new Set<string>();
+  for (const m of engineText.matchAll(/(?:===\s*"|startsWith\(")(__[a-z_]+__)/g)) handled.add(m[1]);
+
+  // Several features can legitimately share a sentinel (e.g. value-reflection +
+  // stale-decay both ride the __auto_dream__ cron), so collect the set of declared
+  // sentinels AND the full per-feature list -- don't dedupe, or a feature loses its
+  // own handled/seeded check.
+  const declared = new Set<string>();
+  const cronFeatures: { id: string; sentinel: string }[] = [];
+  for (const f of FEATURES) {
+    if (f.trigger.kind === "cron") {
+      declared.add(f.trigger.sentinel);
+      cronFeatures.push({ id: f.id, sentinel: f.trigger.sentinel });
+    }
+  }
+
+  const undeclared = [...handled].filter((s) => !declared.has(s));
+  check(
+    "[spec] every cron sentinel handled in cron-engine has a manifest entry",
+    undeclared.length === 0,
+    undeclared.length
+      ? `undeclared background features: ${undeclared.join(", ")}`
+      : `${handled.size} sentinels declared`,
+  );
+
+  for (const { id, sentinel } of cronFeatures) {
+    const refs = filesMentioning(sentinel);
+    const inEngine = refs.includes(engine);
+    const seeder = refs.find((p) => p !== engine);
+    check(
+      `[spec] ${id}: cron handled + seeded (not dormant)`,
+      inEngine && !!seeder,
+      !inEngine
+        ? "no handler in cron-engine"
+        : !seeder
+          ? "handler present but the sentinel is NEVER seeded -- dormant cron"
+          : `handled + seeded in ${seeder}`,
+    );
+  }
+}
+
+/**
+ * Run each effect's deterministic SQL against the populated nomos_eval. Exercised
+ * effects become hard checks (an empty result is a real gap); `notExercised`
+ * effects are recorded as evidence only (the eval doesn't drive them, so absence
+ * is a coverage note, not a failure). The double-encode guard flags only jsonb
+ * strings whose text is itself JSON, so scalar values never false-positive.
+ */
+async function runEffectChecks(): Promise<EffectEvidence[]> {
+  const db = getKysely();
+  const scalar = async (q: string): Promise<number | { error: string }> => {
+    try {
+      const res = await db.executeQuery(sql`${sql.raw(q)}`.compile(db));
+      const row = res.rows[0] as Record<string, unknown> | undefined;
+      return Number((row ? Object.values(row)[0] : 0) ?? 0);
+    } catch (err) {
+      return { error: err instanceof Error ? err.message : String(err) };
+    }
+  };
+
+  const evidence: EffectEvidence[] = [];
+  for (const f of FEATURES) {
+    for (const e of f.effects) {
+      const ev: EffectEvidence = { feature: f.id, claim: e.claim, notExercised: !!e.notExercised };
+
+      if (e.sql) {
+        const c = await scalar(e.sql.query);
+        if (typeof c === "number") {
+          ev.count = c;
+          const ok = e.sql.expect === "nonzero" ? c > 0 : c === 0;
+          if (!e.notExercised)
+            check(`[spec] ${f.id}: ${e.claim}`, ok, `count=${c} (expect ${e.sql.expect})`);
+        } else {
+          ev.error = c.error;
+          if (!e.notExercised) check(`[spec] ${f.id}: ${e.claim}`, false, c.error);
+        }
+      }
+
+      if (e.noDoubleEncode) {
+        const { table, column, where } = e.noDoubleEncode;
+        const w = where ? `WHERE ${where}` : "";
+        // Double-encode signature: a jsonb STRING whose text starts with { or [.
+        const q = `SELECT count(*) FILTER (WHERE jsonb_typeof(${column}) = 'string' AND ltrim(${column} #>> '{}') ~ '^[{[]') AS bad, count(*) AS total FROM ${table} ${w}`;
+        try {
+          const res = await db.executeQuery(sql`${sql.raw(q)}`.compile(db));
+          const row = res.rows[0] as { bad: string; total: string } | undefined;
+          const bad = Number(row?.bad ?? 0);
+          const total = Number(row?.total ?? 0);
+          ev.doubleEncoded = { bad, total };
+          check(
+            `[spec] ${f.id}: ${table}.${column} not double-encoded`,
+            bad === 0,
+            bad > 0
+              ? `${bad}/${total} rows are JSON.stringify'd into jsonb`
+              : `${total} rows clean`,
+          );
+        } catch (err) {
+          check(
+            `[spec] ${f.id}: ${table}.${column} not double-encoded`,
+            false,
+            err instanceof Error ? err.message : String(err),
+          );
+        }
+      }
+
+      evidence.push(ev);
+    }
+  }
+  return evidence;
+}
+
+/**
+ * Opus-4.8 / xhigh reasoning pass against the manifest. Unlike the label audit,
+ * its reference is INTENT: for each feature it weighs the declared effects against
+ * the liveness + effect evidence (which already carries per-column double-encode
+ * counts), and flags dormant code, effects that should have landed but didn't,
+ * double-encoding, and drift. The forked call is wrapped so an audit-fork failure
+ * is reported as a check -- it must never crash the eval after the real work ran.
+ */
+async function runSpecReasoning(
+  liveness: FeatureLiveness[],
+  effects: EffectEvidence[],
+): Promise<void> {
+  const LABEL = "[spec-audit] Opus 4.8 (thinking) reasons DB + wiring against the feature manifest";
+  if (!hasLLM) {
+    skip(LABEL, "no LLM provider");
+    return;
+  }
+  const manifestView = FEATURES.map((f) => ({
+    id: f.id,
+    summary: f.summary,
+    trigger: f.trigger,
+    entry: f.entry,
+    effects: f.effects.map((e) => ({ claim: e.claim, exercised: !e.notExercised })),
+    invariants: f.invariants ?? [],
+  }));
+
+  const prompt = `You are auditing an agent system against its FEATURE MANIFEST -- an independent contract of what each feature should do and produce. Everything you need is provided below as structured evidence. Do NOT use any tools and do NOT try to read files or the codebase; judge ONLY from the evidence here, and reply in a SINGLE message ending with the verdict line.
+
+FEATURE MANIFEST (the target/expected behavior):
+${JSON.stringify(manifestView, null, 2)}
+
+LIVENESS EVIDENCE (static call-site search; a feature with no live caller is dead code):
+${JSON.stringify(liveness, null, 2)}
+
+EFFECT EVIDENCE (deterministic SQL against the populated DB. count = rows matching the effect; "exercised" effects should have count>0; "notExercised" are behavioral and the eval does not drive them, so absence is EXPECTED. doubleEncoded.bad>0 means a jsonb column was JSON.stringify'd):
+${JSON.stringify(effects, null, 2)}
+
+Reason per feature, then judge:
+1. DORMANT: a feature with no live call site, or a cron sentinel handled but never seeded, runs in no real path. Flag it.
+2. MISSING EFFECT: an EXERCISED effect with count=0 means the feature did not produce what the manifest promises. Flag it. (A small but nonzero count is fine -- the eval seeds limited data; nonzero satisfies the claim.)
+3. DOUBLE-ENCODING: any effect with doubleEncoded.bad>0 is a real storage bug. Flag it.
+4. DRIFT: note anything inconsistent with a feature's declared intent or per-owner isolation.
+
+End with EXACTLY one final line:
+"SPEC-AUDIT: PASS" if every declared feature is wired and every exercised effect is supported, or
+"SPEC-AUDIT: FAIL: <comma-separated concrete reasons>" otherwise.`;
+
+  let text: string;
+  try {
+    ({ text } = await runForkedAgent({
+      prompt,
+      model: "claude-opus-4-8",
+      thinking: { type: "adaptive" },
+      effort: "xhigh",
+      label: "spec-audit",
+      maxTurns: 4, // xhigh thinking over a large prompt needs room to reach a terminal answer
+    }));
+  } catch (err) {
+    // An audit fork that errors (e.g. transient SDK/turn-limit) must not crash the
+    // eval after every deterministic spec check already ran. Surface it as a fail.
+    check(
+      LABEL,
+      false,
+      `spec-audit fork errored: ${err instanceof Error ? err.message : String(err)}`,
+    );
+    return;
+  }
+
+  const verdictLine =
+    text
+      .split("\n")
+      .reverse()
+      .find((l) => /SPEC-AUDIT:/i.test(l)) ?? text.slice(-300);
+  const pass = /SPEC-AUDIT:\s*PASS/i.test(text) && !/SPEC-AUDIT:\s*FAIL/i.test(text);
+  check(LABEL, pass, verdictLine.trim());
+}
+
+/**
+ * Spec-driven audit entry point: deterministic liveness + sentinel meta-check +
+ * effect/invariant SQL, then the Opus/xhigh reasoning pass over the manifest.
+ * Reasons against an independent target, so it catches dead code + missing
+ * outputs that no test asserts -- the gap the label audit can't see.
+ */
+async function runSpecAudit(): Promise<void> {
+  // 1. Liveness (deterministic): every manifest feature must have a live caller.
+  const liveness: FeatureLiveness[] = FEATURES.map((f) => {
+    const symbols = f.entry.map(classifyLiveness);
+    return { id: f.id, wired: symbols.some((s) => s.wired), symbols };
+  });
+  for (const l of liveness) {
+    const dormant = l.symbols.filter((s) => !s.wired).map((s) => s.symbol);
+    check(
+      `[spec] ${l.id}: has a live production caller`,
+      l.wired,
+      l.wired
+        ? dormant.length
+          ? `wired; no caller for: ${dormant.join(", ")}`
+          : "wired"
+        : `DORMANT -- no call site for any of: ${FEATURES.find((f) => f.id === l.id)?.entry.join(", ")}`,
+    );
+  }
+
+  // 2. Meta-check: manifest <-> cron-engine handlers <-> seeders.
+  runSentinelMetaCheck();
+
+  // 3. Effects + invariants (deterministic SQL on the populated DB).
+  const effects = await runEffectChecks();
+
+  // 4. Opus/xhigh reasoning against the declared intent.
+  await runSpecReasoning(liveness, effects);
+}
+
+/**
+ * Conversation memory must be SEMANTICALLY searchable, not FTS-only: prove that
+ * indexConversationTurn embeds the chunks it writes. The live gRPC path indexes
+ * fire-and-forget (so a raw DB scan can catch it mid-flight); awaiting the real
+ * function here is the deterministic check that conversation recall is accurate.
+ */
+async function runConversationEmbedding(): Promise<void> {
+  const path = "evalconv:embed";
+  const incoming: IncomingMessage = {
+    id: "conv-embed-1",
+    platform: "evalconv",
+    channelId: "embed",
+    userId: "eval-conv-embed",
+    content:
+      "Remember the product launch is next Tuesday at the downtown loft, and Priya owns the demo.",
+    timestamp: new Date(),
+  };
+  const outgoing: OutgoingMessage = {
+    inReplyTo: "conv-embed-1",
+    platform: "evalconv",
+    channelId: "embed",
+    content:
+      "Got it: launch next Tuesday at the downtown loft, Priya on the demo. I'll remind you.",
+  };
+  await indexConversationTurn(incoming, outgoing);
+
+  const db = getKysely();
+  const res = await db.executeQuery(
+    sql`SELECT count(*) AS total, count(embedding) AS embedded FROM memory_chunks WHERE path = ${path} AND source = 'conversation'`.compile(
+      db,
+    ),
+  );
+  const row = res.rows[0] as { total: string; embedded: string } | undefined;
+  const total = Number(row?.total ?? 0);
+  const embedded = Number(row?.embedded ?? 0);
+  check(
+    "[conversation] indexConversationTurn persists conversation chunks",
+    total >= 1,
+    `total=${total}`,
+  );
+  if (isEmbeddingAvailable()) {
+    check(
+      "[conversation] conversation chunks are embedded (semantic recall, not FTS-only)",
+      total >= 1 && embedded === total,
+      `${embedded}/${total} embedded`,
+    );
+  } else {
+    skip(
+      "[conversation] conversation chunks are embedded (semantic recall, not FTS-only)",
+      "embeddings unavailable",
+    );
+  }
+  if (!KEEP) await db.deleteFrom("memory_chunks").where("path", "=", path).execute();
+}
+
 async function runEval(): Promise<void> {
   await runMode("power_user");
   await runMode("hosted");
@@ -2198,6 +2577,7 @@ async function runEval(): Promise<void> {
   await runAutoDreamDeep();
   await runQuickFixWiring();
   await runGetMessagesWire();
+  await runConversationEmbedding();
 
   // Negative control: a judge that passes everything is worthless. Prove it
   // rejects a response that plainly misses the rubric.

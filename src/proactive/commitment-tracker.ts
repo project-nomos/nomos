@@ -9,6 +9,7 @@
 import { sql } from "kysely";
 import { getKysely } from "../db/client.ts";
 import { runForkedAgent } from "../sdk/forked-agent.ts";
+import { searchContacts } from "../identity/contacts.ts";
 
 export interface CommitmentRow {
   id: string;
@@ -79,10 +80,19 @@ export async function storeCommitments(
   const stored: CommitmentRow[] = [];
 
   for (const c of commitments) {
+    // Link the commitment to the person it's about: resolve the extracted contact
+    // name to a contact_id (best-effort -- first ilike match). Null when unnamed
+    // or no match; a lookup failure must never block storing the commitment.
+    let contactId: string | null = null;
+    if (c.contact?.trim()) {
+      const matches = await searchContacts(userId, c.contact.trim()).catch(() => []);
+      contactId = matches[0]?.id ?? null;
+    }
     const row = await db
       .insertInto("commitments")
       .values({
         user_id: userId,
+        contact_id: contactId,
         description: c.description,
         source_msg: sourceMsg ?? null,
         deadline: c.deadline ? new Date(c.deadline) : null,
