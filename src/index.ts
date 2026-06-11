@@ -3,13 +3,20 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 import { config } from "dotenv";
 import { buildProgram } from "./cli/program.ts";
+import { ensureNomosEnvFile, envLoadOrder, isSourceRun } from "./config/env-bootstrap.ts";
 import { ensureEncryptionKey } from "./db/encryption.ts";
 import { installRejectionHandler } from "./lib/rejection-handler.ts";
 
-// Load env vars: cwd first, then ~/.nomos/ as fallback for Homebrew installs
+// Load env vars. The installed binary lets ~/.nomos/.env take precedence over a
+// stray .env in the current working directory (running nomos from another
+// project's folder must not hijack DATABASE_URL); a source run keeps repo .env
+// first for development. See src/config/env-bootstrap.ts.
 const nomosDir = join(homedir(), ".nomos");
-config({ path: [".env.local", ".env"], quiet: true });
-config({ path: [join(nomosDir, ".env.local"), join(nomosDir, ".env")], quiet: true });
+const sourceRun = isSourceRun(import.meta.url);
+if (!sourceRun) ensureNomosEnvFile(nomosDir);
+for (const paths of envLoadOrder(nomosDir, sourceRun)) {
+  config({ path: paths, quiet: true });
+}
 
 // Ensure encryption key exists (reads ~/.nomos/encryption.key or generates one)
 ensureEncryptionKey();
