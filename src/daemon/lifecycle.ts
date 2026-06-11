@@ -6,6 +6,7 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { createLogger } from "../lib/logger.ts";
+import { isIgnorableRejection } from "../lib/rejection-handler.ts";
 
 const log = createLogger("lifecycle");
 
@@ -104,12 +105,11 @@ export function installSignalHandlers(onShutdown: () => Promise<void>): void {
     process.exit(1);
   });
 
+  // A revoked channel token must degrade one channel, not crash the daemon, so
+  // log unhandled rejections without exiting. (The `pnpm daemon:dev` entry point
+  // bypasses src/index.ts, so this registration is what protects the dev daemon.)
   process.on("unhandledRejection", (reason) => {
-    // Suppress known SDK cleanup race: ProcessTransport closes before pending
-    // MCP control requests finish. Harmless — the session is already done.
-    if (reason instanceof Error && reason.message.includes("ProcessTransport is not ready")) {
-      return;
-    }
+    if (isIgnorableRejection(reason)) return;
     log.error({ err: reason }, "Unhandled rejection");
   });
 }
