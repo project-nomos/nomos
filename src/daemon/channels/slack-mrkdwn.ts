@@ -1,65 +1,90 @@
 /**
- * Convert standard Markdown to Slack's mrkdwn format.
+ * Convert standard Markdown to Slack's "mrkdwn" format.
  *
- * Key differences:
- *   Markdown          Slack mrkdwn
- *   **bold**       -> *bold*
- *   *italic*       -> _italic_
- *   _italic_       -> _italic_ (same)
- *   [text](url)    -> <url|text>
- *   # Heading      -> *Heading*
- *   ## Heading     -> *Heading*
- *   > quote        -> > quote (same)
- *   `code`         -> `code` (same)
- *   ```code```     -> ```code``` (same)
- *   ~~strike~~     -> ~strike~
+ * Slack does NOT speak CommonMark. It has its own dialect, so agent output
+ * (which is normal Markdown) has to be translated or it renders wrong:
+ *
+ *   Markdown              Slack mrkdwn
+ *   **bold**           -> *bold*
+ *   __bold__           -> *bold*
+ *   *italic* / _it_    -> _italic_
+ *   # Heading          -> *Heading*        (Slack has no headings)
+ *   - item / * item    -> bullet item      (Slack shows the raw marker otherwise)
+ *   [text](url)        -> <url|text>
+ *   ![alt](url)        -> alt              (Slack can't inline images in text)
+ *   ~~strike~~         -> ~strike~
+ *   ```lang\ncode```   -> ```\ncode```      (Slack renders the lang tag as a line)
+ *   `code`             -> `code`           (same)
+ *   > quote            -> > quote          (same)
+ *   :emoji:            -> :emoji:          (Slack renders these natively)
+ *
+ * Ordering matters: italic (single *…*) must run BEFORE any rule that emits
+ * single-asterisk bold (headings, bold), otherwise the freshly-written `*bold*`
+ * gets re-read as italic and rendered _italic_.
  */
+
+// Sentinel that wraps protected spans so no real text collides. U+E000 is in the
+// Unicode Private Use Area; built via fromCharCode to keep the source pure ASCII.
+const S = String.fromCharCode(0xe000);
+const BULLET = "•"; // •
+const SUB_BULLET = "◦"; // ◦
+const DIVIDER = "─".repeat(10); // ──────────
+
 export function markdownToSlackMrkdwn(text: string): string {
   let result = text;
 
-  // Protect code blocks from conversion (extract, convert around them, re-insert).
-  //  is in the Unicode Private Use Area, so it won't collide with real text.
+  // 1. Protect fenced code blocks. Slack ignores the language identifier on the
+  //    opening fence and renders it as the first line INSIDE the block, so drop
+  //    it. Everything between the fences is kept verbatim (no markdown applied).
   const codeBlocks: string[] = [];
   result = result.replace(/```[\s\S]*?```/g, (match) => {
-    codeBlocks.push(match);
-    return `CODEBLOCK${codeBlocks.length - 1}`;
+    const normalized = match.replace(/^```[^\n`]*\r?\n/, "```\n");
+    codeBlocks.push(normalized);
+    return `${S}C${codeBlocks.length - 1}${S}`;
   });
 
-  // Protect inline code
+  // 2. Protect inline code so markdown inside it stays literal.
   const inlineCode: string[] = [];
-  result = result.replace(/`[^`]+`/g, (match) => {
+  result = result.replace(/`[^`\n]+`/g, (match) => {
     inlineCode.push(match);
-    return `INLINE${inlineCode.length - 1}`;
+    return `${S}I${inlineCode.length - 1}${S}`;
   });
 
-  // Headers: # Heading -> *Heading* (bold)
-  result = result.replace(/^#{1,6}\s+(.+)$/gm, "*$1*");
+  // 3. Horizontal rules (---, ***, ___, optionally spaced) -> a divider line.
+  result = result.replace(/^[ \t]*([-*_])(?:[ \t]*\1){2,}[ \t]*$/gm, DIVIDER);
 
-  // Bold: **text** -> *text* (must be done before italic)
+  // 4. Bullets (-, *, +) -> bullet char, nested (indented) -> hollow bullet,
+  //    preserving indentation. Done before italic so a leading "* " marker isn't
+  //    read as emphasis.
+  result = result.replace(/^([ \t]*)[-*+][ \t]+/gm, (_m, indent: string) => {
+    const depth = indent.replace(/\t/g, "  ").length;
+    return `${indent}${depth >= 2 ? SUB_BULLET : BULLET} `;
+  });
+
+  // 5. Italic FIRST. Single *…* with no adjacent '*' so **bold** is left
+  //    untouched (its leading "*" fails the (?!\*) guard, its content can't start
+  //    with "*"). Underscore italic (_x_) is already valid Slack mrkdwn.
+  result = result.replace(/(?<!\*)\*(?!\*)([^*\n]+?)\*(?!\*)/g, "_$1_");
+
+  // 6. Headings (# .. ######) -> *bold*. After italic so the result survives.
+  result = result.replace(/^#{1,6}[ \t]+(.+?)[ \t]*#*$/gm, "*$1*");
+
+  // 7. Bold: **text** / __text__ -> *text*. After italic so the result survives.
   result = result.replace(/\*\*(.+?)\*\*/g, "*$1*");
-
-  // Bold: __text__ -> *text*
   result = result.replace(/__(.+?)__/g, "*$1*");
 
-  // Italic: *text* -> _text_ (only single asterisks not already converted)
-  // This is tricky -- after bold conversion, remaining single * pairs are italic
-  // Skip if already handled as bold (no double *)
-  result = result.replace(/(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)/g, "_$1_");
+  // 8. Links: [text](url) -> <url|text>; images ![alt](url) -> alt.
+  result = result.replace(
+    /(!?)\[([^\]]+)\]\(([^)\s]+)(?:[ \t]+"[^"]*")?\)/g,
+    (_m, bang: string, label: string, url: string) => (bang ? label : `<${url}|${label}>`),
+  );
 
-  // Links: [text](url) -> <url|text>
-  result = result.replace(/\[([^\]]+)\]\(([^)]+)\)/g, "<$2|$1>");
-
-  // Strikethrough: ~~text~~ -> ~text~
+  // 9. Strikethrough: ~~text~~ -> ~text~.
   result = result.replace(/~~(.+?)~~/g, "~$1~");
 
-  // Horizontal rules: --- or *** -> ———
-  result = result.replace(/^[-*]{3,}$/gm, "———");
-
-  // Restore inline code
-  result = result.replace(/INLINE(\d+)/g, (_, i) => inlineCode[Number(i)]);
-
-  // Restore code blocks
-  result = result.replace(/CODEBLOCK(\d+)/g, (_, i) => codeBlocks[Number(i)]);
+  // Restore protected spans (inline first, then blocks).
+  result = result.replace(new RegExp(`${S}I(\\d+)${S}`, "g"), (_m, i) => inlineCode[Number(i)]);
+  result = result.replace(new RegExp(`${S}C(\\d+)${S}`, "g"), (_m, i) => codeBlocks[Number(i)]);
 
   return result;
 }
