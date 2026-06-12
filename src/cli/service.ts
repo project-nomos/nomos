@@ -208,6 +208,25 @@ export function registerServiceCommand(program: Command): void {
       console.log();
       console.log(chalk.dim("The service will start automatically on login."));
       console.log(chalk.dim("To stop: nomos service uninstall"));
+
+      // iMessage needs Full Disk Access for the *background service* to read
+      // chat.db. The daemon's TCC context differs from this terminal, so a
+      // terminal that can read chat.db doesn't mean the service can. macOS has
+      // no auto-grant API, so probe (which registers this binary in the FDA
+      // list), open the pane, and print the exact binary to enable.
+      if (process.env.IMESSAGE_ENABLED === "true") {
+        const { canReadMessagesDb, openFullDiskAccessSettings, fullDiskAccessBinary } =
+          await import("../security/full-disk-access.ts");
+        canReadMessagesDb(); // best-effort: triggers macOS to list the binary
+        console.log();
+        console.log(chalk.yellow("iMessage: grant Full Disk Access to the background service"));
+        console.log("  Enable (or add with +) this binary in the pane that just opened:");
+        console.log(chalk.cyan(`    ${fullDiskAccessBinary()}`));
+        console.log(
+          chalk.dim("  Then restart: launchctl kickstart -k gui/$(id -u)/com.projectnomos.daemon"),
+        );
+        openFullDiskAccessSettings();
+      }
     });
 
   service
