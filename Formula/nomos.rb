@@ -88,13 +88,15 @@ class Nomos < Formula
     # post_install sandbox denies file writes to ~/Library/LaunchAgents,
     # so the user installs the service themselves with `nomos service
     # install`. On upgrades, the existing plist already points at
-    # #{opt_bin}/nomos -- an opt symlink Homebrew refreshes -- and the
-    # running daemon picks up the new binary on next restart. We just
-    # try to kill it; launchd's KeepAlive respawns from the new path.
+    # #{opt_bin}/nomos -- an opt symlink Homebrew refreshes -- so we
+    # restart the running daemon to load the new binary. `kickstart -k`
+    # atomically kills + restarts the loaded service (a quiet no-op if it
+    # was never `nomos service install`-ed), which is more deterministic
+    # than a KILL signal that relies on KeepAlive to respawn.
     uid = Process.uid
     label = "com.projectnomos.daemon"
     domain = "gui/#{uid}"
-    quiet_system "launchctl", "kill", "KILL", "#{domain}/#{label}"
+    quiet_system "launchctl", "kickstart", "-k", "#{domain}/#{label}"
   end
 
   def caveats
