@@ -102,6 +102,20 @@ jobs:
           STAGE_DIR="nomos-${VERSION}-homebrew"
           mkdir -p "$STAGE_DIR"
           cp -r dist node_modules package.json skills proto settings "$STAGE_DIR/"
+          # This tarball is macOS-only (Homebrew). The claude-agent-sdk ships its
+          # CLI as ~210MB-per-platform optional binaries; supportedArchitectures
+          # pulls darwin (arm64+x64) AND linux into the build. Drop the Linux
+          # binaries a Mac never runs so the download isn't ~1GB. Keep both darwin
+          # arches for Apple Silicon + Intel.
+          echo "Bundle size before slim: $(du -sh "$STAGE_DIR" | cut -f1)"
+          rm -rf "$STAGE_DIR"/node_modules/.pnpm/@anthropic-ai+claude-agent-sdk-linux-* \
+                 "$STAGE_DIR"/node_modules/.pnpm/node_modules/@anthropic-ai/claude-agent-sdk-linux-*
+          echo "Bundle size after slim:  $(du -sh "$STAGE_DIR" | cut -f1)"
+          # Guard: the macOS binary MUST survive the prune, or installs break.
+          if [ ! -e "$STAGE_DIR"/node_modules/.pnpm/node_modules/@anthropic-ai/claude-agent-sdk-darwin-arm64 ]; then
+            echo "ERROR: darwin-arm64 SDK binary missing from bundle after slim" >&2
+            exit 1
+          fi
           tar -czf "nomos-${VERSION}-homebrew.tar.gz" "$STAGE_DIR"
           ls -lh "nomos-${VERSION}-homebrew.tar.gz"
 
