@@ -1,5 +1,6 @@
 import readline from "node:readline";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
@@ -225,17 +226,27 @@ async function waitForSetupComplete(port: number): Promise<void> {
  * In hosted mode, the wizard is replaced by the mobile onboarding flow +
  * admin-side provisioning, so it never auto-runs.
  */
-export function shouldRunWizard(): boolean {
+/** True if the .env file at `envPath` defines a non-empty DATABASE_URL value. */
+export function envHasDatabaseUrl(envPath: string): boolean {
+  if (!fs.existsSync(envPath)) return false;
+  const content = fs.readFileSync(envPath, "utf-8");
+  // An actual DATABASE_URL value, not just a comment or an empty assignment.
+  return content
+    .split("\n")
+    .some(
+      (line) =>
+        line.startsWith("DATABASE_URL=") && line.slice("DATABASE_URL=".length).trim().length > 0,
+    );
+}
+
+export function shouldRunWizard(opts?: { cwd?: string; nomosEnv?: string }): boolean {
   if (!FEATURES.setupWizard()) return false;
 
-  const envPath = path.resolve(".env");
-  if (!fs.existsSync(envPath)) return true;
-
-  const content = fs.readFileSync(envPath, "utf-8");
-  // Check for an actual DATABASE_URL value (not just a comment or empty)
-  const lines = content.split("\n");
-  return !lines.some(
-    (line) =>
-      line.startsWith("DATABASE_URL=") && line.slice("DATABASE_URL=".length).trim().length > 0,
-  );
+  // Config can live in the CWD .env (a developer running from the repo) or in
+  // ~/.nomos/.env (the installed binary's config home). If either defines a
+  // DATABASE_URL the instance is already set up -- don't re-run the wizard just
+  // because the current directory happens to have no .env.
+  const cwdEnv = path.resolve(opts?.cwd ?? ".", ".env");
+  const nomosEnv = opts?.nomosEnv ?? path.join(os.homedir(), ".nomos", ".env");
+  return !envHasDatabaseUrl(cwdEnv) && !envHasDatabaseUrl(nomosEnv);
 }
