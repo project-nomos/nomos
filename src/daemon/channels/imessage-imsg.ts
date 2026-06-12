@@ -17,10 +17,12 @@
 
 import { spawn, execFile, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import process from "node:process";
 import { createInterface } from "node:readline";
 import { promisify } from "node:util";
 import type { IncomingMessage } from "../types.ts";
 import { createLogger } from "../../lib/logger.ts";
+import { fullDiskAccessHint } from "../../security/full-disk-access.ts";
 
 const log = createLogger("imessage-imsg");
 
@@ -123,7 +125,13 @@ export class ImsgAdapter {
 
     this.watchProc.on("exit", (code) => {
       if (!this.stopping) {
-        log.warn(`Watch process exited with code ${code}`);
+        // A non-zero exit on macOS almost always means the daemon lacks Full
+        // Disk Access and can't read chat.db -- surface the fix, not a bare code.
+        if (code !== 0 && process.platform === "darwin") {
+          log.error({ code }, `Watch process exited (code ${code}). ${fullDiskAccessHint()}`);
+        } else {
+          log.warn(`Watch process exited with code ${code}`);
+        }
       }
       this.watchProc = null;
     });
