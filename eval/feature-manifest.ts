@@ -202,6 +202,64 @@ export const FEATURES: FeatureSpec[] = [
     entry: ["registerDeltaSyncJobs"],
     effects: [{ claim: "emits ingest:trigger for delta runs (behavioral)", notExercised: true }],
   },
+  {
+    id: "studio-gc",
+    summary:
+      "Daily Studio object/row cleanup per owner: expire unconfirmed uploads (assets stuck pending past a TTL) and aged intermediate edit results no longer at the chain head, dropping their objects. Originals + the live head output are kept; the DB is the single clock (rows expired before object delete).",
+    trigger: { kind: "cron", sentinel: "__studio_gc__", schedule: "24h", fanOut: true },
+    entry: ["runStudioGc", "runStudioGcForUser"],
+    effects: [
+      {
+        claim: "GC marks expired Studio rows (status = 'expired')",
+        sql: {
+          query: "SELECT count(*) FROM studio_edits WHERE status = 'expired'",
+          expect: "nonzero",
+        },
+        notExercised: true, // the eval does not age rows past the TTL
+      },
+    ],
+    invariants: [
+      "the original asset object is never deleted by GC",
+      "a row is marked expired before its object is deleted",
+      "every GC query is user_id-filtered",
+    ],
+  },
+
+  // ── Studio (hosted-only photo editor) ──
+  {
+    id: "studio",
+    summary:
+      "Hosted-only photo editor: conversational + parametric edits over an immutable original and a non-destructive op chain. validate op -> consent gate (generative only) -> append (optimistic concurrency + idempotency) -> provider (local-sharp deterministic / Gemini-Vertex generative) -> identity gate (face-risk ops) -> persist output + ~256px preview. GCP-only cloud; per-user scoped.",
+    trigger: { kind: "turn", gate: "studio" },
+    entry: ["buildStudioMcpServer", "buildStudioEngine", "assertIdentityPreserved"],
+    effects: [
+      {
+        claim: "uploaded originals are recorded as studio_assets rows",
+        sql: { query: "SELECT count(*) FROM studio_assets", expect: "nonzero" },
+        notExercised: true,
+      },
+      {
+        claim: "each edit appends a completed studio_edits op row",
+        sql: {
+          query: "SELECT count(*) FROM studio_edits WHERE status = 'done'",
+          expect: "nonzero",
+        },
+        notExercised: true,
+      },
+      {
+        claim: "op params are stored as a jsonb object, never double-encoded",
+        noDoubleEncode: { table: "studio_edits", column: "params" },
+        notExercised: true,
+      },
+    ],
+    invariants: [
+      "the original asset row is never mutated by an edit",
+      "every studio_assets / studio_edits query is user_id-filtered (zero-trust)",
+      "every generative (cloud) op is gated by the cloudAI consent toggle",
+      "every face-touching generative op passes the identity gate (assertIdentityPreserved)",
+      "a retried edit with a committed idempotency_key returns the existing row, never re-charges",
+    ],
+  },
 
   // ── Per-turn (memory-indexer) ──
   {
