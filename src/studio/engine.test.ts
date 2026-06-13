@@ -5,6 +5,7 @@ vi.mock("./assets.ts", async (importOriginal) => {
   return {
     ...actual,
     getAsset: vi.fn(),
+    confirmAsset: vi.fn(),
     getEdit: vi.fn(),
     appendEdit: vi.fn(),
     markEditRunning: vi.fn(),
@@ -86,6 +87,7 @@ function fakeStore(): ObjectStore {
 function fakeProvider(over: Partial<StudioProvider> = {}): StudioProvider {
   return {
     name: "fake",
+    kind: "generative",
     supports: () => true,
     execute: vi.fn(async () => ({
       bytes: new Uint8Array([9]),
@@ -99,6 +101,7 @@ function fakeProvider(over: Partial<StudioProvider> = {}): StudioProvider {
 
 beforeEach(() => {
   vi.mocked(assets.getAsset).mockReset();
+  vi.mocked(assets.confirmAsset).mockReset();
   vi.mocked(assets.getEdit).mockReset();
   vi.mocked(assets.appendEdit).mockReset();
   vi.mocked(assets.markEditRunning).mockReset();
@@ -109,7 +112,10 @@ beforeEach(() => {
 describe("StudioEngine.edit", () => {
   it("runs a generative op end to end: consent, provider, identity gate, store, record", async () => {
     vi.mocked(assets.getAsset).mockResolvedValue(fakeAsset());
-    vi.mocked(assets.appendEdit).mockResolvedValue(fakeEdit({ status: "pending" }));
+    vi.mocked(assets.appendEdit).mockResolvedValue({
+      edit: fakeEdit({ status: "pending" }),
+      created: true,
+    });
     vi.mocked(assets.markEditRunning).mockResolvedValue(fakeEdit({ status: "running" }));
     vi.mocked(assets.markEditDone).mockResolvedValue(
       fakeEdit({ status: "done", outputKey: "out.jpg", identityScore: 0.97 }),
@@ -161,19 +167,22 @@ describe("StudioEngine.edit", () => {
 
   it("does not gate a deterministic op on consent", async () => {
     vi.mocked(assets.getAsset).mockResolvedValue(fakeAsset());
-    vi.mocked(assets.appendEdit).mockResolvedValue(fakeEdit({ op: "adjust", status: "pending" }));
+    vi.mocked(assets.appendEdit).mockResolvedValue({
+      edit: fakeEdit({ op: "adjust", status: "pending" }),
+      created: true,
+    });
     vi.mocked(assets.markEditRunning).mockResolvedValue(
       fakeEdit({ op: "adjust", status: "running" }),
     );
     vi.mocked(assets.markEditDone).mockResolvedValue(
       fakeEdit({ op: "adjust", status: "done", outputKey: "out.jpg" }),
     );
-    const provider = fakeProvider();
+    const provider = fakeProvider({ kind: "deterministic" });
     const identityGate = vi.fn(async () => ({ checked: false, score: null, passed: true }));
     const engine = new StudioEngine({
       providers: [provider],
       store: fakeStore(),
-      isCloudAIEnabled: async () => false, // off, but adjust is deterministic
+      isCloudAIEnabled: async () => false, // off, but the provider is deterministic
       identityGate,
     });
     const edit = await engine.edit(ctx, {
@@ -203,7 +212,10 @@ describe("StudioEngine.edit", () => {
 
   it("marks the edit failed and rethrows when the identity gate rejects", async () => {
     vi.mocked(assets.getAsset).mockResolvedValue(fakeAsset());
-    vi.mocked(assets.appendEdit).mockResolvedValue(fakeEdit({ status: "pending" }));
+    vi.mocked(assets.appendEdit).mockResolvedValue({
+      edit: fakeEdit({ status: "pending" }),
+      created: true,
+    });
     vi.mocked(assets.markEditRunning).mockResolvedValue(fakeEdit({ status: "running" }));
     vi.mocked(assets.markEditFailed).mockResolvedValue(fakeEdit({ status: "failed" }));
     const provider = fakeProvider();
@@ -226,11 +238,12 @@ describe("StudioEngine.edit", () => {
     expect(assets.markEditFailed).toHaveBeenCalled();
   });
 
-  it("short-circuits an idempotent edit that already completed", async () => {
+  it("short-circuits an idempotent retry (created=false), never re-running the provider", async () => {
     vi.mocked(assets.getAsset).mockResolvedValue(fakeAsset());
-    vi.mocked(assets.appendEdit).mockResolvedValue(
-      fakeEdit({ status: "done", outputKey: "prev.jpg" }),
-    );
+    vi.mocked(assets.appendEdit).mockResolvedValue({
+      edit: fakeEdit({ status: "running", outputKey: null }),
+      created: false,
+    });
     const provider = fakeProvider();
     const engine = new StudioEngine({
       providers: [provider],
@@ -243,7 +256,7 @@ describe("StudioEngine.edit", () => {
       parentEditId: null,
       idempotencyKey: "k1",
     });
-    expect(edit.status).toBe("done");
+    expect(edit.status).toBe("running"); // returned the in-flight row as-is
     expect(provider.execute).not.toHaveBeenCalled();
   });
 });

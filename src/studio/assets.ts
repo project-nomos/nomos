@@ -141,7 +141,10 @@ export async function createAsset(
       width: params.width ?? null,
       height: params.height ?? null,
       bytes: params.bytes ?? 0,
-      metadata: JSON.stringify(params.metadata ?? {}),
+      // Pass the object (not JSON.stringify): kysely-postgres-js serializes it to
+      // jsonb once. A pre-stringified string would double-encode. Matches the
+      // guarded style_profiles.profile / auto_dream_state.state_json pattern.
+      metadata: (params.metadata ?? {}) as unknown as string,
     })
     .returningAll()
     .executeTakeFirstOrThrow();
@@ -175,10 +178,18 @@ export async function getAsset(ctx: TenantContext, assetId: string): Promise<Stu
   return row ? mapAsset(row) : null;
 }
 
+/** The result of appendEdit: the edit row + whether it was newly created (vs an idempotent hit). */
+export interface AppendEditResult {
+  edit: StudioEdit;
+  created: boolean;
+}
+
 /**
- * Append an op to the asset's chain. Transactional: idempotency check, then the
- * optimistic head check, then insert + advance head. Returns the existing row on
- * an idempotent retry; throws StaleParentError when the parent is not the head.
+ * Append an op to the asset's chain. Transactional: lock the asset row
+ * (`FOR UPDATE`, so concurrent appends serialize), idempotency check, optimistic
+ * head check, then insert + advance head. `created: false` on an idempotent retry
+ * (the caller must NOT re-execute or re-charge); throws StaleParentError when the
+ * parent is not the head.
  */
 export async function appendEdit(
   ctx: TenantContext,
@@ -191,14 +202,18 @@ export async function appendEdit(
     inputKey?: string | null;
     status?: StudioEditStatus;
   },
-): Promise<StudioEdit> {
+): Promise<AppendEditResult> {
   const db = getKysely();
   return db.transaction().execute(async (trx) => {
+    // Lock the asset row so two concurrent appends on the same asset serialize
+    // here (otherwise the optimistic head check is a stale snapshot under READ
+    // COMMITTED and the chain can fork / a duplicate key can 23505).
     const asset = await trx
       .selectFrom("studio_assets")
       .selectAll()
       .where("id", "=", params.assetId)
       .where("user_id", "=", ctx.userId)
+      .forUpdate()
       .executeTakeFirst();
     if (!asset) throw new StudioAssetNotFoundError(params.assetId);
 
@@ -210,7 +225,7 @@ export async function appendEdit(
       .where("user_id", "=", ctx.userId)
       .where("idempotency_key", "=", params.idempotencyKey)
       .executeTakeFirst();
-    if (existing) return mapEdit(existing);
+    if (existing) return { edit: mapEdit(existing), created: false };
 
     // Optimistic concurrency: the edit must build on the current head.
     const head = asset.head_edit_id ?? null;
@@ -226,7 +241,8 @@ export async function appendEdit(
         idempotency_key: params.idempotencyKey,
         op: params.op.op,
         op_spec_version: params.op.opSpecVersion ?? OP_SPEC_VERSION,
-        params: JSON.stringify(params.op.params),
+        // Pass the object (not JSON.stringify) so jsonb is single-encoded.
+        params: params.op.params as unknown as string,
         provider: params.provider ?? null,
         input_key: params.inputKey ?? null,
         status: params.status ?? "pending",
@@ -241,7 +257,7 @@ export async function appendEdit(
       .where("user_id", "=", ctx.userId)
       .execute();
 
-    return mapEdit(inserted);
+    return { edit: mapEdit(inserted), created: true };
   });
 }
 

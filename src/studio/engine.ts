@@ -17,6 +17,7 @@ import type { TenantContext } from "../auth/tenant-context.ts";
 import { getObjectStore, type ObjectStore, objectKey } from "../storage/object-store.ts";
 import {
   appendEdit,
+  confirmAsset,
   getAsset,
   getEdit,
   markEditDone,
@@ -49,6 +50,8 @@ export interface ProviderOutput {
 
 export interface StudioProvider {
   readonly name: string;
+  /** deterministic = pod CPU / on-device (free, never gated); generative = cloud (consent-gated). */
+  readonly kind: "deterministic" | "generative";
   supports(op: StudioOpName): boolean;
   execute(op: StudioOp, input: ProviderInput): Promise<ProviderOutput>;
 }
@@ -132,17 +135,24 @@ export class StudioEngine {
     const asset = await getAsset(ctx, req.assetId);
     if (!asset) throw new StudioAssetNotFoundError(req.assetId);
 
-    // Consent gate: every cloud (generative) op requires the org-level toggle.
-    if (meta.kind === "generative" && !(await this.isCloudAIEnabledFn())) {
+    // An edit request implies the upload completed: confirm the asset out of
+    // `pending` so __studio_gc__ never reaps the original of an in-use asset
+    // (the conversational/MCP path has no other confirm step).
+    if (asset.status === "pending") await confirmAsset(ctx, asset.id);
+
+    // Resolve the provider before the consent gate, so consent keys off the
+    // provider that will ACTUALLY run, not the op's declared kind (which can be
+    // wrong, e.g. a "deterministic" op that only a cloud provider supports).
+    const provider = this.resolveProvider(op.op);
+    if (provider.kind === "generative" && !(await this.isCloudAIEnabledFn())) {
       throw new ConsentRequiredError();
     }
 
-    // Resolve the provider before committing, so a no-provider op never creates a row.
-    const provider = this.resolveProvider(op.op);
     const inputKey = await this.resolveInputKey(ctx, asset, req.parentEditId);
 
-    // Append to the chain (OCC + idempotency). A committed+done key short-circuits.
-    const edit = await appendEdit(ctx, {
+    // Append to the chain (OCC + idempotency). An idempotent retry returns the
+    // existing row and must NOT re-execute or re-charge, whatever its status.
+    const { edit, created } = await appendEdit(ctx, {
       assetId: req.assetId,
       parentEditId: req.parentEditId,
       idempotencyKey: req.idempotencyKey,
@@ -150,7 +160,7 @@ export class StudioEngine {
       provider: provider.name,
       inputKey,
     });
-    if (edit.status === "done") return edit;
+    if (!created) return edit;
 
     await markEditRunning(ctx, edit.id, provider.name);
     try {

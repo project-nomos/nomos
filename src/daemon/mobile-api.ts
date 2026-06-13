@@ -937,6 +937,9 @@ function notFound(message: string): Error {
   return Object.assign(new Error(message), { code: grpc.status.NOT_FOUND });
 }
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const isUuid = (s: string): boolean => UUID_RE.test(s);
+
 async function handleStudioCreateAsset(
   call: grpc.ServerUnaryCall<unknown, unknown>,
   ctx: TenantContext,
@@ -978,6 +981,7 @@ async function handleStudioGetAssetUrl(
   ctx: TenantContext,
 ): Promise<{ url: string; expiresAt: number }> {
   const assetId = (call.request as { assetId?: string }).assetId ?? "";
+  if (!isUuid(assetId)) throw notFound("studio asset not found");
   const asset = await getAsset(ctx, assetId);
   if (!asset) throw notFound("studio asset not found");
   let key = asset.objectKey;
@@ -993,66 +997,81 @@ async function handleStudioEdit(
   call: grpc.ServerWritableStream<unknown, unknown>,
   ctx: TenantContext,
 ): Promise<void> {
-  const req = call.request as {
-    assetId?: string;
-    op?: string;
-    paramsJson?: string;
-    parentEditId?: string;
-    idempotencyKey?: string;
-    maskKey?: string;
-  };
-  const asset = await getAsset(ctx, req.assetId ?? "");
-  if (!asset) {
-    call.write({ kind: "error", message: "studio asset not found" });
-    call.end();
-    return;
-  }
-  // First edit implies the upload completed; confirm the asset out of `pending`.
-  if (asset.status === "pending") await confirmAsset(ctx, asset.id);
-
-  let params: unknown = {};
-  if (req.paramsJson) {
-    try {
-      params = JSON.parse(req.paramsJson);
-    } catch {
-      call.write({ kind: "error", message: "invalid params_json" });
-      call.end();
+  // Everything is inside try/finally so the stream ALWAYS ends cleanly (a thrown
+  // getAsset/engine error emits an error event instead of destroying the stream).
+  try {
+    const req = call.request as {
+      assetId?: string;
+      op?: string;
+      paramsJson?: string;
+      parentEditId?: string;
+      idempotencyKey?: string;
+      maskKey?: string;
+    };
+    const assetId = req.assetId ?? "";
+    if (!isUuid(assetId)) {
+      call.write({ kind: "error", message: "invalid asset id" });
       return;
     }
-  }
-  const parentEditId =
-    req.parentEditId && req.parentEditId.length > 0 ? req.parentEditId : asset.headEditId;
+    // A client-supplied mask must live under this tenant's object prefix; never
+    // let a request read an arbitrary (or another tenant's) object as a mask.
+    if (req.maskKey && !req.maskKey.startsWith(`org/${ctx.orgId}/`)) {
+      call.write({ kind: "error", message: "invalid mask reference" });
+      return;
+    }
+    let params: unknown = {};
+    if (req.paramsJson) {
+      try {
+        params = JSON.parse(req.paramsJson);
+      } catch {
+        call.write({ kind: "error", message: "invalid params_json" });
+        return;
+      }
+    }
 
-  call.write({ kind: "progress", status: "running", message: `applying ${req.op ?? ""}` });
-  try {
-    const engine = buildStudioEngine();
-    const edit = await engine.edit(ctx, {
-      assetId: asset.id,
-      op: { op: req.op ?? "", params },
-      parentEditId,
-      idempotencyKey: req.idempotencyKey || randomUUID(),
-      maskKey: req.maskKey || null,
-    });
-    call.write({
-      kind: "done",
-      editId: edit.id,
-      status: edit.status,
-      previewKey: edit.previewKey ?? "",
-      outputKey: edit.outputKey ?? "",
-      costUsd: edit.costUsd,
-    });
+    const asset = await getAsset(ctx, assetId);
+    if (!asset) {
+      call.write({ kind: "error", message: "studio asset not found" });
+      return;
+    }
+    const parentEditId =
+      req.parentEditId && req.parentEditId.length > 0 ? req.parentEditId : asset.headEditId;
+
+    call.write({ kind: "progress", status: "running", message: `applying ${req.op ?? ""}` });
+    try {
+      // engine.edit confirms a pending asset, gates consent, and runs the op.
+      const engine = buildStudioEngine();
+      const edit = await engine.edit(ctx, {
+        assetId: asset.id,
+        op: { op: req.op ?? "", params },
+        parentEditId,
+        idempotencyKey: req.idempotencyKey || randomUUID(),
+        maskKey: req.maskKey || null,
+      });
+      call.write({
+        kind: "done",
+        editId: edit.id,
+        status: edit.status,
+        previewKey: edit.previewKey ?? "",
+        outputKey: edit.outputKey ?? "",
+        costUsd: edit.costUsd,
+      });
+    } catch (err) {
+      const message =
+        err instanceof ConsentRequiredError
+          ? "Cloud AI is turned off. Enable it in Studio settings to use this edit."
+          : err instanceof StaleParentError
+            ? "This photo changed since you started. Refresh and try again."
+            : err instanceof Error
+              ? err.message
+              : String(err);
+      call.write({ kind: "error", message });
+    }
   } catch (err) {
-    const message =
-      err instanceof ConsentRequiredError
-        ? "Cloud AI is turned off. Enable it in Studio settings to use this edit."
-        : err instanceof StaleParentError
-          ? "This photo changed since you started. Refresh and try again."
-          : err instanceof Error
-            ? err.message
-            : String(err);
-    call.write({ kind: "error", message });
+    call.write({ kind: "error", message: err instanceof Error ? err.message : String(err) });
+  } finally {
+    call.end();
   }
-  call.end();
 }
 
 async function handleStudioHistory(
@@ -1072,7 +1091,10 @@ async function handleStudioHistory(
   headEditId: string;
 }> {
   const assetId = (call.request as { assetId?: string }).assetId ?? "";
+  if (!isUuid(assetId)) return { edits: [], headEditId: "" };
   const asset = await getAsset(ctx, assetId);
+  // Fetching history means the client is using this asset; confirm it out of
+  // `pending` so the orphan-upload GC sweep never reaps an in-use original.
   if (asset?.status === "pending") await confirmAsset(ctx, asset.id);
   const edits = await listEdits(ctx, assetId);
   return {

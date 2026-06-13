@@ -76,6 +76,7 @@ export interface GeminiImageProviderOptions {
 
 export class GeminiImageProvider implements StudioProvider {
   readonly name: string;
+  readonly kind = "generative" as const;
   private readonly cost: number;
 
   constructor(

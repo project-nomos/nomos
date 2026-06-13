@@ -101,7 +101,9 @@ export const OP_META: Record<StudioOpName, OpMeta> = {
   filter: { kind: "deterministic", localized: false, identityRisk: "none" },
   editSemantic: { kind: "generative", localized: true, identityRisk: "high" },
   eraser: { kind: "generative", localized: true, identityRisk: "low" },
-  cutout: { kind: "deterministic", localized: false, identityRisk: "none" },
+  // Background removal in v1 is a cloud matte (no local provider supports it), so
+  // it is generative and must be consent-gated. (On-device Vision cutout is Ph2.)
+  cutout: { kind: "generative", localized: false, identityRisk: "none" },
   upscale: { kind: "generative", localized: false, identityRisk: "low" },
   restore: { kind: "generative", localized: false, identityRisk: "high" },
 };

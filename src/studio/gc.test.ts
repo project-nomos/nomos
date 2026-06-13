@@ -38,6 +38,9 @@ describe("runStudioGcForUser", () => {
     expect(store.delete).toHaveBeenCalledWith("org/local/studio/a1/original.jpg");
     expect(store.delete).toHaveBeenCalledWith("out1.jpg");
     expect(store.delete).toHaveBeenCalledWith("prev1.jpg");
+    // Regression: the pending sweep must only reap assets with NO edits, so an
+    // in-use original (head_edit_id set) is never deleted.
+    expect(getQueries().some((q) => /"head_edit_id" is null/i.test(q.sql))).toBe(true);
   });
 
   it("is a no-op when nothing is expirable", async () => {

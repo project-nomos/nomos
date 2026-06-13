@@ -60,6 +60,7 @@ async function applyCrop(img: sharp.Sharp, params: CropParams): Promise<sharp.Sh
 
 export class LocalSharpProvider implements StudioProvider {
   readonly name = "local-sharp";
+  readonly kind = "deterministic" as const;
 
   supports(op: StudioOpName): boolean {
     return DETERMINISTIC_OPS.includes(op);

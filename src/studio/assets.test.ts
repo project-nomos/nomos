@@ -103,28 +103,31 @@ describe("appendEdit", () => {
     addResult([editRow({ id: "e1" })]); // INSERT edit
     addResult([]); // UPDATE head
     const op = validateOp({ op: "adjust", params: { exposure: 0.3 } });
-    const edit = await appendEdit(ctx, {
+    const { edit, created } = await appendEdit(ctx, {
       assetId: "a1",
       parentEditId: null,
       idempotencyKey: "k1",
       op,
     });
+    expect(created).toBe(true);
     expect(edit.id).toBe("e1");
     expect(edit.op).toBe("adjust");
     expect(sqlOf(/insert into "studio_edits"/i)).toBe(true);
     expect(sqlOf(/update "studio_assets"/i)).toBe(true);
+    expect(sqlOf(/for update/i)).toBe(true); // asset row locked
   });
 
   it("is idempotent: a committed key returns the existing edit, no insert", async () => {
     addResult([assetRow()]); // SELECT asset
     addResult([editRow({ id: "ePrev", idempotency_key: "k1" })]); // SELECT existing edit
     const op = validateOp({ op: "adjust", params: {} });
-    const edit = await appendEdit(ctx, {
+    const { edit, created } = await appendEdit(ctx, {
       assetId: "a1",
       parentEditId: null,
       idempotencyKey: "k1",
       op,
     });
+    expect(created).toBe(false);
     expect(edit.id).toBe("ePrev");
     expect(sqlOf(/insert into "studio_edits"/i)).toBe(false);
   });

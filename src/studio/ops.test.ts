@@ -58,4 +58,11 @@ describe("studio op registry", () => {
     expect(OP_META.restore.identityRisk).toBe("high");
     expect(OP_META.adjust.identityRisk).toBe("none");
   });
+
+  it("cutout is a cloud op (generative) so the consent gate covers it", () => {
+    // Regression: cutout was mislabeled deterministic and bypassed consent.
+    expect(OP_META.cutout.kind).toBe("generative");
+    expect(OP_META.adjust.kind).toBe("deterministic");
+    expect(OP_META.crop.kind).toBe("deterministic");
+  });
 });

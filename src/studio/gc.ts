@@ -63,17 +63,19 @@ export async function runStudioGcForUser(
 
   let objectsDeleted = 0;
 
-  // 1) Unconfirmed uploads.
+  // 1) Unconfirmed uploads: ONLY assets that never got an edit (head_edit_id IS
+  // NULL). An asset with edits is in use regardless of `pending`, so it is never
+  // a candidate (the original is the chain input). DB is the clock: mark the rows
+  // expired FIRST, then delete the objects, so no reader ever sees a live row
+  // pointing at a deleted object.
   const pending = await db
     .selectFrom("studio_assets")
     .select(["id", "object_key"])
     .where("user_id", "=", ctx.userId)
     .where("status", "=", "pending")
+    .where("head_edit_id", "is", null)
     .where("created_at", "<", pendingCutoff)
     .execute();
-  for (const a of pending) {
-    if (await dropObject(store, a.object_key)) objectsDeleted++;
-  }
   if (pending.length > 0) {
     await db
       .updateTable("studio_assets")
@@ -85,9 +87,13 @@ export async function runStudioGcForUser(
         pending.map((a) => a.id),
       )
       .execute();
+    for (const a of pending) {
+      if (await dropObject(store, a.object_key)) objectsDeleted++;
+    }
   }
 
   // 2) Aged intermediate edit results (anything that is no longer the chain head).
+  // Keys are captured before the row is nulled; mark expired FIRST, then delete.
   const intermediates = await db
     .selectFrom("studio_edits as e")
     .innerJoin("studio_assets as a", "a.id", "e.asset_id")
@@ -97,10 +103,6 @@ export async function runStudioGcForUser(
     .where("e.created_at", "<", intermediateCutoff)
     .where(sql<boolean>`a.head_edit_id is distinct from e.id`)
     .execute();
-  for (const e of intermediates) {
-    if (await dropObject(store, e.output_key)) objectsDeleted++;
-    if (await dropObject(store, e.preview_key)) objectsDeleted++;
-  }
   if (intermediates.length > 0) {
     await db
       .updateTable("studio_edits")
@@ -112,6 +114,10 @@ export async function runStudioGcForUser(
         intermediates.map((e) => e.id),
       )
       .execute();
+    for (const e of intermediates) {
+      if (await dropObject(store, e.output_key)) objectsDeleted++;
+      if (await dropObject(store, e.preview_key)) objectsDeleted++;
+    }
   }
 
   return { assetsExpired: pending.length, editsExpired: intermediates.length, objectsDeleted };

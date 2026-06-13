@@ -161,13 +161,13 @@ async function main(): Promise<void> {
     contentHash: "hb",
     mime: "image/jpeg",
   });
-  const eaA = await appendEdit(tA, {
+  const { edit: eaA } = await appendEdit(tA, {
     assetId: saA.id,
     parentEditId: null,
     idempotencyKey: "iso-ka",
     op: validateOp({ op: "adjust", params: { exposure: 0.2 } }),
   });
-  const eaB = await appendEdit(tB, {
+  const { edit: eaB } = await appendEdit(tB, {
     assetId: saB.id,
     parentEditId: null,
     idempotencyKey: "iso-kb",
