@@ -23,6 +23,9 @@ import {
   deleteContact,
 } from "../src/identity/contacts.ts";
 import { upsertArticle, searchArticles, listArticles, deleteArticle } from "../src/db/wiki.ts";
+import type { TenantContext } from "../src/auth/tenant-context.ts";
+import { appendEdit, createAsset, getAsset, listEdits } from "../src/studio/assets.ts";
+import { validateOp } from "../src/studio/ops.ts";
 
 const A = "iso-user-a";
 const B = "iso-user-b";
@@ -145,6 +148,44 @@ async function main(): Promise<void> {
     (await listArticles(A)).every((a) => a.user_id === A),
   );
 
+  // ── studio (assets + edits) ──
+  const tA: TenantContext = { orgId: "local", userId: A };
+  const tB: TenantContext = { orgId: "local", userId: B };
+  const saA = await createAsset(tA, {
+    objectKey: "org/local/studio/isoA/original.jpg",
+    contentHash: "ha",
+    mime: "image/jpeg",
+  });
+  const saB = await createAsset(tB, {
+    objectKey: "org/local/studio/isoB/original.jpg",
+    contentHash: "hb",
+    mime: "image/jpeg",
+  });
+  const eaA = await appendEdit(tA, {
+    assetId: saA.id,
+    parentEditId: null,
+    idempotencyKey: "iso-ka",
+    op: validateOp({ op: "adjust", params: { exposure: 0.2 } }),
+  });
+  const eaB = await appendEdit(tB, {
+    assetId: saB.id,
+    parentEditId: null,
+    idempotencyKey: "iso-kb",
+    op: validateOp({ op: "adjust", params: { exposure: 0.2 } }),
+  });
+  check("studio: A cannot read B's asset", (await getAsset(tA, saB.id)) === null);
+  check("studio: B cannot read A's asset", (await getAsset(tB, saA.id)) === null);
+  check("studio: A reads its own asset", (await getAsset(tA, saA.id))?.id === saA.id);
+  check("studio: A history excludes B's edits", (await listEdits(tA, saB.id)).length === 0);
+  check(
+    "studio: A history has its own edit",
+    (await listEdits(tA, saA.id)).some((e) => e.id === eaA.id),
+  );
+  check(
+    "studio: B history has its own edit",
+    (await listEdits(tB, saB.id)).some((e) => e.id === eaB.id),
+  );
+
   // ── Cleanup ──
   await vaultDelete(A, "secret.md");
   await vaultDelete(B, "secret.md");
@@ -164,6 +205,8 @@ async function main(): Promise<void> {
     await db.deleteFrom("user_model").where("user_id", "=", uid).execute();
     await db.deleteFrom("contacts").where("user_id", "=", uid).execute();
     await db.deleteFrom("wiki_articles").where("user_id", "=", uid).execute();
+    await db.deleteFrom("studio_edits").where("user_id", "=", uid).execute();
+    await db.deleteFrom("studio_assets").where("user_id", "=", uid).execute();
   }
 
   await closeDb();

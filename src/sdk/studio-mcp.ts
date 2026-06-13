@@ -6,12 +6,12 @@
  * result. Hosted-only; injected when FEATURES.studio() is on.
  *
  * Tools:
- *   studio_edit     — natural-language instruction edit (cloud; needs consent)
- *   studio_adjust   — tonal sliders (exposure/contrast/saturation/temperature; free)
- *   studio_cutout   — remove the background
- *   studio_upscale  — increase resolution/sharpness
- *   studio_restore  — restore an old/damaged photo
- *   studio_history  — list the op chain
+ *   studio_edit     - natural-language instruction edit (cloud; needs consent)
+ *   studio_adjust   - tonal sliders (exposure/contrast/saturation/temperature; free)
+ *   studio_cutout   - remove the background
+ *   studio_upscale  - increase resolution/sharpness
+ *   studio_restore  - restore an old/damaged photo
+ *   studio_history  - list the op chain
  */
 
 import { randomUUID } from "node:crypto";
