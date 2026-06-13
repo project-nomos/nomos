@@ -851,3 +851,62 @@ DO $$ BEGIN
       WHERE jsonb_typeof(metadata) = 'string';
   END IF;
 END $$;
+
+-- ── Studio: image assets + edit chains (hosted-only photo editor) ────────────
+-- studio_assets: one row per uploaded original. Blobs live in object storage
+-- (org/<id>/studio/...); the row holds the object key + metadata. The original
+-- is immutable: edits never mutate it, they append to studio_edits. status is
+-- 'pending' until the client confirms its presigned upload; the __studio_gc__
+-- sentinel expires unconfirmed rows. head_edit_id is the current chain head
+-- (NULL = the original is the head). Per-user scoped on top of db-per-customer.
+CREATE TABLE IF NOT EXISTS studio_assets (
+  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id       TEXT NOT NULL DEFAULT 'local',
+  object_key    TEXT NOT NULL,
+  content_hash  TEXT NOT NULL,
+  mime          TEXT NOT NULL,
+  width         INT,
+  height        INT,
+  bytes         INT  NOT NULL DEFAULT 0,
+  status        TEXT NOT NULL DEFAULT 'pending',   -- 'pending' | 'ready' | 'expired'
+  head_edit_id  UUID,
+  metadata      JSONB NOT NULL DEFAULT '{}',
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_studio_assets_user   ON studio_assets(user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_studio_assets_status ON studio_assets(status, created_at);
+CREATE INDEX IF NOT EXISTS idx_studio_assets_hash   ON studio_assets(user_id, content_hash);
+
+-- studio_edits: the non-destructive op chain. Each row is one validated op
+-- (src/studio/ops.ts) applied on top of parent_edit_id (NULL = on the original).
+-- idempotency_key makes a retried-but-committed edit a no-op (UNIQUE per asset).
+-- parent_edit_id + an optimistic head check give a linear chain; a stale parent
+-- is rejected. preview_key is the ~256px history preview. identity_score is the
+-- face-embedding gate result for face-touching generative ops (NULL = n/a).
+-- params is the op params jsonb (stored object, never double-encoded).
+CREATE TABLE IF NOT EXISTS studio_edits (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  asset_id        UUID NOT NULL REFERENCES studio_assets(id) ON DELETE CASCADE,
+  user_id         TEXT NOT NULL DEFAULT 'local',
+  parent_edit_id  UUID,
+  idempotency_key TEXT NOT NULL,
+  op              TEXT NOT NULL,
+  op_spec_version INT  NOT NULL DEFAULT 1,
+  params          JSONB NOT NULL DEFAULT '{}',
+  provider        TEXT,
+  input_key       TEXT,
+  output_key      TEXT,
+  preview_key     TEXT,
+  status          TEXT NOT NULL DEFAULT 'pending',  -- pending|running|done|failed|expired
+  cost_usd        REAL NOT NULL DEFAULT 0,
+  identity_score  REAL,
+  error           TEXT,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (asset_id, idempotency_key)
+);
+CREATE INDEX IF NOT EXISTS idx_studio_edits_asset  ON studio_edits(asset_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_studio_edits_user   ON studio_edits(user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_studio_edits_status ON studio_edits(status, created_at);
+CREATE INDEX IF NOT EXISTS idx_studio_edits_parent ON studio_edits(parent_edit_id);
