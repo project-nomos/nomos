@@ -198,6 +198,12 @@ service MobileApi {
   rpc ListLoops (Empty) returns (MLoopsResponse);
   rpc SetLoopEnabled (MSetLoopEnabledRequest) returns (MAck);
   rpc DeleteLoop (MLoopDeleteRequest) returns (MAck);
+
+  // Studio (hosted-only photo editor). Blobs move via presigned PUT/GET, never gRPC.
+  rpc StudioCreateAsset (MStudioCreateAssetRequest) returns (MStudioCreateAssetResponse);
+  rpc StudioGetAssetUrl (MStudioAssetRef) returns (MStudioAssetUrlResponse);
+  rpc StudioEdit (MStudioEditRequest) returns (stream MStudioEvent);
+  rpc StudioHistory (MStudioAssetRef) returns (MStudioHistoryResponse);
 }
 
 // Loops (autonomous recurring jobs)
@@ -559,4 +565,65 @@ message DepositResponse {
   string message = 2;
   // Opaque integration id assigned by the customer instance (for revocation).
   string integration_id = 3;
+}
+
+// ── Studio (hosted-only photo editor) ──────────────────────────────────────
+// Register an uploaded original. The client uploads the (downscaled, transcoded)
+// image to upload_url (presigned PUT), then confirms by calling StudioEdit or
+// StudioHistory; unconfirmed rows are reaped by __studio_gc__.
+message MStudioCreateAssetRequest {
+  string mime = 1;          // e.g. image/jpeg (HEIC transcoded client-side)
+  string content_hash = 2;  // sha256 of the bytes
+  int32 width = 3;
+  int32 height = 4;
+  int32 bytes = 5;
+}
+message MStudioCreateAssetResponse {
+  string asset_id = 1;
+  string upload_url = 2;    // presigned PUT
+  string object_key = 3;
+  int64 expires_at = 4;     // ms epoch
+}
+
+message MStudioAssetRef {
+  string asset_id = 1;
+}
+message MStudioAssetUrlResponse {
+  string url = 1;           // presigned GET for the current head (or original)
+  int64 expires_at = 2;
+}
+
+// Apply one op. params_json is the JSON-encoded op params (validated server-side
+// against the op registry). parent_edit_id "" means "on the current head".
+message MStudioEditRequest {
+  string asset_id = 1;
+  string op = 2;            // adjust | editSemantic | cutout | upscale | restore | ...
+  string params_json = 3;
+  string parent_edit_id = 4;
+  string idempotency_key = 5;
+  string mask_key = 6;      // optional device/tap mask object key
+}
+message MStudioEvent {
+  string kind = 1;          // progress | done | error
+  string edit_id = 2;
+  string status = 3;        // pending | running | done | failed
+  string preview_key = 4;
+  string output_key = 5;
+  double cost_usd = 6;
+  string message = 7;
+}
+
+message MStudioEdit {
+  string id = 1;
+  string op = 2;
+  string status = 3;
+  string preview_key = 4;
+  string output_key = 5;
+  double cost_usd = 6;
+  string parent_edit_id = 7;
+  string created_at = 8;
+}
+message MStudioHistoryResponse {
+  repeated MStudioEdit edits = 1;
+  string head_edit_id = 2;
 }
