@@ -311,14 +311,27 @@ export async function markEditFailed(
   error: string,
 ): Promise<StudioEdit | null> {
   const db = getKysely();
-  const row = await db
-    .updateTable("studio_edits")
-    .set({ status: "failed", error, updated_at: sql`now()` })
-    .where("id", "=", editId)
-    .where("user_id", "=", ctx.userId)
-    .returningAll()
-    .executeTakeFirst();
-  return row ? mapEdit(row) : null;
+  return db.transaction().execute(async (trx) => {
+    const row = await trx
+      .updateTable("studio_edits")
+      .set({ status: "failed", error, updated_at: sql`now()` })
+      .where("id", "=", editId)
+      .where("user_id", "=", ctx.userId)
+      .returningAll()
+      .executeTakeFirst();
+    if (!row) return null;
+    // A failed edit must not stay the chain head: roll the head back to its
+    // parent so head always reflects the last successful state. Conditional on
+    // head still being this edit, so it is safe under concurrent appends.
+    await trx
+      .updateTable("studio_assets")
+      .set({ head_edit_id: row.parent_edit_id, updated_at: sql`now()` })
+      .where("id", "=", row.asset_id)
+      .where("user_id", "=", ctx.userId)
+      .where("head_edit_id", "=", editId)
+      .execute();
+    return mapEdit(row);
+  });
 }
 
 /**

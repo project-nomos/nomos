@@ -35,13 +35,12 @@ function tenantFor(userId: string): TenantContext {
 /** Wire the engine with the deterministic provider always, the GCP provider when configured. */
 export function buildStudioEngine(): StudioEngine {
   const providers: StudioProvider[] = [new LocalSharpProvider()];
-  if (process.env.GEMINI_API_KEY || process.env.GOOGLE_CLOUD_PROJECT) {
+  const apiKey = process.env.GEMINI_API_KEY ?? process.env.GOOGLE_API_KEY;
+  if (apiKey || process.env.GOOGLE_CLOUD_PROJECT) {
     try {
       providers.push(
         new GeminiImageProvider(createGoogleGenAIImageClient(), {
-          name:
-            process.env.NOMOS_STUDIO_PROVIDER ??
-            (process.env.GOOGLE_CLOUD_PROJECT ? "vertex" : "gemini"),
+          name: process.env.NOMOS_STUDIO_PROVIDER ?? (apiKey ? "gemini" : "vertex"),
         }),
       );
     } catch (err) {

@@ -11,6 +11,7 @@ import {
   getAsset,
   listEdits,
   markEditDone,
+  markEditFailed,
   recordIdentityScore,
   StaleParentError,
   StudioAssetNotFoundError,
@@ -179,5 +180,15 @@ describe("markEditDone + listEdits", () => {
     expect(edit?.identityScore).toBe(0.97);
     const update = getQueries().find((q) => /update "studio_edits"/i.test(q.sql));
     expect(update?.parameters).toContain("u1");
+  });
+
+  it("markEditFailed rolls the chain head back to the failed edit's parent", async () => {
+    addResult([editRow({ id: "eX", status: "failed", parent_edit_id: "ePrev", asset_id: "a1" })]);
+    addResult([]); // head-revert UPDATE
+    const edit = await markEditFailed(ctx, "eX", "boom");
+    expect(edit?.status).toBe("failed");
+    const headUpdate = getQueries().find((q) => /update "studio_assets"/i.test(q.sql));
+    expect(headUpdate?.parameters).toContain("eX"); // WHERE head_edit_id = the failed edit
+    expect(headUpdate?.parameters).toContain("ePrev"); // SET head_edit_id = its parent
   });
 });

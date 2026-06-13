@@ -116,8 +116,10 @@ export class GeminiImageProvider implements StudioProvider {
  */
 export function createGoogleGenAIImageClient(opts?: { model?: string }): GenAIImageClient {
   const model = opts?.model ?? process.env.NOMOS_STUDIO_GEMINI_MODEL ?? "gemini-2.5-flash-image";
-  const surface =
-    process.env.NOMOS_STUDIO_PROVIDER ?? (process.env.GOOGLE_CLOUD_PROJECT ? "vertex" : "gemini");
+  // Detection mirrors embeddings.ts: an API key (GOOGLE_API_KEY / GEMINI_API_KEY)
+  // -> Gemini API; otherwise GOOGLE_CLOUD_PROJECT -> Vertex (ADC). Overridable.
+  const apiKey = process.env.GEMINI_API_KEY ?? process.env.GOOGLE_API_KEY;
+  const surface = process.env.NOMOS_STUDIO_PROVIDER ?? (apiKey ? "gemini" : "vertex");
 
   const ai =
     surface === "vertex"
@@ -126,7 +128,7 @@ export function createGoogleGenAIImageClient(opts?: { model?: string }): GenAIIm
           project: process.env.GOOGLE_CLOUD_PROJECT,
           location: process.env.CLOUD_ML_REGION ?? "us-central1",
         })
-      : new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+      : new GoogleGenAI({ apiKey });
 
   return {
     model,
