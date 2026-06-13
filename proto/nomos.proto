@@ -199,7 +199,7 @@ service MobileApi {
   rpc SetLoopEnabled (MSetLoopEnabledRequest) returns (MAck);
   rpc DeleteLoop (MLoopDeleteRequest) returns (MAck);
 
-  // Studio (hosted-only photo editor). Blobs move via presigned PUT/GET, never gRPC.
+  // Studio (hosted-only feature). Blobs move via presigned PUT/GET, never gRPC.
   rpc StudioCreateAsset (MStudioCreateAssetRequest) returns (MStudioCreateAssetResponse);
   rpc StudioGetAssetUrl (MStudioAssetRef) returns (MStudioAssetUrlResponse);
   rpc StudioEdit (MStudioEditRequest) returns (stream MStudioEvent);
@@ -567,7 +567,7 @@ message DepositResponse {
   string integration_id = 3;
 }
 
-// ── Studio (hosted-only photo editor) ──────────────────────────────────────
+// ── Studio (hosted-only feature) ──────────────────────────────────────
 // Register an uploaded original. The client uploads the (downscaled, transcoded)
 // image to upload_url (presigned PUT), then confirms by calling StudioEdit or
 // StudioHistory; unconfirmed rows are reaped by __studio_gc__.

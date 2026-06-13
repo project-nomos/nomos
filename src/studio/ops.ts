@@ -6,7 +6,7 @@
  *
  * Bump OP_SPEC_VERSION on any breaking param change. Swift mirrors these by hand
  * in v1 (codegen is a tracked TODO); a contract test pins the Swift encodings
- * against this version. See nomos-docs/studio-plan.md section 3 (op registry).
+ * against this version. See the design doc section 3 (op registry).
  */
 
 import { z } from "zod";

@@ -155,7 +155,7 @@ export function buildMobileApiHandlers(deps: MobileApiDeps) {
       handleDeleteLoop(call, ctx),
     ),
 
-    // Studio (hosted-only photo editor)
+    // Studio (hosted-only feature)
     StudioCreateAsset: withAuthUnary("/nomos.MobileApi/StudioCreateAsset", (call, ctx) =>
       handleStudioCreateAsset(call, ctx),
     ),
@@ -929,7 +929,7 @@ async function handleDeleteLoop(
   return { success: true, message: "deleted" };
 }
 
-// ──────────── Studio (hosted-only photo editor) ────────────
+// ──────────── Studio (hosted-only feature) ────────────
 // Blobs move via presigned PUT/GET, never gRPC. Every handler is user_id-scoped
 // through the authenticated TenantContext.
 

@@ -7,7 +7,7 @@
  * is unit-testable without credentials or a network. `createGoogleGenAIImageClient`
  * wraps `@google/genai` for the real path. Localized ops composite region-only
  * (mask-bounded paste-back) so untouched pixels never drift. A safety refusal is
- * surfaced as a typed ProviderRefusedError. See studio-plan.md sections 2 + 6.
+ * surfaced as a typed ProviderRefusedError. See the design doc sections 2 + 6.
  */
 
 import { GoogleGenAI } from "@google/genai";

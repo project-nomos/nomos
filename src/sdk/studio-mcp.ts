@@ -1,17 +1,8 @@
 /**
- * In-process MCP server exposing Nomos Studio as agent tools (the vault-mcp
- * pattern: built per turn, scoped to the requesting user). Lets the conversational
- * editor run inside a normal MobileApi.Chat turn: the user describes an edit, the
- * agent calls a studio tool, the engine executes + records it, the app fetches the
- * result. Hosted-only; injected when FEATURES.studio() is on.
- *
- * Tools:
- *   studio_edit     - natural-language instruction edit (cloud; needs consent)
- *   studio_adjust   - tonal sliders (exposure/contrast/saturation/temperature; free)
- *   studio_cutout   - remove the background
- *   studio_upscale  - increase resolution/sharpness
- *   studio_restore  - restore an old/damaged photo
- *   studio_history  - list the op chain
+ * In-process MCP server exposing the Studio tools (vault-mcp pattern: built per
+ * turn, scoped to the requesting user). Hosted-only; injected when
+ * FEATURES.studio() is on. The agent calls a tool, the engine executes + records
+ * it, the app fetches the result. Tool descriptions are defined inline below.
  */
 
 import { randomUUID } from "node:crypto";

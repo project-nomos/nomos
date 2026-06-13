@@ -9,7 +9,7 @@
  *   - optimistic concurrency: the edit must build on the asset's current head,
  *     else StaleParentError (the client refreshes and retries).
  *
- * See nomos-docs/studio-plan.md sections 3 + 8 (decision 4).
+ * See the design doc sections 3 + 8 (decision 4).
  */
 
 import { type Selectable, sql } from "kysely";

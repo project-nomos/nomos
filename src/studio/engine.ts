@@ -9,7 +9,7 @@
  * Providers, the object store, the identity gate, the consent check, and the
  * preview maker are all injected, so the engine is testable without sharp, the
  * Google SDK, a DB, or a bucket. Real providers (local-sharp, gemini) and the
- * preview maker land alongside this. See nomos-docs/studio-plan.md sections 3 + 7.
+ * preview maker land alongside this. See the design doc sections 3 + 7.
  */
 
 import { createLogger } from "../lib/logger.ts";

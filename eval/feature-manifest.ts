@@ -225,11 +225,11 @@ export const FEATURES: FeatureSpec[] = [
     ],
   },
 
-  // ── Studio (hosted-only photo editor) ──
+  // ── Studio (hosted-only feature) ──
   {
     id: "studio",
     summary:
-      "Hosted-only photo editor: conversational + parametric edits over an immutable original and a non-destructive op chain. validate op -> consent gate (generative only) -> append (optimistic concurrency + idempotency) -> provider (local-sharp deterministic / Gemini-Vertex generative) -> identity gate (face-risk ops) -> persist output + ~256px preview. GCP-only cloud; per-user scoped.",
+      "Hosted-only media asset + edit pipeline (gated). Immutable original + a non-destructive op chain: validate op -> consent gate (cloud ops only) -> append (optimistic concurrency + idempotency) -> provider (local deterministic / GCP generative) -> identity gate (face-risk ops) -> persist output + preview. Per-user scoped.",
     trigger: { kind: "turn", gate: "studio" },
     entry: ["buildStudioMcpServer", "buildStudioEngine", "assertIdentityPreserved"],
     effects: [

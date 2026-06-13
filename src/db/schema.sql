@@ -852,7 +852,7 @@ DO $$ BEGIN
   END IF;
 END $$;
 
--- ── Studio: image assets + edit chains (hosted-only photo editor) ────────────
+-- ── Studio: image assets + edit chains (hosted-only feature) ────────────
 -- studio_assets: one row per uploaded original. Blobs live in object storage
 -- (org/<id>/studio/...); the row holds the object key + metadata. The original
 -- is immutable: edits never mutate it, they append to studio_edits. status is

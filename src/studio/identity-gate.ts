@@ -8,7 +8,7 @@
  * request, or a server model). When no embedder is configured the gate SKIPS and
  * logs, so dev/eval run without an embedding model while the contract + wiring
  * already exist. A manifest invariant requires every face-touching generative op
- * to pass through here. See nomos-docs/studio-plan.md section 7.
+ * to pass through here. See the design doc section 7.
  */
 
 import { createLogger } from "../lib/logger.ts";

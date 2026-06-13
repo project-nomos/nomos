@@ -3,7 +3,7 @@
  * (Vertex/Gemini), so they are gated behind an explicit org-level toggle.
  * Default is OFF: consent is required until the user grants it. Deterministic /
  * on-device ops are NEVER gated. Org-level because the config table is
- * per-customer (database-per-customer). See studio-plan.md section 3 (consent).
+ * per-customer (database-per-customer). See the design doc section 3 (consent).
  */
 
 import { getConfigValue, setConfigValue } from "../db/config.ts";

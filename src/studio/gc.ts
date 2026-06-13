@@ -9,7 +9,7 @@
  *   2. Aged intermediate edit results that are no longer the chain head -> expire
  *      + drop output/preview blobs. Originals (the asset object) and the live head
  *      output are always kept. Rows are marked `expired` BEFORE the object is
- *      deleted. See nomos-docs/studio-plan.md section 3 (object lifecycle).
+ *      deleted. See the design doc section 3 (object lifecycle).
  */
 
 import { sql } from "kysely";

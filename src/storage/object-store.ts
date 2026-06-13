@@ -8,7 +8,7 @@
  *   - GCS (`NOMOS_OBJECT_STORE_DRIVER=gcs`): Google Cloud Storage, the prod driver.
  *     Same GCP stack as Vertex (ADC / workload identity, no AWS), V4 signed URLs.
  *     Lands with `@google-cloud/storage` when hosted infra is built (see
- *     nomos-docs/studio-plan.md "Build prerequisites").
+ *     the design doc "Build prerequisites").
  *
  * All keys are org-scoped (`org/<NOMOS_ORG_ID>/...`) so GDPR delete can drop a
  * whole customer prefix, matching the per-customer storage prefix in HOSTED_PLAN.
@@ -211,7 +211,7 @@ export function getObjectStore(): ObjectStore {
   if (driver === "gcs") {
     // Prod driver: Google Cloud Storage via @google-cloud/storage (ADC /
     // workload identity, V4 signed URLs). Lands with the hosted infra; see
-    // studio-plan.md "Build prerequisites". GCP-only, no AWS.
+    // the design doc "Build prerequisites". GCP-only, no AWS.
     throw new Error(
       "NOMOS_OBJECT_STORE_DRIVER=gcs is not wired yet (add @google-cloud/storage, Phase 1a prod). Use 'local' for dev/eval.",
     );

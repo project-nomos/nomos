@@ -964,8 +964,8 @@ export class AgentRuntime {
         isLoopContext: source?.platform === "cron" || (sessionKey?.startsWith("cron:") ?? false),
       }),
     };
-    // Studio (hosted-only photo editor): the conversational editing tools, scoped
-    // to this owner. Gated so power-user installs never load image tooling.
+    // Studio (hosted-only feature), scoped to this owner. Gated so power-user
+    // installs never load the extra tooling.
     if (FEATURES.studio()) {
       const studioServers: Record<string, ReturnType<typeof buildStudioMcpServer>> = {
         "nomos-studio": buildStudioMcpServer(vaultUserId),

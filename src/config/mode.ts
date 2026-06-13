@@ -85,7 +85,7 @@ export const FEATURES = {
   adminPowerUserPages: (): boolean => !isHosted(),
 
   /**
-   * Nomos Studio (hosted-only photo editor). The inverse of the BYO gates above:
+   * Studio (hosted-only feature). The inverse of the BYO gates above:
    * the one feature that is OFF in power-user mode and ON in hosted, because it
    * depends on the hosted object-store + per-tenant Vertex credential.
    */
