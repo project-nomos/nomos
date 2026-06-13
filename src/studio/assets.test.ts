@@ -11,6 +11,7 @@ import {
   getAsset,
   listEdits,
   markEditDone,
+  recordIdentityScore,
   StaleParentError,
   StudioAssetNotFoundError,
 } from "./assets.ts";
@@ -170,5 +171,13 @@ describe("markEditDone + listEdits", () => {
     expect(edits.map((e) => e.id)).toEqual(["e1", "e2"]);
     const select = getQueries().find((q) => /from "studio_edits"/i.test(q.sql));
     expect(select?.parameters).toContain("u1");
+  });
+
+  it("recordIdentityScore writes the score scoped to the user", async () => {
+    addResult([editRow({ id: "e1", identity_score: 0.97 })]);
+    const edit = await recordIdentityScore(ctx, "e1", 0.97);
+    expect(edit?.identityScore).toBe(0.97);
+    const update = getQueries().find((q) => /update "studio_edits"/i.test(q.sql));
+    expect(update?.parameters).toContain("u1");
   });
 });

@@ -204,6 +204,8 @@ service MobileApi {
   rpc StudioGetAssetUrl (MStudioAssetRef) returns (MStudioAssetUrlResponse);
   rpc StudioEdit (MStudioEditRequest) returns (stream MStudioEvent);
   rpc StudioHistory (MStudioAssetRef) returns (MStudioHistoryResponse);
+  // The on-device identity check reports its score for an edit (0..1).
+  rpc StudioReportIdentity (MStudioIdentityReport) returns (MAck);
 }
 
 // Loops (autonomous recurring jobs)
@@ -626,4 +628,9 @@ message MStudioEdit {
 message MStudioHistoryResponse {
   repeated MStudioEdit edits = 1;
   string head_edit_id = 2;
+}
+
+message MStudioIdentityReport {
+  string edit_id = 1;
+  double score = 2; // face-embedding similarity in 0..1
 }

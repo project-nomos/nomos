@@ -321,6 +321,26 @@ export async function markEditFailed(
   return row ? mapEdit(row) : null;
 }
 
+/**
+ * Record an identity-preservation score for an edit (e.g. the on-device Vision
+ * check reported by the client after fetching the result). Scoped to the user.
+ */
+export async function recordIdentityScore(
+  ctx: TenantContext,
+  editId: string,
+  score: number,
+): Promise<StudioEdit | null> {
+  const db = getKysely();
+  const row = await db
+    .updateTable("studio_edits")
+    .set({ identity_score: score, updated_at: sql`now()` })
+    .where("id", "=", editId)
+    .where("user_id", "=", ctx.userId)
+    .returningAll()
+    .executeTakeFirst();
+  return row ? mapEdit(row) : null;
+}
+
 export async function getEdit(ctx: TenantContext, editId: string): Promise<StudioEdit | null> {
   const db = getKysely();
   const row = await db

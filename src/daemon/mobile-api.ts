@@ -52,6 +52,7 @@ import {
   getAsset,
   getEdit,
   listEdits,
+  recordIdentityScore,
   StaleParentError,
 } from "../studio/assets.ts";
 import { ConsentRequiredError } from "../studio/consent.ts";
@@ -167,6 +168,9 @@ export function buildMobileApiHandlers(deps: MobileApiDeps) {
     ),
     StudioHistory: withAuthUnary("/nomos.MobileApi/StudioHistory", (call, ctx) =>
       handleStudioHistory(call, ctx),
+    ),
+    StudioReportIdentity: withAuthUnary("/nomos.MobileApi/StudioReportIdentity", (call, ctx) =>
+      handleStudioReportIdentity(call, ctx),
     ),
   };
 }
@@ -1110,6 +1114,20 @@ async function handleStudioHistory(
     })),
     headEditId: asset?.headEditId ?? "",
   };
+}
+
+async function handleStudioReportIdentity(
+  call: grpc.ServerUnaryCall<unknown, unknown>,
+  ctx: TenantContext,
+): Promise<{ success: boolean; message: string }> {
+  const req = call.request as { editId?: string; score?: number };
+  const editId = req.editId ?? "";
+  if (!isUuid(editId)) return { success: false, message: "invalid edit id" };
+  const score = Math.max(0, Math.min(1, Number(req.score ?? 0)));
+  const edit = await recordIdentityScore(ctx, editId, score);
+  return edit
+    ? { success: true, message: "recorded" }
+    : { success: false, message: "edit not found" };
 }
 
 // Helpers

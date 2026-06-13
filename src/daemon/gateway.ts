@@ -427,6 +427,18 @@ export class Gateway {
         process.emit("cron:refresh" as never);
       }
 
+      // Studio: install the optional server-side face embedder for the identity
+      // gate when a model is configured (NOMOS_FACE_MODEL_PATH). No-op otherwise;
+      // the privacy-preferred path is the on-device check via StudioReportIdentity.
+      if (FEATURES.studio()) {
+        try {
+          const { installServerFaceEmbedder } = await import("../studio/face-embedder.ts");
+          await installServerFaceEmbedder();
+        } catch (err) {
+          log.warn({ err }, "studio: face embedder install skipped");
+        }
+      }
+
       // Style analysis: re-derive the user's writing voice daily. Self-gates on
       // config.styleMatching at fire time, so the job is harmless when the
       // feature is off (and reflects a later toggle without reseeding).
