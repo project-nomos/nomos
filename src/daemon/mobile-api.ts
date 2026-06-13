@@ -45,6 +45,18 @@ import { CronStore } from "../cron/store.ts";
 import { createLogger } from "../lib/logger.ts";
 import type { TenantContext } from "../auth/tenant-context.ts";
 import { resolveMemoryUserId } from "../auth/tenant-context.ts";
+import { buildStudioEngine } from "../sdk/studio-mcp.ts";
+import {
+  confirmAsset,
+  createAsset,
+  getAsset,
+  getEdit,
+  listEdits,
+  recordIdentityScore,
+  StaleParentError,
+} from "../studio/assets.ts";
+import { ConsentRequiredError } from "../studio/consent.ts";
+import { getObjectStore, objectKey } from "../storage/object-store.ts";
 
 const log = createLogger("mobile-api");
 
@@ -142,6 +154,23 @@ export function buildMobileApiHandlers(deps: MobileApiDeps) {
     ),
     DeleteLoop: withAuthUnary("/nomos.MobileApi/DeleteLoop", (call, ctx) =>
       handleDeleteLoop(call, ctx),
+    ),
+
+    // Studio (hosted-only feature)
+    StudioCreateAsset: withAuthUnary("/nomos.MobileApi/StudioCreateAsset", (call, ctx) =>
+      handleStudioCreateAsset(call, ctx),
+    ),
+    StudioGetAssetUrl: withAuthUnary("/nomos.MobileApi/StudioGetAssetUrl", (call, ctx) =>
+      handleStudioGetAssetUrl(call, ctx),
+    ),
+    StudioEdit: withAuthStream("/nomos.MobileApi/StudioEdit", (call, ctx) =>
+      handleStudioEdit(call, ctx),
+    ),
+    StudioHistory: withAuthUnary("/nomos.MobileApi/StudioHistory", (call, ctx) =>
+      handleStudioHistory(call, ctx),
+    ),
+    StudioReportIdentity: withAuthUnary("/nomos.MobileApi/StudioReportIdentity", (call, ctx) =>
+      handleStudioReportIdentity(call, ctx),
     ),
   };
 }
@@ -902,6 +931,203 @@ async function handleDeleteLoop(
   await store.deleteJob(job.id);
   process.emit("cron:refresh" as never);
   return { success: true, message: "deleted" };
+}
+
+// ──────────── Studio (hosted-only feature) ────────────
+// Blobs move via presigned PUT/GET, never gRPC. Every handler is user_id-scoped
+// through the authenticated TenantContext.
+
+function notFound(message: string): Error {
+  return Object.assign(new Error(message), { code: grpc.status.NOT_FOUND });
+}
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const isUuid = (s: string): boolean => UUID_RE.test(s);
+
+async function handleStudioCreateAsset(
+  call: grpc.ServerUnaryCall<unknown, unknown>,
+  ctx: TenantContext,
+): Promise<{
+  assetId: string;
+  uploadUrl: string;
+  objectKey: string;
+  expiresAt: number;
+}> {
+  const req = call.request as {
+    mime?: string;
+    contentHash?: string;
+    width?: number;
+    height?: number;
+    bytes?: number;
+  };
+  const mime = req.mime || "image/jpeg";
+  const ext = mime === "image/png" ? "png" : "jpg";
+  const key = objectKey("studio", randomUUID(), `original.${ext}`);
+  const asset = await createAsset(ctx, {
+    objectKey: key,
+    contentHash: req.contentHash ?? "",
+    mime,
+    width: req.width ?? null,
+    height: req.height ?? null,
+    bytes: req.bytes ?? 0,
+  });
+  const presigned = await getObjectStore().presignPut(key, { contentType: mime });
+  return {
+    assetId: asset.id,
+    uploadUrl: presigned.url,
+    objectKey: key,
+    expiresAt: presigned.expiresAt,
+  };
+}
+
+async function handleStudioGetAssetUrl(
+  call: grpc.ServerUnaryCall<unknown, unknown>,
+  ctx: TenantContext,
+): Promise<{ url: string; expiresAt: number }> {
+  const assetId = (call.request as { assetId?: string }).assetId ?? "";
+  if (!isUuid(assetId)) throw notFound("studio asset not found");
+  const asset = await getAsset(ctx, assetId);
+  if (!asset) throw notFound("studio asset not found");
+  let key = asset.objectKey;
+  if (asset.headEditId) {
+    const head = await getEdit(ctx, asset.headEditId);
+    if (head?.outputKey) key = head.outputKey;
+  }
+  const presigned = await getObjectStore().presignGet(key);
+  return { url: presigned.url, expiresAt: presigned.expiresAt };
+}
+
+async function handleStudioEdit(
+  call: grpc.ServerWritableStream<unknown, unknown>,
+  ctx: TenantContext,
+): Promise<void> {
+  // Everything is inside try/finally so the stream ALWAYS ends cleanly (a thrown
+  // getAsset/engine error emits an error event instead of destroying the stream).
+  try {
+    const req = call.request as {
+      assetId?: string;
+      op?: string;
+      paramsJson?: string;
+      parentEditId?: string;
+      idempotencyKey?: string;
+      maskKey?: string;
+    };
+    const assetId = req.assetId ?? "";
+    if (!isUuid(assetId)) {
+      call.write({ kind: "error", message: "invalid asset id" });
+      return;
+    }
+    // A client-supplied mask must live under this tenant's object prefix; never
+    // let a request read an arbitrary (or another tenant's) object as a mask.
+    if (req.maskKey && !req.maskKey.startsWith(`org/${ctx.orgId}/`)) {
+      call.write({ kind: "error", message: "invalid mask reference" });
+      return;
+    }
+    let params: unknown = {};
+    if (req.paramsJson) {
+      try {
+        params = JSON.parse(req.paramsJson);
+      } catch {
+        call.write({ kind: "error", message: "invalid params_json" });
+        return;
+      }
+    }
+
+    const asset = await getAsset(ctx, assetId);
+    if (!asset) {
+      call.write({ kind: "error", message: "studio asset not found" });
+      return;
+    }
+    const parentEditId =
+      req.parentEditId && req.parentEditId.length > 0 ? req.parentEditId : asset.headEditId;
+
+    call.write({ kind: "progress", status: "running", message: `applying ${req.op ?? ""}` });
+    try {
+      // engine.edit confirms a pending asset, gates consent, and runs the op.
+      const engine = buildStudioEngine();
+      const edit = await engine.edit(ctx, {
+        assetId: asset.id,
+        op: { op: req.op ?? "", params },
+        parentEditId,
+        idempotencyKey: req.idempotencyKey || randomUUID(),
+        maskKey: req.maskKey || null,
+      });
+      call.write({
+        kind: "done",
+        editId: edit.id,
+        status: edit.status,
+        previewKey: edit.previewKey ?? "",
+        outputKey: edit.outputKey ?? "",
+        costUsd: edit.costUsd,
+      });
+    } catch (err) {
+      const message =
+        err instanceof ConsentRequiredError
+          ? "Cloud AI is turned off. Enable it in Studio settings to use this edit."
+          : err instanceof StaleParentError
+            ? "This photo changed since you started. Refresh and try again."
+            : err instanceof Error
+              ? err.message
+              : String(err);
+      call.write({ kind: "error", message });
+    }
+  } catch (err) {
+    call.write({ kind: "error", message: err instanceof Error ? err.message : String(err) });
+  } finally {
+    call.end();
+  }
+}
+
+async function handleStudioHistory(
+  call: grpc.ServerUnaryCall<unknown, unknown>,
+  ctx: TenantContext,
+): Promise<{
+  edits: Array<{
+    id: string;
+    op: string;
+    status: string;
+    previewKey: string;
+    outputKey: string;
+    costUsd: number;
+    parentEditId: string;
+    createdAt: string;
+  }>;
+  headEditId: string;
+}> {
+  const assetId = (call.request as { assetId?: string }).assetId ?? "";
+  if (!isUuid(assetId)) return { edits: [], headEditId: "" };
+  const asset = await getAsset(ctx, assetId);
+  // Fetching history means the client is using this asset; confirm it out of
+  // `pending` so the orphan-upload GC sweep never reaps an in-use original.
+  if (asset?.status === "pending") await confirmAsset(ctx, asset.id);
+  const edits = await listEdits(ctx, assetId);
+  return {
+    edits: edits.map((e) => ({
+      id: e.id,
+      op: e.op,
+      status: e.status,
+      previewKey: e.previewKey ?? "",
+      outputKey: e.outputKey ?? "",
+      costUsd: e.costUsd,
+      parentEditId: e.parentEditId ?? "",
+      createdAt: e.createdAt.toISOString(),
+    })),
+    headEditId: asset?.headEditId ?? "",
+  };
+}
+
+async function handleStudioReportIdentity(
+  call: grpc.ServerUnaryCall<unknown, unknown>,
+  ctx: TenantContext,
+): Promise<{ success: boolean; message: string }> {
+  const req = call.request as { editId?: string; score?: number };
+  const editId = req.editId ?? "";
+  if (!isUuid(editId)) return { success: false, message: "invalid edit id" };
+  const score = Math.max(0, Math.min(1, Number(req.score ?? 0)));
+  const edit = await recordIdentityScore(ctx, editId, score);
+  return edit
+    ? { success: true, message: "recorded" }
+    : { success: false, message: "edit not found" };
 }
 
 // Helpers

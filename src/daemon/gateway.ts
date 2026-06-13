@@ -409,6 +409,36 @@ export class Gateway {
         process.emit("cron:refresh" as never);
       }
 
+      // Studio GC: clean up Studio objects/rows daily (hosted-only feature, so
+      // seed only when Studio is enabled; the runner is a no-op without rows).
+      if (FEATURES.studio() && !(await cronStore.getJobByName("studio-gc"))) {
+        await cronStore.createJob({
+          userId: systemTenant().userId,
+          name: "studio-gc",
+          schedule: "24h",
+          scheduleType: "every",
+          sessionTarget: "isolated",
+          deliveryMode: "none",
+          prompt: "__studio_gc__",
+          enabled: true,
+          errorCount: 0,
+        });
+        log.info("Registered studio GC cron job (every 24h)");
+        process.emit("cron:refresh" as never);
+      }
+
+      // Studio: install the optional server-side face embedder for the identity
+      // gate when a model is configured (NOMOS_FACE_MODEL_PATH). No-op otherwise;
+      // the privacy-preferred path is the on-device check via StudioReportIdentity.
+      if (FEATURES.studio()) {
+        try {
+          const { installServerFaceEmbedder } = await import("../studio/face-embedder.ts");
+          await installServerFaceEmbedder();
+        } catch (err) {
+          log.warn({ err }, "studio: face embedder install skipped");
+        }
+      }
+
       // Style analysis: re-derive the user's writing voice daily. Self-gates on
       // config.styleMatching at fire time, so the job is harmless when the
       // feature is off (and reflects a later toggle without reseeding).
