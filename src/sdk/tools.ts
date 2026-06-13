@@ -623,6 +623,7 @@ export function createMemoryMcpServer(userId: string = "local"): McpSdkServerCon
           channelId,
           enabled: true,
           errorCount: 0,
+          source: "agent", // a task the agent scheduled on the user's behalf (not infra)
         });
 
         // Notify cron engine to refresh (if running in daemon)
