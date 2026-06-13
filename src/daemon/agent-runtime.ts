@@ -29,6 +29,7 @@ import {
 } from "../sdk/telegram-mcp.ts";
 import { isGoogleWorkspaceConfiguredAsync } from "../sdk/google-workspace-mcp.ts";
 import { buildGoogleMcpServers, buildGoogleIntegrationPrompt } from "../sdk/google-mcp.ts";
+import { buildStudioMcpServer } from "../sdk/studio-mcp.ts";
 import { buildVaultMcpServer } from "../sdk/vault-mcp.ts";
 import { buildThinkMcpServer } from "../sdk/think-mcp.ts";
 import { buildLoopMcpServer } from "../sdk/loop-mcp.ts";
@@ -963,6 +964,14 @@ export class AgentRuntime {
         isLoopContext: source?.platform === "cron" || (sessionKey?.startsWith("cron:") ?? false),
       }),
     };
+    // Studio (hosted-only photo editor): the conversational editing tools, scoped
+    // to this owner. Gated so power-user installs never load image tooling.
+    if (FEATURES.studio()) {
+      const studioServers: Record<string, ReturnType<typeof buildStudioMcpServer>> = {
+        "nomos-studio": buildStudioMcpServer(vaultUserId),
+      };
+      mcpServers = { ...mcpServers, ...studioServers };
+    }
     let googlePrompt = "";
     if (isHosted() && userId) {
       try {
