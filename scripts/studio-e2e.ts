@@ -27,20 +27,31 @@ async function main(): Promise<void> {
   const priorConsent = await isCloudAIEnabled();
   await setCloudAIEnabled(true);
 
-  // create asset: synthesize an image, upload to the store, register the row.
-  const img = await sharp({
-    create: { width: 256, height: 256, channels: 3, background: { r: 130, g: 95, b: 75 } },
-  })
-    .jpeg()
-    .toBuffer();
+  // Use a REAL photo (synthetic/solid images trip Gemini's IMAGE_RECITATION guard).
+  // picsum returns a random CC0 photo; fall back to a synthetic image offline.
+  let img: Buffer;
+  try {
+    const resp = await fetch("https://picsum.photos/640/800");
+    if (!resp.ok) throw new Error(`picsum ${resp.status}`);
+    img = Buffer.from(await resp.arrayBuffer());
+    log("source: real photo (picsum)");
+  } catch {
+    img = await sharp({
+      create: { width: 256, height: 256, channels: 3, background: { r: 130, g: 95, b: 75 } },
+    })
+      .jpeg()
+      .toBuffer();
+    log("source: synthetic (picsum unreachable)");
+  }
+  const meta = await sharp(img).metadata();
   const key = objectKey("studio", randomUUID(), "original.jpg");
   await store.put(key, new Uint8Array(img), "image/jpeg");
   const asset = await createAsset(ctx, {
     objectKey: key,
     contentHash: "e2e",
-    mime: "image/jpeg",
-    width: 256,
-    height: 256,
+    mime: meta.format === "png" ? "image/png" : "image/jpeg",
+    width: meta.width ?? 0,
+    height: meta.height ?? 0,
     bytes: img.byteLength,
   });
   log(`asset ${asset.id} status=${asset.status}`);
