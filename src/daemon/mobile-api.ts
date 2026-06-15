@@ -55,7 +55,7 @@ import {
   recordIdentityScore,
   StaleParentError,
 } from "../studio/assets.ts";
-import { ConsentRequiredError } from "../studio/consent.ts";
+import { ConsentRequiredError, isCloudAIEnabled, setCloudAIEnabled } from "../studio/consent.ts";
 import { getObjectStore, objectKey } from "../storage/object-store.ts";
 
 const log = createLogger("mobile-api");
@@ -644,6 +644,9 @@ async function handleGetSettings(ctx: TenantContext) {
       },
     ],
     permissions: [
+      // Studio cloud-AI consent: a real toggle (the iOS app surfaces it as its own
+      // "Cloud AI" row) plumbed through UpdatePermission → setCloudAIEnabled.
+      { id: "studio_cloud_ai", label: "Cloud AI photo edits", enabled: await isCloudAIEnabled() },
       { id: "p1", label: "Read emails", enabled: true },
       { id: "p2", label: "Draft replies", enabled: true },
       { id: "p3", label: "Send (with approval)", enabled: true },
@@ -689,7 +692,14 @@ async function handleUpdateTrustTier(
 async function handleUpdatePermission(
   call: grpc.ServerUnaryCall<unknown, unknown>,
 ): Promise<{ success: boolean; message: string }> {
-  await setConfigKey(`permission.${(call.request as any).id}`, (call.request as any).enabled);
+  const id = String((call.request as { id?: string }).id ?? "");
+  const enabled = Boolean((call.request as { enabled?: boolean }).enabled);
+  if (id === "studio_cloud_ai") {
+    // Studio cloud-AI consent → the boolean key the consent gate reads.
+    await setCloudAIEnabled(enabled);
+  } else {
+    await setConfigKey(`permission.${id}`, enabled);
+  }
   return { success: true, message: "ok" };
 }
 
