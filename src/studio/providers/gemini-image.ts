@@ -23,6 +23,13 @@ const GENERATIVE_OPS: readonly StudioOpName[] = [
   "restore",
   // Cloud fallback for retouch until the deterministic sidecar passes parity.
   "retouch",
+  // Phase 3 generative depth bets.
+  "muscle",
+  "hairstyle",
+  "beard",
+  "relight",
+  "expand",
+  "sky",
 ];
 
 export interface GenAIImageRequest {
@@ -66,6 +73,22 @@ function promptFor(op: StudioOp): string {
       return "Restore this old or damaged photo: repair scratches, denoise, recover natural color. Do not change identity.";
     case "retouch":
       return "Subtly retouch this portrait: even out skin tone, soften blemishes and shine while keeping pores and natural texture. Do not change the person's identity, features, or proportions.";
+    case "muscle":
+      return `Add natural, photorealistic muscle definition to the ${op.params.area} (athletic, believable, not exaggerated). Keep the person's face, identity, and pose unchanged.`;
+    case "hairstyle":
+      return `Restyle the person's hair: ${op.params.style}. Keep the face, skin, and identity unchanged.`;
+    case "beard":
+      return op.params.action === "remove"
+        ? "Cleanly remove the facial hair, leaving natural, realistic skin. Keep the person's identity unchanged."
+        : op.params.action === "trim"
+          ? `Neatly trim and tidy the facial hair${op.params.style ? `: ${op.params.style}` : ""}. Keep the person's identity unchanged.`
+          : `Add a realistic, well-groomed beard${op.params.style ? `: ${op.params.style}` : ""}. Keep the person's face and identity unchanged.`;
+    case "relight":
+      return `Relight this photo${op.params.direction ? ` from the ${op.params.direction}` : ""}${op.params.mood ? `, ${op.params.mood} mood` : ""} with natural, believable shadows and highlights. Keep the content and composition unchanged.`;
+    case "expand":
+      return `Outpaint and naturally extend the scene (${op.params.direction}), seamlessly continuing the existing content, lighting, perspective, and style.`;
+    case "sky":
+      return `Replace the sky with ${op.params.style}, matching the scene's lighting, white balance, and reflections so it looks natural.`;
     default:
       return "Edit this image.";
   }

@@ -158,6 +158,92 @@ export function buildStudioMcpServer(userId: string): McpSdkServerConfigWithInst
     async (a) => applyOp(engine, userId, a.asset_id, { op: "restore", params: {} }),
   );
 
+  // ── Phase 3 generative depth bets (cloud, consent-gated) ──────────────
+  const studioMuscle = tool(
+    "studio_muscle",
+    "Add natural, photorealistic muscle definition (e.g. abs, arms, chest). Cloud edit, requires Cloud AI consent.",
+    {
+      asset_id: z.string(),
+      area: z.enum(["abs", "arms", "chest", "full"]).optional(),
+      strength: z.number().min(0).max(1).optional(),
+    },
+    async (a) =>
+      applyOp(engine, userId, a.asset_id, {
+        op: "muscle",
+        params: {
+          ...(a.area ? { area: a.area } : {}),
+          ...(a.strength === undefined ? {} : { strength: a.strength }),
+        },
+      }),
+  );
+
+  const studioHairstyle = tool(
+    "studio_hairstyle",
+    "Restyle the person's hair (e.g. 'short bob', 'long wavy', 'undercut'). Cloud edit, requires Cloud AI consent.",
+    { asset_id: z.string(), style: z.string() },
+    async (a) =>
+      applyOp(engine, userId, a.asset_id, { op: "hairstyle", params: { style: a.style } }),
+  );
+
+  const studioBeard = tool(
+    "studio_beard",
+    "Add, remove, or trim facial hair. Cloud edit, requires Cloud AI consent.",
+    {
+      asset_id: z.string(),
+      action: z.enum(["add", "remove", "trim"]).optional(),
+      style: z.string().optional(),
+    },
+    async (a) =>
+      applyOp(engine, userId, a.asset_id, {
+        op: "beard",
+        params: {
+          ...(a.action ? { action: a.action } : {}),
+          ...(a.style ? { style: a.style } : {}),
+        },
+      }),
+  );
+
+  const studioRelight = tool(
+    "studio_relight",
+    "Relight the photo (change the light direction or mood). Cloud edit, requires Cloud AI consent.",
+    {
+      asset_id: z.string(),
+      direction: z.enum(["left", "right", "front", "back", "top"]).optional(),
+      mood: z.string().optional(),
+    },
+    async (a) =>
+      applyOp(engine, userId, a.asset_id, {
+        op: "relight",
+        params: {
+          ...(a.direction ? { direction: a.direction } : {}),
+          ...(a.mood ? { mood: a.mood } : {}),
+        },
+      }),
+  );
+
+  const studioExpand = tool(
+    "studio_expand",
+    "Generatively expand (outpaint / uncrop) the photo, extending the scene. Cloud edit, requires Cloud AI consent.",
+    {
+      asset_id: z.string(),
+      direction: z
+        .enum(["all", "horizontal", "vertical", "left", "right", "up", "down"])
+        .optional(),
+    },
+    async (a) =>
+      applyOp(engine, userId, a.asset_id, {
+        op: "expand",
+        params: a.direction ? { direction: a.direction } : {},
+      }),
+  );
+
+  const studioSky = tool(
+    "studio_sky",
+    "Replace the sky / background (e.g. 'dramatic sunset', 'clear blue', 'night stars'). Cloud edit, requires Cloud AI consent.",
+    { asset_id: z.string(), style: z.string() },
+    async (a) => applyOp(engine, userId, a.asset_id, { op: "sky", params: { style: a.style } }),
+  );
+
   const studioHistory = tool(
     "studio_history",
     "List the edit history (op chain) of a photo, oldest first.",
@@ -183,6 +269,12 @@ export function buildStudioMcpServer(userId: string): McpSdkServerConfigWithInst
       studioCutout,
       studioUpscale,
       studioRestore,
+      studioMuscle,
+      studioHairstyle,
+      studioBeard,
+      studioRelight,
+      studioExpand,
+      studioSky,
       studioHistory,
     ],
   });

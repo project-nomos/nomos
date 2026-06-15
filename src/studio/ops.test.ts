@@ -87,4 +87,27 @@ describe("studio op registry", () => {
   it("retouch rejects out-of-range strength", () => {
     expect(() => validateOp({ op: "retouch", params: { strength: 2 } })).toThrow(z.ZodError);
   });
+
+  it("Phase 3 depth ops validate + apply defaults", () => {
+    expect(validateOp({ op: "muscle", params: {} }).params).toEqual({
+      area: "full",
+      strength: 0.5,
+    });
+    expect(validateOp({ op: "beard", params: {} }).params).toEqual({ action: "add" });
+    expect(validateOp({ op: "expand", params: {} }).params).toEqual({ direction: "all" });
+    expect(validateOp({ op: "hairstyle", params: { style: "short bob" } }).params).toEqual({
+      style: "short bob",
+    });
+    expect(() => validateOp({ op: "hairstyle", params: {} })).toThrow(z.ZodError);
+    expect(() => validateOp({ op: "sky", params: {} })).toThrow(z.ZodError);
+  });
+
+  it("Phase 3 depth ops are generative transforms, NOT identity-gated", () => {
+    // identityRisk "none" is intentional: these change appearance, so the
+    // preservation gate must not block them.
+    for (const op of ["muscle", "hairstyle", "beard", "relight", "expand", "sky"] as const) {
+      expect(OP_META[op].kind).toBe("generative");
+      expect(OP_META[op].identityRisk).toBe("none");
+    }
+  });
 });

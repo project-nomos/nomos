@@ -84,6 +84,37 @@ const retouch = z.strictObject({
   strength: z.number().min(0).max(1).default(0.5),
 });
 
+// ── Phase 3 generative depth bets (all cloud, consent-gated) ──────────────────
+/** AI Muscle: add natural muscle definition (six-pack, V-line, arms). */
+const muscle = z.strictObject({
+  area: z.enum(["abs", "arms", "chest", "full"]).default("full"),
+  strength: z.number().min(0).max(1).default(0.5),
+});
+/** Hairstyle transfer / restyle. */
+const hairstyle = z.strictObject({
+  style: z.string().min(1).max(200),
+});
+/** Beard add / remove / trim. */
+const beard = z.strictObject({
+  action: z.enum(["add", "remove", "trim"]).default("add"),
+  style: z.string().max(200).optional(),
+});
+/** Relight: change the lighting direction / mood. */
+const relight = z.strictObject({
+  direction: z.enum(["left", "right", "front", "back", "top"]).optional(),
+  mood: z.string().max(200).optional(),
+});
+/** Generative expand (outpaint / uncrop). */
+const expand = z.strictObject({
+  direction: z
+    .enum(["all", "horizontal", "vertical", "left", "right", "up", "down"])
+    .default("all"),
+});
+/** Sky / background replacement. */
+const sky = z.strictObject({
+  style: z.string().min(1).max(200),
+});
+
 export const OP_SCHEMAS = {
   adjust,
   crop,
@@ -95,6 +126,12 @@ export const OP_SCHEMAS = {
   restore,
   deviceRender,
   retouch,
+  muscle,
+  hairstyle,
+  beard,
+  relight,
+  expand,
+  sky,
 } as const;
 
 export type StudioOpName = keyof typeof OP_SCHEMAS;
@@ -135,6 +172,15 @@ export const OP_META: Record<StudioOpName, OpMeta> = {
   // off the resolved provider (sidecar = free, Gemini fallback = consent-gated).
   // identityRisk low so the gate runs against the original when an embedder exists.
   retouch: { kind: "deterministic", localized: false, identityRisk: "low" },
+  // Phase 3 generative transforms. identityRisk "none": these INTENTIONALLY change
+  // appearance (beard, hairstyle, muscle), so the preservation gate would
+  // false-positive and block the very edit the user asked for.
+  muscle: { kind: "generative", localized: false, identityRisk: "none" },
+  hairstyle: { kind: "generative", localized: false, identityRisk: "none" },
+  beard: { kind: "generative", localized: false, identityRisk: "none" },
+  relight: { kind: "generative", localized: false, identityRisk: "none" },
+  expand: { kind: "generative", localized: false, identityRisk: "none" },
+  sky: { kind: "generative", localized: false, identityRisk: "none" },
 };
 
 export function isStudioOpName(op: string): op is StudioOpName {

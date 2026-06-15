@@ -119,6 +119,18 @@ async function main(): Promise<void> {
     log(
       `GEMINI  edit=${gen.id} status=${gen.status} provider=${gen.provider} cost=$${gen.costUsd} out=${genBytes?.byteLength ?? 0}B`,
     );
+
+    // A Phase 3 generative depth op (relight) over the same Gemini path.
+    const depth = await engine.edit(ctx, {
+      assetId: asset.id,
+      op: { op: "relight", params: { mood: "warm golden hour" } },
+      parentEditId: gen.id,
+      idempotencyKey: randomUUID(),
+    });
+    const depthBytes = depth.outputKey ? await store.get(depth.outputKey) : null;
+    log(
+      `DEPTH   edit=${depth.id} op=relight status=${depth.status} provider=${depth.provider} cost=$${depth.costUsd} out=${depthBytes?.byteLength ?? 0}B`,
+    );
   } catch (err) {
     log(`GEMINI  generative edit FAILED: ${err instanceof Error ? err.message : err}`);
   }
