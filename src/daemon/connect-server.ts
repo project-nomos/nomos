@@ -19,6 +19,7 @@ import type { ConnectRouter, HandlerContext } from "@connectrpc/connect";
 import { ConnectError, Code } from "@connectrpc/connect";
 import { MobileApi } from "../gen/nomos_pb.ts";
 import { resolveContext } from "../auth/grpc-interceptor.ts";
+import { handleBlobRequest } from "../storage/object-store.ts";
 import { buildMobileApiHandlers } from "./mobile-api.ts";
 import type { MessageQueue } from "./message-queue.ts";
 import type { DraftManager } from "./draft-manager.ts";
@@ -165,7 +166,14 @@ export class ConnectServer {
     };
 
     return new Promise((resolveStart, reject) => {
-      this.server = createServer(connectNodeAdapter({ routes }));
+      // Signed blob PUT/GET for the local-fs object store are served here too (same
+      // host:port the client already reached us on); everything else is Connect RPC.
+      const connectHandler = connectNodeAdapter({ routes });
+      this.server = createServer((req, res) => {
+        void handleBlobRequest(req, res).then((handled) => {
+          if (!handled) connectHandler(req, res);
+        });
+      });
       this.server.listen(this.deps.port, "0.0.0.0", () => {
         log.info(`Connect server listening on 0.0.0.0:${this.deps.port}`);
         resolveStart();
