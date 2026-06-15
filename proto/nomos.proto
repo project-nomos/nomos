@@ -604,6 +604,7 @@ message MStudioEditRequest {
   string parent_edit_id = 4;
   string idempotency_key = 5;
   string mask_key = 6;      // optional device/tap mask object key
+  bytes input_image = 7;    // deviceRender only: the on-device-rendered output bytes
 }
 message MStudioEvent {
   string kind = 1;          // progress | done | error

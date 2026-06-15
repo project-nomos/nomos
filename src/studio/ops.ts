@@ -64,6 +64,17 @@ const upscale = z.strictObject({
 
 const restore = z.strictObject({});
 
+/**
+ * Commit an on-device render (Core Image adjust, MediaPipe makeup/reshape) as an
+ * edit. The pixels are produced client-side (WYSIWYG) and uploaded with the
+ * request; the engine re-encodes them via sharp (strips metadata, clamps size)
+ * and stores them as the output. `tool`/`detail` label the chain for history.
+ */
+const deviceRender = z.strictObject({
+  tool: z.string().min(1).max(40),
+  detail: z.string().max(120).optional(),
+});
+
 export const OP_SCHEMAS = {
   adjust,
   crop,
@@ -73,6 +84,7 @@ export const OP_SCHEMAS = {
   cutout,
   upscale,
   restore,
+  deviceRender,
 } as const;
 
 export type StudioOpName = keyof typeof OP_SCHEMAS;
@@ -106,6 +118,9 @@ export const OP_META: Record<StudioOpName, OpMeta> = {
   cutout: { kind: "generative", localized: false, identityRisk: "none" },
   upscale: { kind: "generative", localized: false, identityRisk: "low" },
   restore: { kind: "generative", localized: false, identityRisk: "high" },
+  // The user previewed the exact pixels on-device (WYSIWYG), so it is free,
+  // never consent-gated, and not identity-gated (no cloud model to second-guess).
+  deviceRender: { kind: "deterministic", localized: false, identityRisk: "none" },
 };
 
 export function isStudioOpName(op: string): op is StudioOpName {

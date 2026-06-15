@@ -12,7 +12,10 @@ import sharp from "sharp";
 import type { ProviderInput, ProviderOutput, StudioProvider } from "../engine.ts";
 import type { StudioOp, StudioOpName } from "../ops.ts";
 
-const DETERMINISTIC_OPS: readonly StudioOpName[] = ["adjust", "crop"];
+const DETERMINISTIC_OPS: readonly StudioOpName[] = ["adjust", "crop", "deviceRender"];
+
+/** Hard ceiling on a committed device render's long edge (defense-in-depth). */
+const MAX_DEVICE_EDGE = 4096;
 
 const clampPos = (n: number): number => Math.max(0.01, n);
 
@@ -72,6 +75,13 @@ export class LocalSharpProvider implements StudioProvider {
       img = applyAdjust(img, op.params);
     } else if (op.op === "crop") {
       img = await applyCrop(img, op.params);
+    } else if (op.op === "deviceRender") {
+      // The bytes ARE the result (rendered on-device). Re-encode through sharp to
+      // strip EXIF/GPS, reject a malformed upload, and clamp the long edge.
+      img = img.rotate().resize(MAX_DEVICE_EDGE, MAX_DEVICE_EDGE, {
+        fit: "inside",
+        withoutEnlargement: true,
+      });
     } else {
       throw new Error(`local-sharp does not support op: ${op.op}`);
     }

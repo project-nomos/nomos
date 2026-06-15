@@ -65,4 +65,15 @@ describe("studio op registry", () => {
     expect(OP_META.adjust.kind).toBe("deterministic");
     expect(OP_META.crop.kind).toBe("deterministic");
   });
+
+  it("deviceRender is free, never consent- or identity-gated (WYSIWYG on-device)", () => {
+    const op = validateOp({ op: "deviceRender", params: { tool: "makeup", detail: "lips" } });
+    expect(op.params).toEqual({ tool: "makeup", detail: "lips" });
+    expect(OP_META.deviceRender.kind).toBe("deterministic");
+    expect(OP_META.deviceRender.identityRisk).toBe("none");
+  });
+
+  it("deviceRender requires a tool label", () => {
+    expect(() => validateOp({ op: "deviceRender", params: {} })).toThrow(z.ZodError);
+  });
 });

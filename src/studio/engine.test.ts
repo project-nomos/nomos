@@ -196,6 +196,72 @@ describe("StudioEngine.edit", () => {
     expect(provider.execute).toHaveBeenCalled();
   });
 
+  it("deviceRender feeds the client-supplied bytes to the provider (not the chain source)", async () => {
+    vi.mocked(assets.getAsset).mockResolvedValue(fakeAsset());
+    vi.mocked(assets.appendEdit).mockResolvedValue({
+      edit: fakeEdit({ op: "deviceRender", status: "pending" }),
+      created: true,
+    });
+    vi.mocked(assets.markEditRunning).mockResolvedValue(
+      fakeEdit({ op: "deviceRender", status: "running" }),
+    );
+    vi.mocked(assets.markEditDone).mockResolvedValue(
+      fakeEdit({ op: "deviceRender", status: "done", outputKey: "out.jpg" }),
+    );
+    const store = fakeStore();
+    const provider = fakeProvider({ kind: "deterministic" });
+    const rendered = new Uint8Array([42, 43, 44]);
+    const engine = new StudioEngine({
+      providers: [provider],
+      store,
+      isCloudAIEnabled: async () => false,
+    });
+
+    const edit = await engine.edit(ctx, {
+      assetId: "a1",
+      op: { op: "deviceRender", params: { tool: "makeup" } },
+      parentEditId: null,
+      idempotencyKey: "kd",
+      inlineInputBytes: rendered,
+    });
+
+    expect(edit.status).toBe("done");
+    // The provider sees the uploaded render, and the source object is never fetched
+    // (identityRisk none + inline bytes present).
+    expect(provider.execute).toHaveBeenCalledWith(
+      expect.objectContaining({ op: "deviceRender" }),
+      expect.objectContaining({ bytes: rendered }),
+    );
+    expect(store.get).not.toHaveBeenCalled();
+  });
+
+  it("deviceRender without inline bytes fails the edit", async () => {
+    vi.mocked(assets.getAsset).mockResolvedValue(fakeAsset());
+    vi.mocked(assets.appendEdit).mockResolvedValue({
+      edit: fakeEdit({ op: "deviceRender", status: "pending" }),
+      created: true,
+    });
+    vi.mocked(assets.markEditRunning).mockResolvedValue(
+      fakeEdit({ op: "deviceRender", status: "running" }),
+    );
+    vi.mocked(assets.markEditFailed).mockResolvedValue(
+      fakeEdit({ op: "deviceRender", status: "failed" }),
+    );
+    const engine = new StudioEngine({
+      providers: [fakeProvider({ kind: "deterministic" })],
+      store: fakeStore(),
+    });
+    await expect(
+      engine.edit(ctx, {
+        assetId: "a1",
+        op: { op: "deviceRender", params: { tool: "makeup" } },
+        parentEditId: null,
+        idempotencyKey: "kd2",
+      }),
+    ).rejects.toThrow(/requires input_image/);
+    expect(assets.markEditFailed).toHaveBeenCalled();
+  });
+
   it("throws NoProviderError without creating a row when no provider supports the op", async () => {
     vi.mocked(assets.getAsset).mockResolvedValue(fakeAsset());
     const engine = new StudioEngine({ providers: [], store: fakeStore() });

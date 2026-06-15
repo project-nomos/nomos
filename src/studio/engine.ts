@@ -82,6 +82,10 @@ export interface EditRequest {
   idempotencyKey: string;
   /** Object key of a device/tap mask already uploaded for a localized op. */
   maskKey?: string | null;
+  /** Inline output bytes for a `deviceRender` op (the on-device render). Ignored for any other op. */
+  inlineInputBytes?: Uint8Array | null;
+  /** Mime of `inlineInputBytes` (defaults to the asset mime). */
+  inlineInputMime?: string;
 }
 
 function extFor(mime: string): string {
@@ -164,12 +168,24 @@ export class StudioEngine {
 
     await markEditRunning(ctx, edit.id, provider.name);
     try {
-      const inputBytes = await this.store.get(inputKey);
+      // For `deviceRender` the client ships the rendered pixels inline; every other
+      // op derives its input from the chain. Inline bytes are NEVER honored for
+      // another op (no source-bypass). The chain's source is still loaded when the
+      // identity gate needs an original-vs-result comparison.
+      const useInline = op.op === "deviceRender";
+      if (useInline && (!req.inlineInputBytes || req.inlineInputBytes.length === 0)) {
+        throw new Error("deviceRender requires input_image bytes");
+      }
+      const inlineBytes = useInline ? req.inlineInputBytes! : null;
+      const needSource = inlineBytes == null || meta.identityRisk !== "none";
+      const sourceBytes = needSource ? await this.store.get(inputKey) : new Uint8Array();
+      const providerBytes = inlineBytes ?? sourceBytes;
+      const providerMime = inlineBytes ? (req.inlineInputMime ?? asset.mime) : asset.mime;
       const maskBytes = req.maskKey ? await this.store.get(req.maskKey) : null;
 
       const out = await provider.execute(op, {
-        bytes: inputBytes,
-        mime: asset.mime,
+        bytes: providerBytes,
+        mime: providerMime,
         params: op.params,
         maskBytes,
       });
@@ -177,7 +193,7 @@ export class StudioEngine {
       // Identity gate for face-risk ops (skips when no embedder is configured).
       let identityScore: number | null = null;
       if (meta.identityRisk !== "none") {
-        const result = await this.identityGate(inputBytes, out.bytes, {
+        const result = await this.identityGate(sourceBytes, out.bytes, {
           threshold: this.identityThreshold,
         });
         identityScore = result.score;

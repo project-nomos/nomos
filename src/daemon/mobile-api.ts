@@ -1011,10 +1011,22 @@ async function handleStudioEdit(
       parentEditId?: string;
       idempotencyKey?: string;
       maskKey?: string;
+      inputImage?: Uint8Array;
     };
     const assetId = req.assetId ?? "";
     if (!isUuid(assetId)) {
       call.write({ kind: "error", message: "invalid asset id" });
+      return;
+    }
+    // Inline device-render bytes are only valid for the deviceRender op, and are
+    // capped well above a 4096px JPEG to keep the request bounded.
+    const inputImage = req.inputImage && req.inputImage.length > 0 ? req.inputImage : null;
+    if (inputImage && inputImage.length > 12 * 1024 * 1024) {
+      call.write({ kind: "error", message: "input image too large" });
+      return;
+    }
+    if (inputImage && req.op !== "deviceRender") {
+      call.write({ kind: "error", message: "input_image is only valid for deviceRender" });
       return;
     }
     // A client-supplied mask must live under this tenant's object prefix; never
@@ -1051,6 +1063,7 @@ async function handleStudioEdit(
         parentEditId,
         idempotencyKey: req.idempotencyKey || randomUUID(),
         maskKey: req.maskKey || null,
+        inlineInputBytes: inputImage,
       });
       call.write({
         kind: "done",

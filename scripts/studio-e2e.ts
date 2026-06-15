@@ -88,12 +88,31 @@ async function main(): Promise<void> {
   });
   log(`idempotent retry same edit: ${r1.id === r2.id}`);
 
+  // deviceRender: the client uploads on-device-rendered pixels (here simulated by a
+  // sharp tint) and the engine re-encodes + stores them as the edit output. Free,
+  // not consent-gated, not identity-gated.
+  const rendered = new Uint8Array(
+    await sharp(img).modulate({ saturation: 1.3, brightness: 1.05 }).jpeg().toBuffer(),
+  );
+  const dev = await engine.edit(ctx, {
+    assetId: asset.id,
+    op: { op: "deviceRender", params: { tool: "makeup", detail: "lips" } },
+    parentEditId: r1.id,
+    idempotencyKey: randomUUID(),
+    inlineInputBytes: rendered,
+  });
+  const devBytes = dev.outputKey ? await store.get(dev.outputKey) : null;
+  log(
+    `DEVICE  edit=${dev.id} status=${dev.status} provider=${dev.provider} cost=$${dev.costUsd} out=${devBytes?.byteLength ?? 0}B`,
+  );
+  if (dev.status !== "done" || !devBytes) throw new Error("deviceRender produced no output");
+
   // real generative edit via Gemini (GOOGLE_API_KEY). Best-effort; logs on failure.
   try {
     const gen = await engine.edit(ctx, {
       assetId: asset.id,
       op: { op: "editSemantic", params: { instruction: "make it warmer and a bit brighter" } },
-      parentEditId: r1.id,
+      parentEditId: dev.id,
       idempotencyKey: randomUUID(),
     });
     const genBytes = gen.outputKey ? await store.get(gen.outputKey) : null;

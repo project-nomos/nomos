@@ -20,8 +20,31 @@ describe("LocalSharpProvider", () => {
   it("supports only deterministic ops", () => {
     expect(provider.supports("adjust")).toBe(true);
     expect(provider.supports("crop")).toBe(true);
+    expect(provider.supports("deviceRender")).toBe(true);
     expect(provider.supports("editSemantic")).toBe(false);
     expect(provider.supports("upscale")).toBe(false);
+  });
+
+  it("deviceRender re-encodes the uploaded render to a clean jpeg, clamped to 4096px", async () => {
+    const img = await solid(5000, 2000, { r: 30, g: 60, b: 90 });
+    const op = validateOp({ op: "deviceRender", params: { tool: "makeup", detail: "lips" } });
+    const out = await provider.execute(op, { bytes: img, mime: "image/jpeg", params: op.params });
+    expect(out.provider).toBe("local-sharp");
+    expect(out.costUsd).toBe(0);
+    const meta = await sharp(Buffer.from(out.bytes)).metadata();
+    expect(meta.format).toBe("jpeg");
+    expect(Math.max(meta.width ?? 0, meta.height ?? 0)).toBeLessThanOrEqual(4096);
+  });
+
+  it("deviceRender rejects a malformed upload", async () => {
+    const op = validateOp({ op: "deviceRender", params: { tool: "makeup" } });
+    await expect(
+      provider.execute(op, {
+        bytes: new Uint8Array([1, 2, 3]),
+        mime: "image/jpeg",
+        params: op.params,
+      }),
+    ).rejects.toThrow();
   });
 
   it("applies a tonal adjust and returns a same-size jpeg at zero cost", async () => {
