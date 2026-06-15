@@ -63,3 +63,8 @@ skills/webapp-testing/
 skills/xlsx/
 skills/.anthropic-skills-fetched
 .gstack/
+
+# Locally-installed agent skills (e.g. `npx skills add Banuba/ai-skills`) — a tool
+# for the assistant, not part of this repo.
+.claude/skills/
+skills-lock.json
