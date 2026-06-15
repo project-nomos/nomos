@@ -21,6 +21,8 @@ const GENERATIVE_OPS: readonly StudioOpName[] = [
   "cutout",
   "upscale",
   "restore",
+  // Cloud fallback for retouch until the deterministic sidecar passes parity.
+  "retouch",
 ];
 
 export interface GenAIImageRequest {
@@ -62,6 +64,8 @@ function promptFor(op: StudioOp): string {
       return "Increase resolution and sharpness without changing the content or the person's identity.";
     case "restore":
       return "Restore this old or damaged photo: repair scratches, denoise, recover natural color. Do not change identity.";
+    case "retouch":
+      return "Subtly retouch this portrait: even out skin tone, soften blemishes and shine while keeping pores and natural texture. Do not change the person's identity, features, or proportions.";
     default:
       return "Edit this image.";
   }

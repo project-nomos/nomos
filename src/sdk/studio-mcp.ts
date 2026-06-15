@@ -22,6 +22,8 @@ import {
   GeminiImageProvider,
 } from "../studio/providers/gemini-image.ts";
 import { LocalSharpProvider, makePreview } from "../studio/providers/local-sharp.ts";
+import { SidecarProvider } from "../studio/providers/mediapipe-sidecar.ts";
+import { getStudioSidecarUrl } from "../studio/sidecar-launcher.ts";
 
 const log = createLogger("studio-mcp");
 
@@ -35,6 +37,11 @@ function tenantFor(userId: string): TenantContext {
 /** Wire the engine with the deterministic provider always, the GCP provider when configured. */
 export function buildStudioEngine(): StudioEngine {
   const providers: StudioProvider[] = [new LocalSharpProvider()];
+  // The Phase-3 sidecar (when up) runs deterministic ops free; register it BEFORE
+  // Gemini so a reachable sidecar wins and retouch only falls back to the cloud
+  // when the sidecar is absent.
+  const sidecarUrl = getStudioSidecarUrl();
+  if (sidecarUrl) providers.push(new SidecarProvider(sidecarUrl));
   const apiKey = process.env.GEMINI_API_KEY ?? process.env.GOOGLE_API_KEY;
   if (apiKey || process.env.GOOGLE_CLOUD_PROJECT) {
     try {
@@ -115,6 +122,17 @@ export function buildStudioMcpServer(userId: string): McpSdkServerConfigWithInst
       }),
   );
 
+  const studioRetouch = tool(
+    "studio_retouch",
+    "One-tap portrait retouch: even out skin and soften blemishes while keeping it natural (strength 0..1). Free + deterministic when the on-device/sidecar pipeline is available; otherwise a cloud edit (requires Cloud AI consent).",
+    { asset_id: z.string(), strength: z.number().min(0).max(1).optional() },
+    async (a) =>
+      applyOp(engine, userId, a.asset_id, {
+        op: "retouch",
+        params: a.strength === undefined ? {} : { strength: a.strength },
+      }),
+  );
+
   const studioCutout = tool(
     "studio_cutout",
     "Remove the background from the photo, keeping the main subject.",
@@ -158,6 +176,14 @@ export function buildStudioMcpServer(userId: string): McpSdkServerConfigWithInst
   return createSdkMcpServer({
     name: "nomos-studio",
     version: "1.0.0",
-    tools: [studioEdit, studioAdjust, studioCutout, studioUpscale, studioRestore, studioHistory],
+    tools: [
+      studioEdit,
+      studioAdjust,
+      studioRetouch,
+      studioCutout,
+      studioUpscale,
+      studioRestore,
+      studioHistory,
+    ],
   });
 }

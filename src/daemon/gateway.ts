@@ -437,6 +437,15 @@ export class Gateway {
         } catch (err) {
           log.warn({ err }, "studio: face embedder install skipped");
         }
+        // Best-effort: bring up the deterministic beauty-ops sidecar (external URL
+        // or `uv run` from the sibling clone). Non-fatal — retouch falls back to
+        // the cloud provider when it's absent.
+        try {
+          const { ensureStudioSidecar } = await import("../studio/sidecar-launcher.ts");
+          await ensureStudioSidecar();
+        } catch (err) {
+          log.warn({ err }, "studio: sidecar launch skipped");
+        }
       }
 
       // Style analysis: re-derive the user's writing voice daily. Self-gates on
@@ -614,6 +623,14 @@ export class Gateway {
     await this.grpcServer.stop();
     await this.connectServer.stop();
     await this.wsServer.stop();
+    if (FEATURES.studio()) {
+      try {
+        const { stopStudioSidecar } = await import("../studio/sidecar-launcher.ts");
+        await stopStudioSidecar();
+      } catch {
+        // best-effort
+      }
+    }
     await closeBrowser();
 
     log.info("Daemon stopped");

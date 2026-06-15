@@ -76,4 +76,15 @@ describe("studio op registry", () => {
   it("deviceRender requires a tool label", () => {
     expect(() => validateOp({ op: "deviceRender", params: {} })).toThrow(z.ZodError);
   });
+
+  it("retouch defaults strength to 0.5; deterministic + low identity-risk", () => {
+    const op = validateOp({ op: "retouch", params: {} });
+    expect(op.params).toEqual({ strength: 0.5 });
+    expect(OP_META.retouch.kind).toBe("deterministic");
+    expect(OP_META.retouch.identityRisk).toBe("low");
+  });
+
+  it("retouch rejects out-of-range strength", () => {
+    expect(() => validateOp({ op: "retouch", params: { strength: 2 } })).toThrow(z.ZodError);
+  });
 });

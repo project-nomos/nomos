@@ -75,6 +75,15 @@ const deviceRender = z.strictObject({
   detail: z.string().max(120).optional(),
 });
 
+/**
+ * Edge-preserving skin smoothing (one-tap retouch). Deterministic on the Phase-3
+ * MediaPipe sidecar (free); falls back to a generative Gemini pass (consent-gated)
+ * until the sidecar passes parity. Consent + cost follow the RESOLVED provider.
+ */
+const retouch = z.strictObject({
+  strength: z.number().min(0).max(1).default(0.5),
+});
+
 export const OP_SCHEMAS = {
   adjust,
   crop,
@@ -85,6 +94,7 @@ export const OP_SCHEMAS = {
   upscale,
   restore,
   deviceRender,
+  retouch,
 } as const;
 
 export type StudioOpName = keyof typeof OP_SCHEMAS;
@@ -121,6 +131,10 @@ export const OP_META: Record<StudioOpName, OpMeta> = {
   // The user previewed the exact pixels on-device (WYSIWYG), so it is free,
   // never consent-gated, and not identity-gated (no cloud model to second-guess).
   deviceRender: { kind: "deterministic", localized: false, identityRisk: "none" },
+  // Deterministic on the sidecar; the kind here is informational — consent keys
+  // off the resolved provider (sidecar = free, Gemini fallback = consent-gated).
+  // identityRisk low so the gate runs against the original when an embedder exists.
+  retouch: { kind: "deterministic", localized: false, identityRisk: "low" },
 };
 
 export function isStudioOpName(op: string): op is StudioOpName {
