@@ -17,6 +17,7 @@ import {
 beforeEach(() => {
   getConfigValue.mockReset();
   setConfigValue.mockReset();
+  delete process.env.NOMOS_STUDIO_CLOUD_AI;
 });
 
 describe("cloud AI consent", () => {
@@ -45,5 +46,15 @@ describe("cloud AI consent", () => {
   it("setCloudAIEnabled writes the consent config key", async () => {
     await setCloudAIEnabled(true);
     expect(setConfigValue).toHaveBeenCalledWith(CLOUD_AI_CONSENT_KEY, true);
+  });
+
+  it("honors the NOMOS_STUDIO_CLOUD_AI dev override even when the DB flag is off", async () => {
+    getConfigValue.mockResolvedValue(false);
+    process.env.NOMOS_STUDIO_CLOUD_AI = "1";
+    expect(await isCloudAIEnabled()).toBe(true);
+    process.env.NOMOS_STUDIO_CLOUD_AI = "true";
+    expect(await isCloudAIEnabled()).toBe(true);
+    process.env.NOMOS_STUDIO_CLOUD_AI = "0";
+    expect(await isCloudAIEnabled()).toBe(false); // falsy override → DB flag (off)
   });
 });

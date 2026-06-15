@@ -10,7 +10,16 @@ import { getConfigValue, setConfigValue } from "../db/config.ts";
 
 export const CLOUD_AI_CONSENT_KEY = "studio.cloud_ai_enabled";
 
+/** Dev/local override: force-enable cloud AI (e.g. the hosted-google.sh stack), so
+ * generative edits work without the per-customer DB toggle — which has no client UI
+ * yet. Never set in production; there the per-customer consent flag governs. */
+function devCloudAIOverride(): boolean {
+  const v = (process.env.NOMOS_STUDIO_CLOUD_AI ?? "").trim().toLowerCase();
+  return v === "1" || v === "true" || v === "yes" || v === "on";
+}
+
 export async function isCloudAIEnabled(): Promise<boolean> {
+  if (devCloudAIOverride()) return true;
   return (await getConfigValue<boolean>(CLOUD_AI_CONSENT_KEY)) === true;
 }
 
