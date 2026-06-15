@@ -144,6 +144,34 @@ describe("appendEdit", () => {
     expect(sqlOf(/insert into "studio_edits"/i)).toBe(false);
   });
 
+  it("rejects appending onto a parent that is not done yet (no half-built chain)", async () => {
+    addResult([assetRow({ head_edit_id: "ePar" })]); // SELECT asset (head == parent)
+    addResult([]); // no existing edit (idempotency)
+    addResult([{ status: "running", output_key: null }]); // SELECT parent edit -> not ready
+    const op = validateOp({ op: "adjust", params: {} });
+    await expect(
+      appendEdit(ctx, { assetId: "a1", parentEditId: "ePar", idempotencyKey: "k3", op }),
+    ).rejects.toBeInstanceOf(StaleParentError);
+    expect(sqlOf(/insert into "studio_edits"/i)).toBe(false);
+  });
+
+  it("appends a chained edit when the parent is done with output", async () => {
+    addResult([assetRow({ head_edit_id: "ePar" })]); // SELECT asset
+    addResult([]); // no existing edit
+    addResult([{ status: "done", output_key: "out.jpg" }]); // SELECT parent edit -> ready
+    addResult([editRow({ id: "e2" })]); // INSERT edit
+    addResult([]); // UPDATE head
+    const op = validateOp({ op: "adjust", params: {} });
+    const { edit, created } = await appendEdit(ctx, {
+      assetId: "a1",
+      parentEditId: "ePar",
+      idempotencyKey: "k4",
+      op,
+    });
+    expect(created).toBe(true);
+    expect(edit.id).toBe("e2");
+  });
+
   it("throws when the asset does not exist for this user", async () => {
     addResult([]); // SELECT asset -> none
     const op = validateOp({ op: "adjust", params: {} });

@@ -9,6 +9,7 @@
  * version and fails loudly on mismatch.
  */
 
+import sharp from "sharp";
 import type { ProviderInput, ProviderOutput, StudioProvider } from "../engine.ts";
 import type { StudioOp, StudioOpName } from "../ops.ts";
 
@@ -17,6 +18,10 @@ const SIDECAR_OPS: readonly StudioOpName[] = ["retouch"];
 
 /** HTTP contract version the daemon pins; the sidecar reports its own in /healthz. */
 export const SIDECAR_CONTRACT_VERSION = "v1";
+
+/** Reject an absurd response before decoding (~30MB decoded). */
+const MAX_RESPONSE_B64 = 40 * 1024 * 1024;
+const MAX_EDGE = 4096;
 
 interface SidecarEditResponse {
   image_b64: string;
@@ -51,9 +56,22 @@ export class SidecarProvider implements StudioProvider {
     }
     const json = (await resp.json()) as SidecarEditResponse;
     if (!json.image_b64) throw new Error(`studio sidecar ${op.op}: empty response`);
+    if (json.image_b64.length > MAX_RESPONSE_B64) {
+      throw new Error(`studio sidecar ${op.op}: response too large`);
+    }
+    // Trust boundary: Buffer.from(...,"base64") never throws on garbage, so
+    // re-encode through sharp — this validates it is a real image, strips any
+    // metadata, and clamps the size, mirroring the deviceRender path.
+    const decoded = Buffer.from(json.image_b64, "base64");
+    if (decoded.length === 0) throw new Error(`studio sidecar ${op.op}: undecodable image`);
+    const safe = await sharp(decoded)
+      .rotate()
+      .resize(MAX_EDGE, MAX_EDGE, { fit: "inside", withoutEnlargement: true })
+      .jpeg({ quality: 92 })
+      .toBuffer();
     return {
-      bytes: new Uint8Array(Buffer.from(json.image_b64, "base64")),
-      mime: json.mime ?? "image/jpeg",
+      bytes: new Uint8Array(safe),
+      mime: "image/jpeg",
       costUsd: json.cost_usd ?? 0,
       provider: this.name,
     };

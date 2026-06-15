@@ -227,10 +227,26 @@ export async function appendEdit(
       .executeTakeFirst();
     if (existing) return { edit: mapEdit(existing), created: false };
 
-    // Optimistic concurrency: the edit must build on the current head.
+    // Optimistic concurrency: the edit must build on the current head AND the
+    // parent must already be a finished, output-bearing edit. Without the status
+    // check, a second edit submitted while the parent is still running passes the
+    // head check (head is advanced at append time) and then silently builds on the
+    // ORIGINAL bytes (resolveInputKey falls back when outputKey is null). The
+    // asset row is locked above, so reading the parent here is race-free.
     const head = asset.head_edit_id ?? null;
     const parent = params.parentEditId ?? null;
     if (parent !== head) throw new StaleParentError(parent, head);
+    if (parent) {
+      const parentEdit = await trx
+        .selectFrom("studio_edits")
+        .select(["status", "output_key"])
+        .where("id", "=", parent)
+        .where("user_id", "=", ctx.userId)
+        .executeTakeFirst();
+      if (!parentEdit || parentEdit.status !== "done" || !parentEdit.output_key) {
+        throw new StaleParentError(parent, head);
+      }
+    }
 
     const inserted = await trx
       .insertInto("studio_edits")

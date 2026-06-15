@@ -118,6 +118,29 @@ export class StudioEngine {
     return provider;
   }
 
+  /**
+   * Resolve + tenant-validate the mask for a localized op. The key may arrive on
+   * the transport field (`req.maskKey`) OR inside the op params (the op registry
+   * is the cross-interface contract — eraser requires `params.maskKey`). Studio
+   * object keys embed the owning asset (`.../studio/<assetId>/...`); we require
+   * that asset to resolve under THIS user (getAsset is user_id-scoped), so a
+   * client can never point the mask at another tenant's object.
+   */
+  private async resolveMask(
+    ctx: TenantContext,
+    req: EditRequest,
+    op: StudioOp,
+  ): Promise<Uint8Array | null> {
+    const paramMask = (op.params as { maskKey?: string }).maskKey;
+    const key = req.maskKey ?? paramMask;
+    if (!key) return null;
+    const assetId = key.match(/\/studio\/([^/]+)\//)?.[1];
+    if (!assetId || !(await getAsset(ctx, assetId))) {
+      throw new Error("invalid mask reference");
+    }
+    return this.store.get(key);
+  }
+
   /** The input image for an edit is its parent's output, else the original. */
   private async resolveInputKey(
     ctx: TenantContext,
@@ -126,7 +149,14 @@ export class StudioEngine {
   ): Promise<string> {
     if (!parentEditId) return asset.objectKey;
     const parent = await getEdit(ctx, parentEditId);
-    return parent?.outputKey ?? asset.objectKey;
+    // Fail loud rather than silently building on the original: a non-null parent
+    // with no output means the chain is being mutated out from under us (the
+    // appendEdit OCC guards against this, this is defense in depth).
+    if (!parent) throw new StudioAssetNotFoundError(parentEditId);
+    if (parent.status !== "done" || !parent.outputKey) {
+      throw new Error(`studio parent edit ${parentEditId} is not ready (status=${parent.status})`);
+    }
+    return parent.outputKey;
   }
 
   /**
@@ -181,7 +211,7 @@ export class StudioEngine {
       const sourceBytes = needSource ? await this.store.get(inputKey) : new Uint8Array();
       const providerBytes = inlineBytes ?? sourceBytes;
       const providerMime = inlineBytes ? (req.inlineInputMime ?? asset.mime) : asset.mime;
-      const maskBytes = req.maskKey ? await this.store.get(req.maskKey) : null;
+      const maskBytes = await this.resolveMask(ctx, req, op);
 
       const out = await provider.execute(op, {
         bytes: providerBytes,

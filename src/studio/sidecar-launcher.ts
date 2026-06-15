@@ -20,6 +20,28 @@ const log = createLogger("studio-sidecar");
 let sidecarUrl: string | null = null;
 let child: ChildProcess | null = null;
 let stopping = false;
+let exitHookInstalled = false;
+
+/** Synchronous best-effort group-kill so a process.exit (incl. the
+ * uncaughtException path that skips the async gateway.stop) never orphans the
+ * `uv`/python tree. Registered once, when we first spawn. */
+function installExitBackstop(): void {
+  if (exitHookInstalled) return;
+  exitHookInstalled = true;
+  process.on("exit", () => {
+    if (child?.pid) {
+      try {
+        process.kill(-child.pid, "SIGTERM");
+      } catch {
+        try {
+          child.kill("SIGTERM");
+        } catch {
+          // already gone
+        }
+      }
+    }
+  });
+}
 
 export function getStudioSidecarUrl(): string | null {
   return sidecarUrl;
@@ -69,34 +91,58 @@ export async function ensureStudioSidecar(): Promise<string | null> {
   const projectPath = process.env.NOMOS_STUDIO_SIDECAR_PATH ?? "../nomos-studio-sidecar";
   const port = process.env.NOMOS_STUDIO_SIDECAR_PORT ?? "8799";
   const url = `http://127.0.0.1:${port}`;
+
+  // Adopt an instance already listening on the port (e.g. an orphan from a prior
+  // hard-kill) instead of spawning a duplicate that would hit EADDRINUSE.
+  if (await healthOk(url)) {
+    sidecarUrl = url;
+    log.info({ url }, "studio sidecar: adopted an instance already on the port");
+    return url;
+  }
+
   stopping = false;
   try {
+    // detached:true -> own process group, so teardown can group-kill the python
+    // grandchild uv spawns. stdio ignored so unread pipes can't fill/block or
+    // keep the event loop alive.
     child = spawn("uv", ["run", "--project", projectPath, "nomos-studio-sidecar"], {
-      stdio: ["ignore", "pipe", "pipe"],
+      stdio: ["ignore", "ignore", "ignore"],
+      detached: true,
       env: { ...process.env, NOMOS_STUDIO_SIDECAR_PORT: port },
     });
+    installExitBackstop();
+    const myPid = child.pid;
+    child.unref();
     child.on("error", (err) => {
       if (!stopping) log.warn({ err }, "studio sidecar: spawn error; retouch falls back to cloud");
     });
     child.on("exit", (code) => {
       if (!stopping) log.warn({ code }, "studio sidecar exited");
-      child = null;
-      sidecarUrl = null;
+      // Only clear if THIS child is still the tracked one (guard re-adopt races).
+      if (child?.pid === myPid) {
+        child = null;
+        sidecarUrl = null;
+      }
     });
   } catch (err) {
     log.warn({ err }, "studio sidecar: could not spawn uv; retouch falls back to cloud");
     return null;
   }
 
-  for (let i = 0; i < 30; i++) {
+  // Cold `uv run` resolves + installs a heavy venv (MediaPipe/OpenCV) on first
+  // boot, which can far exceed 15s — make the budget generous + env-tunable.
+  const bootMs = Number(process.env.NOMOS_STUDIO_SIDECAR_BOOT_MS ?? "90000");
+  const deadline = bootMs > 0 ? bootMs : 90000;
+  const stepMs = 500;
+  for (let waited = 0; waited < deadline; waited += stepMs) {
     if (await healthOk(url)) {
       sidecarUrl = url;
       log.info({ url, projectPath }, "studio sidecar: ready");
       return url;
     }
-    await new Promise((r) => setTimeout(r, 500));
+    await new Promise((r) => setTimeout(r, stepMs));
   }
-  log.warn("studio sidecar: did not become healthy in time; tearing down");
+  log.warn({ bootMs: deadline }, "studio sidecar: did not become healthy in time; tearing down");
   await stopStudioSidecar();
   return null;
 }
@@ -104,11 +150,17 @@ export async function ensureStudioSidecar(): Promise<string | null> {
 export async function stopStudioSidecar(): Promise<void> {
   stopping = true;
   sidecarUrl = null;
-  if (child) {
+  if (child?.pid) {
+    // Kill the whole process group (uv + the python grandchild). Fall back to a
+    // direct kill if the group signal fails.
     try {
-      child.kill("SIGTERM");
+      process.kill(-child.pid, "SIGTERM");
     } catch {
-      // already gone
+      try {
+        child.kill("SIGTERM");
+      } catch {
+        // already gone
+      }
     }
     child = null;
   }
