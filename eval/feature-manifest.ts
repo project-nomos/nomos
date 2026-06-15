@@ -229,9 +229,14 @@ export const FEATURES: FeatureSpec[] = [
   {
     id: "studio",
     summary:
-      "Hosted-only media asset + edit pipeline (gated). Immutable original + a non-destructive op chain: validate op -> consent gate (cloud ops only) -> append (optimistic concurrency + idempotency) -> provider (local deterministic / GCP generative) -> identity gate (face-risk ops) -> persist output + preview. Per-user scoped.",
+      "Hosted-only media asset + edit pipeline (gated). Immutable original + a non-destructive op chain: validate op -> consent gate (cloud ops only) -> append (optimistic concurrency: parent must be a done+output edit) + idempotency -> provider (local-sharp deterministic / mediapipe-sidecar deterministic / GCP generative) -> identity gate (face-risk ops) -> persist output + preview. Manual on-device renders (adjust/makeup/reshape/hair/body) commit via the deviceRender op (the client uploads its own pixels, re-encoded server-side). retouch routes to the deterministic sidecar when up, else the generative cloud fallback. Phase-3 depth ops (muscle/hairstyle/beard/relight/expand/sky) are generative. Per-user scoped.",
     trigger: { kind: "turn", gate: "studio" },
-    entry: ["buildStudioMcpServer", "buildStudioEngine", "assertIdentityPreserved"],
+    entry: [
+      "buildStudioMcpServer",
+      "buildStudioEngine",
+      "assertIdentityPreserved",
+      "ensureStudioSidecar",
+    ],
     effects: [
       {
         claim: "uploaded originals are recorded as studio_assets rows",
@@ -242,6 +247,31 @@ export const FEATURES: FeatureSpec[] = [
         claim: "each edit appends a completed studio_edits op row",
         sql: {
           query: "SELECT count(*) FROM studio_edits WHERE status = 'done'",
+          expect: "nonzero",
+        },
+        notExercised: true,
+      },
+      {
+        claim: "on-device renders commit as deviceRender edits (client-uploaded pixels)",
+        sql: {
+          query: "SELECT count(*) FROM studio_edits WHERE op = 'deviceRender' AND status = 'done'",
+          expect: "nonzero",
+        },
+        notExercised: true,
+      },
+      {
+        claim: "one-tap retouch records a done studio_edits row (sidecar or cloud fallback)",
+        sql: {
+          query: "SELECT count(*) FROM studio_edits WHERE op = 'retouch' AND status = 'done'",
+          expect: "nonzero",
+        },
+        notExercised: true,
+      },
+      {
+        claim: "Phase-3 generative depth ops record done studio_edits rows",
+        sql: {
+          query:
+            "SELECT count(*) FROM studio_edits WHERE op IN ('muscle','hairstyle','beard','relight','expand','sky') AND status = 'done'",
           expect: "nonzero",
         },
         notExercised: true,
@@ -258,6 +288,9 @@ export const FEATURES: FeatureSpec[] = [
       "every generative (cloud) op is gated by the cloudAI consent toggle",
       "every face-touching generative op passes the identity gate (assertIdentityPreserved)",
       "a retried edit with a committed idempotency_key returns the existing row, never re-charges",
+      "an edit only chains onto a parent that is done with an output (no half-built chain)",
+      "deviceRender requires client bytes and is free + never consent/identity-gated (WYSIWYG)",
+      "a client-supplied mask must resolve to a studio asset owned by the same user",
     ],
   },
 
