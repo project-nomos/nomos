@@ -593,6 +593,7 @@ message MStudioCreateAssetResponse {
 
 message MStudioAssetRef {
   string asset_id = 1;
+  bool original = 2;        // GetAssetUrl: presign the ORIGINAL (for before/after compare)
 }
 message MStudioAssetUrlResponse {
   string url = 1;           // presigned GET for the current head (or original)

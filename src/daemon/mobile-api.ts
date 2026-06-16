@@ -1008,12 +1008,14 @@ async function handleStudioGetAssetUrl(
   call: grpc.ServerUnaryCall<unknown, unknown>,
   ctx: TenantContext,
 ): Promise<{ url: string; expiresAt: number }> {
-  const assetId = (call.request as { assetId?: string }).assetId ?? "";
+  const req = call.request as { assetId?: string; original?: boolean };
+  const assetId = req.assetId ?? "";
   if (!isUuid(assetId)) throw notFound("studio asset not found");
   const asset = await getAsset(ctx, assetId);
   if (!asset) throw notFound("studio asset not found");
+  // The immutable original (before/after compare) vs the current head.
   let key = asset.objectKey;
-  if (asset.headEditId) {
+  if (!req.original && asset.headEditId) {
     const head = await getEdit(ctx, asset.headEditId);
     if (head?.outputKey) key = head.outputKey;
   }
