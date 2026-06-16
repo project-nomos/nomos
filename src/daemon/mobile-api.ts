@@ -972,8 +972,14 @@ async function handleStudioCreateAsset(
   };
   const mime = req.mime || "image/jpeg";
   const ext = mime === "image/png" ? "png" : "jpg";
-  const key = objectKey("studio", randomUUID(), `original.${ext}`);
+  // The object key must embed the asset's OWN id (not a throwaway uuid): a mask
+  // uploaded via this same RPC is later passed back as `maskKey`, and the engine
+  // resolves it by extracting `/studio/<id>/` and requiring getAsset(<id>) to
+  // exist. A mismatched id is exactly what produced "invalid mask reference".
+  const assetId = randomUUID();
+  const key = objectKey("studio", assetId, `original.${ext}`);
   const asset = await createAsset(ctx, {
+    id: assetId,
     objectKey: key,
     contentHash: req.contentHash ?? "",
     mime,

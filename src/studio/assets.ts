@@ -121,6 +121,14 @@ function mapEdit(r: Selectable<StudioEditsTable>): StudioEdit {
 export async function createAsset(
   ctx: TenantContext,
   params: {
+    /**
+     * Explicit row id. Callers pass this so the object key can embed the SAME id
+     * (`.../studio/<id>/...`); the localized-edit path relies on that to resolve
+     * a mask back to a real asset (see `StudioEngine.resolveMask`). When omitted
+     * the DB generates one — but then the key must NOT be built from a throwaway
+     * uuid, or masks uploaded under that key fail with "invalid mask reference".
+     */
+    id?: string;
     objectKey: string;
     contentHash: string;
     mime: string;
@@ -134,6 +142,7 @@ export async function createAsset(
   const row = await db
     .insertInto("studio_assets")
     .values({
+      ...(params.id ? { id: params.id } : {}),
       user_id: ctx.userId,
       object_key: params.objectKey,
       content_hash: params.contentHash,

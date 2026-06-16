@@ -145,6 +145,77 @@ describe("StudioEngine.edit", () => {
     expect(assets.markEditDone).toHaveBeenCalled();
   });
 
+  it("resolves a localized mask whose key embeds the asset id (no 'invalid mask reference')", async () => {
+    // getAsset resolves the target a1 AND the asset embedded in the mask key.
+    vi.mocked(assets.getAsset).mockImplementation(async (_ctx, id) =>
+      id === "a1" ? fakeAsset() : null,
+    );
+    vi.mocked(assets.appendEdit).mockResolvedValue({
+      edit: fakeEdit({ op: "eraser", status: "pending" }),
+      created: true,
+    });
+    vi.mocked(assets.markEditRunning).mockResolvedValue(
+      fakeEdit({ op: "eraser", status: "running" }),
+    );
+    vi.mocked(assets.markEditDone).mockResolvedValue(
+      fakeEdit({ op: "eraser", status: "done", outputKey: "out.jpg" }),
+    );
+    const maskBytes = Buffer.from([7, 7, 7]);
+    const store = fakeStore();
+    vi.mocked(store.get).mockImplementation(async (key: string) =>
+      key.includes("mask-") ? maskBytes : Buffer.from([1, 2, 3]),
+    );
+    const provider = fakeProvider();
+    const engine = new StudioEngine({
+      providers: [provider],
+      store,
+      isCloudAIEnabled: async () => true,
+      identityGate: vi.fn(async () => ({ checked: false, score: null, passed: true })),
+    });
+
+    const edit = await engine.edit(ctx, {
+      assetId: "a1",
+      op: { op: "eraser", params: { maskKey: "org/local/studio/a1/mask-1.png" } },
+      parentEditId: null,
+      idempotencyKey: "k-mask",
+    });
+
+    expect(edit.status).toBe("done");
+    const providerInput = vi.mocked(provider.execute).mock.calls[0][1];
+    expect(Array.from(providerInput.maskBytes ?? [])).toEqual([7, 7, 7]);
+  });
+
+  it("rejects a mask whose key points at an asset that does not resolve for this user", async () => {
+    vi.mocked(assets.getAsset).mockImplementation(async (_ctx, id) =>
+      id === "a1" ? fakeAsset() : null,
+    );
+    vi.mocked(assets.appendEdit).mockResolvedValue({
+      edit: fakeEdit({ op: "eraser", status: "pending" }),
+      created: true,
+    });
+    vi.mocked(assets.markEditRunning).mockResolvedValue(
+      fakeEdit({ op: "eraser", status: "running" }),
+    );
+    const provider = fakeProvider();
+    const engine = new StudioEngine({
+      providers: [provider],
+      store: fakeStore(),
+      isCloudAIEnabled: async () => true,
+      identityGate: vi.fn(async () => ({ checked: false, score: null, passed: true })),
+    });
+
+    await expect(
+      engine.edit(ctx, {
+        assetId: "a1",
+        op: { op: "eraser", params: { maskKey: "org/local/studio/zzz/mask-1.png" } },
+        parentEditId: null,
+        idempotencyKey: "k-bad-mask",
+      }),
+    ).rejects.toThrow("invalid mask reference");
+    expect(provider.execute).not.toHaveBeenCalled();
+    expect(assets.markEditFailed).toHaveBeenCalled();
+  });
+
   it("blocks a generative op when cloud-AI consent is off, before any row is created", async () => {
     vi.mocked(assets.getAsset).mockResolvedValue(fakeAsset());
     const provider = fakeProvider();

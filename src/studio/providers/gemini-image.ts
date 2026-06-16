@@ -10,7 +10,7 @@
  * surfaced as a typed ProviderRefusedError. See the design doc sections 2 + 6.
  */
 
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI, HarmBlockThreshold, HarmCategory, type SafetySetting } from "@google/genai";
 import type { ProviderInput, ProviderOutput, StudioProvider } from "../engine.ts";
 import { OP_META, type StudioOp, type StudioOpName } from "../ops.ts";
 import { compositeMasked } from "./local-sharp.ts";
@@ -137,6 +137,52 @@ export class GeminiImageProvider implements StudioProvider {
 }
 
 /**
+ * The user is editing THEIR OWN photo with explicit Cloud-AI consent, so the
+ * configurable safety filters are relaxed to BLOCK_NONE — a portrait edit was
+ * being refused outright (`IMAGE_SAFETY`) with the filters at their default.
+ * Non-configurable guards (e.g. minors, CSAM, public figures) are NOT affected.
+ *
+ * The set is SURFACE-DEPENDENT: the `HARM_CATEGORY_IMAGE_*` categories that drive
+ * the IMAGE_SAFETY finish reason exist ONLY on Vertex — the @google/genai types
+ * mark them "not supported in Gemini API", and sending them on the API-key surface
+ * 400s the whole request. So Gemini API gets the 4 text categories; Vertex adds
+ * the 4 image ones. (On the API-key surface IMAGE_SAFETY is largely
+ * non-configurable; Vertex is where this fully takes effect.)
+ */
+const TEXT_HARM_CATEGORIES = [
+  HarmCategory.HARM_CATEGORY_HARASSMENT,
+  HarmCategory.HARM_CATEGORY_HATE_SPEECH,
+  HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
+  HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+];
+const IMAGE_HARM_CATEGORIES = [
+  HarmCategory.HARM_CATEGORY_IMAGE_HATE,
+  HarmCategory.HARM_CATEGORY_IMAGE_HARASSMENT,
+  HarmCategory.HARM_CATEGORY_IMAGE_DANGEROUS_CONTENT,
+  HarmCategory.HARM_CATEGORY_IMAGE_SEXUALLY_EXPLICIT,
+];
+
+export function relaxedSafetyFor(surface: "gemini" | "vertex"): SafetySetting[] {
+  const categories =
+    surface === "vertex"
+      ? [...TEXT_HARM_CATEGORIES, ...IMAGE_HARM_CATEGORIES]
+      : TEXT_HARM_CATEGORIES;
+  return categories.map((category) => ({ category, threshold: HarmBlockThreshold.BLOCK_NONE }));
+}
+
+/**
+ * Turn a raw model finish reason into something the editor can show a person.
+ * A bare "IMAGE_SAFETY" is opaque; this names what happened without pretending
+ * the edit succeeded.
+ */
+export function humanizeRefusal(finishReason: string): string {
+  if (/SAFETY|PROHIBITED|BLOCK|RECITATION/i.test(finishReason)) {
+    return "the photo or instruction was blocked by the provider's content-safety filter";
+  }
+  return finishReason;
+}
+
+/**
  * Real client over `@google/genai`. Dev uses the Gemini API key; prod uses Vertex
  * (ADC / workload identity). Selected by NOMOS_STUDIO_PROVIDER, else inferred from
  * GOOGLE_CLOUD_PROJECT. Never hard-wires the model.
@@ -156,6 +202,9 @@ export function createGoogleGenAIImageClient(opts?: { model?: string }): GenAIIm
           location: process.env.CLOUD_ML_REGION ?? "us-central1",
         })
       : new GoogleGenAI({ apiKey });
+  // The image harm categories only exist on Vertex; sending them to the Gemini
+  // API surface 400s the request (see relaxedSafetyFor).
+  const safetySettings = relaxedSafetyFor(surface === "vertex" ? "vertex" : "gemini");
 
   return {
     model,
@@ -171,6 +220,7 @@ export function createGoogleGenAIImageClient(opts?: { model?: string }): GenAIIm
             ],
           },
         ],
+        config: { safetySettings },
       });
       const candidate = resp.candidates?.[0];
       const parts = candidate?.content?.parts ?? [];
@@ -181,7 +231,7 @@ export function createGoogleGenAIImageClient(opts?: { model?: string }): GenAIIm
         }
       }
       const reason = candidate?.finishReason ?? "no image returned";
-      throw new ProviderRefusedError("generate", String(reason));
+      throw new ProviderRefusedError("generate", humanizeRefusal(String(reason)));
     },
   };
 }

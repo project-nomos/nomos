@@ -1,7 +1,26 @@
 import sharp from "sharp";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { validateOp } from "../ops.ts";
-import { type GenAIImageClient, GeminiImageProvider } from "./gemini-image.ts";
+
+// Mock the SDK so the real client can be exercised without creds or a network.
+const { generateContent } = vi.hoisted(() => ({ generateContent: vi.fn() }));
+vi.mock("@google/genai", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@google/genai")>();
+  // A regular function (not an arrow) so `new GoogleGenAI(...)` is constructable;
+  // the returned object becomes the instance.
+  return {
+    ...actual,
+    GoogleGenAI: vi.fn(function () {
+      return { models: { generateContent } };
+    }),
+  };
+});
+
+import {
+  createGoogleGenAIImageClient,
+  type GenAIImageClient,
+  GeminiImageProvider,
+} from "./gemini-image.ts";
 
 async function solid(
   w: number,
@@ -69,5 +88,97 @@ describe("GeminiImageProvider", () => {
     const meta = await sharp(Buffer.from(out.bytes)).metadata();
     expect(meta.format).toBe("jpeg");
     expect(meta.width).toBe(20);
+  });
+});
+
+describe("createGoogleGenAIImageClient (real client over the mocked SDK)", () => {
+  const SAVED = [
+    "GEMINI_API_KEY",
+    "GOOGLE_API_KEY",
+    "NOMOS_STUDIO_PROVIDER",
+    "GOOGLE_CLOUD_PROJECT",
+  ];
+  const prev: Record<string, string | undefined> = {};
+
+  beforeEach(() => {
+    generateContent.mockReset();
+    for (const k of SAVED) {
+      prev[k] = process.env[k];
+      delete process.env[k];
+    }
+  });
+  afterEach(() => {
+    for (const k of SAVED) {
+      if (prev[k] === undefined) delete process.env[k];
+      else process.env[k] = prev[k];
+    }
+  });
+
+  function okImage() {
+    generateContent.mockResolvedValue({
+      candidates: [
+        { content: { parts: [{ inlineData: { data: "QUJD", mimeType: "image/png" } }] } },
+      ],
+    });
+  }
+  function sentCategories(): string[] {
+    const arg = generateContent.mock.calls[0][0] as {
+      config?: { safetySettings?: { category: string; threshold: string }[] };
+    };
+    return (arg.config?.safetySettings ?? []).map((s) => s.category);
+  }
+  function sentThresholds(): string[] {
+    const arg = generateContent.mock.calls[0][0] as {
+      config?: { safetySettings?: { category: string; threshold: string }[] };
+    };
+    return (arg.config?.safetySettings ?? []).map((s) => s.threshold);
+  }
+
+  it("Vertex surface: relaxes text AND image harm categories", async () => {
+    process.env.GOOGLE_CLOUD_PROJECT = "test-project";
+    process.env.NOMOS_STUDIO_PROVIDER = "vertex";
+    okImage();
+    const out = await createGoogleGenAIImageClient({ model: "m" }).editImage({
+      imageBase64: "x",
+      mimeType: "image/jpeg",
+      prompt: "warm it",
+    });
+
+    expect(out).toEqual({ base64: "QUJD", mimeType: "image/png" });
+    const cats = sentCategories();
+    // The IMAGE_* categories govern the IMAGE_SAFETY finish reason — Vertex only.
+    expect(cats).toContain("HARM_CATEGORY_IMAGE_SEXUALLY_EXPLICIT");
+    expect(cats).toContain("HARM_CATEGORY_SEXUALLY_EXPLICIT");
+    expect(cats).toHaveLength(8);
+    expect(sentThresholds().every((t) => t === "BLOCK_NONE")).toBe(true);
+  });
+
+  it("Gemini API surface: text categories only (image categories 400 there)", async () => {
+    process.env.GEMINI_API_KEY = "test-key"; // forces the API-key surface
+    okImage();
+    await createGoogleGenAIImageClient({ model: "m" }).editImage({
+      imageBase64: "x",
+      mimeType: "image/jpeg",
+      prompt: "warm it",
+    });
+
+    const cats = sentCategories();
+    expect(cats).toContain("HARM_CATEGORY_SEXUALLY_EXPLICIT");
+    expect(cats.some((c) => c.startsWith("HARM_CATEGORY_IMAGE_"))).toBe(false);
+    expect(cats).toHaveLength(4);
+  });
+
+  it("surfaces a safety finish reason as a human-readable refusal", async () => {
+    process.env.GEMINI_API_KEY = "test-key";
+    generateContent.mockResolvedValue({
+      candidates: [{ finishReason: "IMAGE_SAFETY", content: { parts: [] } }],
+    });
+    await expect(
+      createGoogleGenAIImageClient({ model: "m" }).editImage({
+        imageBase64: "x",
+        mimeType: "image/jpeg",
+        prompt: "p",
+      }),
+    ).rejects.toThrow(/content-safety filter/i);
   });
 });
