@@ -206,6 +206,8 @@ service MobileApi {
   rpc StudioHistory (MStudioAssetRef) returns (MStudioHistoryResponse);
   // Recent editing sessions for the Home launchpad ("Pick up where you left off").
   rpc StudioListAssets (MStudioListAssetsRequest) returns (MStudioListAssetsResponse);
+  // AI-native: a vision model looks at the photo and proposes tap-to-apply edits.
+  rpc StudioSuggestEdits (MStudioAssetRef) returns (MStudioSuggestionsResponse);
   // The on-device identity check reports its score for an edit (0..1).
   rpc StudioReportIdentity (MStudioIdentityReport) returns (MAck);
 }
@@ -653,4 +655,13 @@ message MStudioAssetSummary {
 }
 message MStudioListAssetsResponse {
   repeated MStudioAssetSummary assets = 1;
+}
+
+// A per-photo edit suggestion: a short chip label + the instruction it applies.
+message MStudioSuggestion {
+  string label = 1;
+  string prompt = 2;
+}
+message MStudioSuggestionsResponse {
+  repeated MStudioSuggestion suggestions = 1;
 }

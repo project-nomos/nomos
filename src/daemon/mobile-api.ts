@@ -57,6 +57,7 @@ import {
   StaleParentError,
 } from "../studio/assets.ts";
 import { ConsentRequiredError, isCloudAIEnabled, setCloudAIEnabled } from "../studio/consent.ts";
+import { suggestEdits } from "../studio/suggest.ts";
 import { getObjectStore, objectKey } from "../storage/object-store.ts";
 
 const log = createLogger("mobile-api");
@@ -172,6 +173,9 @@ export function buildMobileApiHandlers(deps: MobileApiDeps) {
     ),
     StudioListAssets: withAuthUnary("/nomos.MobileApi/StudioListAssets", (call, ctx) =>
       handleStudioListAssets(call, ctx),
+    ),
+    StudioSuggestEdits: withAuthUnary("/nomos.MobileApi/StudioSuggestEdits", (call, ctx) =>
+      handleStudioSuggestEdits(call, ctx),
     ),
     StudioReportIdentity: withAuthUnary("/nomos.MobileApi/StudioReportIdentity", (call, ctx) =>
       handleStudioReportIdentity(call, ctx),
@@ -1191,6 +1195,33 @@ async function handleStudioListAssets(
     }),
   );
   return { assets };
+}
+
+async function handleStudioSuggestEdits(
+  call: grpc.ServerUnaryCall<unknown, unknown>,
+  ctx: TenantContext,
+): Promise<{ suggestions: Array<{ label: string; prompt: string }> }> {
+  const assetId = (call.request as { assetId?: string }).assetId ?? "";
+  if (!isUuid(assetId)) return { suggestions: [] };
+  // Analysis sends the photo to the cloud vision model, so it rides the SAME Cloud-AI
+  // consent as editing. Off -> empty, and the client falls back to its static chips.
+  if (!(await isCloudAIEnabled())) return { suggestions: [] };
+  const asset = await getAsset(ctx, assetId);
+  if (!asset) return { suggestions: [] };
+  // Analyze the CURRENT head so the chips reflect the latest result, not the original.
+  let key = asset.objectKey;
+  if (asset.headEditId) {
+    const head = await getEdit(ctx, asset.headEditId);
+    if (head?.outputKey) key = head.outputKey;
+  }
+  let bytes: Uint8Array;
+  try {
+    bytes = await getObjectStore().get(key);
+  } catch {
+    return { suggestions: [] };
+  }
+  const suggestions = await suggestEdits(bytes, asset.mime);
+  return { suggestions };
 }
 
 async function handleStudioReportIdentity(

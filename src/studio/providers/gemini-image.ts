@@ -187,13 +187,18 @@ export function humanizeRefusal(finishReason: string): string {
  * (ADC / workload identity). Selected by NOMOS_STUDIO_PROVIDER, else inferred from
  * GOOGLE_CLOUD_PROJECT. Never hard-wires the model.
  */
-export function createGoogleGenAIImageClient(opts?: { model?: string }): GenAIImageClient {
-  const model = opts?.model ?? process.env.NOMOS_STUDIO_GEMINI_MODEL ?? "gemini-2.5-flash-image";
-  // Detection mirrors embeddings.ts: an API key (GOOGLE_API_KEY / GEMINI_API_KEY)
-  // -> Gemini API; otherwise GOOGLE_CLOUD_PROJECT -> Vertex (ADC). Overridable.
+/**
+ * Construct the shared GoogleGenAI client + its normalized surface. Detection mirrors
+ * embeddings.ts: an API key (GOOGLE_API_KEY / GEMINI_API_KEY) -> Gemini API; otherwise
+ * GOOGLE_CLOUD_PROJECT -> Vertex (ADC). Overridable via NOMOS_STUDIO_PROVIDER. Reused by
+ * the image client AND the vision-suggestion path so both pick the same surface/creds.
+ */
+export function createGenAI(): { ai: GoogleGenAI; surface: "gemini" | "vertex" } {
   const apiKey = process.env.GEMINI_API_KEY ?? process.env.GOOGLE_API_KEY;
-  const surface = process.env.NOMOS_STUDIO_PROVIDER ?? (apiKey ? "gemini" : "vertex");
-
+  const surface =
+    (process.env.NOMOS_STUDIO_PROVIDER ?? (apiKey ? "gemini" : "vertex")) === "vertex"
+      ? "vertex"
+      : "gemini";
   const ai =
     surface === "vertex"
       ? new GoogleGenAI({
@@ -202,9 +207,15 @@ export function createGoogleGenAIImageClient(opts?: { model?: string }): GenAIIm
           location: process.env.CLOUD_ML_REGION ?? "us-central1",
         })
       : new GoogleGenAI({ apiKey });
+  return { ai, surface };
+}
+
+export function createGoogleGenAIImageClient(opts?: { model?: string }): GenAIImageClient {
+  const model = opts?.model ?? process.env.NOMOS_STUDIO_GEMINI_MODEL ?? "gemini-2.5-flash-image";
+  const { ai, surface } = createGenAI();
   // The image harm categories only exist on Vertex; sending them to the Gemini
   // API surface 400s the request (see relaxedSafetyFor).
-  const safetySettings = relaxedSafetyFor(surface === "vertex" ? "vertex" : "gemini");
+  const safetySettings = relaxedSafetyFor(surface);
 
   return {
     model,
