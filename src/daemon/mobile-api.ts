@@ -51,6 +51,7 @@ import {
   createAsset,
   getAsset,
   getEdit,
+  listAssets,
   listEdits,
   recordIdentityScore,
   StaleParentError,
@@ -168,6 +169,9 @@ export function buildMobileApiHandlers(deps: MobileApiDeps) {
     ),
     StudioHistory: withAuthUnary("/nomos.MobileApi/StudioHistory", (call, ctx) =>
       handleStudioHistory(call, ctx),
+    ),
+    StudioListAssets: withAuthUnary("/nomos.MobileApi/StudioListAssets", (call, ctx) =>
+      handleStudioListAssets(call, ctx),
     ),
     StudioReportIdentity: withAuthUnary("/nomos.MobileApi/StudioReportIdentity", (call, ctx) =>
       handleStudioReportIdentity(call, ctx),
@@ -1143,6 +1147,50 @@ async function handleStudioHistory(
     })),
     headEditId: asset?.headEditId ?? "",
   };
+}
+
+async function handleStudioListAssets(
+  call: grpc.ServerUnaryCall<unknown, unknown>,
+  ctx: TenantContext,
+): Promise<{
+  assets: Array<{
+    assetId: string;
+    previewUrl: string;
+    updatedAt: number;
+    finalized: boolean;
+    editCount: number;
+    headOp: string;
+    expiresAt: number;
+  }>;
+}> {
+  const limit = Number((call.request as { limit?: number }).limit ?? 0) || 30;
+  const sessions = await listAssets(ctx, limit);
+  const store = getObjectStore();
+  const assets = await Promise.all(
+    sessions.map(async (s) => {
+      // Thumbnail: the head edit's ~256px preview, else its full output, else the original.
+      const key = s.headPreviewKey ?? s.headOutputKey ?? s.objectKey;
+      let previewUrl = "";
+      let expiresAt = 0;
+      try {
+        const presigned = await store.presignGet(key);
+        previewUrl = presigned.url;
+        expiresAt = presigned.expiresAt;
+      } catch {
+        // A missing/unreadable object just yields no thumbnail; the card still lists.
+      }
+      return {
+        assetId: s.id,
+        previewUrl,
+        updatedAt: s.updatedAt.getTime(),
+        finalized: s.finalized,
+        editCount: s.editCount,
+        headOp: s.headOp ?? "",
+        expiresAt,
+      };
+    }),
+  );
+  return { assets };
 }
 
 async function handleStudioReportIdentity(

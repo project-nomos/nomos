@@ -161,6 +161,7 @@ export class ConnectServer {
         studioGetAssetUrl: unary(handlers.StudioGetAssetUrl),
         studioEdit: serverStream(handlers.StudioEdit), // server-streaming, like chat
         studioHistory: unary(handlers.StudioHistory),
+        studioListAssets: unary(handlers.StudioListAssets),
         studioReportIdentity: unary(handlers.StudioReportIdentity),
       } as unknown as Parameters<typeof router.service<typeof MobileApi>>[1]);
     };

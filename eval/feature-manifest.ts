@@ -236,6 +236,7 @@ export const FEATURES: FeatureSpec[] = [
       "buildStudioEngine",
       "assertIdentityPreserved",
       "ensureStudioSidecar",
+      "listAssets",
     ],
     effects: [
       {

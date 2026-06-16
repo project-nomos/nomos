@@ -402,3 +402,70 @@ export async function listEdits(ctx: TenantContext, assetId: string): Promise<St
     .execute();
   return rows.map(mapEdit);
 }
+
+/** A recent editing session: an asset + the gist of its head edit (for the Home cards). */
+export interface StudioAssetSummary {
+  id: string;
+  objectKey: string;
+  headEditId: string | null;
+  headOp: string | null;
+  headPreviewKey: string | null;
+  headOutputKey: string | null;
+  editCount: number;
+  finalized: boolean;
+  updatedAt: Date;
+}
+
+/**
+ * Recent editing sessions for the Home launchpad ("Pick up where you left off").
+ * Ready (worked-on) assets, newest first, each carrying the head edit's preview/op so
+ * the client renders a thumbnail + label without N follow-up calls. user_id-scoped.
+ */
+export async function listAssets(ctx: TenantContext, limit = 30): Promise<StudioAssetSummary[]> {
+  const db = getKysely();
+  const capped = Math.min(Math.max(Math.trunc(limit) || 30, 1), 100);
+  const rows = await db
+    .selectFrom("studio_assets as a")
+    .leftJoin("studio_edits as e", "e.id", "a.head_edit_id")
+    .select([
+      "a.id as id",
+      "a.object_key as objectKey",
+      "a.head_edit_id as headEditId",
+      "a.metadata as metadata",
+      "a.updated_at as updatedAt",
+      "e.op as headOp",
+      "e.preview_key as headPreviewKey",
+      "e.output_key as headOutputKey",
+    ])
+    .where("a.user_id", "=", ctx.userId)
+    .where("a.status", "=", "ready")
+    .orderBy("a.updated_at", "desc")
+    .limit(capped)
+    .execute();
+
+  const ids = rows.map((r) => r.id);
+  const counts = ids.length
+    ? await db
+        .selectFrom("studio_edits")
+        .where("asset_id", "in", ids)
+        .where("user_id", "=", ctx.userId)
+        .where("status", "=", "done")
+        .groupBy("asset_id")
+        .select("asset_id")
+        .select((eb) => eb.fn.countAll<number>().as("n"))
+        .execute()
+    : [];
+  const countByAsset = new Map(counts.map((c) => [c.asset_id, Number(c.n)]));
+
+  return rows.map((r) => ({
+    id: r.id,
+    objectKey: r.objectKey,
+    headEditId: r.headEditId,
+    headOp: r.headOp ?? null,
+    headPreviewKey: r.headPreviewKey ?? null,
+    headOutputKey: r.headOutputKey ?? null,
+    editCount: countByAsset.get(r.id) ?? 0,
+    finalized: Boolean((r.metadata as { finalizedAt?: unknown } | null)?.finalizedAt),
+    updatedAt: r.updatedAt,
+  }));
+}

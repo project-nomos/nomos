@@ -9,6 +9,7 @@ import {
   appendEdit,
   createAsset,
   getAsset,
+  listAssets,
   listEdits,
   markEditDone,
   markEditFailed,
@@ -218,5 +219,55 @@ describe("markEditDone + listEdits", () => {
     const headUpdate = getQueries().find((q) => /update "studio_assets"/i.test(q.sql));
     expect(headUpdate?.parameters).toContain("eX"); // WHERE head_edit_id = the failed edit
     expect(headUpdate?.parameters).toContain("ePrev"); // SET head_edit_id = its parent
+  });
+});
+
+describe("listAssets", () => {
+  it("returns ready sessions with head op, edit count, finalized flag; scoped to the user", async () => {
+    addResult([
+      {
+        id: "a1",
+        objectKey: "org/local/studio/a1/original.jpg",
+        headEditId: "e9",
+        metadata: { finalizedAt: "2026-01-01T00:00:00Z" },
+        updatedAt: new Date("2026-06-10T00:00:00Z"),
+        headOp: "editSemantic",
+        headPreviewKey: "org/local/studio/a1/e9.preview.jpg",
+        headOutputKey: "org/local/studio/a1/e9.jpg",
+      },
+      {
+        id: "a2",
+        objectKey: "org/local/studio/a2/original.jpg",
+        headEditId: null,
+        metadata: {},
+        updatedAt: new Date("2026-06-09T00:00:00Z"),
+        headOp: null,
+        headPreviewKey: null,
+        headOutputKey: null,
+      },
+    ]);
+    addResult([{ asset_id: "a1", n: "3" }]); // counts query
+
+    const sessions = await listAssets(ctx, 10);
+
+    expect(sessions).toHaveLength(2);
+    expect(sessions[0].id).toBe("a1");
+    expect(sessions[0].headOp).toBe("editSemantic");
+    expect(sessions[0].editCount).toBe(3);
+    expect(sessions[0].finalized).toBe(true);
+    expect(sessions[1].editCount).toBe(0);
+    expect(sessions[1].finalized).toBe(false);
+
+    const main = getQueries()[0];
+    expect(main.sql).toMatch(/from "studio_assets"/i);
+    expect(main.parameters).toContain("u1"); // user-scoped
+    expect(main.parameters).toContain("ready"); // worked-on sessions only
+  });
+
+  it("skips the counts query when there are no sessions", async () => {
+    addResult([]);
+    const sessions = await listAssets(ctx, 10);
+    expect(sessions).toEqual([]);
+    expect(getQueries()).toHaveLength(1); // no second (counts) query
   });
 });

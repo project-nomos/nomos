@@ -204,6 +204,8 @@ service MobileApi {
   rpc StudioGetAssetUrl (MStudioAssetRef) returns (MStudioAssetUrlResponse);
   rpc StudioEdit (MStudioEditRequest) returns (stream MStudioEvent);
   rpc StudioHistory (MStudioAssetRef) returns (MStudioHistoryResponse);
+  // Recent editing sessions for the Home launchpad ("Pick up where you left off").
+  rpc StudioListAssets (MStudioListAssetsRequest) returns (MStudioListAssetsResponse);
   // The on-device identity check reports its score for an edit (0..1).
   rpc StudioReportIdentity (MStudioIdentityReport) returns (MAck);
 }
@@ -634,4 +636,21 @@ message MStudioHistoryResponse {
 message MStudioIdentityReport {
   string edit_id = 1;
   double score = 2; // face-embedding similarity in 0..1
+}
+
+// A recent editing session for the Home launchpad. An asset + the gist of its chain.
+message MStudioListAssetsRequest {
+  int32 limit = 1;          // max sessions (server caps; default ~30)
+}
+message MStudioAssetSummary {
+  string asset_id = 1;
+  string preview_url = 2;   // presigned GET (~thumbnail): head preview, else original
+  int64 updated_at = 3;     // ms epoch
+  bool finalized = 4;       // a stored final artifact (vs in-progress)
+  int32 edit_count = 5;
+  string head_op = 6;       // op of the head edit ("" if none) — client humanizes
+  int64 expires_at = 7;     // ms epoch for preview_url
+}
+message MStudioListAssetsResponse {
+  repeated MStudioAssetSummary assets = 1;
 }
