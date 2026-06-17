@@ -64,9 +64,10 @@ describe("GeminiImageProvider", () => {
       mime: "image/jpeg",
       params: op.params,
     });
-    expect(client.editImage).toHaveBeenCalledWith(
-      expect.objectContaining({ prompt: "warm it up" }),
-    );
+    // The instruction is sent, with the universal quality guard appended to every prompt.
+    const sent = vi.mocked(client.editImage).mock.calls[0][0].prompt;
+    expect(sent).toContain("warm it up");
+    expect(sent).toMatch(/sharp|detail|do not soften|don't soften/i);
     expect(out.provider).toBe("gemini");
     expect(out.costUsd).toBe(0.039);
     expect(out.mime).toBe("image/png"); // no mask -> raw model output

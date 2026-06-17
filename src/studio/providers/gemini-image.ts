@@ -94,6 +94,14 @@ function promptFor(op: StudioOp): string {
   }
 }
 
+/**
+ * Appended to EVERY generative prompt (typed edits, suggestion chips, auto-enhance,
+ * region edits, the agent path — all of them) so a re-render keeps or raises image
+ * quality instead of softening it, which the model tends to do by default.
+ */
+const QUALITY_GUARD =
+  "Keep the result sharp, clear, and high-detail: maintain or increase sharpness, fine detail, and resolution, and do NOT soften, blur, smear, over-denoise, or reduce quality anywhere — any skin smoothing must still retain pores and natural texture. Preserve the person's identity and a realistic, natural look.";
+
 export interface GeminiImageProviderOptions {
   /** Display name + recorded provider ('gemini' dev, 'vertex' prod). */
   name?: string;
@@ -122,7 +130,7 @@ export class GeminiImageProvider implements StudioProvider {
     const result = await this.client.editImage({
       imageBase64: Buffer.from(input.bytes).toString("base64"),
       mimeType: input.mime,
-      prompt: promptFor(op),
+      prompt: `${promptFor(op)}\n\n${QUALITY_GUARD}`,
     });
     const modelBytes = new Uint8Array(Buffer.from(result.base64, "base64"));
 
