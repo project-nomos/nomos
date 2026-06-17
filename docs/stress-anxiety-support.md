@@ -57,7 +57,15 @@ which reuse this iteration's continuity, reach-out, and growth machinery.
 
 ## 3. The plan
 
-### Phase A — Episodic mood + pattern continuity (not mood-as-state) _(small/medium)_
+### Phase A — Episodic mood + pattern continuity (not mood-as-state) _(implemented)_
+
+> **Shipped** in `src/memory/mood-log.ts` + `src/daemon/agent-runtime.ts`. Episodes
+> (`date · emotion · cause · status`) live in an editable `mood-log.md` vault note;
+> `captureMoodFromTurn()` writes one (forked-Haiku names the _cause_) only when the live
+> theory-of-mind flags real strain; episodes decay (30d / 20-cap); open episodes are surfaced
+> as `## Recently weighing on them` so the agent follows up on the cause, never asserts a mood.
+> `NOMOS_ADAPTIVE_MEMORY`-gated, per-user, guarded by the `mood-episodes` manifest entry +
+> `runMoodLog` eval. The four rules below are enforced by construction.
 
 Mood is volatile, context-bound, and decaying — **not** a durable fact. So don't persist
 "you are stressed" and carry it forward. Persist the **episode and its cause**, and let the
@@ -89,9 +97,15 @@ Four rules keep it honest (and not creepy):
 This is the emotional analogue of the [continuity journal](./agent-presence-and-continuity.md);
 `user_id`-scoped, editable, never hidden.
 
-### Phase B — A graduated support protocol in the self-model _(surface-only)_
+### Phase B — A graduated support protocol in the self-model _(implemented)_
 
-Add to `SOUL.md` / the system prompt a non-patronizing ladder (adapted from IVY's
+> **Shipped** in the always-on **Agent Nature** block (`src/config/profile.ts`,
+> `buildSystemPromptAppend`) under "You attune" — injected unconditionally so it survives a
+> custom `SOUL.md`. The ladder below (acknowledge → adapt → de-escalate only when sustained →
+> normalize) is the prompt text, bounded by the explicit "companion, not a therapist or crisis
+> service" safety line and asserted by `profile.test.ts`.
+
+Add to the system prompt a non-patronizing ladder (adapted from IVY's
 mild→moderate→high tiers) for the _companion_ context:
 
 - **Acknowledge** the feeling first, without judgment or toxic positivity.
@@ -102,7 +116,14 @@ mild→moderate→high tiers) for the _companion_ context:
 - **Normalize**: struggle and stress are normal; reflect progress and effort, grounded in
   real evidence from memory ("you've shipped three hard things this week").
 
-### Phase C — Proactive emotional check-in _(small — reuses proactive loops)_
+### Phase C — Proactive emotional check-in _(not yet built)_
+
+> **Status:** the data + in-context half is already live (open episodes from Phase A are
+> surfaced into the prompt, so the agent follows up on the cause the next time you talk). What
+> remains is the **autonomous trigger** — a loop that reaches out via `proactive_send` /
+> `loop_create` when an episode is still `open` or a recurring pattern is due. Not yet wired;
+> it slots onto [Phase 2 proactive](./agent-presence-and-continuity.md#phase-2--turn-proactive-on-by-default-safely)
+> when built.
 
 Trigger on a **cause or a pattern**, never a stale emotional label. The agent may **reach
 out** via `proactive_send` / `loop_create` when either (a) an episode is still `open` — a

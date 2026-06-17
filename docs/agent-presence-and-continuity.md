@@ -81,7 +81,7 @@ LLM disclaimers ("I'm just a model, I reset every conversation…").
 
 Ordered by leverage-to-effort. Phase 1 alone stops the false denial.
 
-### Phase 1 — Self-model: the agent owns who it is _(surface-only / small)_
+### Phase 1 — Self-model: the agent owns who it is _(implemented)_
 
 Add a unified **"Agent Nature"** manifesto, asserted _before_ the utility sections, in
 `DEFAULT_SOUL` ([`src/config/soul.ts`]) and/or early in `buildSystemPromptAppend`:
@@ -136,10 +136,21 @@ Files: `daemon/agent-runtime.ts` (anchor + `formatElapsedSince`), `db/sessions.t
 (`getPreviousSessionEnd`), `memory/digest.ts` (journal injection), `config/profile.ts`
 (journal nudge).
 
-### Phase 4 — Shared experience: the genuine new capability _(medium)_
+### Phase 4 — Shared experience: the genuine new capability _(implemented)_
 
-This is the one thing that doesn't exist yet — the user's "grow to share experiences (not
-live)". Build **agent-authored relationship narratives**, generated offline:
+> **Shipped:** a dedicated weekly per-owner cron (`__relationship_narrative__`, 168h,
+> fan-out) runs `writeRelationshipNarrative()` — a forked-Haiku, `NOMOS_ADAPTIVE_MEMORY`-gated
+> pass that writes a first-person, evidence-grounded narrative from the learned `user_model`
+> into an editable `relationship.md` vault note (a `MIN_ENTRIES` floor means a barely-known
+> user gets nothing). Declared in [`eval/feature-manifest.ts`] with a `relationship.md` effect
+>
+> - the cron meta-check, exercised by `runRelationshipNarrative` in the agent eval, and green
+>   under `pnpm eval:audit`. (We chose a standalone vault note + its own cron over the original
+>   `relationship_narratives` row / auto-dream phase sketch below — same intent, but it stays
+>   user-editable and reuses the vault as source of truth.)
+
+This was the one thing that didn't exist yet — the user's "grow to share experiences (not
+live)". The capability: **agent-authored relationship narratives**, generated offline:
 
 - A **relationship narrative** (post-consolidation phase of auto-dream, or its own cron):
   detect before→after confidence shifts and inflection points, then write a short,
@@ -156,7 +167,18 @@ Per the repo's working method, each Phase 4 store gets an entry in
 [`eval/feature-manifest.ts`] (trigger, entry symbols, effect SQL) so it can't ship
 dormant, plus `pnpm eval:audit` coverage.
 
-### Phase 5 — Emotional presence: stress & anxiety support _(small / medium)_
+### Phase 5 — Emotional presence: stress & anxiety support _(implemented)_
+
+> **Shipped:** mood is persisted as timestamped **episodes with a cause** in an editable
+> `mood-log.md` vault note (`src/memory/mood-log.ts`) — `captureMoodFromTurn()` fires only when
+> the live theory-of-mind flags real strain, a forked-Haiku names the _cause_ (never asserts a
+> feeling), episodes decay (30d/20-cap), and the live read always wins. Open episodes are
+> surfaced into the prompt (`## Recently weighing on them`) so the agent follows up on the
+> cause; the graduated, non-patronizing **support protocol** lives in the always-on Agent
+> Nature block ("You attune"). `NOMOS_ADAPTIVE_MEMORY`-gated, per-user. Declared as
+> `mood-episodes` in [`eval/feature-manifest.ts`], exercised by `runMoodLog`, green under
+> `pnpm eval:audit`. See **[Stress & Anxiety Support](./stress-anxiety-support.md)** (Phases
+> A + B) for the full design.
 
 A companion that persists, reaches out, and grows should also _notice how you're doing_.
 nomos already **detects** stress/frustration/overwhelm every turn (`theory-of-mind.ts`,
