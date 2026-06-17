@@ -174,7 +174,7 @@ See `.env.example` for the full set of optional variables (model, permissions, c
 - **`sdk/`** -- Claude Agent SDK wrapper:
   - `session.ts` -- wraps `query()`, supports V2 session API with feature detection. `RunSessionParams` accepts `systemPrompt` (full override), `anthropicBaseUrl` (custom API endpoint), and `systemPromptAppend` (append to preset). The `ANTHROPIC_BASE_URL` env var is propagated to child processes via the `env` option.
   - `tools.ts` -- in-process MCP server exposing `memory_search` and `user_model_recall` tools
-  - `cost-tracker.ts` -- per-session and per-model token usage and USD cost tracking with `CostTracker` class, model pricing tiers, formatting utilities, and `getCostTracker()` singleton
+  - `cost-tracker.ts` -- per-session and per-model token usage and USD cost tracking with `CostTracker` class, model pricing tiers, and `getCostTracker()` singleton
   - `token-estimation.ts` -- heuristic-based token counting (`roughTokenCount`, `bytesPerTokenForFileType`, `roughTokenCountForBlock/Content/Messages`, `formatTokenCount`)
   - `retry.ts` -- `withRetry<T>()` async retry with exponential backoff + jitter, 429/529 handling, retry-after header parsing, persistent mode for daemon, abort signal support
   - `cache-break-detection.ts` -- `PromptCacheTracker` class that detects cache-invalidating changes to system prompt, tool schemas, model, or betas across API calls

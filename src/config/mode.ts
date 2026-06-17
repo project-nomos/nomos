@@ -84,6 +84,13 @@ export const FEATURES = {
   /** /admin/* power-user pages in the Settings UI (database explorer, raw SQL, etc.). */
   adminPowerUserPages: (): boolean => !isHosted(),
 
+  /**
+   * Studio (hosted-only feature). The inverse of the BYO gates above:
+   * the one feature that is OFF in power-user mode and ON in hosted, because it
+   * depends on the hosted object-store + per-tenant Vertex credential.
+   */
+  studio: (): boolean => isHosted(),
+
   // Features that stay ON in both modes (declared explicitly so the contract is documented):
   autoDream: (): boolean => true,
   magicDocs: (): boolean => true,

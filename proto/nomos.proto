@@ -198,6 +198,18 @@ service MobileApi {
   rpc ListLoops (Empty) returns (MLoopsResponse);
   rpc SetLoopEnabled (MSetLoopEnabledRequest) returns (MAck);
   rpc DeleteLoop (MLoopDeleteRequest) returns (MAck);
+
+  // Studio (hosted-only feature). Blobs move via presigned PUT/GET, never gRPC.
+  rpc StudioCreateAsset (MStudioCreateAssetRequest) returns (MStudioCreateAssetResponse);
+  rpc StudioGetAssetUrl (MStudioAssetRef) returns (MStudioAssetUrlResponse);
+  rpc StudioEdit (MStudioEditRequest) returns (stream MStudioEvent);
+  rpc StudioHistory (MStudioAssetRef) returns (MStudioHistoryResponse);
+  // Recent editing sessions for the Home launchpad ("Pick up where you left off").
+  rpc StudioListAssets (MStudioListAssetsRequest) returns (MStudioListAssetsResponse);
+  // AI-native: a vision model looks at the photo and proposes tap-to-apply edits.
+  rpc StudioSuggestEdits (MStudioAssetRef) returns (MStudioSuggestionsResponse);
+  // The on-device identity check reports its score for an edit (0..1).
+  rpc StudioReportIdentity (MStudioIdentityReport) returns (MAck);
 }
 
 // Loops (autonomous recurring jobs)
@@ -559,4 +571,98 @@ message DepositResponse {
   string message = 2;
   // Opaque integration id assigned by the customer instance (for revocation).
   string integration_id = 3;
+}
+
+// ── Studio (hosted-only feature) ──────────────────────────────────────
+// Register an uploaded original. The client uploads the (downscaled, transcoded)
+// image to upload_url (presigned PUT), then confirms by calling StudioEdit or
+// StudioHistory; unconfirmed rows are reaped by __studio_gc__.
+message MStudioCreateAssetRequest {
+  string mime = 1;          // e.g. image/jpeg (HEIC transcoded client-side)
+  string content_hash = 2;  // sha256 of the bytes
+  int32 width = 3;
+  int32 height = 4;
+  int32 bytes = 5;
+}
+message MStudioCreateAssetResponse {
+  string asset_id = 1;
+  string upload_url = 2;    // presigned PUT
+  string object_key = 3;
+  int64 expires_at = 4;     // ms epoch
+}
+
+message MStudioAssetRef {
+  string asset_id = 1;
+  bool original = 2;        // GetAssetUrl: presign the ORIGINAL (for before/after compare)
+}
+message MStudioAssetUrlResponse {
+  string url = 1;           // presigned GET for the current head (or original)
+  int64 expires_at = 2;
+}
+
+// Apply one op. params_json is the JSON-encoded op params (validated server-side
+// against the op registry). parent_edit_id "" means "on the current head".
+message MStudioEditRequest {
+  string asset_id = 1;
+  string op = 2;            // adjust | editSemantic | cutout | upscale | restore | ...
+  string params_json = 3;
+  string parent_edit_id = 4;
+  string idempotency_key = 5;
+  string mask_key = 6;      // optional device/tap mask object key
+  bytes input_image = 7;    // deviceRender only: the on-device-rendered output bytes
+}
+message MStudioEvent {
+  string kind = 1;          // progress | done | error
+  string edit_id = 2;
+  string status = 3;        // pending | running | done | failed
+  string preview_key = 4;
+  string output_key = 5;
+  double cost_usd = 6;
+  string message = 7;
+}
+
+message MStudioEdit {
+  string id = 1;
+  string op = 2;
+  string status = 3;
+  string preview_key = 4;
+  string output_key = 5;
+  double cost_usd = 6;
+  string parent_edit_id = 7;
+  string created_at = 8;
+}
+message MStudioHistoryResponse {
+  repeated MStudioEdit edits = 1;
+  string head_edit_id = 2;
+}
+
+message MStudioIdentityReport {
+  string edit_id = 1;
+  double score = 2; // face-embedding similarity in 0..1
+}
+
+// A recent editing session for the Home launchpad. An asset + the gist of its chain.
+message MStudioListAssetsRequest {
+  int32 limit = 1;          // max sessions (server caps; default ~30)
+}
+message MStudioAssetSummary {
+  string asset_id = 1;
+  string preview_url = 2;   // presigned GET (~thumbnail): head preview, else original
+  int64 updated_at = 3;     // ms epoch
+  bool finalized = 4;       // a stored final artifact (vs in-progress)
+  int32 edit_count = 5;
+  string head_op = 6;       // op of the head edit ("" if none) — client humanizes
+  int64 expires_at = 7;     // ms epoch for preview_url
+}
+message MStudioListAssetsResponse {
+  repeated MStudioAssetSummary assets = 1;
+}
+
+// A per-photo edit suggestion: a short chip label + the instruction it applies.
+message MStudioSuggestion {
+  string label = 1;
+  string prompt = 2;
+}
+message MStudioSuggestionsResponse {
+  repeated MStudioSuggestion suggestions = 1;
 }

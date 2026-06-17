@@ -19,6 +19,7 @@ import type { ConnectRouter, HandlerContext } from "@connectrpc/connect";
 import { ConnectError, Code } from "@connectrpc/connect";
 import { MobileApi } from "../gen/nomos_pb.ts";
 import { resolveContext } from "../auth/grpc-interceptor.ts";
+import { handleBlobRequest } from "../storage/object-store.ts";
 import { buildMobileApiHandlers } from "./mobile-api.ts";
 import type { MessageQueue } from "./message-queue.ts";
 import type { DraftManager } from "./draft-manager.ts";
@@ -148,11 +149,33 @@ export class ConnectServer {
         getVaultNote: unary(handlers.GetVaultNote),
         writeVaultNote: unary(handlers.WriteVaultNote),
         deleteVaultNote: unary(handlers.DeleteVaultNote),
+
+        // ── Loops ──
+        listLoops: unary(handlers.ListLoops),
+        setLoopEnabled: unary(handlers.SetLoopEnabled),
+        deleteLoop: unary(handlers.DeleteLoop),
+
+        // ── Studio (hosted-only). Without these the iOS app's Studio calls hit a
+        //    404 over Connect even though the gRPC server (Mac/CLI) has them. ──
+        studioCreateAsset: unary(handlers.StudioCreateAsset),
+        studioGetAssetUrl: unary(handlers.StudioGetAssetUrl),
+        studioEdit: serverStream(handlers.StudioEdit), // server-streaming, like chat
+        studioHistory: unary(handlers.StudioHistory),
+        studioListAssets: unary(handlers.StudioListAssets),
+        studioSuggestEdits: unary(handlers.StudioSuggestEdits),
+        studioReportIdentity: unary(handlers.StudioReportIdentity),
       } as unknown as Parameters<typeof router.service<typeof MobileApi>>[1]);
     };
 
     return new Promise((resolveStart, reject) => {
-      this.server = createServer(connectNodeAdapter({ routes }));
+      // Signed blob PUT/GET for the local-fs object store are served here too (same
+      // host:port the client already reached us on); everything else is Connect RPC.
+      const connectHandler = connectNodeAdapter({ routes });
+      this.server = createServer((req, res) => {
+        void handleBlobRequest(req, res).then((handled) => {
+          if (!handled) connectHandler(req, res);
+        });
+      });
       this.server.listen(this.deps.port, "0.0.0.0", () => {
         log.info(`Connect server listening on 0.0.0.0:${this.deps.port}`);
         resolveStart();
@@ -224,6 +247,76 @@ function unary<TReq, TRes>(grpcHandler: grpc.handleUnaryCall<TReq, TRes>) {
         }
       }) as grpc.sendUnaryData<TRes>);
     });
+  };
+}
+
+/**
+ * Adapt a gRPC SERVER-STREAMING handler — `(call) => void`, emitting via
+ * `call.write()` and finishing on `call.end()` / `call.destroy()` — to a Connect
+ * async-generator handler. We synthesize a writable `call` that funnels writes into
+ * a queue the generator drains, mirroring `unary()` for auth (the gRPC handler reads
+ * the JWT off `call.metadata`).
+ */
+function serverStream<TReq, TRes>(grpcHandler: grpc.handleServerStreamingCall<TReq, TRes>) {
+  return async function* (req: TReq, ctx: HandlerContext): AsyncGenerator<TRes> {
+    const metadata = new grpc.Metadata();
+    const auth = ctx.requestHeader.get("authorization");
+    if (auth) metadata.set("authorization", auth);
+
+    const queue: TRes[] = [];
+    let resolveNext: ((v: TRes | null) => void) | null = null;
+    let ended = false;
+    const box: { failure: Error | null } = { failure: null };
+
+    const wake = (v: TRes | null) => {
+      if (resolveNext) {
+        const r = resolveNext;
+        resolveNext = null;
+        r(v);
+      }
+    };
+    const finish = (err?: Error) => {
+      if (err && !box.failure) box.failure = err;
+      ended = true;
+      wake(null);
+    };
+
+    const fakeCall = {
+      request: req,
+      metadata,
+      cancelled: false,
+      write: (msg: TRes) => {
+        if (resolveNext) wake(msg);
+        else queue.push(msg);
+        return true;
+      },
+      end: () => finish(),
+      destroy: (err?: Error) => finish(err),
+      on: () => fakeCall,
+      once: () => fakeCall,
+      off: () => fakeCall,
+      removeListener: () => fakeCall,
+      emit: () => false,
+    } as unknown as grpc.ServerWritableStream<TReq, TRes>;
+
+    // Kick off the handler; it writes events + ends/destroys the fake call.
+    grpcHandler(fakeCall);
+
+    while (true) {
+      if (queue.length > 0) {
+        yield queue.shift() as TRes;
+        continue;
+      }
+      if (ended) break;
+      const next = await new Promise<TRes | null>((r) => {
+        resolveNext = r;
+      });
+      if (next === null) break;
+      yield next;
+    }
+    if (box.failure) {
+      throw new ConnectError(box.failure.message || "internal", Code.Internal);
+    }
   };
 }
 

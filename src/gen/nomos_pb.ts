@@ -10,7 +10,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file nomos.proto.
  */
 export const file_nomos: GenFile /*@__PURE__*/ = fileDesc(
-  "Cgtub21vcy5wcm90bxIFbm9tb3MiBwoFRW1wdHkiMwoLQ2hhdFJlcXVlc3QSDwoHY29udGVudBgBIAEoCRITCgtzZXNzaW9uX2tleRgCIAEoCSIwCgpBZ2VudEV2ZW50EgwKBHR5cGUYASABKAkSFAoManNvbl9wYXlsb2FkGAIgASgJIjYKDkNvbW1hbmRSZXF1ZXN0Eg8KB2NvbW1hbmQYASABKAkSEwoLc2Vzc2lvbl9rZXkYAiABKAkiMwoPQ29tbWFuZFJlc3BvbnNlEg8KB3N1Y2Nlc3MYASABKAgSDwoHbWVzc2FnZRgCIAEoCSJPCg5TdGF0dXNSZXNwb25zZRIPCgdydW5uaW5nGAEgASgIEhkKEWNvbm5lY3RlZF9jbGllbnRzGAIgASgFEhEKCXBsYXRmb3JtcxgDIAMoCSIlCg5TZXNzaW9uUmVxdWVzdBITCgtzZXNzaW9uX2tleRgBIAEoCSJVCg9TZXNzaW9uUmVzcG9uc2USCgoCaWQYASABKAkSEwoLc2Vzc2lvbl9rZXkYAiABKAkSDQoFbW9kZWwYAyABKAkSEgoKY3JlYXRlZF9hdBgEIAEoCSI3CgtTZXNzaW9uTGlzdBIoCghzZXNzaW9ucxgBIAMoCzIWLm5vbW9zLlNlc3Npb25SZXNwb25zZSIfCgtEcmFmdEFjdGlvbhIQCghkcmFmdF9pZBgBIAEoCSIxCg1EcmFmdFJlc3BvbnNlEg8KB3N1Y2Nlc3MYASABKAgSDwoHbWVzc2FnZRgCIAEoCSItCglEcmFmdExpc3QSIAoGZHJhZnRzGAEgAygLMhAubm9tb3MuRHJhZnRJdGVtInIKCURyYWZ0SXRlbRIKCgJpZBgBIAEoCRIPCgdjb250ZW50GAIgASgJEhAKCHBsYXRmb3JtGAMgASgJEhIKCmNoYW5uZWxfaWQYBCABKAkSDgoGc3RhdHVzGAUgASgJEhIKCmNyZWF0ZWRfYXQYBiABKAkiIQoMUG9uZ1Jlc3BvbnNlEhEKCXRpbWVzdGFtcBgBIAEoAyIoCgRNQWNrEg8KB3N1Y2Nlc3MYASABKAgSDwoHbWVzc2FnZRgCIAEoCSIjChFNVmF1bHRMaXN0UmVxdWVzdBIOCgZwcmVmaXgYASABKAkiRAoRTVZhdWx0Tm90ZVN1bW1hcnkSDAoEcGF0aBgBIAEoCRINCgV0aXRsZRgCIAEoCRISCgp1cGRhdGVkX2F0GAMgASgJIj0KEk1WYXVsdExpc3RSZXNwb25zZRInCgVub3RlcxgBIAMoCzIYLm5vbW9zLk1WYXVsdE5vdGVTdW1tYXJ5IiAKEE1WYXVsdEdldFJlcXVlc3QSDAoEcGF0aBgBIAEoCSJeCgpNVmF1bHROb3RlEgwKBHBhdGgYASABKAkSDQoFdGl0bGUYAiABKAkSDwoHY29udGVudBgDIAEoCRISCgp1cGRhdGVkX2F0GAQgASgJEg4KBmV4aXN0cxgFIAEoCCJCChJNVmF1bHRXcml0ZVJlcXVlc3QSDAoEcGF0aBgBIAEoCRIPCgdjb250ZW50GAIgASgJEg0KBXRpdGxlGAMgASgJIiMKE01WYXVsdERlbGV0ZVJlcXVlc3QSDAoEcGF0aBgBIAEoCSI0CgxNQ2hhdFJlcXVlc3QSDwoHY29udGVudBgBIAEoCRITCgtzZXNzaW9uX2tleRgCIAEoCSIwCgpNQ2hhdEV2ZW50EgwKBHR5cGUYASABKAkSFAoManNvbl9wYXlsb2FkGAIgASgJIkwKE01HZXRNZXNzYWdlc1JlcXVlc3QSEwoLc2Vzc2lvbl9rZXkYASABKAkSDQoFbGltaXQYAiABKAUSEQoJYmVmb3JlX2lkGAMgASgJIkkKCE1NZXNzYWdlEgoKAmlkGAEgASgJEgwKBHJvbGUYAiABKAkSDwoHY29udGVudBgDIAEoCRISCgpjcmVhdGVkX2F0GAQgASgJIjkKFE1HZXRNZXNzYWdlc1Jlc3BvbnNlEiEKCG1lc3NhZ2VzGAEgAygLMg8ubm9tb3MuTU1lc3NhZ2UiIAoMTURyYWZ0QWN0aW9uEhAKCGRyYWZ0X2lkGAEgASgJIj0KFE1EcmFmdEFjdGlvbldpdGhFZGl0EhAKCGRyYWZ0X2lkGAEgASgJEhMKC2VkaXRlZF90ZXh0GAIgASgJIjgKFE1EcmFmdEFjdGlvblJlc3BvbnNlEg8KB3N1Y2Nlc3MYASABKAgSDwoHbWVzc2FnZRgCIAEoCSIuCg1NSW5ib3hSZXF1ZXN0Eg4KBnN0YXR1cxgBIAEoCRINCgVsaW1pdBgCIAEoBSKYAQoKTUluYm94SXRlbRIKCgJpZBgBIAEoCRISCgpmcm9tX2xhYmVsGAIgASgJEhIKCnRydXN0X3RpZXIYAyABKAkSDwoHc3ViamVjdBgEIAEoCRIMCgR0aW1lGAUgASgJEhMKC2JvbmRfYW1vdW50GAYgASgJEg4KBnVucmVhZBgHIAEoCBISCgpjcmVhdGVkX2F0GAggASgJIkkKDk1JbmJveFJlc3BvbnNlEiAKBWl0ZW1zGAEgAygLMhEubm9tb3MuTUluYm94SXRlbRIVCg1ibG9ja2VkX2NvdW50GAIgASgFIiQKEE1FbnZlbG9wZVJlcXVlc3QSEAoIaW5ib3hfaWQYASABKAkijQEKDU1DYXRlRW52ZWxvcGUSCwoDZGlkGAEgASgJEhIKCnRydXN0X3RpZXIYAiABKAkSDgoGaW50ZW50GAMgASgJEhUKDWNvbnNlbnRfZ3JhbnQYBCABKAkSDQoFc3RhbXAYBSABKAkSEwoLYm9uZF9hbW91bnQYBiABKAkSEAoIcmF3X2pzb24YByABKAkiNwoTTUluYm94QWN0aW9uUmVxdWVzdBIQCghpbmJveF9pZBgBIAEoCRIOCgZhY3Rpb24YAiABKAkiOAoUTUluYm94QWN0aW9uUmVzcG9uc2USDwoHc3VjY2VzcxgBIAEoCBIPCgdtZXNzYWdlGAIgASgJImoKBk1Ta2lsbBIMCgRuYW1lGAEgASgJEhMKC2Rlc2NyaXB0aW9uGAIgASgJEg4KBnNvdXJjZRgDIAEoCRIPCgdlbmFibGVkGAQgASgIEg0KBWNlcnRzGAUgAygJEg0KBXByaWNlGAYgASgJIjAKD01Ta2lsbHNSZXNwb25zZRIdCgZza2lsbHMYASADKAsyDS5ub21vcy5NU2tpbGwiNAoTTVNraWxsVG9nZ2xlUmVxdWVzdBIMCgRuYW1lGAEgASgJEg8KB2VuYWJsZWQYAiABKAgiOAoUTVNraWxsVG9nZ2xlUmVzcG9uc2USDwoHc3VjY2VzcxgBIAEoCBIPCgdtZXNzYWdlGAIgASgJIiIKEE1FYXJuaW5nc1JlcXVlc3QSDgoGcGVyaW9kGAEgASgJIooBChFNRWFybmluZ3NSZXNwb25zZRIZChF0aGlzX3BlcmlvZF9jZW50cxgBIAEoAxITCgtib25kc19jb3VudBgCIAEoAxIWCg5hdmdfYm9uZF9jZW50cxgDIAEoAxIXCg9hY2NlcHRfcmF0ZV9wY3QYBCABKAUSFAoMc2VyaWVzX2NlbnRzGAUgAygDIi0KDU1HcmFwaFJlcXVlc3QSDQoFa2luZHMYASADKAkSDQoFbGltaXQYAiABKAUiXgoWTUdyYXBoTmVpZ2hib3JzUmVxdWVzdBIPCgdub2RlX2lkGAEgASgJEg0KBWRlcHRoGAIgASgFEhEKCXJlbF90eXBlcxgDIAMoCRIRCglkaXJlY3Rpb24YBCABKAkiMwoTTUdyYXBoU2VhcmNoUmVxdWVzdBINCgVxdWVyeRgBIAEoCRINCgVsaW1pdBgCIAEoBSKXAQoKTUdyYXBoTm9kZRIKCgJpZBgBIAEoCRIMCgRraW5kGAIgASgJEgwKBG5hbWUYAyABKAkSDwoHYWxpYXNlcxgEIAMoCRIPCgdzdW1tYXJ5GAUgASgJEhIKCmNvbmZpZGVuY2UYBiABKAESFQoNZXh0ZXJuYWxfa2luZBgHIAEoCRIUCgxleHRlcm5hbF9yZWYYCCABKAkiaAoKTUdyYXBoRWRnZRIKCgJpZBgBIAEoCRIOCgZzcmNfaWQYAiABKAkSDgoGZHN0X2lkGAMgASgJEhAKCHJlbF90eXBlGAQgASgJEgwKBGZhY3QYBSABKAkSDgoGd2VpZ2h0GAYgASgBIlQKDk1HcmFwaFJlc3BvbnNlEiAKBW5vZGVzGAEgAygLMhEubm9tb3MuTUdyYXBoTm9kZRIgCgVlZGdlcxgCIAMoCzIRLm5vbW9zLk1HcmFwaEVkZ2UiXgoKTVRydXN0VGllchIKCgJpZBgBIAEoCRIMCgRuYW1lGAIgASgJEhMKC2Rlc2NyaXB0aW9uGAMgASgJEgwKBG1vZGUYBCABKAkSEwoLYm9uZF9hbW91bnQYBSABKAkiOQoLTVBlcm1pc3Npb24SCgoCaWQYASABKAkSDQoFbGFiZWwYAiABKAkSDwoHZW5hYmxlZBgDIAEoCCKJAQoMTUludGVncmF0aW9uEgoKAmlkGAEgASgJEg0KBWxhYmVsGAIgASgJEgwKBGljb24YAyABKAkSEQoJY29ubmVjdGVkGAQgASgIEhUKDWFjY291bnRfZW1haWwYBSABKAkSFAoMc2VuZF9lbmFibGVkGAYgASgIEhAKCHByb3ZpZGVyGAcgASgJImgKCE1Qcm9maWxlEgwKBG5hbWUYASABKAkSDAoEcGxhbhgCIAEoCRIVCg1tZXNzYWdlX2NvdW50GAMgASgDEhQKDGVhcm5lZF9jZW50cxgEIAEoAxITCgtzYXZlZF9jZW50cxgFIAEoAyKxAQoRTVNldHRpbmdzUmVzcG9uc2USIAoHcHJvZmlsZRgBIAEoCzIPLm5vbW9zLk1Qcm9maWxlEiYKC3RydXN0X3RpZXJzGAIgAygLMhEubm9tb3MuTVRydXN0VGllchInCgtwZXJtaXNzaW9ucxgDIAMoCzISLm5vbW9zLk1QZXJtaXNzaW9uEikKDGludGVncmF0aW9ucxgEIAMoCzITLm5vbW9zLk1JbnRlZ3JhdGlvbiIxCg9NQ29uc2VudFJlcXVlc3QSEAoIcGxhdGZvcm0YASABKAkSDAoEbW9kZRgCIAEoCSJCChFNVHJ1c3RUaWVyUmVxdWVzdBIKCgJpZBgBIAEoCRIMCgRtb2RlGAIgASgJEhMKC2JvbmRfYW1vdW50GAMgASgJIjEKEk1QZXJtaXNzaW9uUmVxdWVzdBIKCgJpZBgBIAEoCRIPCgdlbmFibGVkGAIgASgIIkIKFU1JbnRlZ3JhdGlvbnNSZXNwb25zZRIpCgxpbnRlZ3JhdGlvbnMYASADKAsyEy5ub21vcy5NSW50ZWdyYXRpb24iKAoUTVN0YXJ0Q29ubmVjdFJlcXVlc3QSEAoIcHJvdmlkZXIYASABKAkiKgoVTVN0YXJ0Q29ubmVjdFJlc3BvbnNlEhEKCW9hdXRoX3VybBgBIAEoCSJDChJNRGlzY29ubmVjdFJlcXVlc3QSFgoOaW50ZWdyYXRpb25faWQYASABKAkSFQoNYWNjb3VudF9lbWFpbBgCIAEoCSI0ChVNQ29ubmVjdEdvb2dsZVJlcXVlc3QSDAoEY29kZRgBIAEoCRINCgVzdGF0ZRgCIAEoCSI/ChVNU2V0R29vZ2xlU2VuZFJlcXVlc3QSFQoNYWNjb3VudF9lbWFpbBgBIAEoCRIPCgdlbmFibGVkGAIgASgIIlEKD01EZXZpY2VSZWdpc3RlchIXCg9leHBvX3B1c2hfdG9rZW4YASABKAkSEAoIcGxhdGZvcm0YAiABKAkSEwoLYXBwX3ZlcnNpb24YAyABKAkiLAoRTURldmljZVVucmVnaXN0ZXISFwoPZXhwb19wdXNoX3Rva2VuGAEgASgJIuwBCg5EZXBvc2l0UmVxdWVzdBIQCghwcm92aWRlchgBIAEoCRIPCgd1c2VyX2lkGAIgASgJEhQKDGFjY2Vzc190b2tlbhgDIAEoCRIVCg1yZWZyZXNoX3Rva2VuGAQgASgJEhIKCmV4cGlyZXNfYXQYBSABKAMSDgoGc2NvcGVzGAYgASgJEjUKCG1ldGFkYXRhGAcgAygLMiMubm9tb3MuRGVwb3NpdFJlcXVlc3QuTWV0YWRhdGFFbnRyeRovCg1NZXRhZGF0YUVudHJ5EgsKA2tleRgBIAEoCRINCgV2YWx1ZRgCIAEoCToCOAEiSwoPRGVwb3NpdFJlc3BvbnNlEg8KB3N1Y2Nlc3MYASABKAgSDwoHbWVzc2FnZRgCIAEoCRIWCg5pbnRlZ3JhdGlvbl9pZBgDIAEoCTLkAwoKTm9tb3NBZ2VudBIvCgRDaGF0EhIubm9tb3MuQ2hhdFJlcXVlc3QaES5ub21vcy5BZ2VudEV2ZW50MAESOAoHQ29tbWFuZBIVLm5vbW9zLkNvbW1hbmRSZXF1ZXN0GhYubm9tb3MuQ29tbWFuZFJlc3BvbnNlEjAKCUdldFN0YXR1cxIMLm5vbW9zLkVtcHR5GhUubm9tb3MuU3RhdHVzUmVzcG9uc2USMAoMTGlzdFNlc3Npb25zEgwubm9tb3MuRW1wdHkaEi5ub21vcy5TZXNzaW9uTGlzdBI7CgpHZXRTZXNzaW9uEhUubm9tb3MuU2Vzc2lvblJlcXVlc3QaFi5ub21vcy5TZXNzaW9uUmVzcG9uc2USLAoKTGlzdERyYWZ0cxIMLm5vbW9zLkVtcHR5GhAubm9tb3MuRHJhZnRMaXN0EjgKDEFwcHJvdmVEcmFmdBISLm5vbW9zLkRyYWZ0QWN0aW9uGhQubm9tb3MuRHJhZnRSZXNwb25zZRI3CgtSZWplY3REcmFmdBISLm5vbW9zLkRyYWZ0QWN0aW9uGhQubm9tb3MuRHJhZnRSZXNwb25zZRIpCgRQaW5nEgwubm9tb3MuRW1wdHkaEy5ub21vcy5Qb25nUmVzcG9uc2UyyQ4KCU1vYmlsZUFwaRIwCgRDaGF0EhMubm9tb3MuTUNoYXRSZXF1ZXN0GhEubm9tb3MuTUNoYXRFdmVudDABEkYKC0dldE1lc3NhZ2VzEhoubm9tb3MuTUdldE1lc3NhZ2VzUmVxdWVzdBobLm5vbW9zLk1HZXRNZXNzYWdlc1Jlc3BvbnNlEkAKDEFwcHJvdmVEcmFmdBITLm5vbW9zLk1EcmFmdEFjdGlvbhobLm5vbW9zLk1EcmFmdEFjdGlvblJlc3BvbnNlEj8KC1JlamVjdERyYWZ0EhMubm9tb3MuTURyYWZ0QWN0aW9uGhsubm9tb3MuTURyYWZ0QWN0aW9uUmVzcG9uc2USUAoUQXBwcm92ZURyYWZ0V2l0aEVkaXQSGy5ub21vcy5NRHJhZnRBY3Rpb25XaXRoRWRpdBobLm5vbW9zLk1EcmFmdEFjdGlvblJlc3BvbnNlEjgKCUxpc3RJbmJveBIULm5vbW9zLk1JbmJveFJlcXVlc3QaFS5ub21vcy5NSW5ib3hSZXNwb25zZRJACg9HZXRDYXRlRW52ZWxvcGUSFy5ub21vcy5NRW52ZWxvcGVSZXF1ZXN0GhQubm9tb3MuTUNhdGVFbnZlbG9wZRJJCg5BY3RPbkluYm94SXRlbRIaLm5vbW9zLk1JbmJveEFjdGlvblJlcXVlc3QaGy5ub21vcy5NSW5ib3hBY3Rpb25SZXNwb25zZRIyCgpMaXN0U2tpbGxzEgwubm9tb3MuRW1wdHkaFi5ub21vcy5NU2tpbGxzUmVzcG9uc2USRgoLVG9nZ2xlU2tpbGwSGi5ub21vcy5NU2tpbGxUb2dnbGVSZXF1ZXN0Ghsubm9tb3MuTVNraWxsVG9nZ2xlUmVzcG9uc2USQAoLR2V0RWFybmluZ3MSFy5ub21vcy5NRWFybmluZ3NSZXF1ZXN0Ghgubm9tb3MuTUVhcm5pbmdzUmVzcG9uc2USNwoIR2V0R3JhcGgSFC5ub21vcy5NR3JhcGhSZXF1ZXN0GhUubm9tb3MuTUdyYXBoUmVzcG9uc2USSQoRR2V0R3JhcGhOZWlnaGJvcnMSHS5ub21vcy5NR3JhcGhOZWlnaGJvcnNSZXF1ZXN0GhUubm9tb3MuTUdyYXBoUmVzcG9uc2USQAoLU2VhcmNoR3JhcGgSGi5ub21vcy5NR3JhcGhTZWFyY2hSZXF1ZXN0GhUubm9tb3MuTUdyYXBoUmVzcG9uc2USNQoLR2V0U2V0dGluZ3MSDC5ub21vcy5FbXB0eRoYLm5vbW9zLk1TZXR0aW5nc1Jlc3BvbnNlEjQKDVVwZGF0ZUNvbnNlbnQSFi5ub21vcy5NQ29uc2VudFJlcXVlc3QaCy5ub21vcy5NQWNrEjgKD1VwZGF0ZVRydXN0VGllchIYLm5vbW9zLk1UcnVzdFRpZXJSZXF1ZXN0Ggsubm9tb3MuTUFjaxI6ChBVcGRhdGVQZXJtaXNzaW9uEhkubm9tb3MuTVBlcm1pc3Npb25SZXF1ZXN0Ggsubm9tb3MuTUFjaxI+ChBMaXN0SW50ZWdyYXRpb25zEgwubm9tb3MuRW1wdHkaHC5ub21vcy5NSW50ZWdyYXRpb25zUmVzcG9uc2USVAoXU3RhcnRDb25uZWN0SW50ZWdyYXRpb24SGy5ub21vcy5NU3RhcnRDb25uZWN0UmVxdWVzdBocLm5vbW9zLk1TdGFydENvbm5lY3RSZXNwb25zZRJBChRDb25uZWN0R29vZ2xlQWNjb3VudBIcLm5vbW9zLk1Db25uZWN0R29vZ2xlUmVxdWVzdBoLLm5vbW9zLk1BY2sSOgoNU2V0R29vZ2xlU2VuZBIcLm5vbW9zLk1TZXRHb29nbGVTZW5kUmVxdWVzdBoLLm5vbW9zLk1BY2sSPwoVRGlzY29ubmVjdEludGVncmF0aW9uEhkubm9tb3MuTURpc2Nvbm5lY3RSZXF1ZXN0Ggsubm9tb3MuTUFjaxI1Cg5SZWdpc3RlckRldmljZRIWLm5vbW9zLk1EZXZpY2VSZWdpc3RlchoLLm5vbW9zLk1BY2sSOQoQVW5yZWdpc3RlckRldmljZRIYLm5vbW9zLk1EZXZpY2VVbnJlZ2lzdGVyGgsubm9tb3MuTUFjaxJFCg5MaXN0VmF1bHROb3RlcxIYLm5vbW9zLk1WYXVsdExpc3RSZXF1ZXN0Ghkubm9tb3MuTVZhdWx0TGlzdFJlc3BvbnNlEjoKDEdldFZhdWx0Tm90ZRIXLm5vbW9zLk1WYXVsdEdldFJlcXVlc3QaES5ub21vcy5NVmF1bHROb3RlEjgKDldyaXRlVmF1bHROb3RlEhkubm9tb3MuTVZhdWx0V3JpdGVSZXF1ZXN0Ggsubm9tb3MuTUFjaxI6Cg9EZWxldGVWYXVsdE5vdGUSGi5ub21vcy5NVmF1bHREZWxldGVSZXF1ZXN0Ggsubm9tb3MuTUFjazJICgxPQXV0aERlcG9zaXQSOAoHRGVwb3NpdBIVLm5vbW9zLkRlcG9zaXRSZXF1ZXN0GhYubm9tb3MuRGVwb3NpdFJlc3BvbnNlYgZwcm90bzM",
+  "Cgtub21vcy5wcm90bxIFbm9tb3MiBwoFRW1wdHkijgEKCExvb3BJbmZvEgoKAmlkGAEgASgJEgwKBG5hbWUYAiABKAkSEAoIc2NoZWR1bGUYAyABKAkSDwoHZW5hYmxlZBgEIAEoCBIOCgZzb3VyY2UYBSABKAkSEwoLZXJyb3JfY291bnQYBiABKAUSEAoIbGFzdF9ydW4YByABKAkSDgoGcHJvbXB0GAggASgJIioKCExvb3BMaXN0Eh4KBWxvb3BzGAEgAygLMg8ubm9tb3MuTG9vcEluZm8iNgoVU2V0TG9vcEVuYWJsZWRSZXF1ZXN0EgwKBG5hbWUYASABKAkSDwoHZW5hYmxlZBgCIAEoCCIhChFMb29wRGVsZXRlUmVxdWVzdBIMCgRuYW1lGAEgASgJIjYKEkxvb3BBY3Rpb25SZXNwb25zZRIPCgdzdWNjZXNzGAEgASgIEg8KB21lc3NhZ2UYAiABKAkiMwoLQ2hhdFJlcXVlc3QSDwoHY29udGVudBgBIAEoCRITCgtzZXNzaW9uX2tleRgCIAEoCSIwCgpBZ2VudEV2ZW50EgwKBHR5cGUYASABKAkSFAoManNvbl9wYXlsb2FkGAIgASgJIjYKDkNvbW1hbmRSZXF1ZXN0Eg8KB2NvbW1hbmQYASABKAkSEwoLc2Vzc2lvbl9rZXkYAiABKAkiMwoPQ29tbWFuZFJlc3BvbnNlEg8KB3N1Y2Nlc3MYASABKAgSDwoHbWVzc2FnZRgCIAEoCSJPCg5TdGF0dXNSZXNwb25zZRIPCgdydW5uaW5nGAEgASgIEhkKEWNvbm5lY3RlZF9jbGllbnRzGAIgASgFEhEKCXBsYXRmb3JtcxgDIAMoCSIlCg5TZXNzaW9uUmVxdWVzdBITCgtzZXNzaW9uX2tleRgBIAEoCSJVCg9TZXNzaW9uUmVzcG9uc2USCgoCaWQYASABKAkSEwoLc2Vzc2lvbl9rZXkYAiABKAkSDQoFbW9kZWwYAyABKAkSEgoKY3JlYXRlZF9hdBgEIAEoCSI3CgtTZXNzaW9uTGlzdBIoCghzZXNzaW9ucxgBIAMoCzIWLm5vbW9zLlNlc3Npb25SZXNwb25zZSIfCgtEcmFmdEFjdGlvbhIQCghkcmFmdF9pZBgBIAEoCSIxCg1EcmFmdFJlc3BvbnNlEg8KB3N1Y2Nlc3MYASABKAgSDwoHbWVzc2FnZRgCIAEoCSItCglEcmFmdExpc3QSIAoGZHJhZnRzGAEgAygLMhAubm9tb3MuRHJhZnRJdGVtInIKCURyYWZ0SXRlbRIKCgJpZBgBIAEoCRIPCgdjb250ZW50GAIgASgJEhAKCHBsYXRmb3JtGAMgASgJEhIKCmNoYW5uZWxfaWQYBCABKAkSDgoGc3RhdHVzGAUgASgJEhIKCmNyZWF0ZWRfYXQYBiABKAkiIQoMUG9uZ1Jlc3BvbnNlEhEKCXRpbWVzdGFtcBgBIAEoAyKLAQoFTUxvb3ASCgoCaWQYASABKAkSDAoEbmFtZRgCIAEoCRIQCghzY2hlZHVsZRgDIAEoCRIPCgdlbmFibGVkGAQgASgIEg4KBnNvdXJjZRgFIAEoCRITCgtlcnJvcl9jb3VudBgGIAEoBRIQCghsYXN0X3J1bhgHIAEoCRIOCgZwcm9tcHQYCCABKAkiLQoOTUxvb3BzUmVzcG9uc2USGwoFbG9vcHMYASADKAsyDC5ub21vcy5NTG9vcCI3ChZNU2V0TG9vcEVuYWJsZWRSZXF1ZXN0EgwKBG5hbWUYASABKAkSDwoHZW5hYmxlZBgCIAEoCCIiChJNTG9vcERlbGV0ZVJlcXVlc3QSDAoEbmFtZRgBIAEoCSIoCgRNQWNrEg8KB3N1Y2Nlc3MYASABKAgSDwoHbWVzc2FnZRgCIAEoCSIjChFNVmF1bHRMaXN0UmVxdWVzdBIOCgZwcmVmaXgYASABKAkiRAoRTVZhdWx0Tm90ZVN1bW1hcnkSDAoEcGF0aBgBIAEoCRINCgV0aXRsZRgCIAEoCRISCgp1cGRhdGVkX2F0GAMgASgJIj0KEk1WYXVsdExpc3RSZXNwb25zZRInCgVub3RlcxgBIAMoCzIYLm5vbW9zLk1WYXVsdE5vdGVTdW1tYXJ5IiAKEE1WYXVsdEdldFJlcXVlc3QSDAoEcGF0aBgBIAEoCSJeCgpNVmF1bHROb3RlEgwKBHBhdGgYASABKAkSDQoFdGl0bGUYAiABKAkSDwoHY29udGVudBgDIAEoCRISCgp1cGRhdGVkX2F0GAQgASgJEg4KBmV4aXN0cxgFIAEoCCJCChJNVmF1bHRXcml0ZVJlcXVlc3QSDAoEcGF0aBgBIAEoCRIPCgdjb250ZW50GAIgASgJEg0KBXRpdGxlGAMgASgJIiMKE01WYXVsdERlbGV0ZVJlcXVlc3QSDAoEcGF0aBgBIAEoCSI0CgxNQ2hhdFJlcXVlc3QSDwoHY29udGVudBgBIAEoCRITCgtzZXNzaW9uX2tleRgCIAEoCSIwCgpNQ2hhdEV2ZW50EgwKBHR5cGUYASABKAkSFAoManNvbl9wYXlsb2FkGAIgASgJIkwKE01HZXRNZXNzYWdlc1JlcXVlc3QSEwoLc2Vzc2lvbl9rZXkYASABKAkSDQoFbGltaXQYAiABKAUSEQoJYmVmb3JlX2lkGAMgASgJIkkKCE1NZXNzYWdlEgoKAmlkGAEgASgJEgwKBHJvbGUYAiABKAkSDwoHY29udGVudBgDIAEoCRISCgpjcmVhdGVkX2F0GAQgASgJIjkKFE1HZXRNZXNzYWdlc1Jlc3BvbnNlEiEKCG1lc3NhZ2VzGAEgAygLMg8ubm9tb3MuTU1lc3NhZ2UiIAoMTURyYWZ0QWN0aW9uEhAKCGRyYWZ0X2lkGAEgASgJIj0KFE1EcmFmdEFjdGlvbldpdGhFZGl0EhAKCGRyYWZ0X2lkGAEgASgJEhMKC2VkaXRlZF90ZXh0GAIgASgJIjgKFE1EcmFmdEFjdGlvblJlc3BvbnNlEg8KB3N1Y2Nlc3MYASABKAgSDwoHbWVzc2FnZRgCIAEoCSIuCg1NSW5ib3hSZXF1ZXN0Eg4KBnN0YXR1cxgBIAEoCRINCgVsaW1pdBgCIAEoBSKYAQoKTUluYm94SXRlbRIKCgJpZBgBIAEoCRISCgpmcm9tX2xhYmVsGAIgASgJEhIKCnRydXN0X3RpZXIYAyABKAkSDwoHc3ViamVjdBgEIAEoCRIMCgR0aW1lGAUgASgJEhMKC2JvbmRfYW1vdW50GAYgASgJEg4KBnVucmVhZBgHIAEoCBISCgpjcmVhdGVkX2F0GAggASgJIkkKDk1JbmJveFJlc3BvbnNlEiAKBWl0ZW1zGAEgAygLMhEubm9tb3MuTUluYm94SXRlbRIVCg1ibG9ja2VkX2NvdW50GAIgASgFIiQKEE1FbnZlbG9wZVJlcXVlc3QSEAoIaW5ib3hfaWQYASABKAkijQEKDU1DYXRlRW52ZWxvcGUSCwoDZGlkGAEgASgJEhIKCnRydXN0X3RpZXIYAiABKAkSDgoGaW50ZW50GAMgASgJEhUKDWNvbnNlbnRfZ3JhbnQYBCABKAkSDQoFc3RhbXAYBSABKAkSEwoLYm9uZF9hbW91bnQYBiABKAkSEAoIcmF3X2pzb24YByABKAkiNwoTTUluYm94QWN0aW9uUmVxdWVzdBIQCghpbmJveF9pZBgBIAEoCRIOCgZhY3Rpb24YAiABKAkiOAoUTUluYm94QWN0aW9uUmVzcG9uc2USDwoHc3VjY2VzcxgBIAEoCBIPCgdtZXNzYWdlGAIgASgJImoKBk1Ta2lsbBIMCgRuYW1lGAEgASgJEhMKC2Rlc2NyaXB0aW9uGAIgASgJEg4KBnNvdXJjZRgDIAEoCRIPCgdlbmFibGVkGAQgASgIEg0KBWNlcnRzGAUgAygJEg0KBXByaWNlGAYgASgJIjAKD01Ta2lsbHNSZXNwb25zZRIdCgZza2lsbHMYASADKAsyDS5ub21vcy5NU2tpbGwiNAoTTVNraWxsVG9nZ2xlUmVxdWVzdBIMCgRuYW1lGAEgASgJEg8KB2VuYWJsZWQYAiABKAgiOAoUTVNraWxsVG9nZ2xlUmVzcG9uc2USDwoHc3VjY2VzcxgBIAEoCBIPCgdtZXNzYWdlGAIgASgJIiIKEE1FYXJuaW5nc1JlcXVlc3QSDgoGcGVyaW9kGAEgASgJIooBChFNRWFybmluZ3NSZXNwb25zZRIZChF0aGlzX3BlcmlvZF9jZW50cxgBIAEoAxITCgtib25kc19jb3VudBgCIAEoAxIWCg5hdmdfYm9uZF9jZW50cxgDIAEoAxIXCg9hY2NlcHRfcmF0ZV9wY3QYBCABKAUSFAoMc2VyaWVzX2NlbnRzGAUgAygDIi0KDU1HcmFwaFJlcXVlc3QSDQoFa2luZHMYASADKAkSDQoFbGltaXQYAiABKAUiXgoWTUdyYXBoTmVpZ2hib3JzUmVxdWVzdBIPCgdub2RlX2lkGAEgASgJEg0KBWRlcHRoGAIgASgFEhEKCXJlbF90eXBlcxgDIAMoCRIRCglkaXJlY3Rpb24YBCABKAkiMwoTTUdyYXBoU2VhcmNoUmVxdWVzdBINCgVxdWVyeRgBIAEoCRINCgVsaW1pdBgCIAEoBSKXAQoKTUdyYXBoTm9kZRIKCgJpZBgBIAEoCRIMCgRraW5kGAIgASgJEgwKBG5hbWUYAyABKAkSDwoHYWxpYXNlcxgEIAMoCRIPCgdzdW1tYXJ5GAUgASgJEhIKCmNvbmZpZGVuY2UYBiABKAESFQoNZXh0ZXJuYWxfa2luZBgHIAEoCRIUCgxleHRlcm5hbF9yZWYYCCABKAkiaAoKTUdyYXBoRWRnZRIKCgJpZBgBIAEoCRIOCgZzcmNfaWQYAiABKAkSDgoGZHN0X2lkGAMgASgJEhAKCHJlbF90eXBlGAQgASgJEgwKBGZhY3QYBSABKAkSDgoGd2VpZ2h0GAYgASgBIlQKDk1HcmFwaFJlc3BvbnNlEiAKBW5vZGVzGAEgAygLMhEubm9tb3MuTUdyYXBoTm9kZRIgCgVlZGdlcxgCIAMoCzIRLm5vbW9zLk1HcmFwaEVkZ2UiXgoKTVRydXN0VGllchIKCgJpZBgBIAEoCRIMCgRuYW1lGAIgASgJEhMKC2Rlc2NyaXB0aW9uGAMgASgJEgwKBG1vZGUYBCABKAkSEwoLYm9uZF9hbW91bnQYBSABKAkiOQoLTVBlcm1pc3Npb24SCgoCaWQYASABKAkSDQoFbGFiZWwYAiABKAkSDwoHZW5hYmxlZBgDIAEoCCKJAQoMTUludGVncmF0aW9uEgoKAmlkGAEgASgJEg0KBWxhYmVsGAIgASgJEgwKBGljb24YAyABKAkSEQoJY29ubmVjdGVkGAQgASgIEhUKDWFjY291bnRfZW1haWwYBSABKAkSFAoMc2VuZF9lbmFibGVkGAYgASgIEhAKCHByb3ZpZGVyGAcgASgJImgKCE1Qcm9maWxlEgwKBG5hbWUYASABKAkSDAoEcGxhbhgCIAEoCRIVCg1tZXNzYWdlX2NvdW50GAMgASgDEhQKDGVhcm5lZF9jZW50cxgEIAEoAxITCgtzYXZlZF9jZW50cxgFIAEoAyKxAQoRTVNldHRpbmdzUmVzcG9uc2USIAoHcHJvZmlsZRgBIAEoCzIPLm5vbW9zLk1Qcm9maWxlEiYKC3RydXN0X3RpZXJzGAIgAygLMhEubm9tb3MuTVRydXN0VGllchInCgtwZXJtaXNzaW9ucxgDIAMoCzISLm5vbW9zLk1QZXJtaXNzaW9uEikKDGludGVncmF0aW9ucxgEIAMoCzITLm5vbW9zLk1JbnRlZ3JhdGlvbiIxCg9NQ29uc2VudFJlcXVlc3QSEAoIcGxhdGZvcm0YASABKAkSDAoEbW9kZRgCIAEoCSJCChFNVHJ1c3RUaWVyUmVxdWVzdBIKCgJpZBgBIAEoCRIMCgRtb2RlGAIgASgJEhMKC2JvbmRfYW1vdW50GAMgASgJIjEKEk1QZXJtaXNzaW9uUmVxdWVzdBIKCgJpZBgBIAEoCRIPCgdlbmFibGVkGAIgASgIIkIKFU1JbnRlZ3JhdGlvbnNSZXNwb25zZRIpCgxpbnRlZ3JhdGlvbnMYASADKAsyEy5ub21vcy5NSW50ZWdyYXRpb24iKAoUTVN0YXJ0Q29ubmVjdFJlcXVlc3QSEAoIcHJvdmlkZXIYASABKAkiKgoVTVN0YXJ0Q29ubmVjdFJlc3BvbnNlEhEKCW9hdXRoX3VybBgBIAEoCSJDChJNRGlzY29ubmVjdFJlcXVlc3QSFgoOaW50ZWdyYXRpb25faWQYASABKAkSFQoNYWNjb3VudF9lbWFpbBgCIAEoCSI0ChVNQ29ubmVjdEdvb2dsZVJlcXVlc3QSDAoEY29kZRgBIAEoCRINCgVzdGF0ZRgCIAEoCSI/ChVNU2V0R29vZ2xlU2VuZFJlcXVlc3QSFQoNYWNjb3VudF9lbWFpbBgBIAEoCRIPCgdlbmFibGVkGAIgASgIIlEKD01EZXZpY2VSZWdpc3RlchIXCg9leHBvX3B1c2hfdG9rZW4YASABKAkSEAoIcGxhdGZvcm0YAiABKAkSEwoLYXBwX3ZlcnNpb24YAyABKAkiLAoRTURldmljZVVucmVnaXN0ZXISFwoPZXhwb19wdXNoX3Rva2VuGAEgASgJIuwBCg5EZXBvc2l0UmVxdWVzdBIQCghwcm92aWRlchgBIAEoCRIPCgd1c2VyX2lkGAIgASgJEhQKDGFjY2Vzc190b2tlbhgDIAEoCRIVCg1yZWZyZXNoX3Rva2VuGAQgASgJEhIKCmV4cGlyZXNfYXQYBSABKAMSDgoGc2NvcGVzGAYgASgJEjUKCG1ldGFkYXRhGAcgAygLMiMubm9tb3MuRGVwb3NpdFJlcXVlc3QuTWV0YWRhdGFFbnRyeRovCg1NZXRhZGF0YUVudHJ5EgsKA2tleRgBIAEoCRINCgV2YWx1ZRgCIAEoCToCOAEiSwoPRGVwb3NpdFJlc3BvbnNlEg8KB3N1Y2Nlc3MYASABKAgSDwoHbWVzc2FnZRgCIAEoCRIWCg5pbnRlZ3JhdGlvbl9pZBgDIAEoCSJtChlNU3R1ZGlvQ3JlYXRlQXNzZXRSZXF1ZXN0EgwKBG1pbWUYASABKAkSFAoMY29udGVudF9oYXNoGAIgASgJEg0KBXdpZHRoGAMgASgFEg4KBmhlaWdodBgEIAEoBRINCgVieXRlcxgFIAEoBSJqChpNU3R1ZGlvQ3JlYXRlQXNzZXRSZXNwb25zZRIQCghhc3NldF9pZBgBIAEoCRISCgp1cGxvYWRfdXJsGAIgASgJEhIKCm9iamVjdF9rZXkYAyABKAkSEgoKZXhwaXJlc19hdBgEIAEoAyI1Cg9NU3R1ZGlvQXNzZXRSZWYSEAoIYXNzZXRfaWQYASABKAkSEAoIb3JpZ2luYWwYAiABKAgiOgoXTVN0dWRpb0Fzc2V0VXJsUmVzcG9uc2USCwoDdXJsGAEgASgJEhIKCmV4cGlyZXNfYXQYAiABKAMinwEKEk1TdHVkaW9FZGl0UmVxdWVzdBIQCghhc3NldF9pZBgBIAEoCRIKCgJvcBgCIAEoCRITCgtwYXJhbXNfanNvbhgDIAEoCRIWCg5wYXJlbnRfZWRpdF9pZBgEIAEoCRIXCg9pZGVtcG90ZW5jeV9rZXkYBSABKAkSEAoIbWFza19rZXkYBiABKAkSEwoLaW5wdXRfaW1hZ2UYByABKAwiiQEKDE1TdHVkaW9FdmVudBIMCgRraW5kGAEgASgJEg8KB2VkaXRfaWQYAiABKAkSDgoGc3RhdHVzGAMgASgJEhMKC3ByZXZpZXdfa2V5GAQgASgJEhIKCm91dHB1dF9rZXkYBSABKAkSEAoIY29zdF91c2QYBiABKAESDwoHbWVzc2FnZRgHIAEoCSKcAQoLTVN0dWRpb0VkaXQSCgoCaWQYASABKAkSCgoCb3AYAiABKAkSDgoGc3RhdHVzGAMgASgJEhMKC3ByZXZpZXdfa2V5GAQgASgJEhIKCm91dHB1dF9rZXkYBSABKAkSEAoIY29zdF91c2QYBiABKAESFgoOcGFyZW50X2VkaXRfaWQYByABKAkSEgoKY3JlYXRlZF9hdBgIIAEoCSJRChZNU3R1ZGlvSGlzdG9yeVJlc3BvbnNlEiEKBWVkaXRzGAEgAygLMhIubm9tb3MuTVN0dWRpb0VkaXQSFAoMaGVhZF9lZGl0X2lkGAIgASgJIjcKFU1TdHVkaW9JZGVudGl0eVJlcG9ydBIPCgdlZGl0X2lkGAEgASgJEg0KBXNjb3JlGAIgASgBIikKGE1TdHVkaW9MaXN0QXNzZXRzUmVxdWVzdBINCgVsaW1pdBgBIAEoBSKcAQoTTVN0dWRpb0Fzc2V0U3VtbWFyeRIQCghhc3NldF9pZBgBIAEoCRITCgtwcmV2aWV3X3VybBgCIAEoCRISCgp1cGRhdGVkX2F0GAMgASgDEhEKCWZpbmFsaXplZBgEIAEoCBISCgplZGl0X2NvdW50GAUgASgFEg8KB2hlYWRfb3AYBiABKAkSEgoKZXhwaXJlc19hdBgHIAEoAyJHChlNU3R1ZGlvTGlzdEFzc2V0c1Jlc3BvbnNlEioKBmFzc2V0cxgBIAMoCzIaLm5vbW9zLk1TdHVkaW9Bc3NldFN1bW1hcnkiMgoRTVN0dWRpb1N1Z2dlc3Rpb24SDQoFbGFiZWwYASABKAkSDgoGcHJvbXB0GAIgASgJIksKGk1TdHVkaW9TdWdnZXN0aW9uc1Jlc3BvbnNlEi0KC3N1Z2dlc3Rpb25zGAEgAygLMhgubm9tb3MuTVN0dWRpb1N1Z2dlc3Rpb24yngUKCk5vbW9zQWdlbnQSLwoEQ2hhdBISLm5vbW9zLkNoYXRSZXF1ZXN0GhEubm9tb3MuQWdlbnRFdmVudDABEjgKB0NvbW1hbmQSFS5ub21vcy5Db21tYW5kUmVxdWVzdBoWLm5vbW9zLkNvbW1hbmRSZXNwb25zZRIwCglHZXRTdGF0dXMSDC5ub21vcy5FbXB0eRoVLm5vbW9zLlN0YXR1c1Jlc3BvbnNlEjAKDExpc3RTZXNzaW9ucxIMLm5vbW9zLkVtcHR5GhIubm9tb3MuU2Vzc2lvbkxpc3QSOwoKR2V0U2Vzc2lvbhIVLm5vbW9zLlNlc3Npb25SZXF1ZXN0GhYubm9tb3MuU2Vzc2lvblJlc3BvbnNlEiwKCkxpc3REcmFmdHMSDC5ub21vcy5FbXB0eRoQLm5vbW9zLkRyYWZ0TGlzdBI4CgxBcHByb3ZlRHJhZnQSEi5ub21vcy5EcmFmdEFjdGlvbhoULm5vbW9zLkRyYWZ0UmVzcG9uc2USNwoLUmVqZWN0RHJhZnQSEi5ub21vcy5EcmFmdEFjdGlvbhoULm5vbW9zLkRyYWZ0UmVzcG9uc2USKgoJTGlzdExvb3BzEgwubm9tb3MuRW1wdHkaDy5ub21vcy5Mb29wTGlzdBJJCg5TZXRMb29wRW5hYmxlZBIcLm5vbW9zLlNldExvb3BFbmFibGVkUmVxdWVzdBoZLm5vbW9zLkxvb3BBY3Rpb25SZXNwb25zZRJBCgpEZWxldGVMb29wEhgubm9tb3MuTG9vcERlbGV0ZVJlcXVlc3QaGS5ub21vcy5Mb29wQWN0aW9uUmVzcG9uc2USKQoEUGluZxIMLm5vbW9zLkVtcHR5GhMubm9tb3MuUG9uZ1Jlc3BvbnNlMokUCglNb2JpbGVBcGkSMAoEQ2hhdBITLm5vbW9zLk1DaGF0UmVxdWVzdBoRLm5vbW9zLk1DaGF0RXZlbnQwARJGCgtHZXRNZXNzYWdlcxIaLm5vbW9zLk1HZXRNZXNzYWdlc1JlcXVlc3QaGy5ub21vcy5NR2V0TWVzc2FnZXNSZXNwb25zZRJACgxBcHByb3ZlRHJhZnQSEy5ub21vcy5NRHJhZnRBY3Rpb24aGy5ub21vcy5NRHJhZnRBY3Rpb25SZXNwb25zZRI/CgtSZWplY3REcmFmdBITLm5vbW9zLk1EcmFmdEFjdGlvbhobLm5vbW9zLk1EcmFmdEFjdGlvblJlc3BvbnNlElAKFEFwcHJvdmVEcmFmdFdpdGhFZGl0Ehsubm9tb3MuTURyYWZ0QWN0aW9uV2l0aEVkaXQaGy5ub21vcy5NRHJhZnRBY3Rpb25SZXNwb25zZRI4CglMaXN0SW5ib3gSFC5ub21vcy5NSW5ib3hSZXF1ZXN0GhUubm9tb3MuTUluYm94UmVzcG9uc2USQAoPR2V0Q2F0ZUVudmVsb3BlEhcubm9tb3MuTUVudmVsb3BlUmVxdWVzdBoULm5vbW9zLk1DYXRlRW52ZWxvcGUSSQoOQWN0T25JbmJveEl0ZW0SGi5ub21vcy5NSW5ib3hBY3Rpb25SZXF1ZXN0Ghsubm9tb3MuTUluYm94QWN0aW9uUmVzcG9uc2USMgoKTGlzdFNraWxscxIMLm5vbW9zLkVtcHR5GhYubm9tb3MuTVNraWxsc1Jlc3BvbnNlEkYKC1RvZ2dsZVNraWxsEhoubm9tb3MuTVNraWxsVG9nZ2xlUmVxdWVzdBobLm5vbW9zLk1Ta2lsbFRvZ2dsZVJlc3BvbnNlEkAKC0dldEVhcm5pbmdzEhcubm9tb3MuTUVhcm5pbmdzUmVxdWVzdBoYLm5vbW9zLk1FYXJuaW5nc1Jlc3BvbnNlEjcKCEdldEdyYXBoEhQubm9tb3MuTUdyYXBoUmVxdWVzdBoVLm5vbW9zLk1HcmFwaFJlc3BvbnNlEkkKEUdldEdyYXBoTmVpZ2hib3JzEh0ubm9tb3MuTUdyYXBoTmVpZ2hib3JzUmVxdWVzdBoVLm5vbW9zLk1HcmFwaFJlc3BvbnNlEkAKC1NlYXJjaEdyYXBoEhoubm9tb3MuTUdyYXBoU2VhcmNoUmVxdWVzdBoVLm5vbW9zLk1HcmFwaFJlc3BvbnNlEjUKC0dldFNldHRpbmdzEgwubm9tb3MuRW1wdHkaGC5ub21vcy5NU2V0dGluZ3NSZXNwb25zZRI0Cg1VcGRhdGVDb25zZW50EhYubm9tb3MuTUNvbnNlbnRSZXF1ZXN0Ggsubm9tb3MuTUFjaxI4Cg9VcGRhdGVUcnVzdFRpZXISGC5ub21vcy5NVHJ1c3RUaWVyUmVxdWVzdBoLLm5vbW9zLk1BY2sSOgoQVXBkYXRlUGVybWlzc2lvbhIZLm5vbW9zLk1QZXJtaXNzaW9uUmVxdWVzdBoLLm5vbW9zLk1BY2sSPgoQTGlzdEludGVncmF0aW9ucxIMLm5vbW9zLkVtcHR5Ghwubm9tb3MuTUludGVncmF0aW9uc1Jlc3BvbnNlElQKF1N0YXJ0Q29ubmVjdEludGVncmF0aW9uEhsubm9tb3MuTVN0YXJ0Q29ubmVjdFJlcXVlc3QaHC5ub21vcy5NU3RhcnRDb25uZWN0UmVzcG9uc2USQQoUQ29ubmVjdEdvb2dsZUFjY291bnQSHC5ub21vcy5NQ29ubmVjdEdvb2dsZVJlcXVlc3QaCy5ub21vcy5NQWNrEjoKDVNldEdvb2dsZVNlbmQSHC5ub21vcy5NU2V0R29vZ2xlU2VuZFJlcXVlc3QaCy5ub21vcy5NQWNrEj8KFURpc2Nvbm5lY3RJbnRlZ3JhdGlvbhIZLm5vbW9zLk1EaXNjb25uZWN0UmVxdWVzdBoLLm5vbW9zLk1BY2sSNQoOUmVnaXN0ZXJEZXZpY2USFi5ub21vcy5NRGV2aWNlUmVnaXN0ZXIaCy5ub21vcy5NQWNrEjkKEFVucmVnaXN0ZXJEZXZpY2USGC5ub21vcy5NRGV2aWNlVW5yZWdpc3RlchoLLm5vbW9zLk1BY2sSRQoOTGlzdFZhdWx0Tm90ZXMSGC5ub21vcy5NVmF1bHRMaXN0UmVxdWVzdBoZLm5vbW9zLk1WYXVsdExpc3RSZXNwb25zZRI6CgxHZXRWYXVsdE5vdGUSFy5ub21vcy5NVmF1bHRHZXRSZXF1ZXN0GhEubm9tb3MuTVZhdWx0Tm90ZRI4Cg5Xcml0ZVZhdWx0Tm90ZRIZLm5vbW9zLk1WYXVsdFdyaXRlUmVxdWVzdBoLLm5vbW9zLk1BY2sSOgoPRGVsZXRlVmF1bHROb3RlEhoubm9tb3MuTVZhdWx0RGVsZXRlUmVxdWVzdBoLLm5vbW9zLk1BY2sSMAoJTGlzdExvb3BzEgwubm9tb3MuRW1wdHkaFS5ub21vcy5NTG9vcHNSZXNwb25zZRI8Cg5TZXRMb29wRW5hYmxlZBIdLm5vbW9zLk1TZXRMb29wRW5hYmxlZFJlcXVlc3QaCy5ub21vcy5NQWNrEjQKCkRlbGV0ZUxvb3ASGS5ub21vcy5NTG9vcERlbGV0ZVJlcXVlc3QaCy5ub21vcy5NQWNrElgKEVN0dWRpb0NyZWF0ZUFzc2V0EiAubm9tb3MuTVN0dWRpb0NyZWF0ZUFzc2V0UmVxdWVzdBohLm5vbW9zLk1TdHVkaW9DcmVhdGVBc3NldFJlc3BvbnNlEksKEVN0dWRpb0dldEFzc2V0VXJsEhYubm9tb3MuTVN0dWRpb0Fzc2V0UmVmGh4ubm9tb3MuTVN0dWRpb0Fzc2V0VXJsUmVzcG9uc2USPgoKU3R1ZGlvRWRpdBIZLm5vbW9zLk1TdHVkaW9FZGl0UmVxdWVzdBoTLm5vbW9zLk1TdHVkaW9FdmVudDABEkYKDVN0dWRpb0hpc3RvcnkSFi5ub21vcy5NU3R1ZGlvQXNzZXRSZWYaHS5ub21vcy5NU3R1ZGlvSGlzdG9yeVJlc3BvbnNlElUKEFN0dWRpb0xpc3RBc3NldHMSHy5ub21vcy5NU3R1ZGlvTGlzdEFzc2V0c1JlcXVlc3QaIC5ub21vcy5NU3R1ZGlvTGlzdEFzc2V0c1Jlc3BvbnNlEk8KElN0dWRpb1N1Z2dlc3RFZGl0cxIWLm5vbW9zLk1TdHVkaW9Bc3NldFJlZhohLm5vbW9zLk1TdHVkaW9TdWdnZXN0aW9uc1Jlc3BvbnNlEkEKFFN0dWRpb1JlcG9ydElkZW50aXR5Ehwubm9tb3MuTVN0dWRpb0lkZW50aXR5UmVwb3J0Ggsubm9tb3MuTUFjazJICgxPQXV0aERlcG9zaXQSOAoHRGVwb3NpdBIVLm5vbW9zLkRlcG9zaXRSZXF1ZXN0GhYubm9tb3MuRGVwb3NpdFJlc3BvbnNlYgZwcm90bzM",
 );
 
 /**
@@ -23,6 +23,142 @@ export type Empty = Message<"nomos.Empty"> & {};
  * Use `create(EmptySchema)` to create a new message.
  */
 export const EmptySchema: GenMessage<Empty> /*@__PURE__*/ = messageDesc(file_nomos, 0);
+
+/**
+ * @generated from message nomos.LoopInfo
+ */
+export type LoopInfo = Message<"nomos.LoopInfo"> & {
+  /**
+   * @generated from field: string id = 1;
+   */
+  id: string;
+
+  /**
+   * @generated from field: string name = 2;
+   */
+  name: string;
+
+  /**
+   * @generated from field: string schedule = 3;
+   */
+  schedule: string;
+
+  /**
+   * @generated from field: bool enabled = 4;
+   */
+  enabled: boolean;
+
+  /**
+   * system | bundled | user | agent
+   *
+   * @generated from field: string source = 5;
+   */
+  source: string;
+
+  /**
+   * @generated from field: int32 error_count = 6;
+   */
+  errorCount: number;
+
+  /**
+   * ISO-8601, empty if never run
+   *
+   * @generated from field: string last_run = 7;
+   */
+  lastRun: string;
+
+  /**
+   * @generated from field: string prompt = 8;
+   */
+  prompt: string;
+};
+
+/**
+ * Describes the message nomos.LoopInfo.
+ * Use `create(LoopInfoSchema)` to create a new message.
+ */
+export const LoopInfoSchema: GenMessage<LoopInfo> /*@__PURE__*/ = messageDesc(file_nomos, 1);
+
+/**
+ * @generated from message nomos.LoopList
+ */
+export type LoopList = Message<"nomos.LoopList"> & {
+  /**
+   * @generated from field: repeated nomos.LoopInfo loops = 1;
+   */
+  loops: LoopInfo[];
+};
+
+/**
+ * Describes the message nomos.LoopList.
+ * Use `create(LoopListSchema)` to create a new message.
+ */
+export const LoopListSchema: GenMessage<LoopList> /*@__PURE__*/ = messageDesc(file_nomos, 2);
+
+/**
+ * @generated from message nomos.SetLoopEnabledRequest
+ */
+export type SetLoopEnabledRequest = Message<"nomos.SetLoopEnabledRequest"> & {
+  /**
+   * @generated from field: string name = 1;
+   */
+  name: string;
+
+  /**
+   * @generated from field: bool enabled = 2;
+   */
+  enabled: boolean;
+};
+
+/**
+ * Describes the message nomos.SetLoopEnabledRequest.
+ * Use `create(SetLoopEnabledRequestSchema)` to create a new message.
+ */
+export const SetLoopEnabledRequestSchema: GenMessage<SetLoopEnabledRequest> /*@__PURE__*/ =
+  messageDesc(file_nomos, 3);
+
+/**
+ * @generated from message nomos.LoopDeleteRequest
+ */
+export type LoopDeleteRequest = Message<"nomos.LoopDeleteRequest"> & {
+  /**
+   * @generated from field: string name = 1;
+   */
+  name: string;
+};
+
+/**
+ * Describes the message nomos.LoopDeleteRequest.
+ * Use `create(LoopDeleteRequestSchema)` to create a new message.
+ */
+export const LoopDeleteRequestSchema: GenMessage<LoopDeleteRequest> /*@__PURE__*/ = messageDesc(
+  file_nomos,
+  4,
+);
+
+/**
+ * @generated from message nomos.LoopActionResponse
+ */
+export type LoopActionResponse = Message<"nomos.LoopActionResponse"> & {
+  /**
+   * @generated from field: bool success = 1;
+   */
+  success: boolean;
+
+  /**
+   * @generated from field: string message = 2;
+   */
+  message: string;
+};
+
+/**
+ * Describes the message nomos.LoopActionResponse.
+ * Use `create(LoopActionResponseSchema)` to create a new message.
+ */
+export const LoopActionResponseSchema: GenMessage<LoopActionResponse> /*@__PURE__*/ = messageDesc(
+  file_nomos,
+  5,
+);
 
 /**
  * @generated from message nomos.ChatRequest
@@ -43,7 +179,7 @@ export type ChatRequest = Message<"nomos.ChatRequest"> & {
  * Describes the message nomos.ChatRequest.
  * Use `create(ChatRequestSchema)` to create a new message.
  */
-export const ChatRequestSchema: GenMessage<ChatRequest> /*@__PURE__*/ = messageDesc(file_nomos, 1);
+export const ChatRequestSchema: GenMessage<ChatRequest> /*@__PURE__*/ = messageDesc(file_nomos, 6);
 
 /**
  * @generated from message nomos.AgentEvent
@@ -68,7 +204,7 @@ export type AgentEvent = Message<"nomos.AgentEvent"> & {
  * Describes the message nomos.AgentEvent.
  * Use `create(AgentEventSchema)` to create a new message.
  */
-export const AgentEventSchema: GenMessage<AgentEvent> /*@__PURE__*/ = messageDesc(file_nomos, 2);
+export const AgentEventSchema: GenMessage<AgentEvent> /*@__PURE__*/ = messageDesc(file_nomos, 7);
 
 /**
  * @generated from message nomos.CommandRequest
@@ -91,7 +227,7 @@ export type CommandRequest = Message<"nomos.CommandRequest"> & {
  */
 export const CommandRequestSchema: GenMessage<CommandRequest> /*@__PURE__*/ = messageDesc(
   file_nomos,
-  3,
+  8,
 );
 
 /**
@@ -115,7 +251,7 @@ export type CommandResponse = Message<"nomos.CommandResponse"> & {
  */
 export const CommandResponseSchema: GenMessage<CommandResponse> /*@__PURE__*/ = messageDesc(
   file_nomos,
-  4,
+  9,
 );
 
 /**
@@ -144,7 +280,7 @@ export type StatusResponse = Message<"nomos.StatusResponse"> & {
  */
 export const StatusResponseSchema: GenMessage<StatusResponse> /*@__PURE__*/ = messageDesc(
   file_nomos,
-  5,
+  10,
 );
 
 /**
@@ -163,7 +299,7 @@ export type SessionRequest = Message<"nomos.SessionRequest"> & {
  */
 export const SessionRequestSchema: GenMessage<SessionRequest> /*@__PURE__*/ = messageDesc(
   file_nomos,
-  6,
+  11,
 );
 
 /**
@@ -197,7 +333,7 @@ export type SessionResponse = Message<"nomos.SessionResponse"> & {
  */
 export const SessionResponseSchema: GenMessage<SessionResponse> /*@__PURE__*/ = messageDesc(
   file_nomos,
-  7,
+  12,
 );
 
 /**
@@ -214,7 +350,7 @@ export type SessionList = Message<"nomos.SessionList"> & {
  * Describes the message nomos.SessionList.
  * Use `create(SessionListSchema)` to create a new message.
  */
-export const SessionListSchema: GenMessage<SessionList> /*@__PURE__*/ = messageDesc(file_nomos, 8);
+export const SessionListSchema: GenMessage<SessionList> /*@__PURE__*/ = messageDesc(file_nomos, 13);
 
 /**
  * @generated from message nomos.DraftAction
@@ -230,7 +366,7 @@ export type DraftAction = Message<"nomos.DraftAction"> & {
  * Describes the message nomos.DraftAction.
  * Use `create(DraftActionSchema)` to create a new message.
  */
-export const DraftActionSchema: GenMessage<DraftAction> /*@__PURE__*/ = messageDesc(file_nomos, 9);
+export const DraftActionSchema: GenMessage<DraftAction> /*@__PURE__*/ = messageDesc(file_nomos, 14);
 
 /**
  * @generated from message nomos.DraftResponse
@@ -253,7 +389,7 @@ export type DraftResponse = Message<"nomos.DraftResponse"> & {
  */
 export const DraftResponseSchema: GenMessage<DraftResponse> /*@__PURE__*/ = messageDesc(
   file_nomos,
-  10,
+  15,
 );
 
 /**
@@ -270,7 +406,7 @@ export type DraftList = Message<"nomos.DraftList"> & {
  * Describes the message nomos.DraftList.
  * Use `create(DraftListSchema)` to create a new message.
  */
-export const DraftListSchema: GenMessage<DraftList> /*@__PURE__*/ = messageDesc(file_nomos, 11);
+export const DraftListSchema: GenMessage<DraftList> /*@__PURE__*/ = messageDesc(file_nomos, 16);
 
 /**
  * @generated from message nomos.DraftItem
@@ -311,7 +447,7 @@ export type DraftItem = Message<"nomos.DraftItem"> & {
  * Describes the message nomos.DraftItem.
  * Use `create(DraftItemSchema)` to create a new message.
  */
-export const DraftItemSchema: GenMessage<DraftItem> /*@__PURE__*/ = messageDesc(file_nomos, 12);
+export const DraftItemSchema: GenMessage<DraftItem> /*@__PURE__*/ = messageDesc(file_nomos, 17);
 
 /**
  * @generated from message nomos.PongResponse
@@ -329,7 +465,124 @@ export type PongResponse = Message<"nomos.PongResponse"> & {
  */
 export const PongResponseSchema: GenMessage<PongResponse> /*@__PURE__*/ = messageDesc(
   file_nomos,
-  13,
+  18,
+);
+
+/**
+ * Loops (autonomous recurring jobs)
+ *
+ * @generated from message nomos.MLoop
+ */
+export type MLoop = Message<"nomos.MLoop"> & {
+  /**
+   * @generated from field: string id = 1;
+   */
+  id: string;
+
+  /**
+   * @generated from field: string name = 2;
+   */
+  name: string;
+
+  /**
+   * @generated from field: string schedule = 3;
+   */
+  schedule: string;
+
+  /**
+   * @generated from field: bool enabled = 4;
+   */
+  enabled: boolean;
+
+  /**
+   * system | bundled | user | agent
+   *
+   * @generated from field: string source = 5;
+   */
+  source: string;
+
+  /**
+   * @generated from field: int32 error_count = 6;
+   */
+  errorCount: number;
+
+  /**
+   * ISO-8601, empty if never run
+   *
+   * @generated from field: string last_run = 7;
+   */
+  lastRun: string;
+
+  /**
+   * @generated from field: string prompt = 8;
+   */
+  prompt: string;
+};
+
+/**
+ * Describes the message nomos.MLoop.
+ * Use `create(MLoopSchema)` to create a new message.
+ */
+export const MLoopSchema: GenMessage<MLoop> /*@__PURE__*/ = messageDesc(file_nomos, 19);
+
+/**
+ * @generated from message nomos.MLoopsResponse
+ */
+export type MLoopsResponse = Message<"nomos.MLoopsResponse"> & {
+  /**
+   * @generated from field: repeated nomos.MLoop loops = 1;
+   */
+  loops: MLoop[];
+};
+
+/**
+ * Describes the message nomos.MLoopsResponse.
+ * Use `create(MLoopsResponseSchema)` to create a new message.
+ */
+export const MLoopsResponseSchema: GenMessage<MLoopsResponse> /*@__PURE__*/ = messageDesc(
+  file_nomos,
+  20,
+);
+
+/**
+ * @generated from message nomos.MSetLoopEnabledRequest
+ */
+export type MSetLoopEnabledRequest = Message<"nomos.MSetLoopEnabledRequest"> & {
+  /**
+   * @generated from field: string name = 1;
+   */
+  name: string;
+
+  /**
+   * @generated from field: bool enabled = 2;
+   */
+  enabled: boolean;
+};
+
+/**
+ * Describes the message nomos.MSetLoopEnabledRequest.
+ * Use `create(MSetLoopEnabledRequestSchema)` to create a new message.
+ */
+export const MSetLoopEnabledRequestSchema: GenMessage<MSetLoopEnabledRequest> /*@__PURE__*/ =
+  messageDesc(file_nomos, 21);
+
+/**
+ * @generated from message nomos.MLoopDeleteRequest
+ */
+export type MLoopDeleteRequest = Message<"nomos.MLoopDeleteRequest"> & {
+  /**
+   * @generated from field: string name = 1;
+   */
+  name: string;
+};
+
+/**
+ * Describes the message nomos.MLoopDeleteRequest.
+ * Use `create(MLoopDeleteRequestSchema)` to create a new message.
+ */
+export const MLoopDeleteRequestSchema: GenMessage<MLoopDeleteRequest> /*@__PURE__*/ = messageDesc(
+  file_nomos,
+  22,
 );
 
 /**
@@ -351,7 +604,7 @@ export type MAck = Message<"nomos.MAck"> & {
  * Describes the message nomos.MAck.
  * Use `create(MAckSchema)` to create a new message.
  */
-export const MAckSchema: GenMessage<MAck> /*@__PURE__*/ = messageDesc(file_nomos, 14);
+export const MAckSchema: GenMessage<MAck> /*@__PURE__*/ = messageDesc(file_nomos, 23);
 
 /**
  * Vault (long-term memory / knowledge base)
@@ -371,7 +624,7 @@ export type MVaultListRequest = Message<"nomos.MVaultListRequest"> & {
  */
 export const MVaultListRequestSchema: GenMessage<MVaultListRequest> /*@__PURE__*/ = messageDesc(
   file_nomos,
-  15,
+  24,
 );
 
 /**
@@ -400,7 +653,7 @@ export type MVaultNoteSummary = Message<"nomos.MVaultNoteSummary"> & {
  */
 export const MVaultNoteSummarySchema: GenMessage<MVaultNoteSummary> /*@__PURE__*/ = messageDesc(
   file_nomos,
-  16,
+  25,
 );
 
 /**
@@ -419,7 +672,7 @@ export type MVaultListResponse = Message<"nomos.MVaultListResponse"> & {
  */
 export const MVaultListResponseSchema: GenMessage<MVaultListResponse> /*@__PURE__*/ = messageDesc(
   file_nomos,
-  17,
+  26,
 );
 
 /**
@@ -438,7 +691,7 @@ export type MVaultGetRequest = Message<"nomos.MVaultGetRequest"> & {
  */
 export const MVaultGetRequestSchema: GenMessage<MVaultGetRequest> /*@__PURE__*/ = messageDesc(
   file_nomos,
-  18,
+  27,
 );
 
 /**
@@ -475,7 +728,7 @@ export type MVaultNote = Message<"nomos.MVaultNote"> & {
  * Describes the message nomos.MVaultNote.
  * Use `create(MVaultNoteSchema)` to create a new message.
  */
-export const MVaultNoteSchema: GenMessage<MVaultNote> /*@__PURE__*/ = messageDesc(file_nomos, 19);
+export const MVaultNoteSchema: GenMessage<MVaultNote> /*@__PURE__*/ = messageDesc(file_nomos, 28);
 
 /**
  * @generated from message nomos.MVaultWriteRequest
@@ -503,7 +756,7 @@ export type MVaultWriteRequest = Message<"nomos.MVaultWriteRequest"> & {
  */
 export const MVaultWriteRequestSchema: GenMessage<MVaultWriteRequest> /*@__PURE__*/ = messageDesc(
   file_nomos,
-  20,
+  29,
 );
 
 /**
@@ -522,7 +775,7 @@ export type MVaultDeleteRequest = Message<"nomos.MVaultDeleteRequest"> & {
  */
 export const MVaultDeleteRequestSchema: GenMessage<MVaultDeleteRequest> /*@__PURE__*/ = messageDesc(
   file_nomos,
-  21,
+  30,
 );
 
 /**
@@ -548,7 +801,7 @@ export type MChatRequest = Message<"nomos.MChatRequest"> & {
  */
 export const MChatRequestSchema: GenMessage<MChatRequest> /*@__PURE__*/ = messageDesc(
   file_nomos,
-  22,
+  31,
 );
 
 /**
@@ -570,7 +823,7 @@ export type MChatEvent = Message<"nomos.MChatEvent"> & {
  * Describes the message nomos.MChatEvent.
  * Use `create(MChatEventSchema)` to create a new message.
  */
-export const MChatEventSchema: GenMessage<MChatEvent> /*@__PURE__*/ = messageDesc(file_nomos, 23);
+export const MChatEventSchema: GenMessage<MChatEvent> /*@__PURE__*/ = messageDesc(file_nomos, 32);
 
 /**
  * @generated from message nomos.MGetMessagesRequest
@@ -598,7 +851,7 @@ export type MGetMessagesRequest = Message<"nomos.MGetMessagesRequest"> & {
  */
 export const MGetMessagesRequestSchema: GenMessage<MGetMessagesRequest> /*@__PURE__*/ = messageDesc(
   file_nomos,
-  24,
+  33,
 );
 
 /**
@@ -632,7 +885,7 @@ export type MMessage = Message<"nomos.MMessage"> & {
  * Describes the message nomos.MMessage.
  * Use `create(MMessageSchema)` to create a new message.
  */
-export const MMessageSchema: GenMessage<MMessage> /*@__PURE__*/ = messageDesc(file_nomos, 25);
+export const MMessageSchema: GenMessage<MMessage> /*@__PURE__*/ = messageDesc(file_nomos, 34);
 
 /**
  * @generated from message nomos.MGetMessagesResponse
@@ -649,7 +902,7 @@ export type MGetMessagesResponse = Message<"nomos.MGetMessagesResponse"> & {
  * Use `create(MGetMessagesResponseSchema)` to create a new message.
  */
 export const MGetMessagesResponseSchema: GenMessage<MGetMessagesResponse> /*@__PURE__*/ =
-  messageDesc(file_nomos, 26);
+  messageDesc(file_nomos, 35);
 
 /**
  * @generated from message nomos.MDraftAction
@@ -667,7 +920,7 @@ export type MDraftAction = Message<"nomos.MDraftAction"> & {
  */
 export const MDraftActionSchema: GenMessage<MDraftAction> /*@__PURE__*/ = messageDesc(
   file_nomos,
-  27,
+  36,
 );
 
 /**
@@ -690,7 +943,7 @@ export type MDraftActionWithEdit = Message<"nomos.MDraftActionWithEdit"> & {
  * Use `create(MDraftActionWithEditSchema)` to create a new message.
  */
 export const MDraftActionWithEditSchema: GenMessage<MDraftActionWithEdit> /*@__PURE__*/ =
-  messageDesc(file_nomos, 28);
+  messageDesc(file_nomos, 37);
 
 /**
  * @generated from message nomos.MDraftActionResponse
@@ -712,7 +965,7 @@ export type MDraftActionResponse = Message<"nomos.MDraftActionResponse"> & {
  * Use `create(MDraftActionResponseSchema)` to create a new message.
  */
 export const MDraftActionResponseSchema: GenMessage<MDraftActionResponse> /*@__PURE__*/ =
-  messageDesc(file_nomos, 29);
+  messageDesc(file_nomos, 38);
 
 /**
  * Inbox
@@ -739,7 +992,7 @@ export type MInboxRequest = Message<"nomos.MInboxRequest"> & {
  */
 export const MInboxRequestSchema: GenMessage<MInboxRequest> /*@__PURE__*/ = messageDesc(
   file_nomos,
-  30,
+  39,
 );
 
 /**
@@ -797,7 +1050,7 @@ export type MInboxItem = Message<"nomos.MInboxItem"> & {
  * Describes the message nomos.MInboxItem.
  * Use `create(MInboxItemSchema)` to create a new message.
  */
-export const MInboxItemSchema: GenMessage<MInboxItem> /*@__PURE__*/ = messageDesc(file_nomos, 31);
+export const MInboxItemSchema: GenMessage<MInboxItem> /*@__PURE__*/ = messageDesc(file_nomos, 40);
 
 /**
  * @generated from message nomos.MInboxResponse
@@ -820,7 +1073,7 @@ export type MInboxResponse = Message<"nomos.MInboxResponse"> & {
  */
 export const MInboxResponseSchema: GenMessage<MInboxResponse> /*@__PURE__*/ = messageDesc(
   file_nomos,
-  32,
+  41,
 );
 
 /**
@@ -839,7 +1092,7 @@ export type MEnvelopeRequest = Message<"nomos.MEnvelopeRequest"> & {
  */
 export const MEnvelopeRequestSchema: GenMessage<MEnvelopeRequest> /*@__PURE__*/ = messageDesc(
   file_nomos,
-  33,
+  42,
 );
 
 /**
@@ -888,7 +1141,7 @@ export type MCateEnvelope = Message<"nomos.MCateEnvelope"> & {
  */
 export const MCateEnvelopeSchema: GenMessage<MCateEnvelope> /*@__PURE__*/ = messageDesc(
   file_nomos,
-  34,
+  43,
 );
 
 /**
@@ -914,7 +1167,7 @@ export type MInboxActionRequest = Message<"nomos.MInboxActionRequest"> & {
  */
 export const MInboxActionRequestSchema: GenMessage<MInboxActionRequest> /*@__PURE__*/ = messageDesc(
   file_nomos,
-  35,
+  44,
 );
 
 /**
@@ -937,7 +1190,7 @@ export type MInboxActionResponse = Message<"nomos.MInboxActionResponse"> & {
  * Use `create(MInboxActionResponseSchema)` to create a new message.
  */
 export const MInboxActionResponseSchema: GenMessage<MInboxActionResponse> /*@__PURE__*/ =
-  messageDesc(file_nomos, 36);
+  messageDesc(file_nomos, 45);
 
 /**
  * Skills
@@ -982,7 +1235,7 @@ export type MSkill = Message<"nomos.MSkill"> & {
  * Describes the message nomos.MSkill.
  * Use `create(MSkillSchema)` to create a new message.
  */
-export const MSkillSchema: GenMessage<MSkill> /*@__PURE__*/ = messageDesc(file_nomos, 37);
+export const MSkillSchema: GenMessage<MSkill> /*@__PURE__*/ = messageDesc(file_nomos, 46);
 
 /**
  * @generated from message nomos.MSkillsResponse
@@ -1000,7 +1253,7 @@ export type MSkillsResponse = Message<"nomos.MSkillsResponse"> & {
  */
 export const MSkillsResponseSchema: GenMessage<MSkillsResponse> /*@__PURE__*/ = messageDesc(
   file_nomos,
-  38,
+  47,
 );
 
 /**
@@ -1024,7 +1277,7 @@ export type MSkillToggleRequest = Message<"nomos.MSkillToggleRequest"> & {
  */
 export const MSkillToggleRequestSchema: GenMessage<MSkillToggleRequest> /*@__PURE__*/ = messageDesc(
   file_nomos,
-  39,
+  48,
 );
 
 /**
@@ -1047,7 +1300,7 @@ export type MSkillToggleResponse = Message<"nomos.MSkillToggleResponse"> & {
  * Use `create(MSkillToggleResponseSchema)` to create a new message.
  */
 export const MSkillToggleResponseSchema: GenMessage<MSkillToggleResponse> /*@__PURE__*/ =
-  messageDesc(file_nomos, 40);
+  messageDesc(file_nomos, 49);
 
 /**
  * Earnings
@@ -1069,7 +1322,7 @@ export type MEarningsRequest = Message<"nomos.MEarningsRequest"> & {
  */
 export const MEarningsRequestSchema: GenMessage<MEarningsRequest> /*@__PURE__*/ = messageDesc(
   file_nomos,
-  41,
+  50,
 );
 
 /**
@@ -1112,7 +1365,7 @@ export type MEarningsResponse = Message<"nomos.MEarningsResponse"> & {
  */
 export const MEarningsResponseSchema: GenMessage<MEarningsResponse> /*@__PURE__*/ = messageDesc(
   file_nomos,
-  42,
+  51,
 );
 
 /**
@@ -1142,7 +1395,7 @@ export type MGraphRequest = Message<"nomos.MGraphRequest"> & {
  */
 export const MGraphRequestSchema: GenMessage<MGraphRequest> /*@__PURE__*/ = messageDesc(
   file_nomos,
-  43,
+  52,
 );
 
 /**
@@ -1181,7 +1434,7 @@ export type MGraphNeighborsRequest = Message<"nomos.MGraphNeighborsRequest"> & {
  * Use `create(MGraphNeighborsRequestSchema)` to create a new message.
  */
 export const MGraphNeighborsRequestSchema: GenMessage<MGraphNeighborsRequest> /*@__PURE__*/ =
-  messageDesc(file_nomos, 44);
+  messageDesc(file_nomos, 53);
 
 /**
  * @generated from message nomos.MGraphSearchRequest
@@ -1204,7 +1457,7 @@ export type MGraphSearchRequest = Message<"nomos.MGraphSearchRequest"> & {
  */
 export const MGraphSearchRequestSchema: GenMessage<MGraphSearchRequest> /*@__PURE__*/ = messageDesc(
   file_nomos,
-  45,
+  54,
 );
 
 /**
@@ -1258,7 +1511,7 @@ export type MGraphNode = Message<"nomos.MGraphNode"> & {
  * Describes the message nomos.MGraphNode.
  * Use `create(MGraphNodeSchema)` to create a new message.
  */
-export const MGraphNodeSchema: GenMessage<MGraphNode> /*@__PURE__*/ = messageDesc(file_nomos, 46);
+export const MGraphNodeSchema: GenMessage<MGraphNode> /*@__PURE__*/ = messageDesc(file_nomos, 55);
 
 /**
  * @generated from message nomos.MGraphEdge
@@ -1299,7 +1552,7 @@ export type MGraphEdge = Message<"nomos.MGraphEdge"> & {
  * Describes the message nomos.MGraphEdge.
  * Use `create(MGraphEdgeSchema)` to create a new message.
  */
-export const MGraphEdgeSchema: GenMessage<MGraphEdge> /*@__PURE__*/ = messageDesc(file_nomos, 47);
+export const MGraphEdgeSchema: GenMessage<MGraphEdge> /*@__PURE__*/ = messageDesc(file_nomos, 56);
 
 /**
  * @generated from message nomos.MGraphResponse
@@ -1322,7 +1575,7 @@ export type MGraphResponse = Message<"nomos.MGraphResponse"> & {
  */
 export const MGraphResponseSchema: GenMessage<MGraphResponse> /*@__PURE__*/ = messageDesc(
   file_nomos,
-  48,
+  57,
 );
 
 /**
@@ -1363,7 +1616,7 @@ export type MTrustTier = Message<"nomos.MTrustTier"> & {
  * Describes the message nomos.MTrustTier.
  * Use `create(MTrustTierSchema)` to create a new message.
  */
-export const MTrustTierSchema: GenMessage<MTrustTier> /*@__PURE__*/ = messageDesc(file_nomos, 49);
+export const MTrustTierSchema: GenMessage<MTrustTier> /*@__PURE__*/ = messageDesc(file_nomos, 58);
 
 /**
  * @generated from message nomos.MPermission
@@ -1389,7 +1642,7 @@ export type MPermission = Message<"nomos.MPermission"> & {
  * Describes the message nomos.MPermission.
  * Use `create(MPermissionSchema)` to create a new message.
  */
-export const MPermissionSchema: GenMessage<MPermission> /*@__PURE__*/ = messageDesc(file_nomos, 50);
+export const MPermissionSchema: GenMessage<MPermission> /*@__PURE__*/ = messageDesc(file_nomos, 59);
 
 /**
  * @generated from message nomos.MIntegration
@@ -1443,7 +1696,7 @@ export type MIntegration = Message<"nomos.MIntegration"> & {
  */
 export const MIntegrationSchema: GenMessage<MIntegration> /*@__PURE__*/ = messageDesc(
   file_nomos,
-  51,
+  60,
 );
 
 /**
@@ -1480,7 +1733,7 @@ export type MProfile = Message<"nomos.MProfile"> & {
  * Describes the message nomos.MProfile.
  * Use `create(MProfileSchema)` to create a new message.
  */
-export const MProfileSchema: GenMessage<MProfile> /*@__PURE__*/ = messageDesc(file_nomos, 52);
+export const MProfileSchema: GenMessage<MProfile> /*@__PURE__*/ = messageDesc(file_nomos, 61);
 
 /**
  * @generated from message nomos.MSettingsResponse
@@ -1513,7 +1766,7 @@ export type MSettingsResponse = Message<"nomos.MSettingsResponse"> & {
  */
 export const MSettingsResponseSchema: GenMessage<MSettingsResponse> /*@__PURE__*/ = messageDesc(
   file_nomos,
-  53,
+  62,
 );
 
 /**
@@ -1539,7 +1792,7 @@ export type MConsentRequest = Message<"nomos.MConsentRequest"> & {
  */
 export const MConsentRequestSchema: GenMessage<MConsentRequest> /*@__PURE__*/ = messageDesc(
   file_nomos,
-  54,
+  63,
 );
 
 /**
@@ -1568,7 +1821,7 @@ export type MTrustTierRequest = Message<"nomos.MTrustTierRequest"> & {
  */
 export const MTrustTierRequestSchema: GenMessage<MTrustTierRequest> /*@__PURE__*/ = messageDesc(
   file_nomos,
-  55,
+  64,
 );
 
 /**
@@ -1592,7 +1845,7 @@ export type MPermissionRequest = Message<"nomos.MPermissionRequest"> & {
  */
 export const MPermissionRequestSchema: GenMessage<MPermissionRequest> /*@__PURE__*/ = messageDesc(
   file_nomos,
-  56,
+  65,
 );
 
 /**
@@ -1610,7 +1863,7 @@ export type MIntegrationsResponse = Message<"nomos.MIntegrationsResponse"> & {
  * Use `create(MIntegrationsResponseSchema)` to create a new message.
  */
 export const MIntegrationsResponseSchema: GenMessage<MIntegrationsResponse> /*@__PURE__*/ =
-  messageDesc(file_nomos, 57);
+  messageDesc(file_nomos, 66);
 
 /**
  * @generated from message nomos.MStartConnectRequest
@@ -1629,7 +1882,7 @@ export type MStartConnectRequest = Message<"nomos.MStartConnectRequest"> & {
  * Use `create(MStartConnectRequestSchema)` to create a new message.
  */
 export const MStartConnectRequestSchema: GenMessage<MStartConnectRequest> /*@__PURE__*/ =
-  messageDesc(file_nomos, 58);
+  messageDesc(file_nomos, 67);
 
 /**
  * @generated from message nomos.MStartConnectResponse
@@ -1650,7 +1903,7 @@ export type MStartConnectResponse = Message<"nomos.MStartConnectResponse"> & {
  * Use `create(MStartConnectResponseSchema)` to create a new message.
  */
 export const MStartConnectResponseSchema: GenMessage<MStartConnectResponse> /*@__PURE__*/ =
-  messageDesc(file_nomos, 59);
+  messageDesc(file_nomos, 68);
 
 /**
  * @generated from message nomos.MDisconnectRequest
@@ -1675,7 +1928,7 @@ export type MDisconnectRequest = Message<"nomos.MDisconnectRequest"> & {
  */
 export const MDisconnectRequestSchema: GenMessage<MDisconnectRequest> /*@__PURE__*/ = messageDesc(
   file_nomos,
-  60,
+  69,
 );
 
 /**
@@ -1702,7 +1955,7 @@ export type MConnectGoogleRequest = Message<"nomos.MConnectGoogleRequest"> & {
  * Use `create(MConnectGoogleRequestSchema)` to create a new message.
  */
 export const MConnectGoogleRequestSchema: GenMessage<MConnectGoogleRequest> /*@__PURE__*/ =
-  messageDesc(file_nomos, 61);
+  messageDesc(file_nomos, 70);
 
 /**
  * @generated from message nomos.MSetGoogleSendRequest
@@ -1724,7 +1977,7 @@ export type MSetGoogleSendRequest = Message<"nomos.MSetGoogleSendRequest"> & {
  * Use `create(MSetGoogleSendRequestSchema)` to create a new message.
  */
 export const MSetGoogleSendRequestSchema: GenMessage<MSetGoogleSendRequest> /*@__PURE__*/ =
-  messageDesc(file_nomos, 62);
+  messageDesc(file_nomos, 71);
 
 /**
  * @generated from message nomos.MDeviceRegister
@@ -1754,7 +2007,7 @@ export type MDeviceRegister = Message<"nomos.MDeviceRegister"> & {
  */
 export const MDeviceRegisterSchema: GenMessage<MDeviceRegister> /*@__PURE__*/ = messageDesc(
   file_nomos,
-  63,
+  72,
 );
 
 /**
@@ -1773,7 +2026,7 @@ export type MDeviceUnregister = Message<"nomos.MDeviceUnregister"> & {
  */
 export const MDeviceUnregisterSchema: GenMessage<MDeviceUnregister> /*@__PURE__*/ = messageDesc(
   file_nomos,
-  64,
+  73,
 );
 
 /**
@@ -1833,7 +2086,7 @@ export type DepositRequest = Message<"nomos.DepositRequest"> & {
  */
 export const DepositRequestSchema: GenMessage<DepositRequest> /*@__PURE__*/ = messageDesc(
   file_nomos,
-  65,
+  74,
 );
 
 /**
@@ -1864,8 +2117,488 @@ export type DepositResponse = Message<"nomos.DepositResponse"> & {
  */
 export const DepositResponseSchema: GenMessage<DepositResponse> /*@__PURE__*/ = messageDesc(
   file_nomos,
-  66,
+  75,
 );
+
+/**
+ * ── Studio (hosted-only feature) ──────────────────────────────────────
+ * Register an uploaded original. The client uploads the (downscaled, transcoded)
+ * image to upload_url (presigned PUT), then confirms by calling StudioEdit or
+ * StudioHistory; unconfirmed rows are reaped by __studio_gc__.
+ *
+ * @generated from message nomos.MStudioCreateAssetRequest
+ */
+export type MStudioCreateAssetRequest = Message<"nomos.MStudioCreateAssetRequest"> & {
+  /**
+   * e.g. image/jpeg (HEIC transcoded client-side)
+   *
+   * @generated from field: string mime = 1;
+   */
+  mime: string;
+
+  /**
+   * sha256 of the bytes
+   *
+   * @generated from field: string content_hash = 2;
+   */
+  contentHash: string;
+
+  /**
+   * @generated from field: int32 width = 3;
+   */
+  width: number;
+
+  /**
+   * @generated from field: int32 height = 4;
+   */
+  height: number;
+
+  /**
+   * @generated from field: int32 bytes = 5;
+   */
+  bytes: number;
+};
+
+/**
+ * Describes the message nomos.MStudioCreateAssetRequest.
+ * Use `create(MStudioCreateAssetRequestSchema)` to create a new message.
+ */
+export const MStudioCreateAssetRequestSchema: GenMessage<MStudioCreateAssetRequest> /*@__PURE__*/ =
+  messageDesc(file_nomos, 76);
+
+/**
+ * @generated from message nomos.MStudioCreateAssetResponse
+ */
+export type MStudioCreateAssetResponse = Message<"nomos.MStudioCreateAssetResponse"> & {
+  /**
+   * @generated from field: string asset_id = 1;
+   */
+  assetId: string;
+
+  /**
+   * presigned PUT
+   *
+   * @generated from field: string upload_url = 2;
+   */
+  uploadUrl: string;
+
+  /**
+   * @generated from field: string object_key = 3;
+   */
+  objectKey: string;
+
+  /**
+   * ms epoch
+   *
+   * @generated from field: int64 expires_at = 4;
+   */
+  expiresAt: bigint;
+};
+
+/**
+ * Describes the message nomos.MStudioCreateAssetResponse.
+ * Use `create(MStudioCreateAssetResponseSchema)` to create a new message.
+ */
+export const MStudioCreateAssetResponseSchema: GenMessage<MStudioCreateAssetResponse> /*@__PURE__*/ =
+  messageDesc(file_nomos, 77);
+
+/**
+ * @generated from message nomos.MStudioAssetRef
+ */
+export type MStudioAssetRef = Message<"nomos.MStudioAssetRef"> & {
+  /**
+   * @generated from field: string asset_id = 1;
+   */
+  assetId: string;
+
+  /**
+   * GetAssetUrl: presign the ORIGINAL (for before/after compare)
+   *
+   * @generated from field: bool original = 2;
+   */
+  original: boolean;
+};
+
+/**
+ * Describes the message nomos.MStudioAssetRef.
+ * Use `create(MStudioAssetRefSchema)` to create a new message.
+ */
+export const MStudioAssetRefSchema: GenMessage<MStudioAssetRef> /*@__PURE__*/ = messageDesc(
+  file_nomos,
+  78,
+);
+
+/**
+ * @generated from message nomos.MStudioAssetUrlResponse
+ */
+export type MStudioAssetUrlResponse = Message<"nomos.MStudioAssetUrlResponse"> & {
+  /**
+   * presigned GET for the current head (or original)
+   *
+   * @generated from field: string url = 1;
+   */
+  url: string;
+
+  /**
+   * @generated from field: int64 expires_at = 2;
+   */
+  expiresAt: bigint;
+};
+
+/**
+ * Describes the message nomos.MStudioAssetUrlResponse.
+ * Use `create(MStudioAssetUrlResponseSchema)` to create a new message.
+ */
+export const MStudioAssetUrlResponseSchema: GenMessage<MStudioAssetUrlResponse> /*@__PURE__*/ =
+  messageDesc(file_nomos, 79);
+
+/**
+ * Apply one op. params_json is the JSON-encoded op params (validated server-side
+ * against the op registry). parent_edit_id "" means "on the current head".
+ *
+ * @generated from message nomos.MStudioEditRequest
+ */
+export type MStudioEditRequest = Message<"nomos.MStudioEditRequest"> & {
+  /**
+   * @generated from field: string asset_id = 1;
+   */
+  assetId: string;
+
+  /**
+   * adjust | editSemantic | cutout | upscale | restore | ...
+   *
+   * @generated from field: string op = 2;
+   */
+  op: string;
+
+  /**
+   * @generated from field: string params_json = 3;
+   */
+  paramsJson: string;
+
+  /**
+   * @generated from field: string parent_edit_id = 4;
+   */
+  parentEditId: string;
+
+  /**
+   * @generated from field: string idempotency_key = 5;
+   */
+  idempotencyKey: string;
+
+  /**
+   * optional device/tap mask object key
+   *
+   * @generated from field: string mask_key = 6;
+   */
+  maskKey: string;
+
+  /**
+   * deviceRender only: the on-device-rendered output bytes
+   *
+   * @generated from field: bytes input_image = 7;
+   */
+  inputImage: Uint8Array;
+};
+
+/**
+ * Describes the message nomos.MStudioEditRequest.
+ * Use `create(MStudioEditRequestSchema)` to create a new message.
+ */
+export const MStudioEditRequestSchema: GenMessage<MStudioEditRequest> /*@__PURE__*/ = messageDesc(
+  file_nomos,
+  80,
+);
+
+/**
+ * @generated from message nomos.MStudioEvent
+ */
+export type MStudioEvent = Message<"nomos.MStudioEvent"> & {
+  /**
+   * progress | done | error
+   *
+   * @generated from field: string kind = 1;
+   */
+  kind: string;
+
+  /**
+   * @generated from field: string edit_id = 2;
+   */
+  editId: string;
+
+  /**
+   * pending | running | done | failed
+   *
+   * @generated from field: string status = 3;
+   */
+  status: string;
+
+  /**
+   * @generated from field: string preview_key = 4;
+   */
+  previewKey: string;
+
+  /**
+   * @generated from field: string output_key = 5;
+   */
+  outputKey: string;
+
+  /**
+   * @generated from field: double cost_usd = 6;
+   */
+  costUsd: number;
+
+  /**
+   * @generated from field: string message = 7;
+   */
+  message: string;
+};
+
+/**
+ * Describes the message nomos.MStudioEvent.
+ * Use `create(MStudioEventSchema)` to create a new message.
+ */
+export const MStudioEventSchema: GenMessage<MStudioEvent> /*@__PURE__*/ = messageDesc(
+  file_nomos,
+  81,
+);
+
+/**
+ * @generated from message nomos.MStudioEdit
+ */
+export type MStudioEdit = Message<"nomos.MStudioEdit"> & {
+  /**
+   * @generated from field: string id = 1;
+   */
+  id: string;
+
+  /**
+   * @generated from field: string op = 2;
+   */
+  op: string;
+
+  /**
+   * @generated from field: string status = 3;
+   */
+  status: string;
+
+  /**
+   * @generated from field: string preview_key = 4;
+   */
+  previewKey: string;
+
+  /**
+   * @generated from field: string output_key = 5;
+   */
+  outputKey: string;
+
+  /**
+   * @generated from field: double cost_usd = 6;
+   */
+  costUsd: number;
+
+  /**
+   * @generated from field: string parent_edit_id = 7;
+   */
+  parentEditId: string;
+
+  /**
+   * @generated from field: string created_at = 8;
+   */
+  createdAt: string;
+};
+
+/**
+ * Describes the message nomos.MStudioEdit.
+ * Use `create(MStudioEditSchema)` to create a new message.
+ */
+export const MStudioEditSchema: GenMessage<MStudioEdit> /*@__PURE__*/ = messageDesc(file_nomos, 82);
+
+/**
+ * @generated from message nomos.MStudioHistoryResponse
+ */
+export type MStudioHistoryResponse = Message<"nomos.MStudioHistoryResponse"> & {
+  /**
+   * @generated from field: repeated nomos.MStudioEdit edits = 1;
+   */
+  edits: MStudioEdit[];
+
+  /**
+   * @generated from field: string head_edit_id = 2;
+   */
+  headEditId: string;
+};
+
+/**
+ * Describes the message nomos.MStudioHistoryResponse.
+ * Use `create(MStudioHistoryResponseSchema)` to create a new message.
+ */
+export const MStudioHistoryResponseSchema: GenMessage<MStudioHistoryResponse> /*@__PURE__*/ =
+  messageDesc(file_nomos, 83);
+
+/**
+ * @generated from message nomos.MStudioIdentityReport
+ */
+export type MStudioIdentityReport = Message<"nomos.MStudioIdentityReport"> & {
+  /**
+   * @generated from field: string edit_id = 1;
+   */
+  editId: string;
+
+  /**
+   * face-embedding similarity in 0..1
+   *
+   * @generated from field: double score = 2;
+   */
+  score: number;
+};
+
+/**
+ * Describes the message nomos.MStudioIdentityReport.
+ * Use `create(MStudioIdentityReportSchema)` to create a new message.
+ */
+export const MStudioIdentityReportSchema: GenMessage<MStudioIdentityReport> /*@__PURE__*/ =
+  messageDesc(file_nomos, 84);
+
+/**
+ * A recent editing session for the Home launchpad. An asset + the gist of its chain.
+ *
+ * @generated from message nomos.MStudioListAssetsRequest
+ */
+export type MStudioListAssetsRequest = Message<"nomos.MStudioListAssetsRequest"> & {
+  /**
+   * max sessions (server caps; default ~30)
+   *
+   * @generated from field: int32 limit = 1;
+   */
+  limit: number;
+};
+
+/**
+ * Describes the message nomos.MStudioListAssetsRequest.
+ * Use `create(MStudioListAssetsRequestSchema)` to create a new message.
+ */
+export const MStudioListAssetsRequestSchema: GenMessage<MStudioListAssetsRequest> /*@__PURE__*/ =
+  messageDesc(file_nomos, 85);
+
+/**
+ * @generated from message nomos.MStudioAssetSummary
+ */
+export type MStudioAssetSummary = Message<"nomos.MStudioAssetSummary"> & {
+  /**
+   * @generated from field: string asset_id = 1;
+   */
+  assetId: string;
+
+  /**
+   * presigned GET (~thumbnail): head preview, else original
+   *
+   * @generated from field: string preview_url = 2;
+   */
+  previewUrl: string;
+
+  /**
+   * ms epoch
+   *
+   * @generated from field: int64 updated_at = 3;
+   */
+  updatedAt: bigint;
+
+  /**
+   * a stored final artifact (vs in-progress)
+   *
+   * @generated from field: bool finalized = 4;
+   */
+  finalized: boolean;
+
+  /**
+   * @generated from field: int32 edit_count = 5;
+   */
+  editCount: number;
+
+  /**
+   * op of the head edit ("" if none) — client humanizes
+   *
+   * @generated from field: string head_op = 6;
+   */
+  headOp: string;
+
+  /**
+   * ms epoch for preview_url
+   *
+   * @generated from field: int64 expires_at = 7;
+   */
+  expiresAt: bigint;
+};
+
+/**
+ * Describes the message nomos.MStudioAssetSummary.
+ * Use `create(MStudioAssetSummarySchema)` to create a new message.
+ */
+export const MStudioAssetSummarySchema: GenMessage<MStudioAssetSummary> /*@__PURE__*/ = messageDesc(
+  file_nomos,
+  86,
+);
+
+/**
+ * @generated from message nomos.MStudioListAssetsResponse
+ */
+export type MStudioListAssetsResponse = Message<"nomos.MStudioListAssetsResponse"> & {
+  /**
+   * @generated from field: repeated nomos.MStudioAssetSummary assets = 1;
+   */
+  assets: MStudioAssetSummary[];
+};
+
+/**
+ * Describes the message nomos.MStudioListAssetsResponse.
+ * Use `create(MStudioListAssetsResponseSchema)` to create a new message.
+ */
+export const MStudioListAssetsResponseSchema: GenMessage<MStudioListAssetsResponse> /*@__PURE__*/ =
+  messageDesc(file_nomos, 87);
+
+/**
+ * A per-photo edit suggestion: a short chip label + the instruction it applies.
+ *
+ * @generated from message nomos.MStudioSuggestion
+ */
+export type MStudioSuggestion = Message<"nomos.MStudioSuggestion"> & {
+  /**
+   * @generated from field: string label = 1;
+   */
+  label: string;
+
+  /**
+   * @generated from field: string prompt = 2;
+   */
+  prompt: string;
+};
+
+/**
+ * Describes the message nomos.MStudioSuggestion.
+ * Use `create(MStudioSuggestionSchema)` to create a new message.
+ */
+export const MStudioSuggestionSchema: GenMessage<MStudioSuggestion> /*@__PURE__*/ = messageDesc(
+  file_nomos,
+  88,
+);
+
+/**
+ * @generated from message nomos.MStudioSuggestionsResponse
+ */
+export type MStudioSuggestionsResponse = Message<"nomos.MStudioSuggestionsResponse"> & {
+  /**
+   * @generated from field: repeated nomos.MStudioSuggestion suggestions = 1;
+   */
+  suggestions: MStudioSuggestion[];
+};
+
+/**
+ * Describes the message nomos.MStudioSuggestionsResponse.
+ * Use `create(MStudioSuggestionsResponseSchema)` to create a new message.
+ */
+export const MStudioSuggestionsResponseSchema: GenMessage<MStudioSuggestionsResponse> /*@__PURE__*/ =
+  messageDesc(file_nomos, 89);
 
 /**
  * @generated from service nomos.NomosAgent
@@ -1944,6 +2677,32 @@ export const NomosAgent: GenService<{
     methodKind: "unary";
     input: typeof DraftActionSchema;
     output: typeof DraftResponseSchema;
+  };
+  /**
+   * Autonomous loops (recurring background jobs — audit + disable)
+   *
+   * @generated from rpc nomos.NomosAgent.ListLoops
+   */
+  listLoops: {
+    methodKind: "unary";
+    input: typeof EmptySchema;
+    output: typeof LoopListSchema;
+  };
+  /**
+   * @generated from rpc nomos.NomosAgent.SetLoopEnabled
+   */
+  setLoopEnabled: {
+    methodKind: "unary";
+    input: typeof SetLoopEnabledRequestSchema;
+    output: typeof LoopActionResponseSchema;
+  };
+  /**
+   * @generated from rpc nomos.NomosAgent.DeleteLoop
+   */
+  deleteLoop: {
+    methodKind: "unary";
+    input: typeof LoopDeleteRequestSchema;
+    output: typeof LoopActionResponseSchema;
   };
   /**
    * Health check
@@ -2207,6 +2966,96 @@ export const MobileApi: GenService<{
   deleteVaultNote: {
     methodKind: "unary";
     input: typeof MVaultDeleteRequestSchema;
+    output: typeof MAckSchema;
+  };
+  /**
+   * Loops tab (autonomous recurring jobs — audit + disable agent-created loops)
+   *
+   * @generated from rpc nomos.MobileApi.ListLoops
+   */
+  listLoops: {
+    methodKind: "unary";
+    input: typeof EmptySchema;
+    output: typeof MLoopsResponseSchema;
+  };
+  /**
+   * @generated from rpc nomos.MobileApi.SetLoopEnabled
+   */
+  setLoopEnabled: {
+    methodKind: "unary";
+    input: typeof MSetLoopEnabledRequestSchema;
+    output: typeof MAckSchema;
+  };
+  /**
+   * @generated from rpc nomos.MobileApi.DeleteLoop
+   */
+  deleteLoop: {
+    methodKind: "unary";
+    input: typeof MLoopDeleteRequestSchema;
+    output: typeof MAckSchema;
+  };
+  /**
+   * Studio (hosted-only feature). Blobs move via presigned PUT/GET, never gRPC.
+   *
+   * @generated from rpc nomos.MobileApi.StudioCreateAsset
+   */
+  studioCreateAsset: {
+    methodKind: "unary";
+    input: typeof MStudioCreateAssetRequestSchema;
+    output: typeof MStudioCreateAssetResponseSchema;
+  };
+  /**
+   * @generated from rpc nomos.MobileApi.StudioGetAssetUrl
+   */
+  studioGetAssetUrl: {
+    methodKind: "unary";
+    input: typeof MStudioAssetRefSchema;
+    output: typeof MStudioAssetUrlResponseSchema;
+  };
+  /**
+   * @generated from rpc nomos.MobileApi.StudioEdit
+   */
+  studioEdit: {
+    methodKind: "server_streaming";
+    input: typeof MStudioEditRequestSchema;
+    output: typeof MStudioEventSchema;
+  };
+  /**
+   * @generated from rpc nomos.MobileApi.StudioHistory
+   */
+  studioHistory: {
+    methodKind: "unary";
+    input: typeof MStudioAssetRefSchema;
+    output: typeof MStudioHistoryResponseSchema;
+  };
+  /**
+   * Recent editing sessions for the Home launchpad ("Pick up where you left off").
+   *
+   * @generated from rpc nomos.MobileApi.StudioListAssets
+   */
+  studioListAssets: {
+    methodKind: "unary";
+    input: typeof MStudioListAssetsRequestSchema;
+    output: typeof MStudioListAssetsResponseSchema;
+  };
+  /**
+   * AI-native: a vision model looks at the photo and proposes tap-to-apply edits.
+   *
+   * @generated from rpc nomos.MobileApi.StudioSuggestEdits
+   */
+  studioSuggestEdits: {
+    methodKind: "unary";
+    input: typeof MStudioAssetRefSchema;
+    output: typeof MStudioSuggestionsResponseSchema;
+  };
+  /**
+   * The on-device identity check reports its score for an edit (0..1).
+   *
+   * @generated from rpc nomos.MobileApi.StudioReportIdentity
+   */
+  studioReportIdentity: {
+    methodKind: "unary";
+    input: typeof MStudioIdentityReportSchema;
     output: typeof MAckSchema;
   };
 }> /*@__PURE__*/ = serviceDesc(file_nomos, 1);
