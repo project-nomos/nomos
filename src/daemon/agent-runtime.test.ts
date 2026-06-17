@@ -46,7 +46,7 @@ describe("buildIntegrationsSummary channel visibility by mode", () => {
     process.env.WHATSAPP_ENABLED = "true";
     const summary = summaryOf();
     expect(summary).not.toContain(WA_ENTRY);
-    expect(summary).toContain("Nomos mobile app");
+    expect(summary).toContain("**Nomos app**");
     expect(summary).toContain("this conversation IS the Nomos app");
   });
 });

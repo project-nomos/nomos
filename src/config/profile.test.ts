@@ -65,6 +65,35 @@ describe("buildSystemPromptAppend", () => {
     }
   });
 
+  it("hosted mode adds a consumer-voice directive (jargon-free)", () => {
+    const priorMode = process.env.NOMOS_MODE;
+    process.env.NOMOS_MODE = "hosted";
+    try {
+      const result = buildSystemPromptAppend({ profile: {}, identity: defaultIdentity });
+      expect(result).toContain("## Talking with the user");
+      expect(result).toContain("No jargon");
+    } finally {
+      if (priorMode === undefined) delete process.env.NOMOS_MODE;
+      else process.env.NOMOS_MODE = priorMode;
+    }
+  });
+
+  it("power-user mode has no consumer-voice directive (technical detail is welcome)", () => {
+    const priorMode = process.env.NOMOS_MODE;
+    const priorJwks = process.env.AUTH_JWKS_URL;
+    delete process.env.NOMOS_MODE;
+    delete process.env.AUTH_JWKS_URL;
+    try {
+      const result = buildSystemPromptAppend({ profile: {}, identity: defaultIdentity });
+      expect(result).not.toContain("## Talking with the user");
+    } finally {
+      if (priorMode === undefined) delete process.env.NOMOS_MODE;
+      else process.env.NOMOS_MODE = priorMode;
+      if (priorJwks === undefined) delete process.env.AUTH_JWKS_URL;
+      else process.env.AUTH_JWKS_URL = priorJwks;
+    }
+  });
+
   it("includes agent identity when name is not default", () => {
     const result = buildSystemPromptAppend({
       profile: {},
