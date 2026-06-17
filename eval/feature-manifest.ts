@@ -303,12 +303,12 @@ export const FEATURES: FeatureSpec[] = [
     entry: ["recordEditSignal", "flushPhotoStyle", "readPhotoStyle"],
     effects: [
       {
+        // Exercised by runStudioLearn: 4 edits -> flushPhotoStyle distills the note.
         claim: "learned editing taste is written as an editable photo-style.md vault note",
         sql: {
           query: "SELECT count(*) FROM vault_notes WHERE path = 'photo-style.md'",
           expect: "nonzero",
         },
-        notExercised: true,
       },
       {
         claim: "structured photo_style preferences accumulate in the user model",
@@ -316,7 +316,6 @@ export const FEATURES: FeatureSpec[] = [
           query: "SELECT count(*) FROM user_model WHERE category = 'photo_style'",
           expect: "nonzero",
         },
-        notExercised: true,
       },
     ],
     invariants: [

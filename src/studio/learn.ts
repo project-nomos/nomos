@@ -45,16 +45,58 @@ interface DistilledStyle {
   prefs: Record<string, string>;
 }
 
-/** Tolerant parse of the distiller's JSON (strips code fences). */
+/**
+ * Scan out the first brace-balanced {...} object (string-aware), so we recover the
+ * JSON even when the model wraps it in prose or — as Haiku sometimes does — emits the
+ * same fenced object twice back-to-back (which defeats a naive first-{ ... last-}).
+ */
+function firstJsonObject(s: string): string | null {
+  const start = s.indexOf("{");
+  if (start < 0) return null;
+  let depth = 0;
+  let inStr = false;
+  let esc = false;
+  for (let i = start; i < s.length; i++) {
+    const ch = s[i];
+    if (inStr) {
+      if (esc) esc = false;
+      else if (ch === "\\") esc = true;
+      else if (ch === '"') inStr = false;
+    } else if (ch === '"') {
+      inStr = true;
+    } else if (ch === "{") {
+      depth++;
+    } else if (ch === "}") {
+      depth--;
+      if (depth === 0) return s.slice(start, i + 1);
+    }
+  }
+  return null;
+}
+
+/**
+ * Tolerant parse of the distiller's JSON. Tries the whole (de-fenced) string first,
+ * then the first brace-balanced object — covering fenced, prose-wrapped, and
+ * duplicated-block outputs.
+ */
 export function parseStyle(text: string): DistilledStyle | null {
   const cleaned = text
     .trim()
     .replace(/^```(?:json)?/i, "")
     .replace(/```$/i, "")
     .trim();
-  try {
-    const raw = JSON.parse(cleaned) as { profile?: unknown; prefs?: unknown };
-    if (typeof raw.profile !== "string" || !raw.profile.trim()) return null;
+  const candidates = [cleaned];
+  const obj = firstJsonObject(cleaned);
+  if (obj) candidates.push(obj);
+
+  for (const candidate of candidates) {
+    let raw: { profile?: unknown; prefs?: unknown };
+    try {
+      raw = JSON.parse(candidate) as { profile?: unknown; prefs?: unknown };
+    } catch {
+      continue;
+    }
+    if (typeof raw.profile !== "string" || !raw.profile.trim()) continue;
     const prefs: Record<string, string> = {};
     if (raw.prefs && typeof raw.prefs === "object") {
       for (const [k, v] of Object.entries(raw.prefs as Record<string, unknown>)) {
@@ -62,9 +104,8 @@ export function parseStyle(text: string): DistilledStyle | null {
       }
     }
     return { profile: raw.profile.trim().slice(0, 1200), prefs };
-  } catch {
-    return null;
   }
+  return null;
 }
 
 /** Record one applied edit as a learning signal; distills in the background every few. */
@@ -105,7 +146,10 @@ export async function flushPhotoStyle(userId: string, signals: EditSignal[]): Pr
     prompt: `${DISTILL_PROMPT}\n\nCURRENT PROFILE:\n${current || "(none yet)"}\n\nNEW EDITS THE USER JUST APPLIED:\n${recent}`,
   });
   const parsed = parseStyle(result.text);
-  if (!parsed) return;
+  if (!parsed) {
+    log.debug({ chars: result.text.length }, "distill output not parseable; skipping");
+    return;
+  }
   // The editable prose profile, in the wiki/vault.
   await vaultWrite(userId, STYLE_NOTE, parsed.profile, { title: "Photo editing style" });
   // Structured, confidence-weighted prefs for injection.

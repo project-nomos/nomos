@@ -24,6 +24,25 @@ describe("parseStyle", () => {
     expect(parseStyle('```json\n{"profile":"x"}\n```')?.profile).toBe("x");
   });
 
+  it("recovers JSON wrapped in prose", () => {
+    expect(parseStyle('Here is the profile:\n{"profile":"warm"}\nThanks!')?.profile).toBe("warm");
+  });
+
+  it("recovers the first object when the model emits the fenced block twice", () => {
+    // Real Haiku failure mode: the same fenced object repeated back-to-back.
+    const dup =
+      '```json\n{"profile":"warm","prefs":{"tone":"warm"}}\n``````json\n{"profile":"warm"}\n```';
+    const s = parseStyle(dup);
+    expect(s?.profile).toBe("warm");
+    expect(s?.prefs.tone).toBe("warm");
+  });
+
+  it("ignores braces inside string values when balancing", () => {
+    expect(parseStyle('{"profile":"a {nested} brace","prefs":{}}')?.profile).toBe(
+      "a {nested} brace",
+    );
+  });
+
   it("returns null without a usable profile", () => {
     expect(parseStyle('{"prefs":{}}')).toBeNull();
     expect(parseStyle("sorry, not JSON")).toBeNull();

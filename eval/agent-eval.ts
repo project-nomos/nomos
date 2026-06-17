@@ -1304,6 +1304,106 @@ async function runStyleProfiles(): Promise<void> {
   if (!KEEP) await db.deleteFrom("style_profiles").where("user_id", "in", [A, B]).execute();
 }
 
+async function runStudioLearn(): Promise<void> {
+  // Studio learning: drive the REAL capture -> distill -> store path. Four committed
+  // edits fill recordEditSignal's buffer and trip flushPhotoStyle, which distills them
+  // (forked Haiku) into an editable photo-style.md vault note + photo_style user_model
+  // entries -- the exact rows suggestEdits + auto-enhance read back to personalize.
+  // Asserts both durable effects, the apply-side read, and per-user isolation.
+  const { recordEditSignal, readPhotoStyle, flushPhotoStyle } =
+    await import("../src/studio/learn.ts");
+  const db = getKysely();
+  const A = "eval-photo-a";
+  const B = "eval-photo-b";
+  const clear = async (): Promise<void> => {
+    await db
+      .deleteFrom("vault_notes")
+      .where("user_id", "in", [A, B])
+      .where("path", "=", "photo-style.md")
+      .execute();
+    await db
+      .deleteFrom("user_model")
+      .where("user_id", "in", [A, B])
+      .where("category", "=", "photo_style")
+      .execute();
+  };
+  const styleNote = (): Promise<{ content: string } | undefined> =>
+    db
+      .selectFrom("vault_notes")
+      .select(["content"])
+      .where("user_id", "=", A)
+      .where("path", "=", "photo-style.md")
+      .executeTakeFirst();
+  const photoPrefCount = async (userId: string): Promise<number> =>
+    Number(
+      (
+        await db
+          .selectFrom("user_model")
+          .select((eb) => eb.fn.countAll<number>().as("n"))
+          .where("user_id", "=", userId)
+          .where("category", "=", "photo_style")
+          .executeTakeFirst()
+      )?.n ?? 0,
+    );
+  await clear();
+
+  // Capture + read gate on NOMOS_ADAPTIVE_MEMORY (same flag as all other learning).
+  const priorAdaptive = process.env.NOMOS_ADAPTIVE_MEMORY;
+  process.env.NOMOS_ADAPTIVE_MEMORY = "true";
+  try {
+    if (!hasLLM) {
+      skip(
+        "[studio-learn] distills applied edits into a photo-style vault note + user_model",
+        "no LLM provider configured",
+      );
+      return;
+    }
+
+    const edits = [
+      "warm up the photo and add a soft golden-hour glow",
+      "smooth the skin but keep the pores and natural texture",
+      "deepen the contrast and make the colors pop",
+      "brighten the eyes and gently whiten the teeth",
+    ];
+    const signals = edits.map((instruction) => ({ op: "editSemantic", instruction }));
+    // The real path: 4 edits fill the buffer and trip the flush (FLUSH_EVERY).
+    for (const s of signals) await recordEditSignal(A, s.op, s.instruction);
+
+    // recordEditSignal swallows flush errors by design (fire-and-forget); if nothing
+    // landed, drive the distiller directly so a genuine failure surfaces with a reason.
+    let note = await styleNote();
+    if (!note?.content) {
+      await flushPhotoStyle(A, signals);
+      note = await styleNote();
+    }
+
+    check(
+      "[studio-learn] writes an editable photo-style.md vault note",
+      !!note?.content && note.content.trim().length > 0,
+      note?.content?.slice(0, 80),
+    );
+    check(
+      "[studio-learn] accumulates photo_style preferences in the user model",
+      (await photoPrefCount(A)) >= 1,
+      `count=${await photoPrefCount(A)}`,
+    );
+    // Apply side: readPhotoStyle is what the engine (auto-enhance) + suggestEdits inject.
+    check(
+      "[studio-learn] readPhotoStyle surfaces the learned style for injection",
+      (await readPhotoStyle(A)).length > 0,
+    );
+    // Per-user scoped: B applied no edits, so it has neither the note nor any prefs.
+    check(
+      "[studio-learn] B (no edits) has no photo-style note or prefs (per-user scoped)",
+      (await readPhotoStyle(B)).length === 0 && (await photoPrefCount(B)) === 0,
+    );
+  } finally {
+    if (priorAdaptive === undefined) delete process.env.NOMOS_ADAPTIVE_MEMORY;
+    else process.env.NOMOS_ADAPTIVE_MEMORY = priorAdaptive;
+    if (!KEEP) await clear();
+  }
+}
+
 async function runWikiArticles(): Promise<void> {
   // Derived store: wiki_articles. Deterministic write + per-user isolation, then
   // the full LLM compile (2 Sonnet passes) pointed at a temp NOMOS_WIKI_DIR so it
@@ -2979,6 +3079,7 @@ async function runEval(): Promise<void> {
   await runRelationshipStats();
   await runManagedFiles();
   await runStyleProfiles();
+  await runStudioLearn();
   await runGraphMetadata();
   await runBacklinks();
   await runMetadataColumns();
