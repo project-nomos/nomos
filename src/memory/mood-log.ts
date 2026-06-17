@@ -56,8 +56,16 @@ export function parseMoodLog(content: string): MoodEpisode[] {
 }
 
 function renderMoodLog(episodes: MoodEpisode[]): string {
-  const lines = episodes.map((e) => `- ${e.date}${SEP}${e.emotion}${SEP}${e.cause}${SEP}${e.status}`);
-  return ["# Mood log", "", "Episodes (not a standing state) — what was weighing on you and whether it recurs.", "", ...lines].join("\n");
+  const lines = episodes.map(
+    (e) => `- ${e.date}${SEP}${e.emotion}${SEP}${e.cause}${SEP}${e.status}`,
+  );
+  return [
+    "# Mood log",
+    "",
+    "Episodes (not a standing state) — what was weighing on you and whether it recurs.",
+    "",
+    ...lines,
+  ].join("\n");
 }
 
 /** Drop episodes older than MAX_AGE_DAYS (and cap at MAX_EPISODES, newest first). */
@@ -109,7 +117,10 @@ export async function recordMoodEpisode(
 }
 
 /** Recent OPEN episodes (decayed), so the agent can follow up on the cause — not the feeling. */
-export async function readOpenMoodEpisodes(userId: string, nowMs = Date.now()): Promise<MoodEpisode[]> {
+export async function readOpenMoodEpisodes(
+  userId: string,
+  nowMs = Date.now(),
+): Promise<MoodEpisode[]> {
   if (!enabled()) return [];
   const note = await vaultRead(userId, MOOD_NOTE);
   if (!note?.content.trim()) return [];
@@ -122,7 +133,11 @@ Output ONLY JSON: {"strain": true|false, "emotion": "stressed|frustrated|overwhe
 
 /** Parse the capture distiller's JSON (tolerant; null if no real strain). */
 export function parseMoodCapture(text: string): { emotion: string; cause: string } | null {
-  const cleaned = text.trim().replace(/^```(?:json)?/i, "").replace(/```$/i, "").trim();
+  const cleaned = text
+    .trim()
+    .replace(/^```(?:json)?/i, "")
+    .replace(/```$/i, "")
+    .trim();
   const start = cleaned.indexOf("{");
   const end = cleaned.lastIndexOf("}");
   if (start < 0 || end <= start) return null;

@@ -19,9 +19,16 @@ const DAY = 86_400_000;
 
 describe("parseMoodLog", () => {
   it("parses ` · `-delimited episode lines", () => {
-    const eps = parseMoodLog("- 2026-06-10 · stressed · Q3 launch · open\n- 2026-06-01 · frustrated · the migration · resolved");
+    const eps = parseMoodLog(
+      "- 2026-06-10 · stressed · Q3 launch · open\n- 2026-06-01 · frustrated · the migration · resolved",
+    );
     expect(eps).toHaveLength(2);
-    expect(eps[0]).toEqual({ date: "2026-06-10", emotion: "stressed", cause: "Q3 launch", status: "open" });
+    expect(eps[0]).toEqual({
+      date: "2026-06-10",
+      emotion: "stressed",
+      cause: "Q3 launch",
+      status: "open",
+    });
     expect(eps[1].status).toBe("resolved");
   });
 });
@@ -38,9 +45,10 @@ describe("parseMoodCapture", () => {
     expect(parseMoodCapture("nope")).toBeNull();
   });
   it("recovers JSON wrapped in prose/fences", () => {
-    expect(parseMoodCapture('```json\n{"strain":true,"emotion":"anxious","cause":"the review"}\n```')?.cause).toBe(
-      "the review",
-    );
+    expect(
+      parseMoodCapture('```json\n{"strain":true,"emotion":"anxious","cause":"the review"}\n```')
+        ?.cause,
+    ).toBe("the review");
   });
 });
 
