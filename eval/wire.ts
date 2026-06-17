@@ -9,6 +9,8 @@
  * a token is rejected at the wire.
  */
 
+import { createServer as createNetServer } from "node:net";
+import type { AddressInfo } from "node:net";
 import { createClient, type Client, type Interceptor } from "@connectrpc/connect";
 import { createConnectTransport } from "@connectrpc/connect-node";
 import { ConnectServer } from "../src/daemon/connect-server.ts";
@@ -21,21 +23,42 @@ export interface ServerHandle {
 }
 
 /**
+ * Ask the OS for a free ephemeral port. The harness used to hardcode ports
+ * (8797-8799), which collide with whatever the dev box happens to be running
+ * (e.g. the studio sidecar binds 8799) — the client then reaches the wrong
+ * server and the RPC fails UNIMPLEMENTED. Binding :0 and reading back the
+ * assigned port sidesteps the collision entirely.
+ */
+async function findFreePort(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const probe = createNetServer();
+    probe.unref();
+    probe.on("error", reject);
+    probe.listen(0, "127.0.0.1", () => {
+      const port = (probe.address() as AddressInfo).port;
+      probe.close(() => resolve(port));
+    });
+  });
+}
+
+/**
  * Boot the MobileApi Connect server on a test port. Pass a real `messageQueue`
  * to exercise the streaming Chat RPC; the vault/session RPCs do not touch it, so
- * the unary tests can leave it as a stub.
+ * the unary tests can leave it as a stub. Omit `port` (or pass 0) to bind a free
+ * ephemeral port — read the chosen port back off the returned handle.
  */
 export async function startConnectServer(
-  port = 8799,
+  port?: number,
   messageQueue?: MessageQueue,
 ): Promise<ServerHandle> {
+  const actualPort = port && port > 0 ? port : await findFreePort();
   const server = new ConnectServer({
     messageQueue: messageQueue ?? ({} as MessageQueue),
     draftManager: null,
-    port,
+    port: actualPort,
   });
   await server.start();
-  return { port, stop: () => server.stop() };
+  return { port: actualPort, stop: () => server.stop() };
 }
 
 /**
@@ -65,7 +88,7 @@ export interface WireHandle {
 }
 
 /** Convenience for the power-user wire test: server + one unauthenticated client. */
-export async function startWire(port = 8799): Promise<WireHandle> {
+export async function startWire(port?: number): Promise<WireHandle> {
   const server = await startConnectServer(port);
-  return { client: makeMobileClient(port), stop: server.stop };
+  return { client: makeMobileClient(server.port), stop: server.stop };
 }

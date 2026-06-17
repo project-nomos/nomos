@@ -325,10 +325,10 @@ async function runHostedWire(): Promise<void> {
   const auth = await startHostedAuth("eval-org");
   const ids = ["eval-alice", "eval-bob"];
   await seedOrgMembers(ids);
-  const server = await startConnectServer(8798);
-  const alice = makeMobileClient(8798, () => auth.mint("eval-alice"));
-  const bob = makeMobileClient(8798, () => auth.mint("eval-bob"));
-  const anon = makeMobileClient(8798); // no bearer
+  const server = await startConnectServer();
+  const alice = makeMobileClient(server.port, () => auth.mint("eval-alice"));
+  const bob = makeMobileClient(server.port, () => auth.mint("eval-bob"));
+  const anon = makeMobileClient(server.port); // no bearer
   try {
     await alice.writeVaultNote({
       path: "hw/secret.md",
@@ -528,8 +528,8 @@ async function runHostedMobileChat(): Promise<void> {
     runtime = new AgentRuntime();
     await runtime.initialize();
     const queue = new MessageQueue((msg, emit) => runtime!.processMessage(msg, emit));
-    server = await startConnectServer(8797, queue);
-    const client = makeMobileClient(8797, () => real.token);
+    server = await startConnectServer(undefined, queue);
+    const client = makeMobileClient(server.port, () => real.token);
 
     await mobileChatTurn(
       client,
@@ -878,9 +878,9 @@ async function runGetMessagesWire(): Promise<void> {
   const auth = await startHostedAuth("eval-org");
   const ids = ["eval-alice", "eval-bob"];
   await seedOrgMembers(ids);
-  const server = await startConnectServer(8798);
-  const alice = makeMobileClient(8798, () => auth.mint("eval-alice"));
-  const bob = makeMobileClient(8798, () => auth.mint("eval-bob"));
+  const server = await startConnectServer();
+  const alice = makeMobileClient(server.port, () => auth.mint("eval-alice"));
+  const bob = makeMobileClient(server.port, () => auth.mint("eval-bob"));
   const aKey1 = "mobile:gm-alice:s1";
   const aKey2 = "mobile:gm-alice:s2";
   const bKey = "mobile:gm-bob:s1";
@@ -940,7 +940,7 @@ async function runGetMessagesWire(): Promise<void> {
 
     let rejected = false;
     try {
-      await makeMobileClient(8798).getMessages({ sessionKey: aKey1, limit: 50 });
+      await makeMobileClient(server.port).getMessages({ sessionKey: aKey1, limit: 50 });
     } catch (err) {
       rejected = err instanceof ConnectError && err.code === Code.Unauthenticated;
     }
