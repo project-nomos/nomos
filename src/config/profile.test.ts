@@ -20,6 +20,21 @@ describe("buildSystemPromptAppend", () => {
     expect(result).toContain("user_model_recall");
   });
 
+  it("always asserts the persistent/proactive/learning self-model (Agent Nature)", () => {
+    // Unconditional — present even with an empty profile, so it survives a custom SOUL.
+    const result = buildSystemPromptAppend({
+      profile: {},
+      identity: defaultIdentity,
+    });
+
+    expect(result).toContain("## Agent Nature");
+    expect(result).toContain("You persist");
+    expect(result).toContain("You reach out");
+    expect(result).toContain("You grow");
+    expect(result).toContain("You attune");
+    expect(result).toContain("not a therapist"); // the safety boundary
+  });
+
   it("includes agent identity when name is not default", () => {
     const result = buildSystemPromptAppend({
       profile: {},
