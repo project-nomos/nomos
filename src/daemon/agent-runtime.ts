@@ -34,6 +34,7 @@ import { buildVaultMcpServer } from "../sdk/vault-mcp.ts";
 import { buildThinkMcpServer } from "../sdk/think-mcp.ts";
 import { buildLoopMcpServer } from "../sdk/loop-mcp.ts";
 import { buildMemoryDigest } from "../memory/digest.ts";
+import { captureMoodFromTurn } from "../memory/mood-log.ts";
 import { getRelevantArticles } from "../memory/wiki-reader.ts";
 import { loadEnvConfig, type NomosConfig } from "../config/env.ts";
 import { FEATURES, isHosted } from "../config/mode.ts";
@@ -732,8 +733,19 @@ export class AgentRuntime {
       tomTracker = new TheoryOfMindTracker();
       this.tomTrackers.set(sessionKey, tomTracker);
     }
-    tomTracker.update(message.content);
+    const tomState = tomTracker.update(message.content);
     const userState = tomTracker.formatForPrompt();
+
+    // Emotional presence: when the live read flags genuine strain this turn, capture a
+    // mood EPISODE (its cause, not a standing state) for continuity. Fire-and-forget and
+    // cost-bounded to strain turns; the live read above always wins for the moment.
+    if (tomState.emotion === "stressed" || tomState.emotion === "frustrated") {
+      void captureMoodFromTurn(
+        resolveMemoryUserId(message.userId),
+        message.content,
+        tomState.summary,
+      ).catch(() => {});
+    }
 
     // Detect active persona for this message context
     const personaMatches =
@@ -1028,6 +1040,24 @@ export class AgentRuntime {
       }
     }
 
+    // Open mood episodes: the cause(s) the user was recently stretched about, so the
+    // agent can gently follow up on the THING — never assert a mood. Decayed; the live
+    // read always wins.
+    let moodContext = "";
+    try {
+      const { readOpenMoodEpisodes } = await import("../memory/mood-log.ts");
+      const open = await readOpenMoodEpisodes(vaultUserId);
+      if (open.length > 0) {
+        const lines = open
+          .slice(0, 5)
+          .map((e) => `- ${e.cause} (seemed ${e.emotion}, ${e.date})`)
+          .join("\n");
+        moodContext = `## Recently weighing on them\nThings the user was stretched about lately. You MAY gently follow up on the cause ("how'd the launch land?") — never assert their current mood. The live read above wins: if they seem fine now, they're fine.\n${lines}`;
+      }
+    } catch {
+      /* mood log unavailable; skip */
+    }
+
     // Query-specific: surface the most relevant compiled wiki articles for this
     // turn (FTS over the owner's wiki, 4000-char budget). Empty when the wiki is
     // empty or the prompt has no matches. Scoped to the resolved owner.
@@ -1070,6 +1100,11 @@ export class AgentRuntime {
     // Inject the elapsed-time anchor (how long since the last conversation)
     if (elapsedAnchor) {
       systemPromptAppend = systemPromptAppend + "\n\n" + elapsedAnchor;
+    }
+
+    // Inject open mood episodes (gentle follow-up on the cause, never assert a mood)
+    if (moodContext) {
+      systemPromptAppend = systemPromptAppend + "\n\n" + moodContext;
     }
 
     // Inject query-relevant wiki articles LAST so the stable prefix (system
