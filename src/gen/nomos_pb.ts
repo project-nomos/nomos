@@ -9,20 +9,155 @@ import type { Message } from "@bufbuild/protobuf";
 /**
  * Describes the file nomos.proto.
  */
-export const file_nomos: GenFile /*@__PURE__*/ = fileDesc(
-  "Cgtub21vcy5wcm90bxIFbm9tb3MiBwoFRW1wdHkiMwoLQ2hhdFJlcXVlc3QSDwoHY29udGVudBgBIAEoCRITCgtzZXNzaW9uX2tleRgCIAEoCSIwCgpBZ2VudEV2ZW50EgwKBHR5cGUYASABKAkSFAoManNvbl9wYXlsb2FkGAIgASgJIjYKDkNvbW1hbmRSZXF1ZXN0Eg8KB2NvbW1hbmQYASABKAkSEwoLc2Vzc2lvbl9rZXkYAiABKAkiMwoPQ29tbWFuZFJlc3BvbnNlEg8KB3N1Y2Nlc3MYASABKAgSDwoHbWVzc2FnZRgCIAEoCSJPCg5TdGF0dXNSZXNwb25zZRIPCgdydW5uaW5nGAEgASgIEhkKEWNvbm5lY3RlZF9jbGllbnRzGAIgASgFEhEKCXBsYXRmb3JtcxgDIAMoCSIlCg5TZXNzaW9uUmVxdWVzdBITCgtzZXNzaW9uX2tleRgBIAEoCSJVCg9TZXNzaW9uUmVzcG9uc2USCgoCaWQYASABKAkSEwoLc2Vzc2lvbl9rZXkYAiABKAkSDQoFbW9kZWwYAyABKAkSEgoKY3JlYXRlZF9hdBgEIAEoCSI3CgtTZXNzaW9uTGlzdBIoCghzZXNzaW9ucxgBIAMoCzIWLm5vbW9zLlNlc3Npb25SZXNwb25zZSIfCgtEcmFmdEFjdGlvbhIQCghkcmFmdF9pZBgBIAEoCSIxCg1EcmFmdFJlc3BvbnNlEg8KB3N1Y2Nlc3MYASABKAgSDwoHbWVzc2FnZRgCIAEoCSItCglEcmFmdExpc3QSIAoGZHJhZnRzGAEgAygLMhAubm9tb3MuRHJhZnRJdGVtInIKCURyYWZ0SXRlbRIKCgJpZBgBIAEoCRIPCgdjb250ZW50GAIgASgJEhAKCHBsYXRmb3JtGAMgASgJEhIKCmNoYW5uZWxfaWQYBCABKAkSDgoGc3RhdHVzGAUgASgJEhIKCmNyZWF0ZWRfYXQYBiABKAkiIQoMUG9uZ1Jlc3BvbnNlEhEKCXRpbWVzdGFtcBgBIAEoAyIoCgRNQWNrEg8KB3N1Y2Nlc3MYASABKAgSDwoHbWVzc2FnZRgCIAEoCSIjChFNVmF1bHRMaXN0UmVxdWVzdBIOCgZwcmVmaXgYASABKAkiRAoRTVZhdWx0Tm90ZVN1bW1hcnkSDAoEcGF0aBgBIAEoCRINCgV0aXRsZRgCIAEoCRISCgp1cGRhdGVkX2F0GAMgASgJIj0KEk1WYXVsdExpc3RSZXNwb25zZRInCgVub3RlcxgBIAMoCzIYLm5vbW9zLk1WYXVsdE5vdGVTdW1tYXJ5IiAKEE1WYXVsdEdldFJlcXVlc3QSDAoEcGF0aBgBIAEoCSJeCgpNVmF1bHROb3RlEgwKBHBhdGgYASABKAkSDQoFdGl0bGUYAiABKAkSDwoHY29udGVudBgDIAEoCRISCgp1cGRhdGVkX2F0GAQgASgJEg4KBmV4aXN0cxgFIAEoCCJCChJNVmF1bHRXcml0ZVJlcXVlc3QSDAoEcGF0aBgBIAEoCRIPCgdjb250ZW50GAIgASgJEg0KBXRpdGxlGAMgASgJIiMKE01WYXVsdERlbGV0ZVJlcXVlc3QSDAoEcGF0aBgBIAEoCSI0CgxNQ2hhdFJlcXVlc3QSDwoHY29udGVudBgBIAEoCRITCgtzZXNzaW9uX2tleRgCIAEoCSIwCgpNQ2hhdEV2ZW50EgwKBHR5cGUYASABKAkSFAoManNvbl9wYXlsb2FkGAIgASgJIkwKE01HZXRNZXNzYWdlc1JlcXVlc3QSEwoLc2Vzc2lvbl9rZXkYASABKAkSDQoFbGltaXQYAiABKAUSEQoJYmVmb3JlX2lkGAMgASgJIkkKCE1NZXNzYWdlEgoKAmlkGAEgASgJEgwKBHJvbGUYAiABKAkSDwoHY29udGVudBgDIAEoCRISCgpjcmVhdGVkX2F0GAQgASgJIjkKFE1HZXRNZXNzYWdlc1Jlc3BvbnNlEiEKCG1lc3NhZ2VzGAEgAygLMg8ubm9tb3MuTU1lc3NhZ2UiIAoMTURyYWZ0QWN0aW9uEhAKCGRyYWZ0X2lkGAEgASgJIj0KFE1EcmFmdEFjdGlvbldpdGhFZGl0EhAKCGRyYWZ0X2lkGAEgASgJEhMKC2VkaXRlZF90ZXh0GAIgASgJIjgKFE1EcmFmdEFjdGlvblJlc3BvbnNlEg8KB3N1Y2Nlc3MYASABKAgSDwoHbWVzc2FnZRgCIAEoCSIuCg1NSW5ib3hSZXF1ZXN0Eg4KBnN0YXR1cxgBIAEoCRINCgVsaW1pdBgCIAEoBSKYAQoKTUluYm94SXRlbRIKCgJpZBgBIAEoCRISCgpmcm9tX2xhYmVsGAIgASgJEhIKCnRydXN0X3RpZXIYAyABKAkSDwoHc3ViamVjdBgEIAEoCRIMCgR0aW1lGAUgASgJEhMKC2JvbmRfYW1vdW50GAYgASgJEg4KBnVucmVhZBgHIAEoCBISCgpjcmVhdGVkX2F0GAggASgJIkkKDk1JbmJveFJlc3BvbnNlEiAKBWl0ZW1zGAEgAygLMhEubm9tb3MuTUluYm94SXRlbRIVCg1ibG9ja2VkX2NvdW50GAIgASgFIiQKEE1FbnZlbG9wZVJlcXVlc3QSEAoIaW5ib3hfaWQYASABKAkijQEKDU1DYXRlRW52ZWxvcGUSCwoDZGlkGAEgASgJEhIKCnRydXN0X3RpZXIYAiABKAkSDgoGaW50ZW50GAMgASgJEhUKDWNvbnNlbnRfZ3JhbnQYBCABKAkSDQoFc3RhbXAYBSABKAkSEwoLYm9uZF9hbW91bnQYBiABKAkSEAoIcmF3X2pzb24YByABKAkiNwoTTUluYm94QWN0aW9uUmVxdWVzdBIQCghpbmJveF9pZBgBIAEoCRIOCgZhY3Rpb24YAiABKAkiOAoUTUluYm94QWN0aW9uUmVzcG9uc2USDwoHc3VjY2VzcxgBIAEoCBIPCgdtZXNzYWdlGAIgASgJImoKBk1Ta2lsbBIMCgRuYW1lGAEgASgJEhMKC2Rlc2NyaXB0aW9uGAIgASgJEg4KBnNvdXJjZRgDIAEoCRIPCgdlbmFibGVkGAQgASgIEg0KBWNlcnRzGAUgAygJEg0KBXByaWNlGAYgASgJIjAKD01Ta2lsbHNSZXNwb25zZRIdCgZza2lsbHMYASADKAsyDS5ub21vcy5NU2tpbGwiNAoTTVNraWxsVG9nZ2xlUmVxdWVzdBIMCgRuYW1lGAEgASgJEg8KB2VuYWJsZWQYAiABKAgiOAoUTVNraWxsVG9nZ2xlUmVzcG9uc2USDwoHc3VjY2VzcxgBIAEoCBIPCgdtZXNzYWdlGAIgASgJIiIKEE1FYXJuaW5nc1JlcXVlc3QSDgoGcGVyaW9kGAEgASgJIooBChFNRWFybmluZ3NSZXNwb25zZRIZChF0aGlzX3BlcmlvZF9jZW50cxgBIAEoAxITCgtib25kc19jb3VudBgCIAEoAxIWCg5hdmdfYm9uZF9jZW50cxgDIAEoAxIXCg9hY2NlcHRfcmF0ZV9wY3QYBCABKAUSFAoMc2VyaWVzX2NlbnRzGAUgAygDIi0KDU1HcmFwaFJlcXVlc3QSDQoFa2luZHMYASADKAkSDQoFbGltaXQYAiABKAUiXgoWTUdyYXBoTmVpZ2hib3JzUmVxdWVzdBIPCgdub2RlX2lkGAEgASgJEg0KBWRlcHRoGAIgASgFEhEKCXJlbF90eXBlcxgDIAMoCRIRCglkaXJlY3Rpb24YBCABKAkiMwoTTUdyYXBoU2VhcmNoUmVxdWVzdBINCgVxdWVyeRgBIAEoCRINCgVsaW1pdBgCIAEoBSKXAQoKTUdyYXBoTm9kZRIKCgJpZBgBIAEoCRIMCgRraW5kGAIgASgJEgwKBG5hbWUYAyABKAkSDwoHYWxpYXNlcxgEIAMoCRIPCgdzdW1tYXJ5GAUgASgJEhIKCmNvbmZpZGVuY2UYBiABKAESFQoNZXh0ZXJuYWxfa2luZBgHIAEoCRIUCgxleHRlcm5hbF9yZWYYCCABKAkiaAoKTUdyYXBoRWRnZRIKCgJpZBgBIAEoCRIOCgZzcmNfaWQYAiABKAkSDgoGZHN0X2lkGAMgASgJEhAKCHJlbF90eXBlGAQgASgJEgwKBGZhY3QYBSABKAkSDgoGd2VpZ2h0GAYgASgBIlQKDk1HcmFwaFJlc3BvbnNlEiAKBW5vZGVzGAEgAygLMhEubm9tb3MuTUdyYXBoTm9kZRIgCgVlZGdlcxgCIAMoCzIRLm5vbW9zLk1HcmFwaEVkZ2UiXgoKTVRydXN0VGllchIKCgJpZBgBIAEoCRIMCgRuYW1lGAIgASgJEhMKC2Rlc2NyaXB0aW9uGAMgASgJEgwKBG1vZGUYBCABKAkSEwoLYm9uZF9hbW91bnQYBSABKAkiOQoLTVBlcm1pc3Npb24SCgoCaWQYASABKAkSDQoFbGFiZWwYAiABKAkSDwoHZW5hYmxlZBgDIAEoCCKJAQoMTUludGVncmF0aW9uEgoKAmlkGAEgASgJEg0KBWxhYmVsGAIgASgJEgwKBGljb24YAyABKAkSEQoJY29ubmVjdGVkGAQgASgIEhUKDWFjY291bnRfZW1haWwYBSABKAkSFAoMc2VuZF9lbmFibGVkGAYgASgIEhAKCHByb3ZpZGVyGAcgASgJImgKCE1Qcm9maWxlEgwKBG5hbWUYASABKAkSDAoEcGxhbhgCIAEoCRIVCg1tZXNzYWdlX2NvdW50GAMgASgDEhQKDGVhcm5lZF9jZW50cxgEIAEoAxITCgtzYXZlZF9jZW50cxgFIAEoAyKxAQoRTVNldHRpbmdzUmVzcG9uc2USIAoHcHJvZmlsZRgBIAEoCzIPLm5vbW9zLk1Qcm9maWxlEiYKC3RydXN0X3RpZXJzGAIgAygLMhEubm9tb3MuTVRydXN0VGllchInCgtwZXJtaXNzaW9ucxgDIAMoCzISLm5vbW9zLk1QZXJtaXNzaW9uEikKDGludGVncmF0aW9ucxgEIAMoCzITLm5vbW9zLk1JbnRlZ3JhdGlvbiIxCg9NQ29uc2VudFJlcXVlc3QSEAoIcGxhdGZvcm0YASABKAkSDAoEbW9kZRgCIAEoCSJCChFNVHJ1c3RUaWVyUmVxdWVzdBIKCgJpZBgBIAEoCRIMCgRtb2RlGAIgASgJEhMKC2JvbmRfYW1vdW50GAMgASgJIjEKEk1QZXJtaXNzaW9uUmVxdWVzdBIKCgJpZBgBIAEoCRIPCgdlbmFibGVkGAIgASgIIkIKFU1JbnRlZ3JhdGlvbnNSZXNwb25zZRIpCgxpbnRlZ3JhdGlvbnMYASADKAsyEy5ub21vcy5NSW50ZWdyYXRpb24iKAoUTVN0YXJ0Q29ubmVjdFJlcXVlc3QSEAoIcHJvdmlkZXIYASABKAkiKgoVTVN0YXJ0Q29ubmVjdFJlc3BvbnNlEhEKCW9hdXRoX3VybBgBIAEoCSJDChJNRGlzY29ubmVjdFJlcXVlc3QSFgoOaW50ZWdyYXRpb25faWQYASABKAkSFQoNYWNjb3VudF9lbWFpbBgCIAEoCSI0ChVNQ29ubmVjdEdvb2dsZVJlcXVlc3QSDAoEY29kZRgBIAEoCRINCgVzdGF0ZRgCIAEoCSI/ChVNU2V0R29vZ2xlU2VuZFJlcXVlc3QSFQoNYWNjb3VudF9lbWFpbBgBIAEoCRIPCgdlbmFibGVkGAIgASgIIlEKD01EZXZpY2VSZWdpc3RlchIXCg9leHBvX3B1c2hfdG9rZW4YASABKAkSEAoIcGxhdGZvcm0YAiABKAkSEwoLYXBwX3ZlcnNpb24YAyABKAkiLAoRTURldmljZVVucmVnaXN0ZXISFwoPZXhwb19wdXNoX3Rva2VuGAEgASgJIuwBCg5EZXBvc2l0UmVxdWVzdBIQCghwcm92aWRlchgBIAEoCRIPCgd1c2VyX2lkGAIgASgJEhQKDGFjY2Vzc190b2tlbhgDIAEoCRIVCg1yZWZyZXNoX3Rva2VuGAQgASgJEhIKCmV4cGlyZXNfYXQYBSABKAMSDgoGc2NvcGVzGAYgASgJEjUKCG1ldGFkYXRhGAcgAygLMiMubm9tb3MuRGVwb3NpdFJlcXVlc3QuTWV0YWRhdGFFbnRyeRovCg1NZXRhZGF0YUVudHJ5EgsKA2tleRgBIAEoCRINCgV2YWx1ZRgCIAEoCToCOAEiSwoPRGVwb3NpdFJlc3BvbnNlEg8KB3N1Y2Nlc3MYASABKAgSDwoHbWVzc2FnZRgCIAEoCRIWCg5pbnRlZ3JhdGlvbl9pZBgDIAEoCTLkAwoKTm9tb3NBZ2VudBIvCgRDaGF0EhIubm9tb3MuQ2hhdFJlcXVlc3QaES5ub21vcy5BZ2VudEV2ZW50MAESOAoHQ29tbWFuZBIVLm5vbW9zLkNvbW1hbmRSZXF1ZXN0GhYubm9tb3MuQ29tbWFuZFJlc3BvbnNlEjAKCUdldFN0YXR1cxIMLm5vbW9zLkVtcHR5GhUubm9tb3MuU3RhdHVzUmVzcG9uc2USMAoMTGlzdFNlc3Npb25zEgwubm9tb3MuRW1wdHkaEi5ub21vcy5TZXNzaW9uTGlzdBI7CgpHZXRTZXNzaW9uEhUubm9tb3MuU2Vzc2lvblJlcXVlc3QaFi5ub21vcy5TZXNzaW9uUmVzcG9uc2USLAoKTGlzdERyYWZ0cxIMLm5vbW9zLkVtcHR5GhAubm9tb3MuRHJhZnRMaXN0EjgKDEFwcHJvdmVEcmFmdBISLm5vbW9zLkRyYWZ0QWN0aW9uGhQubm9tb3MuRHJhZnRSZXNwb25zZRI3CgtSZWplY3REcmFmdBISLm5vbW9zLkRyYWZ0QWN0aW9uGhQubm9tb3MuRHJhZnRSZXNwb25zZRIpCgRQaW5nEgwubm9tb3MuRW1wdHkaEy5ub21vcy5Qb25nUmVzcG9uc2UyyQ4KCU1vYmlsZUFwaRIwCgRDaGF0EhMubm9tb3MuTUNoYXRSZXF1ZXN0GhEubm9tb3MuTUNoYXRFdmVudDABEkYKC0dldE1lc3NhZ2VzEhoubm9tb3MuTUdldE1lc3NhZ2VzUmVxdWVzdBobLm5vbW9zLk1HZXRNZXNzYWdlc1Jlc3BvbnNlEkAKDEFwcHJvdmVEcmFmdBITLm5vbW9zLk1EcmFmdEFjdGlvbhobLm5vbW9zLk1EcmFmdEFjdGlvblJlc3BvbnNlEj8KC1JlamVjdERyYWZ0EhMubm9tb3MuTURyYWZ0QWN0aW9uGhsubm9tb3MuTURyYWZ0QWN0aW9uUmVzcG9uc2USUAoUQXBwcm92ZURyYWZ0V2l0aEVkaXQSGy5ub21vcy5NRHJhZnRBY3Rpb25XaXRoRWRpdBobLm5vbW9zLk1EcmFmdEFjdGlvblJlc3BvbnNlEjgKCUxpc3RJbmJveBIULm5vbW9zLk1JbmJveFJlcXVlc3QaFS5ub21vcy5NSW5ib3hSZXNwb25zZRJACg9HZXRDYXRlRW52ZWxvcGUSFy5ub21vcy5NRW52ZWxvcGVSZXF1ZXN0GhQubm9tb3MuTUNhdGVFbnZlbG9wZRJJCg5BY3RPbkluYm94SXRlbRIaLm5vbW9zLk1JbmJveEFjdGlvblJlcXVlc3QaGy5ub21vcy5NSW5ib3hBY3Rpb25SZXNwb25zZRIyCgpMaXN0U2tpbGxzEgwubm9tb3MuRW1wdHkaFi5ub21vcy5NU2tpbGxzUmVzcG9uc2USRgoLVG9nZ2xlU2tpbGwSGi5ub21vcy5NU2tpbGxUb2dnbGVSZXF1ZXN0Ghsubm9tb3MuTVNraWxsVG9nZ2xlUmVzcG9uc2USQAoLR2V0RWFybmluZ3MSFy5ub21vcy5NRWFybmluZ3NSZXF1ZXN0Ghgubm9tb3MuTUVhcm5pbmdzUmVzcG9uc2USNwoIR2V0R3JhcGgSFC5ub21vcy5NR3JhcGhSZXF1ZXN0GhUubm9tb3MuTUdyYXBoUmVzcG9uc2USSQoRR2V0R3JhcGhOZWlnaGJvcnMSHS5ub21vcy5NR3JhcGhOZWlnaGJvcnNSZXF1ZXN0GhUubm9tb3MuTUdyYXBoUmVzcG9uc2USQAoLU2VhcmNoR3JhcGgSGi5ub21vcy5NR3JhcGhTZWFyY2hSZXF1ZXN0GhUubm9tb3MuTUdyYXBoUmVzcG9uc2USNQoLR2V0U2V0dGluZ3MSDC5ub21vcy5FbXB0eRoYLm5vbW9zLk1TZXR0aW5nc1Jlc3BvbnNlEjQKDVVwZGF0ZUNvbnNlbnQSFi5ub21vcy5NQ29uc2VudFJlcXVlc3QaCy5ub21vcy5NQWNrEjgKD1VwZGF0ZVRydXN0VGllchIYLm5vbW9zLk1UcnVzdFRpZXJSZXF1ZXN0Ggsubm9tb3MuTUFjaxI6ChBVcGRhdGVQZXJtaXNzaW9uEhkubm9tb3MuTVBlcm1pc3Npb25SZXF1ZXN0Ggsubm9tb3MuTUFjaxI+ChBMaXN0SW50ZWdyYXRpb25zEgwubm9tb3MuRW1wdHkaHC5ub21vcy5NSW50ZWdyYXRpb25zUmVzcG9uc2USVAoXU3RhcnRDb25uZWN0SW50ZWdyYXRpb24SGy5ub21vcy5NU3RhcnRDb25uZWN0UmVxdWVzdBocLm5vbW9zLk1TdGFydENvbm5lY3RSZXNwb25zZRJBChRDb25uZWN0R29vZ2xlQWNjb3VudBIcLm5vbW9zLk1Db25uZWN0R29vZ2xlUmVxdWVzdBoLLm5vbW9zLk1BY2sSOgoNU2V0R29vZ2xlU2VuZBIcLm5vbW9zLk1TZXRHb29nbGVTZW5kUmVxdWVzdBoLLm5vbW9zLk1BY2sSPwoVRGlzY29ubmVjdEludGVncmF0aW9uEhkubm9tb3MuTURpc2Nvbm5lY3RSZXF1ZXN0Ggsubm9tb3MuTUFjaxI1Cg5SZWdpc3RlckRldmljZRIWLm5vbW9zLk1EZXZpY2VSZWdpc3RlchoLLm5vbW9zLk1BY2sSOQoQVW5yZWdpc3RlckRldmljZRIYLm5vbW9zLk1EZXZpY2VVbnJlZ2lzdGVyGgsubm9tb3MuTUFjaxJFCg5MaXN0VmF1bHROb3RlcxIYLm5vbW9zLk1WYXVsdExpc3RSZXF1ZXN0Ghkubm9tb3MuTVZhdWx0TGlzdFJlc3BvbnNlEjoKDEdldFZhdWx0Tm90ZRIXLm5vbW9zLk1WYXVsdEdldFJlcXVlc3QaES5ub21vcy5NVmF1bHROb3RlEjgKDldyaXRlVmF1bHROb3RlEhkubm9tb3MuTVZhdWx0V3JpdGVSZXF1ZXN0Ggsubm9tb3MuTUFjaxI6Cg9EZWxldGVWYXVsdE5vdGUSGi5ub21vcy5NVmF1bHREZWxldGVSZXF1ZXN0Ggsubm9tb3MuTUFjazJICgxPQXV0aERlcG9zaXQSOAoHRGVwb3NpdBIVLm5vbW9zLkRlcG9zaXRSZXF1ZXN0GhYubm9tb3MuRGVwb3NpdFJlc3BvbnNlYgZwcm90bzM",
-);
+export const file_nomos: GenFile = /*@__PURE__*/
+  fileDesc("Cgtub21vcy5wcm90bxIFbm9tb3MiBwoFRW1wdHkijgEKCExvb3BJbmZvEgoKAmlkGAEgASgJEgwKBG5hbWUYAiABKAkSEAoIc2NoZWR1bGUYAyABKAkSDwoHZW5hYmxlZBgEIAEoCBIOCgZzb3VyY2UYBSABKAkSEwoLZXJyb3JfY291bnQYBiABKAUSEAoIbGFzdF9ydW4YByABKAkSDgoGcHJvbXB0GAggASgJIioKCExvb3BMaXN0Eh4KBWxvb3BzGAEgAygLMg8ubm9tb3MuTG9vcEluZm8iNgoVU2V0TG9vcEVuYWJsZWRSZXF1ZXN0EgwKBG5hbWUYASABKAkSDwoHZW5hYmxlZBgCIAEoCCIhChFMb29wRGVsZXRlUmVxdWVzdBIMCgRuYW1lGAEgASgJIjYKEkxvb3BBY3Rpb25SZXNwb25zZRIPCgdzdWNjZXNzGAEgASgIEg8KB21lc3NhZ2UYAiABKAkiMwoLQ2hhdFJlcXVlc3QSDwoHY29udGVudBgBIAEoCRITCgtzZXNzaW9uX2tleRgCIAEoCSIwCgpBZ2VudEV2ZW50EgwKBHR5cGUYASABKAkSFAoManNvbl9wYXlsb2FkGAIgASgJIjYKDkNvbW1hbmRSZXF1ZXN0Eg8KB2NvbW1hbmQYASABKAkSEwoLc2Vzc2lvbl9rZXkYAiABKAkiMwoPQ29tbWFuZFJlc3BvbnNlEg8KB3N1Y2Nlc3MYASABKAgSDwoHbWVzc2FnZRgCIAEoCSJPCg5TdGF0dXNSZXNwb25zZRIPCgdydW5uaW5nGAEgASgIEhkKEWNvbm5lY3RlZF9jbGllbnRzGAIgASgFEhEKCXBsYXRmb3JtcxgDIAMoCSIlCg5TZXNzaW9uUmVxdWVzdBITCgtzZXNzaW9uX2tleRgBIAEoCSJVCg9TZXNzaW9uUmVzcG9uc2USCgoCaWQYASABKAkSEwoLc2Vzc2lvbl9rZXkYAiABKAkSDQoFbW9kZWwYAyABKAkSEgoKY3JlYXRlZF9hdBgEIAEoCSI3CgtTZXNzaW9uTGlzdBIoCghzZXNzaW9ucxgBIAMoCzIWLm5vbW9zLlNlc3Npb25SZXNwb25zZSIfCgtEcmFmdEFjdGlvbhIQCghkcmFmdF9pZBgBIAEoCSIxCg1EcmFmdFJlc3BvbnNlEg8KB3N1Y2Nlc3MYASABKAgSDwoHbWVzc2FnZRgCIAEoCSItCglEcmFmdExpc3QSIAoGZHJhZnRzGAEgAygLMhAubm9tb3MuRHJhZnRJdGVtInIKCURyYWZ0SXRlbRIKCgJpZBgBIAEoCRIPCgdjb250ZW50GAIgASgJEhAKCHBsYXRmb3JtGAMgASgJEhIKCmNoYW5uZWxfaWQYBCABKAkSDgoGc3RhdHVzGAUgASgJEhIKCmNyZWF0ZWRfYXQYBiABKAkiIQoMUG9uZ1Jlc3BvbnNlEhEKCXRpbWVzdGFtcBgBIAEoAyKLAQoFTUxvb3ASCgoCaWQYASABKAkSDAoEbmFtZRgCIAEoCRIQCghzY2hlZHVsZRgDIAEoCRIPCgdlbmFibGVkGAQgASgIEg4KBnNvdXJjZRgFIAEoCRITCgtlcnJvcl9jb3VudBgGIAEoBRIQCghsYXN0X3J1bhgHIAEoCRIOCgZwcm9tcHQYCCABKAkiLQoOTUxvb3BzUmVzcG9uc2USGwoFbG9vcHMYASADKAsyDC5ub21vcy5NTG9vcCI3ChZNU2V0TG9vcEVuYWJsZWRSZXF1ZXN0EgwKBG5hbWUYASABKAkSDwoHZW5hYmxlZBgCIAEoCCIiChJNTG9vcERlbGV0ZVJlcXVlc3QSDAoEbmFtZRgBIAEoCSKnAQoFTVRhc2sSCgoCaWQYASABKAkSDAoEbmFtZRgCIAEoCRIOCgZwcm9tcHQYAyABKAkSEAoIc2NoZWR1bGUYBCABKAkSFQoNc2NoZWR1bGVfdHlwZRgFIAEoCRIYChBkaXNwbGF5X3NjaGVkdWxlGAYgASgJEg8KB2VuYWJsZWQYByABKAgSDgoGc291cmNlGAggASgJEhAKCGxhc3RfcnVuGAkgASgJIi0KDk1UYXNrc1Jlc3BvbnNlEhsKBXRhc2tzGAEgAygLMgwubm9tb3MuTVRhc2sieAoSTVRhc2tVcGRhdGVSZXF1ZXN0EgoKAmlkGAEgASgJEgwKBG5hbWUYAiABKAkSDgoGcHJvbXB0GAMgASgJEhAKCHNjaGVkdWxlGAQgASgJEhUKDXNjaGVkdWxlX3R5cGUYBSABKAkSDwoHZW5hYmxlZBgGIAEoCCIgChJNVGFza0RlbGV0ZVJlcXVlc3QSCgoCaWQYASABKAkiagoKTUJyYWluTm9kZRIKCgJpZBgBIAEoCRINCgVsYWJlbBgCIAEoCRIMCgRraW5kGAMgASgJEg8KB3N1bW1hcnkYBCABKAkSDgoGZGVncmVlGAUgASgFEhIKCmNvbmZpZGVuY2UYBiABKAEiOAoKTUJyYWluRWRnZRILCgNzcmMYASABKAkSCwoDZHN0GAIgASgJEhAKCHJlbGF0aW9uGAMgASgJIlIKCk1CcmFpbkZhY3QSDAoEdGV4dBgBIAEoCRIOCgZzb3VyY2UYAiABKAkSEgoKY29uZmlkZW5jZRgDIAEoBRISCgpsZWFybmVkX2F0GAQgASgJIqABCg5NQnJhaW5SZXNwb25zZRIgCgVub2RlcxgBIAMoCzIRLm5vbW9zLk1CcmFpbk5vZGUSIAoFZWRnZXMYAiADKAsyES5ub21vcy5NQnJhaW5FZGdlEiAKBWZhY3RzGAMgAygLMhEubm9tb3MuTUJyYWluRmFjdBIUCgxlbnRpdHlfY291bnQYBCABKAUSEgoKZmFjdF9jb3VudBgFIAEoBSJzCgtNSW5ib3hEcmFmdBIKCgJpZBgBIAEoCRIRCglyZWNpcGllbnQYAiABKAkSDwoHcHJldmlldxgDIAEoCRIOCgZzdGF0dXMYBCABKAkSEAoIcGxhdGZvcm0YBSABKAkSEgoKY3JlYXRlZF9hdBgGIAEoCSJ6CgpNSW5ib3hDYXRlEgoKAmlkGAEgASgJEhIKCmZyb21fbGFiZWwYAiABKAkSEgoKdHJ1c3RfdGllchgDIAEoCRIPCgdzdWJqZWN0GAQgASgJEhMKC2JvbmRfYW1vdW50GAUgASgJEhIKCmNyZWF0ZWRfYXQYBiABKAkibwoRTUdldEluYm94UmVzcG9uc2USIgoGZHJhZnRzGAEgAygLMhIubm9tb3MuTUluYm94RHJhZnQSHwoEY2F0ZRgCIAMoCzIRLm5vbW9zLk1JbmJveENhdGUSFQoNYmxvY2tlZF9jb3VudBgDIAEoBSI4CgtNVG9kYXlFdmVudBIMCgR0aW1lGAEgASgJEg0KBXRpdGxlGAIgASgJEgwKBG1ldGEYAyABKAkiQAoQTVRvZGF5Q29tbWl0bWVudBIKCgJpZBgBIAEoCRITCgtkZXNjcmlwdGlvbhgCIAEoCRILCgNkdWUYAyABKAkiOAoKTVRvZGF5VGFzaxIKCgJpZBgBIAEoCRIMCgRuYW1lGAIgASgJEhAKCHNjaGVkdWxlGAMgASgJIp4BCg5NVG9kYXlSZXNwb25zZRIYChBicmllZmluZ19lbmFibGVkGAEgASgIEiIKBmV2ZW50cxgCIAMoCzISLm5vbW9zLk1Ub2RheUV2ZW50EiwKC2NvbW1pdG1lbnRzGAMgAygLMhcubm9tb3MuTVRvZGF5Q29tbWl0bWVudBIgCgV0YXNrcxgEIAMoCzIRLm5vbW9zLk1Ub2RheVRhc2siKAoETUFjaxIPCgdzdWNjZXNzGAEgASgIEg8KB21lc3NhZ2UYAiABKAkiIwoRTVZhdWx0TGlzdFJlcXVlc3QSDgoGcHJlZml4GAEgASgJIkQKEU1WYXVsdE5vdGVTdW1tYXJ5EgwKBHBhdGgYASABKAkSDQoFdGl0bGUYAiABKAkSEgoKdXBkYXRlZF9hdBgDIAEoCSI9ChJNVmF1bHRMaXN0UmVzcG9uc2USJwoFbm90ZXMYASADKAsyGC5ub21vcy5NVmF1bHROb3RlU3VtbWFyeSIgChBNVmF1bHRHZXRSZXF1ZXN0EgwKBHBhdGgYASABKAkiXgoKTVZhdWx0Tm90ZRIMCgRwYXRoGAEgASgJEg0KBXRpdGxlGAIgASgJEg8KB2NvbnRlbnQYAyABKAkSEgoKdXBkYXRlZF9hdBgEIAEoCRIOCgZleGlzdHMYBSABKAgiQgoSTVZhdWx0V3JpdGVSZXF1ZXN0EgwKBHBhdGgYASABKAkSDwoHY29udGVudBgCIAEoCRINCgV0aXRsZRgDIAEoCSIjChNNVmF1bHREZWxldGVSZXF1ZXN0EgwKBHBhdGgYASABKAkiNAoMTUNoYXRSZXF1ZXN0Eg8KB2NvbnRlbnQYASABKAkSEwoLc2Vzc2lvbl9rZXkYAiABKAkiMAoKTUNoYXRFdmVudBIMCgR0eXBlGAEgASgJEhQKDGpzb25fcGF5bG9hZBgCIAEoCSJMChNNR2V0TWVzc2FnZXNSZXF1ZXN0EhMKC3Nlc3Npb25fa2V5GAEgASgJEg0KBWxpbWl0GAIgASgFEhEKCWJlZm9yZV9pZBgDIAEoCSJJCghNTWVzc2FnZRIKCgJpZBgBIAEoCRIMCgRyb2xlGAIgASgJEg8KB2NvbnRlbnQYAyABKAkSEgoKY3JlYXRlZF9hdBgEIAEoCSI5ChRNR2V0TWVzc2FnZXNSZXNwb25zZRIhCghtZXNzYWdlcxgBIAMoCzIPLm5vbW9zLk1NZXNzYWdlIiAKDE1EcmFmdEFjdGlvbhIQCghkcmFmdF9pZBgBIAEoCSI9ChRNRHJhZnRBY3Rpb25XaXRoRWRpdBIQCghkcmFmdF9pZBgBIAEoCRITCgtlZGl0ZWRfdGV4dBgCIAEoCSI4ChRNRHJhZnRBY3Rpb25SZXNwb25zZRIPCgdzdWNjZXNzGAEgASgIEg8KB21lc3NhZ2UYAiABKAkiLgoNTUluYm94UmVxdWVzdBIOCgZzdGF0dXMYASABKAkSDQoFbGltaXQYAiABKAUimAEKCk1JbmJveEl0ZW0SCgoCaWQYASABKAkSEgoKZnJvbV9sYWJlbBgCIAEoCRISCgp0cnVzdF90aWVyGAMgASgJEg8KB3N1YmplY3QYBCABKAkSDAoEdGltZRgFIAEoCRITCgtib25kX2Ftb3VudBgGIAEoCRIOCgZ1bnJlYWQYByABKAgSEgoKY3JlYXRlZF9hdBgIIAEoCSJJCg5NSW5ib3hSZXNwb25zZRIgCgVpdGVtcxgBIAMoCzIRLm5vbW9zLk1JbmJveEl0ZW0SFQoNYmxvY2tlZF9jb3VudBgCIAEoBSIkChBNRW52ZWxvcGVSZXF1ZXN0EhAKCGluYm94X2lkGAEgASgJIo0BCg1NQ2F0ZUVudmVsb3BlEgsKA2RpZBgBIAEoCRISCgp0cnVzdF90aWVyGAIgASgJEg4KBmludGVudBgDIAEoCRIVCg1jb25zZW50X2dyYW50GAQgASgJEg0KBXN0YW1wGAUgASgJEhMKC2JvbmRfYW1vdW50GAYgASgJEhAKCHJhd19qc29uGAcgASgJIjcKE01JbmJveEFjdGlvblJlcXVlc3QSEAoIaW5ib3hfaWQYASABKAkSDgoGYWN0aW9uGAIgASgJIjgKFE1JbmJveEFjdGlvblJlc3BvbnNlEg8KB3N1Y2Nlc3MYASABKAgSDwoHbWVzc2FnZRgCIAEoCSJqCgZNU2tpbGwSDAoEbmFtZRgBIAEoCRITCgtkZXNjcmlwdGlvbhgCIAEoCRIOCgZzb3VyY2UYAyABKAkSDwoHZW5hYmxlZBgEIAEoCBINCgVjZXJ0cxgFIAMoCRINCgVwcmljZRgGIAEoCSIwCg9NU2tpbGxzUmVzcG9uc2USHQoGc2tpbGxzGAEgAygLMg0ubm9tb3MuTVNraWxsIkEKB01QbHVnaW4SDAoEbmFtZRgBIAEoCRITCgtkZXNjcmlwdGlvbhgCIAEoCRITCgttYXJrZXRwbGFjZRgDIAEoCSIzChBNUGx1Z2luc1Jlc3BvbnNlEh8KB3BsdWdpbnMYASADKAsyDi5ub21vcy5NUGx1Z2luIjQKE01Ta2lsbFRvZ2dsZVJlcXVlc3QSDAoEbmFtZRgBIAEoCRIPCgdlbmFibGVkGAIgASgIIjgKFE1Ta2lsbFRvZ2dsZVJlc3BvbnNlEg8KB3N1Y2Nlc3MYASABKAgSDwoHbWVzc2FnZRgCIAEoCSIiChBNRWFybmluZ3NSZXF1ZXN0Eg4KBnBlcmlvZBgBIAEoCSKKAQoRTUVhcm5pbmdzUmVzcG9uc2USGQoRdGhpc19wZXJpb2RfY2VudHMYASABKAMSEwoLYm9uZHNfY291bnQYAiABKAMSFgoOYXZnX2JvbmRfY2VudHMYAyABKAMSFwoPYWNjZXB0X3JhdGVfcGN0GAQgASgFEhQKDHNlcmllc19jZW50cxgFIAMoAyItCg1NR3JhcGhSZXF1ZXN0Eg0KBWtpbmRzGAEgAygJEg0KBWxpbWl0GAIgASgFIl4KFk1HcmFwaE5laWdoYm9yc1JlcXVlc3QSDwoHbm9kZV9pZBgBIAEoCRINCgVkZXB0aBgCIAEoBRIRCglyZWxfdHlwZXMYAyADKAkSEQoJZGlyZWN0aW9uGAQgASgJIjMKE01HcmFwaFNlYXJjaFJlcXVlc3QSDQoFcXVlcnkYASABKAkSDQoFbGltaXQYAiABKAUilwEKCk1HcmFwaE5vZGUSCgoCaWQYASABKAkSDAoEa2luZBgCIAEoCRIMCgRuYW1lGAMgASgJEg8KB2FsaWFzZXMYBCADKAkSDwoHc3VtbWFyeRgFIAEoCRISCgpjb25maWRlbmNlGAYgASgBEhUKDWV4dGVybmFsX2tpbmQYByABKAkSFAoMZXh0ZXJuYWxfcmVmGAggASgJImgKCk1HcmFwaEVkZ2USCgoCaWQYASABKAkSDgoGc3JjX2lkGAIgASgJEg4KBmRzdF9pZBgDIAEoCRIQCghyZWxfdHlwZRgEIAEoCRIMCgRmYWN0GAUgASgJEg4KBndlaWdodBgGIAEoASJUCg5NR3JhcGhSZXNwb25zZRIgCgVub2RlcxgBIAMoCzIRLm5vbW9zLk1HcmFwaE5vZGUSIAoFZWRnZXMYAiADKAsyES5ub21vcy5NR3JhcGhFZGdlIl4KCk1UcnVzdFRpZXISCgoCaWQYASABKAkSDAoEbmFtZRgCIAEoCRITCgtkZXNjcmlwdGlvbhgDIAEoCRIMCgRtb2RlGAQgASgJEhMKC2JvbmRfYW1vdW50GAUgASgJIjkKC01QZXJtaXNzaW9uEgoKAmlkGAEgASgJEg0KBWxhYmVsGAIgASgJEg8KB2VuYWJsZWQYAyABKAgiiQEKDE1JbnRlZ3JhdGlvbhIKCgJpZBgBIAEoCRINCgVsYWJlbBgCIAEoCRIMCgRpY29uGAMgASgJEhEKCWNvbm5lY3RlZBgEIAEoCBIVCg1hY2NvdW50X2VtYWlsGAUgASgJEhQKDHNlbmRfZW5hYmxlZBgGIAEoCBIQCghwcm92aWRlchgHIAEoCSJoCghNUHJvZmlsZRIMCgRuYW1lGAEgASgJEgwKBHBsYW4YAiABKAkSFQoNbWVzc2FnZV9jb3VudBgDIAEoAxIUCgxlYXJuZWRfY2VudHMYBCABKAMSEwoLc2F2ZWRfY2VudHMYBSABKAMizwIKEU1TZXR0aW5nc1Jlc3BvbnNlEiAKB3Byb2ZpbGUYASABKAsyDy5ub21vcy5NUHJvZmlsZRImCgt0cnVzdF90aWVycxgCIAMoCzIRLm5vbW9zLk1UcnVzdFRpZXISJwoLcGVybWlzc2lvbnMYAyADKAsyEi5ub21vcy5NUGVybWlzc2lvbhIpCgxpbnRlZ3JhdGlvbnMYBCADKAsyEy5ub21vcy5NSW50ZWdyYXRpb24SJQoHY29uc2VudBgFIAMoCzIULm5vbW9zLk1Db25zZW50RW50cnkSJwoIaWRlbnRpdHkYBiABKAsyFS5ub21vcy5NQWdlbnRJZGVudGl0eRImCgthcHBfdG9nZ2xlcxgHIAMoCzIRLm5vbW9zLk1BcHBUb2dnbGUSJAoJcHJvYWN0aXZlGAggASgLMhEubm9tb3MuTVByb2FjdGl2ZSIsCgpNUHJvYWN0aXZlEgwKBG1vZGUYASABKAkSEAoIYnJpZWZpbmcYAiABKAkiLwoNTUNvbnNlbnRFbnRyeRIQCghwbGF0Zm9ybRgBIAEoCRIMCgRtb2RlGAIgASgJIj0KDk1BZ2VudElkZW50aXR5EgwKBG5hbWUYASABKAkSDQoFdm9pY2UYAiABKAkSDgoGYXZhdGFyGAMgASgJIioKCk1BcHBUb2dnbGUSCwoDa2V5GAEgASgJEg8KB2VuYWJsZWQYAiABKAgiMAoSTUFwcFNldHRpbmdSZXF1ZXN0EgsKA2tleRgBIAEoCRINCgV2YWx1ZRgCIAEoCSJEChVNQWdlbnRJZGVudGl0eVJlcXVlc3QSDAoEbmFtZRgBIAEoCRINCgV2b2ljZRgCIAEoCRIOCgZhdmF0YXIYAyABKAkiMQoPTUNvbnNlbnRSZXF1ZXN0EhAKCHBsYXRmb3JtGAEgASgJEgwKBG1vZGUYAiABKAkiQgoRTVRydXN0VGllclJlcXVlc3QSCgoCaWQYASABKAkSDAoEbW9kZRgCIAEoCRITCgtib25kX2Ftb3VudBgDIAEoCSIxChJNUGVybWlzc2lvblJlcXVlc3QSCgoCaWQYASABKAkSDwoHZW5hYmxlZBgCIAEoCCJCChVNSW50ZWdyYXRpb25zUmVzcG9uc2USKQoMaW50ZWdyYXRpb25zGAEgAygLMhMubm9tb3MuTUludGVncmF0aW9uIigKFE1TdGFydENvbm5lY3RSZXF1ZXN0EhAKCHByb3ZpZGVyGAEgASgJIioKFU1TdGFydENvbm5lY3RSZXNwb25zZRIRCglvYXV0aF91cmwYASABKAkiQwoSTURpc2Nvbm5lY3RSZXF1ZXN0EhYKDmludGVncmF0aW9uX2lkGAEgASgJEhUKDWFjY291bnRfZW1haWwYAiABKAkiNAoVTUNvbm5lY3RHb29nbGVSZXF1ZXN0EgwKBGNvZGUYASABKAkSDQoFc3RhdGUYAiABKAkiPwoVTVNldEdvb2dsZVNlbmRSZXF1ZXN0EhUKDWFjY291bnRfZW1haWwYASABKAkSDwoHZW5hYmxlZBgCIAEoCCJRCg9NRGV2aWNlUmVnaXN0ZXISFwoPZXhwb19wdXNoX3Rva2VuGAEgASgJEhAKCHBsYXRmb3JtGAIgASgJEhMKC2FwcF92ZXJzaW9uGAMgASgJIiwKEU1EZXZpY2VVbnJlZ2lzdGVyEhcKD2V4cG9fcHVzaF90b2tlbhgBIAEoCSLsAQoORGVwb3NpdFJlcXVlc3QSEAoIcHJvdmlkZXIYASABKAkSDwoHdXNlcl9pZBgCIAEoCRIUCgxhY2Nlc3NfdG9rZW4YAyABKAkSFQoNcmVmcmVzaF90b2tlbhgEIAEoCRISCgpleHBpcmVzX2F0GAUgASgDEg4KBnNjb3BlcxgGIAEoCRI1CghtZXRhZGF0YRgHIAMoCzIjLm5vbW9zLkRlcG9zaXRSZXF1ZXN0Lk1ldGFkYXRhRW50cnkaLwoNTWV0YWRhdGFFbnRyeRILCgNrZXkYASABKAkSDQoFdmFsdWUYAiABKAk6AjgBIksKD0RlcG9zaXRSZXNwb25zZRIPCgdzdWNjZXNzGAEgASgIEg8KB21lc3NhZ2UYAiABKAkSFgoOaW50ZWdyYXRpb25faWQYAyABKAkibQoZTVN0dWRpb0NyZWF0ZUFzc2V0UmVxdWVzdBIMCgRtaW1lGAEgASgJEhQKDGNvbnRlbnRfaGFzaBgCIAEoCRINCgV3aWR0aBgDIAEoBRIOCgZoZWlnaHQYBCABKAUSDQoFYnl0ZXMYBSABKAUiagoaTVN0dWRpb0NyZWF0ZUFzc2V0UmVzcG9uc2USEAoIYXNzZXRfaWQYASABKAkSEgoKdXBsb2FkX3VybBgCIAEoCRISCgpvYmplY3Rfa2V5GAMgASgJEhIKCmV4cGlyZXNfYXQYBCABKAMiNQoPTVN0dWRpb0Fzc2V0UmVmEhAKCGFzc2V0X2lkGAEgASgJEhAKCG9yaWdpbmFsGAIgASgIIjoKF01TdHVkaW9Bc3NldFVybFJlc3BvbnNlEgsKA3VybBgBIAEoCRISCgpleHBpcmVzX2F0GAIgASgDIp8BChJNU3R1ZGlvRWRpdFJlcXVlc3QSEAoIYXNzZXRfaWQYASABKAkSCgoCb3AYAiABKAkSEwoLcGFyYW1zX2pzb24YAyABKAkSFgoOcGFyZW50X2VkaXRfaWQYBCABKAkSFwoPaWRlbXBvdGVuY3lfa2V5GAUgASgJEhAKCG1hc2tfa2V5GAYgASgJEhMKC2lucHV0X2ltYWdlGAcgASgMIokBCgxNU3R1ZGlvRXZlbnQSDAoEa2luZBgBIAEoCRIPCgdlZGl0X2lkGAIgASgJEg4KBnN0YXR1cxgDIAEoCRITCgtwcmV2aWV3X2tleRgEIAEoCRISCgpvdXRwdXRfa2V5GAUgASgJEhAKCGNvc3RfdXNkGAYgASgBEg8KB21lc3NhZ2UYByABKAkinAEKC01TdHVkaW9FZGl0EgoKAmlkGAEgASgJEgoKAm9wGAIgASgJEg4KBnN0YXR1cxgDIAEoCRITCgtwcmV2aWV3X2tleRgEIAEoCRISCgpvdXRwdXRfa2V5GAUgASgJEhAKCGNvc3RfdXNkGAYgASgBEhYKDnBhcmVudF9lZGl0X2lkGAcgASgJEhIKCmNyZWF0ZWRfYXQYCCABKAkiUQoWTVN0dWRpb0hpc3RvcnlSZXNwb25zZRIhCgVlZGl0cxgBIAMoCzISLm5vbW9zLk1TdHVkaW9FZGl0EhQKDGhlYWRfZWRpdF9pZBgCIAEoCSI3ChVNU3R1ZGlvSWRlbnRpdHlSZXBvcnQSDwoHZWRpdF9pZBgBIAEoCRINCgVzY29yZRgCIAEoASIpChhNU3R1ZGlvTGlzdEFzc2V0c1JlcXVlc3QSDQoFbGltaXQYASABKAUinAEKE01TdHVkaW9Bc3NldFN1bW1hcnkSEAoIYXNzZXRfaWQYASABKAkSEwoLcHJldmlld191cmwYAiABKAkSEgoKdXBkYXRlZF9hdBgDIAEoAxIRCglmaW5hbGl6ZWQYBCABKAgSEgoKZWRpdF9jb3VudBgFIAEoBRIPCgdoZWFkX29wGAYgASgJEhIKCmV4cGlyZXNfYXQYByABKAMiRwoZTVN0dWRpb0xpc3RBc3NldHNSZXNwb25zZRIqCgZhc3NldHMYASADKAsyGi5ub21vcy5NU3R1ZGlvQXNzZXRTdW1tYXJ5IjIKEU1TdHVkaW9TdWdnZXN0aW9uEg0KBWxhYmVsGAEgASgJEg4KBnByb21wdBgCIAEoCSJLChpNU3R1ZGlvU3VnZ2VzdGlvbnNSZXNwb25zZRItCgtzdWdnZXN0aW9ucxgBIAMoCzIYLm5vbW9zLk1TdHVkaW9TdWdnZXN0aW9uMp4FCgpOb21vc0FnZW50Ei8KBENoYXQSEi5ub21vcy5DaGF0UmVxdWVzdBoRLm5vbW9zLkFnZW50RXZlbnQwARI4CgdDb21tYW5kEhUubm9tb3MuQ29tbWFuZFJlcXVlc3QaFi5ub21vcy5Db21tYW5kUmVzcG9uc2USMAoJR2V0U3RhdHVzEgwubm9tb3MuRW1wdHkaFS5ub21vcy5TdGF0dXNSZXNwb25zZRIwCgxMaXN0U2Vzc2lvbnMSDC5ub21vcy5FbXB0eRoSLm5vbW9zLlNlc3Npb25MaXN0EjsKCkdldFNlc3Npb24SFS5ub21vcy5TZXNzaW9uUmVxdWVzdBoWLm5vbW9zLlNlc3Npb25SZXNwb25zZRIsCgpMaXN0RHJhZnRzEgwubm9tb3MuRW1wdHkaEC5ub21vcy5EcmFmdExpc3QSOAoMQXBwcm92ZURyYWZ0EhIubm9tb3MuRHJhZnRBY3Rpb24aFC5ub21vcy5EcmFmdFJlc3BvbnNlEjcKC1JlamVjdERyYWZ0EhIubm9tb3MuRHJhZnRBY3Rpb24aFC5ub21vcy5EcmFmdFJlc3BvbnNlEioKCUxpc3RMb29wcxIMLm5vbW9zLkVtcHR5Gg8ubm9tb3MuTG9vcExpc3QSSQoOU2V0TG9vcEVuYWJsZWQSHC5ub21vcy5TZXRMb29wRW5hYmxlZFJlcXVlc3QaGS5ub21vcy5Mb29wQWN0aW9uUmVzcG9uc2USQQoKRGVsZXRlTG9vcBIYLm5vbW9zLkxvb3BEZWxldGVSZXF1ZXN0Ghkubm9tb3MuTG9vcEFjdGlvblJlc3BvbnNlEikKBFBpbmcSDC5ub21vcy5FbXB0eRoTLm5vbW9zLlBvbmdSZXNwb25zZTLxFwoJTW9iaWxlQXBpEjAKBENoYXQSEy5ub21vcy5NQ2hhdFJlcXVlc3QaES5ub21vcy5NQ2hhdEV2ZW50MAESRgoLR2V0TWVzc2FnZXMSGi5ub21vcy5NR2V0TWVzc2FnZXNSZXF1ZXN0Ghsubm9tb3MuTUdldE1lc3NhZ2VzUmVzcG9uc2USQAoMQXBwcm92ZURyYWZ0EhMubm9tb3MuTURyYWZ0QWN0aW9uGhsubm9tb3MuTURyYWZ0QWN0aW9uUmVzcG9uc2USPwoLUmVqZWN0RHJhZnQSEy5ub21vcy5NRHJhZnRBY3Rpb24aGy5ub21vcy5NRHJhZnRBY3Rpb25SZXNwb25zZRJQChRBcHByb3ZlRHJhZnRXaXRoRWRpdBIbLm5vbW9zLk1EcmFmdEFjdGlvbldpdGhFZGl0Ghsubm9tb3MuTURyYWZ0QWN0aW9uUmVzcG9uc2USOAoJTGlzdEluYm94EhQubm9tb3MuTUluYm94UmVxdWVzdBoVLm5vbW9zLk1JbmJveFJlc3BvbnNlEkAKD0dldENhdGVFbnZlbG9wZRIXLm5vbW9zLk1FbnZlbG9wZVJlcXVlc3QaFC5ub21vcy5NQ2F0ZUVudmVsb3BlEkkKDkFjdE9uSW5ib3hJdGVtEhoubm9tb3MuTUluYm94QWN0aW9uUmVxdWVzdBobLm5vbW9zLk1JbmJveEFjdGlvblJlc3BvbnNlEjIKCkxpc3RTa2lsbHMSDC5ub21vcy5FbXB0eRoWLm5vbW9zLk1Ta2lsbHNSZXNwb25zZRJGCgtUb2dnbGVTa2lsbBIaLm5vbW9zLk1Ta2lsbFRvZ2dsZVJlcXVlc3QaGy5ub21vcy5NU2tpbGxUb2dnbGVSZXNwb25zZRI0CgtMaXN0UGx1Z2lucxIMLm5vbW9zLkVtcHR5Ghcubm9tb3MuTVBsdWdpbnNSZXNwb25zZRJACgtHZXRFYXJuaW5ncxIXLm5vbW9zLk1FYXJuaW5nc1JlcXVlc3QaGC5ub21vcy5NRWFybmluZ3NSZXNwb25zZRI3CghHZXRHcmFwaBIULm5vbW9zLk1HcmFwaFJlcXVlc3QaFS5ub21vcy5NR3JhcGhSZXNwb25zZRJJChFHZXRHcmFwaE5laWdoYm9ycxIdLm5vbW9zLk1HcmFwaE5laWdoYm9yc1JlcXVlc3QaFS5ub21vcy5NR3JhcGhSZXNwb25zZRJACgtTZWFyY2hHcmFwaBIaLm5vbW9zLk1HcmFwaFNlYXJjaFJlcXVlc3QaFS5ub21vcy5NR3JhcGhSZXNwb25zZRI1CgtHZXRTZXR0aW5ncxIMLm5vbW9zLkVtcHR5Ghgubm9tb3MuTVNldHRpbmdzUmVzcG9uc2USNAoNVXBkYXRlQ29uc2VudBIWLm5vbW9zLk1Db25zZW50UmVxdWVzdBoLLm5vbW9zLk1BY2sSOAoPVXBkYXRlVHJ1c3RUaWVyEhgubm9tb3MuTVRydXN0VGllclJlcXVlc3QaCy5ub21vcy5NQWNrEjoKEFVwZGF0ZVBlcm1pc3Npb24SGS5ub21vcy5NUGVybWlzc2lvblJlcXVlc3QaCy5ub21vcy5NQWNrEjoKEFVwZGF0ZUFwcFNldHRpbmcSGS5ub21vcy5NQXBwU2V0dGluZ1JlcXVlc3QaCy5ub21vcy5NQWNrEkAKE1VwZGF0ZUFnZW50SWRlbnRpdHkSHC5ub21vcy5NQWdlbnRJZGVudGl0eVJlcXVlc3QaCy5ub21vcy5NQWNrEj4KEExpc3RJbnRlZ3JhdGlvbnMSDC5ub21vcy5FbXB0eRocLm5vbW9zLk1JbnRlZ3JhdGlvbnNSZXNwb25zZRJUChdTdGFydENvbm5lY3RJbnRlZ3JhdGlvbhIbLm5vbW9zLk1TdGFydENvbm5lY3RSZXF1ZXN0Ghwubm9tb3MuTVN0YXJ0Q29ubmVjdFJlc3BvbnNlEkEKFENvbm5lY3RHb29nbGVBY2NvdW50Ehwubm9tb3MuTUNvbm5lY3RHb29nbGVSZXF1ZXN0Ggsubm9tb3MuTUFjaxI6Cg1TZXRHb29nbGVTZW5kEhwubm9tb3MuTVNldEdvb2dsZVNlbmRSZXF1ZXN0Ggsubm9tb3MuTUFjaxI/ChVEaXNjb25uZWN0SW50ZWdyYXRpb24SGS5ub21vcy5NRGlzY29ubmVjdFJlcXVlc3QaCy5ub21vcy5NQWNrEjUKDlJlZ2lzdGVyRGV2aWNlEhYubm9tb3MuTURldmljZVJlZ2lzdGVyGgsubm9tb3MuTUFjaxI5ChBVbnJlZ2lzdGVyRGV2aWNlEhgubm9tb3MuTURldmljZVVucmVnaXN0ZXIaCy5ub21vcy5NQWNrEkUKDkxpc3RWYXVsdE5vdGVzEhgubm9tb3MuTVZhdWx0TGlzdFJlcXVlc3QaGS5ub21vcy5NVmF1bHRMaXN0UmVzcG9uc2USOgoMR2V0VmF1bHROb3RlEhcubm9tb3MuTVZhdWx0R2V0UmVxdWVzdBoRLm5vbW9zLk1WYXVsdE5vdGUSOAoOV3JpdGVWYXVsdE5vdGUSGS5ub21vcy5NVmF1bHRXcml0ZVJlcXVlc3QaCy5ub21vcy5NQWNrEjoKD0RlbGV0ZVZhdWx0Tm90ZRIaLm5vbW9zLk1WYXVsdERlbGV0ZVJlcXVlc3QaCy5ub21vcy5NQWNrEjAKCUxpc3RMb29wcxIMLm5vbW9zLkVtcHR5GhUubm9tb3MuTUxvb3BzUmVzcG9uc2USPAoOU2V0TG9vcEVuYWJsZWQSHS5ub21vcy5NU2V0TG9vcEVuYWJsZWRSZXF1ZXN0Ggsubm9tb3MuTUFjaxI0CgpEZWxldGVMb29wEhkubm9tb3MuTUxvb3BEZWxldGVSZXF1ZXN0Ggsubm9tb3MuTUFjaxIwCglMaXN0VGFza3MSDC5ub21vcy5FbXB0eRoVLm5vbW9zLk1UYXNrc1Jlc3BvbnNlEjQKClVwZGF0ZVRhc2sSGS5ub21vcy5NVGFza1VwZGF0ZVJlcXVlc3QaCy5ub21vcy5NQWNrEjQKCkRlbGV0ZVRhc2sSGS5ub21vcy5NVGFza0RlbGV0ZVJlcXVlc3QaCy5ub21vcy5NQWNrEi8KCEdldEJyYWluEgwubm9tb3MuRW1wdHkaFS5ub21vcy5NQnJhaW5SZXNwb25zZRIyCghHZXRJbmJveBIMLm5vbW9zLkVtcHR5Ghgubm9tb3MuTUdldEluYm94UmVzcG9uc2USLwoIR2V0VG9kYXkSDC5ub21vcy5FbXB0eRoVLm5vbW9zLk1Ub2RheVJlc3BvbnNlElgKEVN0dWRpb0NyZWF0ZUFzc2V0EiAubm9tb3MuTVN0dWRpb0NyZWF0ZUFzc2V0UmVxdWVzdBohLm5vbW9zLk1TdHVkaW9DcmVhdGVBc3NldFJlc3BvbnNlEksKEVN0dWRpb0dldEFzc2V0VXJsEhYubm9tb3MuTVN0dWRpb0Fzc2V0UmVmGh4ubm9tb3MuTVN0dWRpb0Fzc2V0VXJsUmVzcG9uc2USPgoKU3R1ZGlvRWRpdBIZLm5vbW9zLk1TdHVkaW9FZGl0UmVxdWVzdBoTLm5vbW9zLk1TdHVkaW9FdmVudDABEkYKDVN0dWRpb0hpc3RvcnkSFi5ub21vcy5NU3R1ZGlvQXNzZXRSZWYaHS5ub21vcy5NU3R1ZGlvSGlzdG9yeVJlc3BvbnNlElUKEFN0dWRpb0xpc3RBc3NldHMSHy5ub21vcy5NU3R1ZGlvTGlzdEFzc2V0c1JlcXVlc3QaIC5ub21vcy5NU3R1ZGlvTGlzdEFzc2V0c1Jlc3BvbnNlEk8KElN0dWRpb1N1Z2dlc3RFZGl0cxIWLm5vbW9zLk1TdHVkaW9Bc3NldFJlZhohLm5vbW9zLk1TdHVkaW9TdWdnZXN0aW9uc1Jlc3BvbnNlEkEKFFN0dWRpb1JlcG9ydElkZW50aXR5Ehwubm9tb3MuTVN0dWRpb0lkZW50aXR5UmVwb3J0Ggsubm9tb3MuTUFjazJICgxPQXV0aERlcG9zaXQSOAoHRGVwb3NpdBIVLm5vbW9zLkRlcG9zaXRSZXF1ZXN0GhYubm9tb3MuRGVwb3NpdFJlc3BvbnNlYgZwcm90bzM");
 
 /**
  * @generated from message nomos.Empty
  */
-export type Empty = Message<"nomos.Empty"> & {};
+export type Empty = Message<"nomos.Empty"> & {
+};
 
 /**
  * Describes the message nomos.Empty.
  * Use `create(EmptySchema)` to create a new message.
  */
-export const EmptySchema: GenMessage<Empty> /*@__PURE__*/ = messageDesc(file_nomos, 0);
+export const EmptySchema: GenMessage<Empty> = /*@__PURE__*/
+  messageDesc(file_nomos, 0);
+
+/**
+ * @generated from message nomos.LoopInfo
+ */
+export type LoopInfo = Message<"nomos.LoopInfo"> & {
+  /**
+   * @generated from field: string id = 1;
+   */
+  id: string;
+
+  /**
+   * @generated from field: string name = 2;
+   */
+  name: string;
+
+  /**
+   * @generated from field: string schedule = 3;
+   */
+  schedule: string;
+
+  /**
+   * @generated from field: bool enabled = 4;
+   */
+  enabled: boolean;
+
+  /**
+   * system | bundled | user | agent
+   *
+   * @generated from field: string source = 5;
+   */
+  source: string;
+
+  /**
+   * @generated from field: int32 error_count = 6;
+   */
+  errorCount: number;
+
+  /**
+   * ISO-8601, empty if never run
+   *
+   * @generated from field: string last_run = 7;
+   */
+  lastRun: string;
+
+  /**
+   * @generated from field: string prompt = 8;
+   */
+  prompt: string;
+};
+
+/**
+ * Describes the message nomos.LoopInfo.
+ * Use `create(LoopInfoSchema)` to create a new message.
+ */
+export const LoopInfoSchema: GenMessage<LoopInfo> = /*@__PURE__*/
+  messageDesc(file_nomos, 1);
+
+/**
+ * @generated from message nomos.LoopList
+ */
+export type LoopList = Message<"nomos.LoopList"> & {
+  /**
+   * @generated from field: repeated nomos.LoopInfo loops = 1;
+   */
+  loops: LoopInfo[];
+};
+
+/**
+ * Describes the message nomos.LoopList.
+ * Use `create(LoopListSchema)` to create a new message.
+ */
+export const LoopListSchema: GenMessage<LoopList> = /*@__PURE__*/
+  messageDesc(file_nomos, 2);
+
+/**
+ * @generated from message nomos.SetLoopEnabledRequest
+ */
+export type SetLoopEnabledRequest = Message<"nomos.SetLoopEnabledRequest"> & {
+  /**
+   * @generated from field: string name = 1;
+   */
+  name: string;
+
+  /**
+   * @generated from field: bool enabled = 2;
+   */
+  enabled: boolean;
+};
+
+/**
+ * Describes the message nomos.SetLoopEnabledRequest.
+ * Use `create(SetLoopEnabledRequestSchema)` to create a new message.
+ */
+export const SetLoopEnabledRequestSchema: GenMessage<SetLoopEnabledRequest> = /*@__PURE__*/
+  messageDesc(file_nomos, 3);
+
+/**
+ * @generated from message nomos.LoopDeleteRequest
+ */
+export type LoopDeleteRequest = Message<"nomos.LoopDeleteRequest"> & {
+  /**
+   * @generated from field: string name = 1;
+   */
+  name: string;
+};
+
+/**
+ * Describes the message nomos.LoopDeleteRequest.
+ * Use `create(LoopDeleteRequestSchema)` to create a new message.
+ */
+export const LoopDeleteRequestSchema: GenMessage<LoopDeleteRequest> = /*@__PURE__*/
+  messageDesc(file_nomos, 4);
+
+/**
+ * @generated from message nomos.LoopActionResponse
+ */
+export type LoopActionResponse = Message<"nomos.LoopActionResponse"> & {
+  /**
+   * @generated from field: bool success = 1;
+   */
+  success: boolean;
+
+  /**
+   * @generated from field: string message = 2;
+   */
+  message: string;
+};
+
+/**
+ * Describes the message nomos.LoopActionResponse.
+ * Use `create(LoopActionResponseSchema)` to create a new message.
+ */
+export const LoopActionResponseSchema: GenMessage<LoopActionResponse> = /*@__PURE__*/
+  messageDesc(file_nomos, 5);
 
 /**
  * @generated from message nomos.ChatRequest
@@ -43,7 +178,8 @@ export type ChatRequest = Message<"nomos.ChatRequest"> & {
  * Describes the message nomos.ChatRequest.
  * Use `create(ChatRequestSchema)` to create a new message.
  */
-export const ChatRequestSchema: GenMessage<ChatRequest> /*@__PURE__*/ = messageDesc(file_nomos, 1);
+export const ChatRequestSchema: GenMessage<ChatRequest> = /*@__PURE__*/
+  messageDesc(file_nomos, 6);
 
 /**
  * @generated from message nomos.AgentEvent
@@ -68,7 +204,8 @@ export type AgentEvent = Message<"nomos.AgentEvent"> & {
  * Describes the message nomos.AgentEvent.
  * Use `create(AgentEventSchema)` to create a new message.
  */
-export const AgentEventSchema: GenMessage<AgentEvent> /*@__PURE__*/ = messageDesc(file_nomos, 2);
+export const AgentEventSchema: GenMessage<AgentEvent> = /*@__PURE__*/
+  messageDesc(file_nomos, 7);
 
 /**
  * @generated from message nomos.CommandRequest
@@ -89,10 +226,8 @@ export type CommandRequest = Message<"nomos.CommandRequest"> & {
  * Describes the message nomos.CommandRequest.
  * Use `create(CommandRequestSchema)` to create a new message.
  */
-export const CommandRequestSchema: GenMessage<CommandRequest> /*@__PURE__*/ = messageDesc(
-  file_nomos,
-  3,
-);
+export const CommandRequestSchema: GenMessage<CommandRequest> = /*@__PURE__*/
+  messageDesc(file_nomos, 8);
 
 /**
  * @generated from message nomos.CommandResponse
@@ -113,10 +248,8 @@ export type CommandResponse = Message<"nomos.CommandResponse"> & {
  * Describes the message nomos.CommandResponse.
  * Use `create(CommandResponseSchema)` to create a new message.
  */
-export const CommandResponseSchema: GenMessage<CommandResponse> /*@__PURE__*/ = messageDesc(
-  file_nomos,
-  4,
-);
+export const CommandResponseSchema: GenMessage<CommandResponse> = /*@__PURE__*/
+  messageDesc(file_nomos, 9);
 
 /**
  * @generated from message nomos.StatusResponse
@@ -142,10 +275,8 @@ export type StatusResponse = Message<"nomos.StatusResponse"> & {
  * Describes the message nomos.StatusResponse.
  * Use `create(StatusResponseSchema)` to create a new message.
  */
-export const StatusResponseSchema: GenMessage<StatusResponse> /*@__PURE__*/ = messageDesc(
-  file_nomos,
-  5,
-);
+export const StatusResponseSchema: GenMessage<StatusResponse> = /*@__PURE__*/
+  messageDesc(file_nomos, 10);
 
 /**
  * @generated from message nomos.SessionRequest
@@ -161,10 +292,8 @@ export type SessionRequest = Message<"nomos.SessionRequest"> & {
  * Describes the message nomos.SessionRequest.
  * Use `create(SessionRequestSchema)` to create a new message.
  */
-export const SessionRequestSchema: GenMessage<SessionRequest> /*@__PURE__*/ = messageDesc(
-  file_nomos,
-  6,
-);
+export const SessionRequestSchema: GenMessage<SessionRequest> = /*@__PURE__*/
+  messageDesc(file_nomos, 11);
 
 /**
  * @generated from message nomos.SessionResponse
@@ -195,10 +324,8 @@ export type SessionResponse = Message<"nomos.SessionResponse"> & {
  * Describes the message nomos.SessionResponse.
  * Use `create(SessionResponseSchema)` to create a new message.
  */
-export const SessionResponseSchema: GenMessage<SessionResponse> /*@__PURE__*/ = messageDesc(
-  file_nomos,
-  7,
-);
+export const SessionResponseSchema: GenMessage<SessionResponse> = /*@__PURE__*/
+  messageDesc(file_nomos, 12);
 
 /**
  * @generated from message nomos.SessionList
@@ -214,7 +341,8 @@ export type SessionList = Message<"nomos.SessionList"> & {
  * Describes the message nomos.SessionList.
  * Use `create(SessionListSchema)` to create a new message.
  */
-export const SessionListSchema: GenMessage<SessionList> /*@__PURE__*/ = messageDesc(file_nomos, 8);
+export const SessionListSchema: GenMessage<SessionList> = /*@__PURE__*/
+  messageDesc(file_nomos, 13);
 
 /**
  * @generated from message nomos.DraftAction
@@ -230,7 +358,8 @@ export type DraftAction = Message<"nomos.DraftAction"> & {
  * Describes the message nomos.DraftAction.
  * Use `create(DraftActionSchema)` to create a new message.
  */
-export const DraftActionSchema: GenMessage<DraftAction> /*@__PURE__*/ = messageDesc(file_nomos, 9);
+export const DraftActionSchema: GenMessage<DraftAction> = /*@__PURE__*/
+  messageDesc(file_nomos, 14);
 
 /**
  * @generated from message nomos.DraftResponse
@@ -251,10 +380,8 @@ export type DraftResponse = Message<"nomos.DraftResponse"> & {
  * Describes the message nomos.DraftResponse.
  * Use `create(DraftResponseSchema)` to create a new message.
  */
-export const DraftResponseSchema: GenMessage<DraftResponse> /*@__PURE__*/ = messageDesc(
-  file_nomos,
-  10,
-);
+export const DraftResponseSchema: GenMessage<DraftResponse> = /*@__PURE__*/
+  messageDesc(file_nomos, 15);
 
 /**
  * @generated from message nomos.DraftList
@@ -270,7 +397,8 @@ export type DraftList = Message<"nomos.DraftList"> & {
  * Describes the message nomos.DraftList.
  * Use `create(DraftListSchema)` to create a new message.
  */
-export const DraftListSchema: GenMessage<DraftList> /*@__PURE__*/ = messageDesc(file_nomos, 11);
+export const DraftListSchema: GenMessage<DraftList> = /*@__PURE__*/
+  messageDesc(file_nomos, 16);
 
 /**
  * @generated from message nomos.DraftItem
@@ -311,7 +439,8 @@ export type DraftItem = Message<"nomos.DraftItem"> & {
  * Describes the message nomos.DraftItem.
  * Use `create(DraftItemSchema)` to create a new message.
  */
-export const DraftItemSchema: GenMessage<DraftItem> /*@__PURE__*/ = messageDesc(file_nomos, 12);
+export const DraftItemSchema: GenMessage<DraftItem> = /*@__PURE__*/
+  messageDesc(file_nomos, 17);
 
 /**
  * @generated from message nomos.PongResponse
@@ -327,10 +456,648 @@ export type PongResponse = Message<"nomos.PongResponse"> & {
  * Describes the message nomos.PongResponse.
  * Use `create(PongResponseSchema)` to create a new message.
  */
-export const PongResponseSchema: GenMessage<PongResponse> /*@__PURE__*/ = messageDesc(
-  file_nomos,
-  13,
-);
+export const PongResponseSchema: GenMessage<PongResponse> = /*@__PURE__*/
+  messageDesc(file_nomos, 18);
+
+/**
+ * Loops (autonomous recurring jobs)
+ *
+ * @generated from message nomos.MLoop
+ */
+export type MLoop = Message<"nomos.MLoop"> & {
+  /**
+   * @generated from field: string id = 1;
+   */
+  id: string;
+
+  /**
+   * @generated from field: string name = 2;
+   */
+  name: string;
+
+  /**
+   * @generated from field: string schedule = 3;
+   */
+  schedule: string;
+
+  /**
+   * @generated from field: bool enabled = 4;
+   */
+  enabled: boolean;
+
+  /**
+   * system | bundled | user | agent
+   *
+   * @generated from field: string source = 5;
+   */
+  source: string;
+
+  /**
+   * @generated from field: int32 error_count = 6;
+   */
+  errorCount: number;
+
+  /**
+   * ISO-8601, empty if never run
+   *
+   * @generated from field: string last_run = 7;
+   */
+  lastRun: string;
+
+  /**
+   * @generated from field: string prompt = 8;
+   */
+  prompt: string;
+};
+
+/**
+ * Describes the message nomos.MLoop.
+ * Use `create(MLoopSchema)` to create a new message.
+ */
+export const MLoopSchema: GenMessage<MLoop> = /*@__PURE__*/
+  messageDesc(file_nomos, 19);
+
+/**
+ * @generated from message nomos.MLoopsResponse
+ */
+export type MLoopsResponse = Message<"nomos.MLoopsResponse"> & {
+  /**
+   * @generated from field: repeated nomos.MLoop loops = 1;
+   */
+  loops: MLoop[];
+};
+
+/**
+ * Describes the message nomos.MLoopsResponse.
+ * Use `create(MLoopsResponseSchema)` to create a new message.
+ */
+export const MLoopsResponseSchema: GenMessage<MLoopsResponse> = /*@__PURE__*/
+  messageDesc(file_nomos, 20);
+
+/**
+ * @generated from message nomos.MSetLoopEnabledRequest
+ */
+export type MSetLoopEnabledRequest = Message<"nomos.MSetLoopEnabledRequest"> & {
+  /**
+   * @generated from field: string name = 1;
+   */
+  name: string;
+
+  /**
+   * @generated from field: bool enabled = 2;
+   */
+  enabled: boolean;
+};
+
+/**
+ * Describes the message nomos.MSetLoopEnabledRequest.
+ * Use `create(MSetLoopEnabledRequestSchema)` to create a new message.
+ */
+export const MSetLoopEnabledRequestSchema: GenMessage<MSetLoopEnabledRequest> = /*@__PURE__*/
+  messageDesc(file_nomos, 21);
+
+/**
+ * @generated from message nomos.MLoopDeleteRequest
+ */
+export type MLoopDeleteRequest = Message<"nomos.MLoopDeleteRequest"> & {
+  /**
+   * @generated from field: string name = 1;
+   */
+  name: string;
+};
+
+/**
+ * Describes the message nomos.MLoopDeleteRequest.
+ * Use `create(MLoopDeleteRequestSchema)` to create a new message.
+ */
+export const MLoopDeleteRequestSchema: GenMessage<MLoopDeleteRequest> = /*@__PURE__*/
+  messageDesc(file_nomos, 22);
+
+/**
+ * Tasks (the user's scheduled tasks)
+ *
+ * @generated from message nomos.MTask
+ */
+export type MTask = Message<"nomos.MTask"> & {
+  /**
+   * @generated from field: string id = 1;
+   */
+  id: string;
+
+  /**
+   * @generated from field: string name = 2;
+   */
+  name: string;
+
+  /**
+   * the instruction the task runs
+   *
+   * @generated from field: string prompt = 3;
+   */
+  prompt: string;
+
+  /**
+   * raw: "15m" | cron expr | ISO timestamp
+   *
+   * @generated from field: string schedule = 4;
+   */
+  schedule: string;
+
+  /**
+   * every | cron | at
+   *
+   * @generated from field: string schedule_type = 5;
+   */
+  scheduleType: string;
+
+  /**
+   * friendly, display-only
+   *
+   * @generated from field: string display_schedule = 6;
+   */
+  displaySchedule: string;
+
+  /**
+   * @generated from field: bool enabled = 7;
+   */
+  enabled: boolean;
+
+  /**
+   * @generated from field: string source = 8;
+   */
+  source: string;
+
+  /**
+   * ISO-8601, empty if never run
+   *
+   * @generated from field: string last_run = 9;
+   */
+  lastRun: string;
+};
+
+/**
+ * Describes the message nomos.MTask.
+ * Use `create(MTaskSchema)` to create a new message.
+ */
+export const MTaskSchema: GenMessage<MTask> = /*@__PURE__*/
+  messageDesc(file_nomos, 23);
+
+/**
+ * @generated from message nomos.MTasksResponse
+ */
+export type MTasksResponse = Message<"nomos.MTasksResponse"> & {
+  /**
+   * @generated from field: repeated nomos.MTask tasks = 1;
+   */
+  tasks: MTask[];
+};
+
+/**
+ * Describes the message nomos.MTasksResponse.
+ * Use `create(MTasksResponseSchema)` to create a new message.
+ */
+export const MTasksResponseSchema: GenMessage<MTasksResponse> = /*@__PURE__*/
+  messageDesc(file_nomos, 24);
+
+/**
+ * Full-state update (the client sends the edited task); empty name/schedule are
+ * ignored so a toggle-only call never blanks fields.
+ *
+ * @generated from message nomos.MTaskUpdateRequest
+ */
+export type MTaskUpdateRequest = Message<"nomos.MTaskUpdateRequest"> & {
+  /**
+   * @generated from field: string id = 1;
+   */
+  id: string;
+
+  /**
+   * @generated from field: string name = 2;
+   */
+  name: string;
+
+  /**
+   * @generated from field: string prompt = 3;
+   */
+  prompt: string;
+
+  /**
+   * @generated from field: string schedule = 4;
+   */
+  schedule: string;
+
+  /**
+   * @generated from field: string schedule_type = 5;
+   */
+  scheduleType: string;
+
+  /**
+   * @generated from field: bool enabled = 6;
+   */
+  enabled: boolean;
+};
+
+/**
+ * Describes the message nomos.MTaskUpdateRequest.
+ * Use `create(MTaskUpdateRequestSchema)` to create a new message.
+ */
+export const MTaskUpdateRequestSchema: GenMessage<MTaskUpdateRequest> = /*@__PURE__*/
+  messageDesc(file_nomos, 25);
+
+/**
+ * @generated from message nomos.MTaskDeleteRequest
+ */
+export type MTaskDeleteRequest = Message<"nomos.MTaskDeleteRequest"> & {
+  /**
+   * @generated from field: string id = 1;
+   */
+  id: string;
+};
+
+/**
+ * Describes the message nomos.MTaskDeleteRequest.
+ * Use `create(MTaskDeleteRequestSchema)` to create a new message.
+ */
+export const MTaskDeleteRequestSchema: GenMessage<MTaskDeleteRequest> = /*@__PURE__*/
+  messageDesc(file_nomos, 26);
+
+/**
+ * Brain (knowledge graph + learned facts)
+ *
+ * @generated from message nomos.MBrainNode
+ */
+export type MBrainNode = Message<"nomos.MBrainNode"> & {
+  /**
+   * @generated from field: string id = 1;
+   */
+  id: string;
+
+  /**
+   * @generated from field: string label = 2;
+   */
+  label: string;
+
+  /**
+   * person | org | topic | decision | project | value | event | wiki | vault
+   *
+   * @generated from field: string kind = 3;
+   */
+  kind: string;
+
+  /**
+   * @generated from field: string summary = 4;
+   */
+  summary: string;
+
+  /**
+   * connection count within the returned subgraph
+   *
+   * @generated from field: int32 degree = 5;
+   */
+  degree: number;
+
+  /**
+   * @generated from field: double confidence = 6;
+   */
+  confidence: number;
+};
+
+/**
+ * Describes the message nomos.MBrainNode.
+ * Use `create(MBrainNodeSchema)` to create a new message.
+ */
+export const MBrainNodeSchema: GenMessage<MBrainNode> = /*@__PURE__*/
+  messageDesc(file_nomos, 27);
+
+/**
+ * @generated from message nomos.MBrainEdge
+ */
+export type MBrainEdge = Message<"nomos.MBrainEdge"> & {
+  /**
+   * @generated from field: string src = 1;
+   */
+  src: string;
+
+  /**
+   * @generated from field: string dst = 2;
+   */
+  dst: string;
+
+  /**
+   * @generated from field: string relation = 3;
+   */
+  relation: string;
+};
+
+/**
+ * Describes the message nomos.MBrainEdge.
+ * Use `create(MBrainEdgeSchema)` to create a new message.
+ */
+export const MBrainEdgeSchema: GenMessage<MBrainEdge> = /*@__PURE__*/
+  messageDesc(file_nomos, 28);
+
+/**
+ * @generated from message nomos.MBrainFact
+ */
+export type MBrainFact = Message<"nomos.MBrainFact"> & {
+  /**
+   * @generated from field: string text = 1;
+   */
+  text: string;
+
+  /**
+   * @generated from field: string source = 2;
+   */
+  source: string;
+
+  /**
+   * 0..3
+   *
+   * @generated from field: int32 confidence = 3;
+   */
+  confidence: number;
+
+  /**
+   * ISO-8601
+   *
+   * @generated from field: string learned_at = 4;
+   */
+  learnedAt: string;
+};
+
+/**
+ * Describes the message nomos.MBrainFact.
+ * Use `create(MBrainFactSchema)` to create a new message.
+ */
+export const MBrainFactSchema: GenMessage<MBrainFact> = /*@__PURE__*/
+  messageDesc(file_nomos, 29);
+
+/**
+ * @generated from message nomos.MBrainResponse
+ */
+export type MBrainResponse = Message<"nomos.MBrainResponse"> & {
+  /**
+   * @generated from field: repeated nomos.MBrainNode nodes = 1;
+   */
+  nodes: MBrainNode[];
+
+  /**
+   * @generated from field: repeated nomos.MBrainEdge edges = 2;
+   */
+  edges: MBrainEdge[];
+
+  /**
+   * @generated from field: repeated nomos.MBrainFact facts = 3;
+   */
+  facts: MBrainFact[];
+
+  /**
+   * @generated from field: int32 entity_count = 4;
+   */
+  entityCount: number;
+
+  /**
+   * @generated from field: int32 fact_count = 5;
+   */
+  factCount: number;
+};
+
+/**
+ * Describes the message nomos.MBrainResponse.
+ * Use `create(MBrainResponseSchema)` to create a new message.
+ */
+export const MBrainResponseSchema: GenMessage<MBrainResponse> = /*@__PURE__*/
+  messageDesc(file_nomos, 30);
+
+/**
+ * Inbox (drafts + CATE agent requests)
+ *
+ * @generated from message nomos.MInboxDraft
+ */
+export type MInboxDraft = Message<"nomos.MInboxDraft"> & {
+  /**
+   * @generated from field: string id = 1;
+   */
+  id: string;
+
+  /**
+   * @generated from field: string recipient = 2;
+   */
+  recipient: string;
+
+  /**
+   * @generated from field: string preview = 3;
+   */
+  preview: string;
+
+  /**
+   * pending | approved | sent
+   *
+   * @generated from field: string status = 4;
+   */
+  status: string;
+
+  /**
+   * @generated from field: string platform = 5;
+   */
+  platform: string;
+
+  /**
+   * @generated from field: string created_at = 6;
+   */
+  createdAt: string;
+};
+
+/**
+ * Describes the message nomos.MInboxDraft.
+ * Use `create(MInboxDraftSchema)` to create a new message.
+ */
+export const MInboxDraftSchema: GenMessage<MInboxDraft> = /*@__PURE__*/
+  messageDesc(file_nomos, 31);
+
+/**
+ * @generated from message nomos.MInboxCate
+ */
+export type MInboxCate = Message<"nomos.MInboxCate"> & {
+  /**
+   * @generated from field: string id = 1;
+   */
+  id: string;
+
+  /**
+   * @generated from field: string from_label = 2;
+   */
+  fromLabel: string;
+
+  /**
+   * @generated from field: string trust_tier = 3;
+   */
+  trustTier: string;
+
+  /**
+   * @generated from field: string subject = 4;
+   */
+  subject: string;
+
+  /**
+   * @generated from field: string bond_amount = 5;
+   */
+  bondAmount: string;
+
+  /**
+   * @generated from field: string created_at = 6;
+   */
+  createdAt: string;
+};
+
+/**
+ * Describes the message nomos.MInboxCate.
+ * Use `create(MInboxCateSchema)` to create a new message.
+ */
+export const MInboxCateSchema: GenMessage<MInboxCate> = /*@__PURE__*/
+  messageDesc(file_nomos, 32);
+
+/**
+ * @generated from message nomos.MGetInboxResponse
+ */
+export type MGetInboxResponse = Message<"nomos.MGetInboxResponse"> & {
+  /**
+   * @generated from field: repeated nomos.MInboxDraft drafts = 1;
+   */
+  drafts: MInboxDraft[];
+
+  /**
+   * @generated from field: repeated nomos.MInboxCate cate = 2;
+   */
+  cate: MInboxCate[];
+
+  /**
+   * @generated from field: int32 blocked_count = 3;
+   */
+  blockedCount: number;
+};
+
+/**
+ * Describes the message nomos.MGetInboxResponse.
+ * Use `create(MGetInboxResponseSchema)` to create a new message.
+ */
+export const MGetInboxResponseSchema: GenMessage<MGetInboxResponse> = /*@__PURE__*/
+  messageDesc(file_nomos, 33);
+
+/**
+ * Today (the daily brief)
+ *
+ * @generated from message nomos.MTodayEvent
+ */
+export type MTodayEvent = Message<"nomos.MTodayEvent"> & {
+  /**
+   * @generated from field: string time = 1;
+   */
+  time: string;
+
+  /**
+   * @generated from field: string title = 2;
+   */
+  title: string;
+
+  /**
+   * @generated from field: string meta = 3;
+   */
+  meta: string;
+};
+
+/**
+ * Describes the message nomos.MTodayEvent.
+ * Use `create(MTodayEventSchema)` to create a new message.
+ */
+export const MTodayEventSchema: GenMessage<MTodayEvent> = /*@__PURE__*/
+  messageDesc(file_nomos, 34);
+
+/**
+ * @generated from message nomos.MTodayCommitment
+ */
+export type MTodayCommitment = Message<"nomos.MTodayCommitment"> & {
+  /**
+   * @generated from field: string id = 1;
+   */
+  id: string;
+
+  /**
+   * @generated from field: string description = 2;
+   */
+  description: string;
+
+  /**
+   * @generated from field: string due = 3;
+   */
+  due: string;
+};
+
+/**
+ * Describes the message nomos.MTodayCommitment.
+ * Use `create(MTodayCommitmentSchema)` to create a new message.
+ */
+export const MTodayCommitmentSchema: GenMessage<MTodayCommitment> = /*@__PURE__*/
+  messageDesc(file_nomos, 35);
+
+/**
+ * @generated from message nomos.MTodayTask
+ */
+export type MTodayTask = Message<"nomos.MTodayTask"> & {
+  /**
+   * @generated from field: string id = 1;
+   */
+  id: string;
+
+  /**
+   * @generated from field: string name = 2;
+   */
+  name: string;
+
+  /**
+   * @generated from field: string schedule = 3;
+   */
+  schedule: string;
+};
+
+/**
+ * Describes the message nomos.MTodayTask.
+ * Use `create(MTodayTaskSchema)` to create a new message.
+ */
+export const MTodayTaskSchema: GenMessage<MTodayTask> = /*@__PURE__*/
+  messageDesc(file_nomos, 36);
+
+/**
+ * @generated from message nomos.MTodayResponse
+ */
+export type MTodayResponse = Message<"nomos.MTodayResponse"> & {
+  /**
+   * @generated from field: bool briefing_enabled = 1;
+   */
+  briefingEnabled: boolean;
+
+  /**
+   * @generated from field: repeated nomos.MTodayEvent events = 2;
+   */
+  events: MTodayEvent[];
+
+  /**
+   * @generated from field: repeated nomos.MTodayCommitment commitments = 3;
+   */
+  commitments: MTodayCommitment[];
+
+  /**
+   * @generated from field: repeated nomos.MTodayTask tasks = 4;
+   */
+  tasks: MTodayTask[];
+};
+
+/**
+ * Describes the message nomos.MTodayResponse.
+ * Use `create(MTodayResponseSchema)` to create a new message.
+ */
+export const MTodayResponseSchema: GenMessage<MTodayResponse> = /*@__PURE__*/
+  messageDesc(file_nomos, 37);
 
 /**
  * @generated from message nomos.MAck
@@ -351,7 +1118,8 @@ export type MAck = Message<"nomos.MAck"> & {
  * Describes the message nomos.MAck.
  * Use `create(MAckSchema)` to create a new message.
  */
-export const MAckSchema: GenMessage<MAck> /*@__PURE__*/ = messageDesc(file_nomos, 14);
+export const MAckSchema: GenMessage<MAck> = /*@__PURE__*/
+  messageDesc(file_nomos, 38);
 
 /**
  * Vault (long-term memory / knowledge base)
@@ -369,10 +1137,8 @@ export type MVaultListRequest = Message<"nomos.MVaultListRequest"> & {
  * Describes the message nomos.MVaultListRequest.
  * Use `create(MVaultListRequestSchema)` to create a new message.
  */
-export const MVaultListRequestSchema: GenMessage<MVaultListRequest> /*@__PURE__*/ = messageDesc(
-  file_nomos,
-  15,
-);
+export const MVaultListRequestSchema: GenMessage<MVaultListRequest> = /*@__PURE__*/
+  messageDesc(file_nomos, 39);
 
 /**
  * @generated from message nomos.MVaultNoteSummary
@@ -398,10 +1164,8 @@ export type MVaultNoteSummary = Message<"nomos.MVaultNoteSummary"> & {
  * Describes the message nomos.MVaultNoteSummary.
  * Use `create(MVaultNoteSummarySchema)` to create a new message.
  */
-export const MVaultNoteSummarySchema: GenMessage<MVaultNoteSummary> /*@__PURE__*/ = messageDesc(
-  file_nomos,
-  16,
-);
+export const MVaultNoteSummarySchema: GenMessage<MVaultNoteSummary> = /*@__PURE__*/
+  messageDesc(file_nomos, 40);
 
 /**
  * @generated from message nomos.MVaultListResponse
@@ -417,10 +1181,8 @@ export type MVaultListResponse = Message<"nomos.MVaultListResponse"> & {
  * Describes the message nomos.MVaultListResponse.
  * Use `create(MVaultListResponseSchema)` to create a new message.
  */
-export const MVaultListResponseSchema: GenMessage<MVaultListResponse> /*@__PURE__*/ = messageDesc(
-  file_nomos,
-  17,
-);
+export const MVaultListResponseSchema: GenMessage<MVaultListResponse> = /*@__PURE__*/
+  messageDesc(file_nomos, 41);
 
 /**
  * @generated from message nomos.MVaultGetRequest
@@ -436,10 +1198,8 @@ export type MVaultGetRequest = Message<"nomos.MVaultGetRequest"> & {
  * Describes the message nomos.MVaultGetRequest.
  * Use `create(MVaultGetRequestSchema)` to create a new message.
  */
-export const MVaultGetRequestSchema: GenMessage<MVaultGetRequest> /*@__PURE__*/ = messageDesc(
-  file_nomos,
-  18,
-);
+export const MVaultGetRequestSchema: GenMessage<MVaultGetRequest> = /*@__PURE__*/
+  messageDesc(file_nomos, 42);
 
 /**
  * @generated from message nomos.MVaultNote
@@ -475,7 +1235,8 @@ export type MVaultNote = Message<"nomos.MVaultNote"> & {
  * Describes the message nomos.MVaultNote.
  * Use `create(MVaultNoteSchema)` to create a new message.
  */
-export const MVaultNoteSchema: GenMessage<MVaultNote> /*@__PURE__*/ = messageDesc(file_nomos, 19);
+export const MVaultNoteSchema: GenMessage<MVaultNote> = /*@__PURE__*/
+  messageDesc(file_nomos, 43);
 
 /**
  * @generated from message nomos.MVaultWriteRequest
@@ -501,10 +1262,8 @@ export type MVaultWriteRequest = Message<"nomos.MVaultWriteRequest"> & {
  * Describes the message nomos.MVaultWriteRequest.
  * Use `create(MVaultWriteRequestSchema)` to create a new message.
  */
-export const MVaultWriteRequestSchema: GenMessage<MVaultWriteRequest> /*@__PURE__*/ = messageDesc(
-  file_nomos,
-  20,
-);
+export const MVaultWriteRequestSchema: GenMessage<MVaultWriteRequest> = /*@__PURE__*/
+  messageDesc(file_nomos, 44);
 
 /**
  * @generated from message nomos.MVaultDeleteRequest
@@ -520,10 +1279,8 @@ export type MVaultDeleteRequest = Message<"nomos.MVaultDeleteRequest"> & {
  * Describes the message nomos.MVaultDeleteRequest.
  * Use `create(MVaultDeleteRequestSchema)` to create a new message.
  */
-export const MVaultDeleteRequestSchema: GenMessage<MVaultDeleteRequest> /*@__PURE__*/ = messageDesc(
-  file_nomos,
-  21,
-);
+export const MVaultDeleteRequestSchema: GenMessage<MVaultDeleteRequest> = /*@__PURE__*/
+  messageDesc(file_nomos, 45);
 
 /**
  * Chat
@@ -546,10 +1303,8 @@ export type MChatRequest = Message<"nomos.MChatRequest"> & {
  * Describes the message nomos.MChatRequest.
  * Use `create(MChatRequestSchema)` to create a new message.
  */
-export const MChatRequestSchema: GenMessage<MChatRequest> /*@__PURE__*/ = messageDesc(
-  file_nomos,
-  22,
-);
+export const MChatRequestSchema: GenMessage<MChatRequest> = /*@__PURE__*/
+  messageDesc(file_nomos, 46);
 
 /**
  * @generated from message nomos.MChatEvent
@@ -570,7 +1325,8 @@ export type MChatEvent = Message<"nomos.MChatEvent"> & {
  * Describes the message nomos.MChatEvent.
  * Use `create(MChatEventSchema)` to create a new message.
  */
-export const MChatEventSchema: GenMessage<MChatEvent> /*@__PURE__*/ = messageDesc(file_nomos, 23);
+export const MChatEventSchema: GenMessage<MChatEvent> = /*@__PURE__*/
+  messageDesc(file_nomos, 47);
 
 /**
  * @generated from message nomos.MGetMessagesRequest
@@ -596,10 +1352,8 @@ export type MGetMessagesRequest = Message<"nomos.MGetMessagesRequest"> & {
  * Describes the message nomos.MGetMessagesRequest.
  * Use `create(MGetMessagesRequestSchema)` to create a new message.
  */
-export const MGetMessagesRequestSchema: GenMessage<MGetMessagesRequest> /*@__PURE__*/ = messageDesc(
-  file_nomos,
-  24,
-);
+export const MGetMessagesRequestSchema: GenMessage<MGetMessagesRequest> = /*@__PURE__*/
+  messageDesc(file_nomos, 48);
 
 /**
  * @generated from message nomos.MMessage
@@ -632,7 +1386,8 @@ export type MMessage = Message<"nomos.MMessage"> & {
  * Describes the message nomos.MMessage.
  * Use `create(MMessageSchema)` to create a new message.
  */
-export const MMessageSchema: GenMessage<MMessage> /*@__PURE__*/ = messageDesc(file_nomos, 25);
+export const MMessageSchema: GenMessage<MMessage> = /*@__PURE__*/
+  messageDesc(file_nomos, 49);
 
 /**
  * @generated from message nomos.MGetMessagesResponse
@@ -648,8 +1403,8 @@ export type MGetMessagesResponse = Message<"nomos.MGetMessagesResponse"> & {
  * Describes the message nomos.MGetMessagesResponse.
  * Use `create(MGetMessagesResponseSchema)` to create a new message.
  */
-export const MGetMessagesResponseSchema: GenMessage<MGetMessagesResponse> /*@__PURE__*/ =
-  messageDesc(file_nomos, 26);
+export const MGetMessagesResponseSchema: GenMessage<MGetMessagesResponse> = /*@__PURE__*/
+  messageDesc(file_nomos, 50);
 
 /**
  * @generated from message nomos.MDraftAction
@@ -665,10 +1420,8 @@ export type MDraftAction = Message<"nomos.MDraftAction"> & {
  * Describes the message nomos.MDraftAction.
  * Use `create(MDraftActionSchema)` to create a new message.
  */
-export const MDraftActionSchema: GenMessage<MDraftAction> /*@__PURE__*/ = messageDesc(
-  file_nomos,
-  27,
-);
+export const MDraftActionSchema: GenMessage<MDraftAction> = /*@__PURE__*/
+  messageDesc(file_nomos, 51);
 
 /**
  * @generated from message nomos.MDraftActionWithEdit
@@ -689,8 +1442,8 @@ export type MDraftActionWithEdit = Message<"nomos.MDraftActionWithEdit"> & {
  * Describes the message nomos.MDraftActionWithEdit.
  * Use `create(MDraftActionWithEditSchema)` to create a new message.
  */
-export const MDraftActionWithEditSchema: GenMessage<MDraftActionWithEdit> /*@__PURE__*/ =
-  messageDesc(file_nomos, 28);
+export const MDraftActionWithEditSchema: GenMessage<MDraftActionWithEdit> = /*@__PURE__*/
+  messageDesc(file_nomos, 52);
 
 /**
  * @generated from message nomos.MDraftActionResponse
@@ -711,8 +1464,8 @@ export type MDraftActionResponse = Message<"nomos.MDraftActionResponse"> & {
  * Describes the message nomos.MDraftActionResponse.
  * Use `create(MDraftActionResponseSchema)` to create a new message.
  */
-export const MDraftActionResponseSchema: GenMessage<MDraftActionResponse> /*@__PURE__*/ =
-  messageDesc(file_nomos, 29);
+export const MDraftActionResponseSchema: GenMessage<MDraftActionResponse> = /*@__PURE__*/
+  messageDesc(file_nomos, 53);
 
 /**
  * Inbox
@@ -737,10 +1490,8 @@ export type MInboxRequest = Message<"nomos.MInboxRequest"> & {
  * Describes the message nomos.MInboxRequest.
  * Use `create(MInboxRequestSchema)` to create a new message.
  */
-export const MInboxRequestSchema: GenMessage<MInboxRequest> /*@__PURE__*/ = messageDesc(
-  file_nomos,
-  30,
-);
+export const MInboxRequestSchema: GenMessage<MInboxRequest> = /*@__PURE__*/
+  messageDesc(file_nomos, 54);
 
 /**
  * @generated from message nomos.MInboxItem
@@ -797,7 +1548,8 @@ export type MInboxItem = Message<"nomos.MInboxItem"> & {
  * Describes the message nomos.MInboxItem.
  * Use `create(MInboxItemSchema)` to create a new message.
  */
-export const MInboxItemSchema: GenMessage<MInboxItem> /*@__PURE__*/ = messageDesc(file_nomos, 31);
+export const MInboxItemSchema: GenMessage<MInboxItem> = /*@__PURE__*/
+  messageDesc(file_nomos, 55);
 
 /**
  * @generated from message nomos.MInboxResponse
@@ -818,10 +1570,8 @@ export type MInboxResponse = Message<"nomos.MInboxResponse"> & {
  * Describes the message nomos.MInboxResponse.
  * Use `create(MInboxResponseSchema)` to create a new message.
  */
-export const MInboxResponseSchema: GenMessage<MInboxResponse> /*@__PURE__*/ = messageDesc(
-  file_nomos,
-  32,
-);
+export const MInboxResponseSchema: GenMessage<MInboxResponse> = /*@__PURE__*/
+  messageDesc(file_nomos, 56);
 
 /**
  * @generated from message nomos.MEnvelopeRequest
@@ -837,10 +1587,8 @@ export type MEnvelopeRequest = Message<"nomos.MEnvelopeRequest"> & {
  * Describes the message nomos.MEnvelopeRequest.
  * Use `create(MEnvelopeRequestSchema)` to create a new message.
  */
-export const MEnvelopeRequestSchema: GenMessage<MEnvelopeRequest> /*@__PURE__*/ = messageDesc(
-  file_nomos,
-  33,
-);
+export const MEnvelopeRequestSchema: GenMessage<MEnvelopeRequest> = /*@__PURE__*/
+  messageDesc(file_nomos, 57);
 
 /**
  * @generated from message nomos.MCateEnvelope
@@ -886,10 +1634,8 @@ export type MCateEnvelope = Message<"nomos.MCateEnvelope"> & {
  * Describes the message nomos.MCateEnvelope.
  * Use `create(MCateEnvelopeSchema)` to create a new message.
  */
-export const MCateEnvelopeSchema: GenMessage<MCateEnvelope> /*@__PURE__*/ = messageDesc(
-  file_nomos,
-  34,
-);
+export const MCateEnvelopeSchema: GenMessage<MCateEnvelope> = /*@__PURE__*/
+  messageDesc(file_nomos, 58);
 
 /**
  * @generated from message nomos.MInboxActionRequest
@@ -912,10 +1658,8 @@ export type MInboxActionRequest = Message<"nomos.MInboxActionRequest"> & {
  * Describes the message nomos.MInboxActionRequest.
  * Use `create(MInboxActionRequestSchema)` to create a new message.
  */
-export const MInboxActionRequestSchema: GenMessage<MInboxActionRequest> /*@__PURE__*/ = messageDesc(
-  file_nomos,
-  35,
-);
+export const MInboxActionRequestSchema: GenMessage<MInboxActionRequest> = /*@__PURE__*/
+  messageDesc(file_nomos, 59);
 
 /**
  * @generated from message nomos.MInboxActionResponse
@@ -936,8 +1680,8 @@ export type MInboxActionResponse = Message<"nomos.MInboxActionResponse"> & {
  * Describes the message nomos.MInboxActionResponse.
  * Use `create(MInboxActionResponseSchema)` to create a new message.
  */
-export const MInboxActionResponseSchema: GenMessage<MInboxActionResponse> /*@__PURE__*/ =
-  messageDesc(file_nomos, 36);
+export const MInboxActionResponseSchema: GenMessage<MInboxActionResponse> = /*@__PURE__*/
+  messageDesc(file_nomos, 60);
 
 /**
  * Skills
@@ -982,7 +1726,8 @@ export type MSkill = Message<"nomos.MSkill"> & {
  * Describes the message nomos.MSkill.
  * Use `create(MSkillSchema)` to create a new message.
  */
-export const MSkillSchema: GenMessage<MSkill> /*@__PURE__*/ = messageDesc(file_nomos, 37);
+export const MSkillSchema: GenMessage<MSkill> = /*@__PURE__*/
+  messageDesc(file_nomos, 61);
 
 /**
  * @generated from message nomos.MSkillsResponse
@@ -998,10 +1743,52 @@ export type MSkillsResponse = Message<"nomos.MSkillsResponse"> & {
  * Describes the message nomos.MSkillsResponse.
  * Use `create(MSkillsResponseSchema)` to create a new message.
  */
-export const MSkillsResponseSchema: GenMessage<MSkillsResponse> /*@__PURE__*/ = messageDesc(
-  file_nomos,
-  38,
-);
+export const MSkillsResponseSchema: GenMessage<MSkillsResponse> = /*@__PURE__*/
+  messageDesc(file_nomos, 62);
+
+/**
+ * @generated from message nomos.MPlugin
+ */
+export type MPlugin = Message<"nomos.MPlugin"> & {
+  /**
+   * @generated from field: string name = 1;
+   */
+  name: string;
+
+  /**
+   * @generated from field: string description = 2;
+   */
+  description: string;
+
+  /**
+   * @generated from field: string marketplace = 3;
+   */
+  marketplace: string;
+};
+
+/**
+ * Describes the message nomos.MPlugin.
+ * Use `create(MPluginSchema)` to create a new message.
+ */
+export const MPluginSchema: GenMessage<MPlugin> = /*@__PURE__*/
+  messageDesc(file_nomos, 63);
+
+/**
+ * @generated from message nomos.MPluginsResponse
+ */
+export type MPluginsResponse = Message<"nomos.MPluginsResponse"> & {
+  /**
+   * @generated from field: repeated nomos.MPlugin plugins = 1;
+   */
+  plugins: MPlugin[];
+};
+
+/**
+ * Describes the message nomos.MPluginsResponse.
+ * Use `create(MPluginsResponseSchema)` to create a new message.
+ */
+export const MPluginsResponseSchema: GenMessage<MPluginsResponse> = /*@__PURE__*/
+  messageDesc(file_nomos, 64);
 
 /**
  * @generated from message nomos.MSkillToggleRequest
@@ -1022,10 +1809,8 @@ export type MSkillToggleRequest = Message<"nomos.MSkillToggleRequest"> & {
  * Describes the message nomos.MSkillToggleRequest.
  * Use `create(MSkillToggleRequestSchema)` to create a new message.
  */
-export const MSkillToggleRequestSchema: GenMessage<MSkillToggleRequest> /*@__PURE__*/ = messageDesc(
-  file_nomos,
-  39,
-);
+export const MSkillToggleRequestSchema: GenMessage<MSkillToggleRequest> = /*@__PURE__*/
+  messageDesc(file_nomos, 65);
 
 /**
  * @generated from message nomos.MSkillToggleResponse
@@ -1046,8 +1831,8 @@ export type MSkillToggleResponse = Message<"nomos.MSkillToggleResponse"> & {
  * Describes the message nomos.MSkillToggleResponse.
  * Use `create(MSkillToggleResponseSchema)` to create a new message.
  */
-export const MSkillToggleResponseSchema: GenMessage<MSkillToggleResponse> /*@__PURE__*/ =
-  messageDesc(file_nomos, 40);
+export const MSkillToggleResponseSchema: GenMessage<MSkillToggleResponse> = /*@__PURE__*/
+  messageDesc(file_nomos, 66);
 
 /**
  * Earnings
@@ -1067,10 +1852,8 @@ export type MEarningsRequest = Message<"nomos.MEarningsRequest"> & {
  * Describes the message nomos.MEarningsRequest.
  * Use `create(MEarningsRequestSchema)` to create a new message.
  */
-export const MEarningsRequestSchema: GenMessage<MEarningsRequest> /*@__PURE__*/ = messageDesc(
-  file_nomos,
-  41,
-);
+export const MEarningsRequestSchema: GenMessage<MEarningsRequest> = /*@__PURE__*/
+  messageDesc(file_nomos, 67);
 
 /**
  * @generated from message nomos.MEarningsResponse
@@ -1110,10 +1893,8 @@ export type MEarningsResponse = Message<"nomos.MEarningsResponse"> & {
  * Describes the message nomos.MEarningsResponse.
  * Use `create(MEarningsResponseSchema)` to create a new message.
  */
-export const MEarningsResponseSchema: GenMessage<MEarningsResponse> /*@__PURE__*/ = messageDesc(
-  file_nomos,
-  42,
-);
+export const MEarningsResponseSchema: GenMessage<MEarningsResponse> = /*@__PURE__*/
+  messageDesc(file_nomos, 68);
 
 /**
  * Brain (knowledge graph)
@@ -1140,10 +1921,8 @@ export type MGraphRequest = Message<"nomos.MGraphRequest"> & {
  * Describes the message nomos.MGraphRequest.
  * Use `create(MGraphRequestSchema)` to create a new message.
  */
-export const MGraphRequestSchema: GenMessage<MGraphRequest> /*@__PURE__*/ = messageDesc(
-  file_nomos,
-  43,
-);
+export const MGraphRequestSchema: GenMessage<MGraphRequest> = /*@__PURE__*/
+  messageDesc(file_nomos, 69);
 
 /**
  * @generated from message nomos.MGraphNeighborsRequest
@@ -1180,8 +1959,8 @@ export type MGraphNeighborsRequest = Message<"nomos.MGraphNeighborsRequest"> & {
  * Describes the message nomos.MGraphNeighborsRequest.
  * Use `create(MGraphNeighborsRequestSchema)` to create a new message.
  */
-export const MGraphNeighborsRequestSchema: GenMessage<MGraphNeighborsRequest> /*@__PURE__*/ =
-  messageDesc(file_nomos, 44);
+export const MGraphNeighborsRequestSchema: GenMessage<MGraphNeighborsRequest> = /*@__PURE__*/
+  messageDesc(file_nomos, 70);
 
 /**
  * @generated from message nomos.MGraphSearchRequest
@@ -1202,10 +1981,8 @@ export type MGraphSearchRequest = Message<"nomos.MGraphSearchRequest"> & {
  * Describes the message nomos.MGraphSearchRequest.
  * Use `create(MGraphSearchRequestSchema)` to create a new message.
  */
-export const MGraphSearchRequestSchema: GenMessage<MGraphSearchRequest> /*@__PURE__*/ = messageDesc(
-  file_nomos,
-  45,
-);
+export const MGraphSearchRequestSchema: GenMessage<MGraphSearchRequest> = /*@__PURE__*/
+  messageDesc(file_nomos, 71);
 
 /**
  * @generated from message nomos.MGraphNode
@@ -1258,7 +2035,8 @@ export type MGraphNode = Message<"nomos.MGraphNode"> & {
  * Describes the message nomos.MGraphNode.
  * Use `create(MGraphNodeSchema)` to create a new message.
  */
-export const MGraphNodeSchema: GenMessage<MGraphNode> /*@__PURE__*/ = messageDesc(file_nomos, 46);
+export const MGraphNodeSchema: GenMessage<MGraphNode> = /*@__PURE__*/
+  messageDesc(file_nomos, 72);
 
 /**
  * @generated from message nomos.MGraphEdge
@@ -1299,7 +2077,8 @@ export type MGraphEdge = Message<"nomos.MGraphEdge"> & {
  * Describes the message nomos.MGraphEdge.
  * Use `create(MGraphEdgeSchema)` to create a new message.
  */
-export const MGraphEdgeSchema: GenMessage<MGraphEdge> /*@__PURE__*/ = messageDesc(file_nomos, 47);
+export const MGraphEdgeSchema: GenMessage<MGraphEdge> = /*@__PURE__*/
+  messageDesc(file_nomos, 73);
 
 /**
  * @generated from message nomos.MGraphResponse
@@ -1320,10 +2099,8 @@ export type MGraphResponse = Message<"nomos.MGraphResponse"> & {
  * Describes the message nomos.MGraphResponse.
  * Use `create(MGraphResponseSchema)` to create a new message.
  */
-export const MGraphResponseSchema: GenMessage<MGraphResponse> /*@__PURE__*/ = messageDesc(
-  file_nomos,
-  48,
-);
+export const MGraphResponseSchema: GenMessage<MGraphResponse> = /*@__PURE__*/
+  messageDesc(file_nomos, 74);
 
 /**
  * Settings
@@ -1363,7 +2140,8 @@ export type MTrustTier = Message<"nomos.MTrustTier"> & {
  * Describes the message nomos.MTrustTier.
  * Use `create(MTrustTierSchema)` to create a new message.
  */
-export const MTrustTierSchema: GenMessage<MTrustTier> /*@__PURE__*/ = messageDesc(file_nomos, 49);
+export const MTrustTierSchema: GenMessage<MTrustTier> = /*@__PURE__*/
+  messageDesc(file_nomos, 75);
 
 /**
  * @generated from message nomos.MPermission
@@ -1389,7 +2167,8 @@ export type MPermission = Message<"nomos.MPermission"> & {
  * Describes the message nomos.MPermission.
  * Use `create(MPermissionSchema)` to create a new message.
  */
-export const MPermissionSchema: GenMessage<MPermission> /*@__PURE__*/ = messageDesc(file_nomos, 50);
+export const MPermissionSchema: GenMessage<MPermission> = /*@__PURE__*/
+  messageDesc(file_nomos, 76);
 
 /**
  * @generated from message nomos.MIntegration
@@ -1441,10 +2220,8 @@ export type MIntegration = Message<"nomos.MIntegration"> & {
  * Describes the message nomos.MIntegration.
  * Use `create(MIntegrationSchema)` to create a new message.
  */
-export const MIntegrationSchema: GenMessage<MIntegration> /*@__PURE__*/ = messageDesc(
-  file_nomos,
-  51,
-);
+export const MIntegrationSchema: GenMessage<MIntegration> = /*@__PURE__*/
+  messageDesc(file_nomos, 77);
 
 /**
  * @generated from message nomos.MProfile
@@ -1480,7 +2257,8 @@ export type MProfile = Message<"nomos.MProfile"> & {
  * Describes the message nomos.MProfile.
  * Use `create(MProfileSchema)` to create a new message.
  */
-export const MProfileSchema: GenMessage<MProfile> /*@__PURE__*/ = messageDesc(file_nomos, 52);
+export const MProfileSchema: GenMessage<MProfile> = /*@__PURE__*/
+  messageDesc(file_nomos, 78);
 
 /**
  * @generated from message nomos.MSettingsResponse
@@ -1505,16 +2283,192 @@ export type MSettingsResponse = Message<"nomos.MSettingsResponse"> & {
    * @generated from field: repeated nomos.MIntegration integrations = 4;
    */
   integrations: MIntegration[];
+
+  /**
+   * @generated from field: repeated nomos.MConsentEntry consent = 5;
+   */
+  consent: MConsentEntry[];
+
+  /**
+   * @generated from field: nomos.MAgentIdentity identity = 6;
+   */
+  identity?: MAgentIdentity | undefined;
+
+  /**
+   * @generated from field: repeated nomos.MAppToggle app_toggles = 7;
+   */
+  appToggles: MAppToggle[];
+
+  /**
+   * @generated from field: nomos.MProactive proactive = 8;
+   */
+  proactive?: MProactive | undefined;
 };
 
 /**
  * Describes the message nomos.MSettingsResponse.
  * Use `create(MSettingsResponseSchema)` to create a new message.
  */
-export const MSettingsResponseSchema: GenMessage<MSettingsResponse> /*@__PURE__*/ = messageDesc(
-  file_nomos,
-  53,
-);
+export const MSettingsResponseSchema: GenMessage<MSettingsResponse> = /*@__PURE__*/
+  messageDesc(file_nomos, 79);
+
+/**
+ * @generated from message nomos.MProactive
+ */
+export type MProactive = Message<"nomos.MProactive"> & {
+  /**
+   * off | passive | active (app.inboxAutonomy)
+   *
+   * @generated from field: string mode = 1;
+   */
+  mode: string;
+
+  /**
+   * cron for the daily briefing (app.briefingCron)
+   *
+   * @generated from field: string briefing = 2;
+   */
+  briefing: string;
+};
+
+/**
+ * Describes the message nomos.MProactive.
+ * Use `create(MProactiveSchema)` to create a new message.
+ */
+export const MProactiveSchema: GenMessage<MProactive> = /*@__PURE__*/
+  messageDesc(file_nomos, 80);
+
+/**
+ * @generated from message nomos.MConsentEntry
+ */
+export type MConsentEntry = Message<"nomos.MConsentEntry"> & {
+  /**
+   * @generated from field: string platform = 1;
+   */
+  platform: string;
+
+  /**
+   * always_ask | auto_approve | notify_only
+   *
+   * @generated from field: string mode = 2;
+   */
+  mode: string;
+};
+
+/**
+ * Describes the message nomos.MConsentEntry.
+ * Use `create(MConsentEntrySchema)` to create a new message.
+ */
+export const MConsentEntrySchema: GenMessage<MConsentEntry> = /*@__PURE__*/
+  messageDesc(file_nomos, 81);
+
+/**
+ * @generated from message nomos.MAgentIdentity
+ */
+export type MAgentIdentity = Message<"nomos.MAgentIdentity"> & {
+  /**
+   * @generated from field: string name = 1;
+   */
+  name: string;
+
+  /**
+   * personality / voice & tone (the SOUL)
+   *
+   * @generated from field: string voice = 2;
+   */
+  voice: string;
+
+  /**
+   * chosen avatar (an emoji), empty = monogram fallback
+   *
+   * @generated from field: string avatar = 3;
+   */
+  avatar: string;
+};
+
+/**
+ * Describes the message nomos.MAgentIdentity.
+ * Use `create(MAgentIdentitySchema)` to create a new message.
+ */
+export const MAgentIdentitySchema: GenMessage<MAgentIdentity> = /*@__PURE__*/
+  messageDesc(file_nomos, 82);
+
+/**
+ * @generated from message nomos.MAppToggle
+ */
+export type MAppToggle = Message<"nomos.MAppToggle"> & {
+  /**
+   * app.<field> config key
+   *
+   * @generated from field: string key = 1;
+   */
+  key: string;
+
+  /**
+   * @generated from field: bool enabled = 2;
+   */
+  enabled: boolean;
+};
+
+/**
+ * Describes the message nomos.MAppToggle.
+ * Use `create(MAppToggleSchema)` to create a new message.
+ */
+export const MAppToggleSchema: GenMessage<MAppToggle> = /*@__PURE__*/
+  messageDesc(file_nomos, 83);
+
+/**
+ * @generated from message nomos.MAppSettingRequest
+ */
+export type MAppSettingRequest = Message<"nomos.MAppSettingRequest"> & {
+  /**
+   * app.<field> config key (consumer-safe subset only)
+   *
+   * @generated from field: string key = 1;
+   */
+  key: string;
+
+  /**
+   * "true"/"false" for bools, raw string otherwise
+   *
+   * @generated from field: string value = 2;
+   */
+  value: string;
+};
+
+/**
+ * Describes the message nomos.MAppSettingRequest.
+ * Use `create(MAppSettingRequestSchema)` to create a new message.
+ */
+export const MAppSettingRequestSchema: GenMessage<MAppSettingRequest> = /*@__PURE__*/
+  messageDesc(file_nomos, 84);
+
+/**
+ * @generated from message nomos.MAgentIdentityRequest
+ */
+export type MAgentIdentityRequest = Message<"nomos.MAgentIdentityRequest"> & {
+  /**
+   * @generated from field: string name = 1;
+   */
+  name: string;
+
+  /**
+   * @generated from field: string voice = 2;
+   */
+  voice: string;
+
+  /**
+   * @generated from field: string avatar = 3;
+   */
+  avatar: string;
+};
+
+/**
+ * Describes the message nomos.MAgentIdentityRequest.
+ * Use `create(MAgentIdentityRequestSchema)` to create a new message.
+ */
+export const MAgentIdentityRequestSchema: GenMessage<MAgentIdentityRequest> = /*@__PURE__*/
+  messageDesc(file_nomos, 85);
 
 /**
  * @generated from message nomos.MConsentRequest
@@ -1537,10 +2491,8 @@ export type MConsentRequest = Message<"nomos.MConsentRequest"> & {
  * Describes the message nomos.MConsentRequest.
  * Use `create(MConsentRequestSchema)` to create a new message.
  */
-export const MConsentRequestSchema: GenMessage<MConsentRequest> /*@__PURE__*/ = messageDesc(
-  file_nomos,
-  54,
-);
+export const MConsentRequestSchema: GenMessage<MConsentRequest> = /*@__PURE__*/
+  messageDesc(file_nomos, 86);
 
 /**
  * @generated from message nomos.MTrustTierRequest
@@ -1566,10 +2518,8 @@ export type MTrustTierRequest = Message<"nomos.MTrustTierRequest"> & {
  * Describes the message nomos.MTrustTierRequest.
  * Use `create(MTrustTierRequestSchema)` to create a new message.
  */
-export const MTrustTierRequestSchema: GenMessage<MTrustTierRequest> /*@__PURE__*/ = messageDesc(
-  file_nomos,
-  55,
-);
+export const MTrustTierRequestSchema: GenMessage<MTrustTierRequest> = /*@__PURE__*/
+  messageDesc(file_nomos, 87);
 
 /**
  * @generated from message nomos.MPermissionRequest
@@ -1590,10 +2540,8 @@ export type MPermissionRequest = Message<"nomos.MPermissionRequest"> & {
  * Describes the message nomos.MPermissionRequest.
  * Use `create(MPermissionRequestSchema)` to create a new message.
  */
-export const MPermissionRequestSchema: GenMessage<MPermissionRequest> /*@__PURE__*/ = messageDesc(
-  file_nomos,
-  56,
-);
+export const MPermissionRequestSchema: GenMessage<MPermissionRequest> = /*@__PURE__*/
+  messageDesc(file_nomos, 88);
 
 /**
  * @generated from message nomos.MIntegrationsResponse
@@ -1609,8 +2557,8 @@ export type MIntegrationsResponse = Message<"nomos.MIntegrationsResponse"> & {
  * Describes the message nomos.MIntegrationsResponse.
  * Use `create(MIntegrationsResponseSchema)` to create a new message.
  */
-export const MIntegrationsResponseSchema: GenMessage<MIntegrationsResponse> /*@__PURE__*/ =
-  messageDesc(file_nomos, 57);
+export const MIntegrationsResponseSchema: GenMessage<MIntegrationsResponse> = /*@__PURE__*/
+  messageDesc(file_nomos, 89);
 
 /**
  * @generated from message nomos.MStartConnectRequest
@@ -1628,8 +2576,8 @@ export type MStartConnectRequest = Message<"nomos.MStartConnectRequest"> & {
  * Describes the message nomos.MStartConnectRequest.
  * Use `create(MStartConnectRequestSchema)` to create a new message.
  */
-export const MStartConnectRequestSchema: GenMessage<MStartConnectRequest> /*@__PURE__*/ =
-  messageDesc(file_nomos, 58);
+export const MStartConnectRequestSchema: GenMessage<MStartConnectRequest> = /*@__PURE__*/
+  messageDesc(file_nomos, 90);
 
 /**
  * @generated from message nomos.MStartConnectResponse
@@ -1649,8 +2597,8 @@ export type MStartConnectResponse = Message<"nomos.MStartConnectResponse"> & {
  * Describes the message nomos.MStartConnectResponse.
  * Use `create(MStartConnectResponseSchema)` to create a new message.
  */
-export const MStartConnectResponseSchema: GenMessage<MStartConnectResponse> /*@__PURE__*/ =
-  messageDesc(file_nomos, 59);
+export const MStartConnectResponseSchema: GenMessage<MStartConnectResponse> = /*@__PURE__*/
+  messageDesc(file_nomos, 91);
 
 /**
  * @generated from message nomos.MDisconnectRequest
@@ -1673,10 +2621,8 @@ export type MDisconnectRequest = Message<"nomos.MDisconnectRequest"> & {
  * Describes the message nomos.MDisconnectRequest.
  * Use `create(MDisconnectRequestSchema)` to create a new message.
  */
-export const MDisconnectRequestSchema: GenMessage<MDisconnectRequest> /*@__PURE__*/ = messageDesc(
-  file_nomos,
-  60,
-);
+export const MDisconnectRequestSchema: GenMessage<MDisconnectRequest> = /*@__PURE__*/
+  messageDesc(file_nomos, 92);
 
 /**
  * Relay an OAuth authorization code from the (web/mobile) callback to the daemon,
@@ -1701,8 +2647,8 @@ export type MConnectGoogleRequest = Message<"nomos.MConnectGoogleRequest"> & {
  * Describes the message nomos.MConnectGoogleRequest.
  * Use `create(MConnectGoogleRequestSchema)` to create a new message.
  */
-export const MConnectGoogleRequestSchema: GenMessage<MConnectGoogleRequest> /*@__PURE__*/ =
-  messageDesc(file_nomos, 61);
+export const MConnectGoogleRequestSchema: GenMessage<MConnectGoogleRequest> = /*@__PURE__*/
+  messageDesc(file_nomos, 93);
 
 /**
  * @generated from message nomos.MSetGoogleSendRequest
@@ -1723,8 +2669,8 @@ export type MSetGoogleSendRequest = Message<"nomos.MSetGoogleSendRequest"> & {
  * Describes the message nomos.MSetGoogleSendRequest.
  * Use `create(MSetGoogleSendRequestSchema)` to create a new message.
  */
-export const MSetGoogleSendRequestSchema: GenMessage<MSetGoogleSendRequest> /*@__PURE__*/ =
-  messageDesc(file_nomos, 62);
+export const MSetGoogleSendRequestSchema: GenMessage<MSetGoogleSendRequest> = /*@__PURE__*/
+  messageDesc(file_nomos, 94);
 
 /**
  * @generated from message nomos.MDeviceRegister
@@ -1752,10 +2698,8 @@ export type MDeviceRegister = Message<"nomos.MDeviceRegister"> & {
  * Describes the message nomos.MDeviceRegister.
  * Use `create(MDeviceRegisterSchema)` to create a new message.
  */
-export const MDeviceRegisterSchema: GenMessage<MDeviceRegister> /*@__PURE__*/ = messageDesc(
-  file_nomos,
-  63,
-);
+export const MDeviceRegisterSchema: GenMessage<MDeviceRegister> = /*@__PURE__*/
+  messageDesc(file_nomos, 95);
 
 /**
  * @generated from message nomos.MDeviceUnregister
@@ -1771,10 +2715,8 @@ export type MDeviceUnregister = Message<"nomos.MDeviceUnregister"> & {
  * Describes the message nomos.MDeviceUnregister.
  * Use `create(MDeviceUnregisterSchema)` to create a new message.
  */
-export const MDeviceUnregisterSchema: GenMessage<MDeviceUnregister> /*@__PURE__*/ = messageDesc(
-  file_nomos,
-  64,
-);
+export const MDeviceUnregisterSchema: GenMessage<MDeviceUnregister> = /*@__PURE__*/
+  messageDesc(file_nomos, 96);
 
 /**
  * @generated from message nomos.DepositRequest
@@ -1831,10 +2773,8 @@ export type DepositRequest = Message<"nomos.DepositRequest"> & {
  * Describes the message nomos.DepositRequest.
  * Use `create(DepositRequestSchema)` to create a new message.
  */
-export const DepositRequestSchema: GenMessage<DepositRequest> /*@__PURE__*/ = messageDesc(
-  file_nomos,
-  65,
-);
+export const DepositRequestSchema: GenMessage<DepositRequest> = /*@__PURE__*/
+  messageDesc(file_nomos, 97);
 
 /**
  * @generated from message nomos.DepositResponse
@@ -1862,10 +2802,479 @@ export type DepositResponse = Message<"nomos.DepositResponse"> & {
  * Describes the message nomos.DepositResponse.
  * Use `create(DepositResponseSchema)` to create a new message.
  */
-export const DepositResponseSchema: GenMessage<DepositResponse> /*@__PURE__*/ = messageDesc(
-  file_nomos,
-  66,
-);
+export const DepositResponseSchema: GenMessage<DepositResponse> = /*@__PURE__*/
+  messageDesc(file_nomos, 98);
+
+/**
+ * ── Studio (hosted-only feature) ──────────────────────────────────────
+ * Register an uploaded original. The client uploads the (downscaled, transcoded)
+ * image to upload_url (presigned PUT), then confirms by calling StudioEdit or
+ * StudioHistory; unconfirmed rows are reaped by __studio_gc__.
+ *
+ * @generated from message nomos.MStudioCreateAssetRequest
+ */
+export type MStudioCreateAssetRequest = Message<"nomos.MStudioCreateAssetRequest"> & {
+  /**
+   * e.g. image/jpeg (HEIC transcoded client-side)
+   *
+   * @generated from field: string mime = 1;
+   */
+  mime: string;
+
+  /**
+   * sha256 of the bytes
+   *
+   * @generated from field: string content_hash = 2;
+   */
+  contentHash: string;
+
+  /**
+   * @generated from field: int32 width = 3;
+   */
+  width: number;
+
+  /**
+   * @generated from field: int32 height = 4;
+   */
+  height: number;
+
+  /**
+   * @generated from field: int32 bytes = 5;
+   */
+  bytes: number;
+};
+
+/**
+ * Describes the message nomos.MStudioCreateAssetRequest.
+ * Use `create(MStudioCreateAssetRequestSchema)` to create a new message.
+ */
+export const MStudioCreateAssetRequestSchema: GenMessage<MStudioCreateAssetRequest> = /*@__PURE__*/
+  messageDesc(file_nomos, 99);
+
+/**
+ * @generated from message nomos.MStudioCreateAssetResponse
+ */
+export type MStudioCreateAssetResponse = Message<"nomos.MStudioCreateAssetResponse"> & {
+  /**
+   * @generated from field: string asset_id = 1;
+   */
+  assetId: string;
+
+  /**
+   * presigned PUT
+   *
+   * @generated from field: string upload_url = 2;
+   */
+  uploadUrl: string;
+
+  /**
+   * @generated from field: string object_key = 3;
+   */
+  objectKey: string;
+
+  /**
+   * ms epoch
+   *
+   * @generated from field: int64 expires_at = 4;
+   */
+  expiresAt: bigint;
+};
+
+/**
+ * Describes the message nomos.MStudioCreateAssetResponse.
+ * Use `create(MStudioCreateAssetResponseSchema)` to create a new message.
+ */
+export const MStudioCreateAssetResponseSchema: GenMessage<MStudioCreateAssetResponse> = /*@__PURE__*/
+  messageDesc(file_nomos, 100);
+
+/**
+ * @generated from message nomos.MStudioAssetRef
+ */
+export type MStudioAssetRef = Message<"nomos.MStudioAssetRef"> & {
+  /**
+   * @generated from field: string asset_id = 1;
+   */
+  assetId: string;
+
+  /**
+   * GetAssetUrl: presign the ORIGINAL (for before/after compare)
+   *
+   * @generated from field: bool original = 2;
+   */
+  original: boolean;
+};
+
+/**
+ * Describes the message nomos.MStudioAssetRef.
+ * Use `create(MStudioAssetRefSchema)` to create a new message.
+ */
+export const MStudioAssetRefSchema: GenMessage<MStudioAssetRef> = /*@__PURE__*/
+  messageDesc(file_nomos, 101);
+
+/**
+ * @generated from message nomos.MStudioAssetUrlResponse
+ */
+export type MStudioAssetUrlResponse = Message<"nomos.MStudioAssetUrlResponse"> & {
+  /**
+   * presigned GET for the current head (or original)
+   *
+   * @generated from field: string url = 1;
+   */
+  url: string;
+
+  /**
+   * @generated from field: int64 expires_at = 2;
+   */
+  expiresAt: bigint;
+};
+
+/**
+ * Describes the message nomos.MStudioAssetUrlResponse.
+ * Use `create(MStudioAssetUrlResponseSchema)` to create a new message.
+ */
+export const MStudioAssetUrlResponseSchema: GenMessage<MStudioAssetUrlResponse> = /*@__PURE__*/
+  messageDesc(file_nomos, 102);
+
+/**
+ * Apply one op. params_json is the JSON-encoded op params (validated server-side
+ * against the op registry). parent_edit_id "" means "on the current head".
+ *
+ * @generated from message nomos.MStudioEditRequest
+ */
+export type MStudioEditRequest = Message<"nomos.MStudioEditRequest"> & {
+  /**
+   * @generated from field: string asset_id = 1;
+   */
+  assetId: string;
+
+  /**
+   * adjust | editSemantic | cutout | upscale | restore | ...
+   *
+   * @generated from field: string op = 2;
+   */
+  op: string;
+
+  /**
+   * @generated from field: string params_json = 3;
+   */
+  paramsJson: string;
+
+  /**
+   * @generated from field: string parent_edit_id = 4;
+   */
+  parentEditId: string;
+
+  /**
+   * @generated from field: string idempotency_key = 5;
+   */
+  idempotencyKey: string;
+
+  /**
+   * optional device/tap mask object key
+   *
+   * @generated from field: string mask_key = 6;
+   */
+  maskKey: string;
+
+  /**
+   * deviceRender only: the on-device-rendered output bytes
+   *
+   * @generated from field: bytes input_image = 7;
+   */
+  inputImage: Uint8Array;
+};
+
+/**
+ * Describes the message nomos.MStudioEditRequest.
+ * Use `create(MStudioEditRequestSchema)` to create a new message.
+ */
+export const MStudioEditRequestSchema: GenMessage<MStudioEditRequest> = /*@__PURE__*/
+  messageDesc(file_nomos, 103);
+
+/**
+ * @generated from message nomos.MStudioEvent
+ */
+export type MStudioEvent = Message<"nomos.MStudioEvent"> & {
+  /**
+   * progress | done | error
+   *
+   * @generated from field: string kind = 1;
+   */
+  kind: string;
+
+  /**
+   * @generated from field: string edit_id = 2;
+   */
+  editId: string;
+
+  /**
+   * pending | running | done | failed
+   *
+   * @generated from field: string status = 3;
+   */
+  status: string;
+
+  /**
+   * @generated from field: string preview_key = 4;
+   */
+  previewKey: string;
+
+  /**
+   * @generated from field: string output_key = 5;
+   */
+  outputKey: string;
+
+  /**
+   * @generated from field: double cost_usd = 6;
+   */
+  costUsd: number;
+
+  /**
+   * @generated from field: string message = 7;
+   */
+  message: string;
+};
+
+/**
+ * Describes the message nomos.MStudioEvent.
+ * Use `create(MStudioEventSchema)` to create a new message.
+ */
+export const MStudioEventSchema: GenMessage<MStudioEvent> = /*@__PURE__*/
+  messageDesc(file_nomos, 104);
+
+/**
+ * @generated from message nomos.MStudioEdit
+ */
+export type MStudioEdit = Message<"nomos.MStudioEdit"> & {
+  /**
+   * @generated from field: string id = 1;
+   */
+  id: string;
+
+  /**
+   * @generated from field: string op = 2;
+   */
+  op: string;
+
+  /**
+   * @generated from field: string status = 3;
+   */
+  status: string;
+
+  /**
+   * @generated from field: string preview_key = 4;
+   */
+  previewKey: string;
+
+  /**
+   * @generated from field: string output_key = 5;
+   */
+  outputKey: string;
+
+  /**
+   * @generated from field: double cost_usd = 6;
+   */
+  costUsd: number;
+
+  /**
+   * @generated from field: string parent_edit_id = 7;
+   */
+  parentEditId: string;
+
+  /**
+   * @generated from field: string created_at = 8;
+   */
+  createdAt: string;
+};
+
+/**
+ * Describes the message nomos.MStudioEdit.
+ * Use `create(MStudioEditSchema)` to create a new message.
+ */
+export const MStudioEditSchema: GenMessage<MStudioEdit> = /*@__PURE__*/
+  messageDesc(file_nomos, 105);
+
+/**
+ * @generated from message nomos.MStudioHistoryResponse
+ */
+export type MStudioHistoryResponse = Message<"nomos.MStudioHistoryResponse"> & {
+  /**
+   * @generated from field: repeated nomos.MStudioEdit edits = 1;
+   */
+  edits: MStudioEdit[];
+
+  /**
+   * @generated from field: string head_edit_id = 2;
+   */
+  headEditId: string;
+};
+
+/**
+ * Describes the message nomos.MStudioHistoryResponse.
+ * Use `create(MStudioHistoryResponseSchema)` to create a new message.
+ */
+export const MStudioHistoryResponseSchema: GenMessage<MStudioHistoryResponse> = /*@__PURE__*/
+  messageDesc(file_nomos, 106);
+
+/**
+ * @generated from message nomos.MStudioIdentityReport
+ */
+export type MStudioIdentityReport = Message<"nomos.MStudioIdentityReport"> & {
+  /**
+   * @generated from field: string edit_id = 1;
+   */
+  editId: string;
+
+  /**
+   * face-embedding similarity in 0..1
+   *
+   * @generated from field: double score = 2;
+   */
+  score: number;
+};
+
+/**
+ * Describes the message nomos.MStudioIdentityReport.
+ * Use `create(MStudioIdentityReportSchema)` to create a new message.
+ */
+export const MStudioIdentityReportSchema: GenMessage<MStudioIdentityReport> = /*@__PURE__*/
+  messageDesc(file_nomos, 107);
+
+/**
+ * A recent editing session for the Home launchpad. An asset + the gist of its chain.
+ *
+ * @generated from message nomos.MStudioListAssetsRequest
+ */
+export type MStudioListAssetsRequest = Message<"nomos.MStudioListAssetsRequest"> & {
+  /**
+   * max sessions (server caps; default ~30)
+   *
+   * @generated from field: int32 limit = 1;
+   */
+  limit: number;
+};
+
+/**
+ * Describes the message nomos.MStudioListAssetsRequest.
+ * Use `create(MStudioListAssetsRequestSchema)` to create a new message.
+ */
+export const MStudioListAssetsRequestSchema: GenMessage<MStudioListAssetsRequest> = /*@__PURE__*/
+  messageDesc(file_nomos, 108);
+
+/**
+ * @generated from message nomos.MStudioAssetSummary
+ */
+export type MStudioAssetSummary = Message<"nomos.MStudioAssetSummary"> & {
+  /**
+   * @generated from field: string asset_id = 1;
+   */
+  assetId: string;
+
+  /**
+   * presigned GET (~thumbnail): head preview, else original
+   *
+   * @generated from field: string preview_url = 2;
+   */
+  previewUrl: string;
+
+  /**
+   * ms epoch
+   *
+   * @generated from field: int64 updated_at = 3;
+   */
+  updatedAt: bigint;
+
+  /**
+   * a stored final artifact (vs in-progress)
+   *
+   * @generated from field: bool finalized = 4;
+   */
+  finalized: boolean;
+
+  /**
+   * @generated from field: int32 edit_count = 5;
+   */
+  editCount: number;
+
+  /**
+   * op of the head edit ("" if none) — client humanizes
+   *
+   * @generated from field: string head_op = 6;
+   */
+  headOp: string;
+
+  /**
+   * ms epoch for preview_url
+   *
+   * @generated from field: int64 expires_at = 7;
+   */
+  expiresAt: bigint;
+};
+
+/**
+ * Describes the message nomos.MStudioAssetSummary.
+ * Use `create(MStudioAssetSummarySchema)` to create a new message.
+ */
+export const MStudioAssetSummarySchema: GenMessage<MStudioAssetSummary> = /*@__PURE__*/
+  messageDesc(file_nomos, 109);
+
+/**
+ * @generated from message nomos.MStudioListAssetsResponse
+ */
+export type MStudioListAssetsResponse = Message<"nomos.MStudioListAssetsResponse"> & {
+  /**
+   * @generated from field: repeated nomos.MStudioAssetSummary assets = 1;
+   */
+  assets: MStudioAssetSummary[];
+};
+
+/**
+ * Describes the message nomos.MStudioListAssetsResponse.
+ * Use `create(MStudioListAssetsResponseSchema)` to create a new message.
+ */
+export const MStudioListAssetsResponseSchema: GenMessage<MStudioListAssetsResponse> = /*@__PURE__*/
+  messageDesc(file_nomos, 110);
+
+/**
+ * A per-photo edit suggestion: a short chip label + the instruction it applies.
+ *
+ * @generated from message nomos.MStudioSuggestion
+ */
+export type MStudioSuggestion = Message<"nomos.MStudioSuggestion"> & {
+  /**
+   * @generated from field: string label = 1;
+   */
+  label: string;
+
+  /**
+   * @generated from field: string prompt = 2;
+   */
+  prompt: string;
+};
+
+/**
+ * Describes the message nomos.MStudioSuggestion.
+ * Use `create(MStudioSuggestionSchema)` to create a new message.
+ */
+export const MStudioSuggestionSchema: GenMessage<MStudioSuggestion> = /*@__PURE__*/
+  messageDesc(file_nomos, 111);
+
+/**
+ * @generated from message nomos.MStudioSuggestionsResponse
+ */
+export type MStudioSuggestionsResponse = Message<"nomos.MStudioSuggestionsResponse"> & {
+  /**
+   * @generated from field: repeated nomos.MStudioSuggestion suggestions = 1;
+   */
+  suggestions: MStudioSuggestion[];
+};
+
+/**
+ * Describes the message nomos.MStudioSuggestionsResponse.
+ * Use `create(MStudioSuggestionsResponseSchema)` to create a new message.
+ */
+export const MStudioSuggestionsResponseSchema: GenMessage<MStudioSuggestionsResponse> = /*@__PURE__*/
+  messageDesc(file_nomos, 112);
 
 /**
  * @generated from service nomos.NomosAgent
@@ -1880,7 +3289,7 @@ export const NomosAgent: GenService<{
     methodKind: "server_streaming";
     input: typeof ChatRequestSchema;
     output: typeof AgentEventSchema;
-  };
+  },
   /**
    * Send a command (e.g., /compact)
    *
@@ -1890,7 +3299,7 @@ export const NomosAgent: GenService<{
     methodKind: "unary";
     input: typeof CommandRequestSchema;
     output: typeof CommandResponseSchema;
-  };
+  },
   /**
    * Get daemon status
    *
@@ -1900,7 +3309,7 @@ export const NomosAgent: GenService<{
     methodKind: "unary";
     input: typeof EmptySchema;
     output: typeof StatusResponseSchema;
-  };
+  },
   /**
    * Session management
    *
@@ -1910,7 +3319,7 @@ export const NomosAgent: GenService<{
     methodKind: "unary";
     input: typeof EmptySchema;
     output: typeof SessionListSchema;
-  };
+  },
   /**
    * @generated from rpc nomos.NomosAgent.GetSession
    */
@@ -1918,7 +3327,7 @@ export const NomosAgent: GenService<{
     methodKind: "unary";
     input: typeof SessionRequestSchema;
     output: typeof SessionResponseSchema;
-  };
+  },
   /**
    * Draft management (Slack User Mode approve-before-send)
    *
@@ -1928,7 +3337,7 @@ export const NomosAgent: GenService<{
     methodKind: "unary";
     input: typeof EmptySchema;
     output: typeof DraftListSchema;
-  };
+  },
   /**
    * @generated from rpc nomos.NomosAgent.ApproveDraft
    */
@@ -1936,7 +3345,7 @@ export const NomosAgent: GenService<{
     methodKind: "unary";
     input: typeof DraftActionSchema;
     output: typeof DraftResponseSchema;
-  };
+  },
   /**
    * @generated from rpc nomos.NomosAgent.RejectDraft
    */
@@ -1944,7 +3353,33 @@ export const NomosAgent: GenService<{
     methodKind: "unary";
     input: typeof DraftActionSchema;
     output: typeof DraftResponseSchema;
-  };
+  },
+  /**
+   * Autonomous loops (recurring background jobs — audit + disable)
+   *
+   * @generated from rpc nomos.NomosAgent.ListLoops
+   */
+  listLoops: {
+    methodKind: "unary";
+    input: typeof EmptySchema;
+    output: typeof LoopListSchema;
+  },
+  /**
+   * @generated from rpc nomos.NomosAgent.SetLoopEnabled
+   */
+  setLoopEnabled: {
+    methodKind: "unary";
+    input: typeof SetLoopEnabledRequestSchema;
+    output: typeof LoopActionResponseSchema;
+  },
+  /**
+   * @generated from rpc nomos.NomosAgent.DeleteLoop
+   */
+  deleteLoop: {
+    methodKind: "unary";
+    input: typeof LoopDeleteRequestSchema;
+    output: typeof LoopActionResponseSchema;
+  },
   /**
    * Health check
    *
@@ -1954,8 +3389,9 @@ export const NomosAgent: GenService<{
     methodKind: "unary";
     input: typeof EmptySchema;
     output: typeof PongResponseSchema;
-  };
-}> /*@__PURE__*/ = serviceDesc(file_nomos, 0);
+  },
+}> = /*@__PURE__*/
+  serviceDesc(file_nomos, 0);
 
 /**
  * @generated from service nomos.MobileApi
@@ -1970,7 +3406,7 @@ export const MobileApi: GenService<{
     methodKind: "server_streaming";
     input: typeof MChatRequestSchema;
     output: typeof MChatEventSchema;
-  };
+  },
   /**
    * @generated from rpc nomos.MobileApi.GetMessages
    */
@@ -1978,7 +3414,7 @@ export const MobileApi: GenService<{
     methodKind: "unary";
     input: typeof MGetMessagesRequestSchema;
     output: typeof MGetMessagesResponseSchema;
-  };
+  },
   /**
    * @generated from rpc nomos.MobileApi.ApproveDraft
    */
@@ -1986,7 +3422,7 @@ export const MobileApi: GenService<{
     methodKind: "unary";
     input: typeof MDraftActionSchema;
     output: typeof MDraftActionResponseSchema;
-  };
+  },
   /**
    * @generated from rpc nomos.MobileApi.RejectDraft
    */
@@ -1994,7 +3430,7 @@ export const MobileApi: GenService<{
     methodKind: "unary";
     input: typeof MDraftActionSchema;
     output: typeof MDraftActionResponseSchema;
-  };
+  },
   /**
    * @generated from rpc nomos.MobileApi.ApproveDraftWithEdit
    */
@@ -2002,7 +3438,7 @@ export const MobileApi: GenService<{
     methodKind: "unary";
     input: typeof MDraftActionWithEditSchema;
     output: typeof MDraftActionResponseSchema;
-  };
+  },
   /**
    * Inbox tab (CATE inbound queue — Phase 5b)
    *
@@ -2012,7 +3448,7 @@ export const MobileApi: GenService<{
     methodKind: "unary";
     input: typeof MInboxRequestSchema;
     output: typeof MInboxResponseSchema;
-  };
+  },
   /**
    * @generated from rpc nomos.MobileApi.GetCateEnvelope
    */
@@ -2020,7 +3456,7 @@ export const MobileApi: GenService<{
     methodKind: "unary";
     input: typeof MEnvelopeRequestSchema;
     output: typeof MCateEnvelopeSchema;
-  };
+  },
   /**
    * @generated from rpc nomos.MobileApi.ActOnInboxItem
    */
@@ -2028,7 +3464,7 @@ export const MobileApi: GenService<{
     methodKind: "unary";
     input: typeof MInboxActionRequestSchema;
     output: typeof MInboxActionResponseSchema;
-  };
+  },
   /**
    * Skills tab
    *
@@ -2038,7 +3474,7 @@ export const MobileApi: GenService<{
     methodKind: "unary";
     input: typeof EmptySchema;
     output: typeof MSkillsResponseSchema;
-  };
+  },
   /**
    * @generated from rpc nomos.MobileApi.ToggleSkill
    */
@@ -2046,7 +3482,15 @@ export const MobileApi: GenService<{
     methodKind: "unary";
     input: typeof MSkillToggleRequestSchema;
     output: typeof MSkillToggleResponseSchema;
-  };
+  },
+  /**
+   * @generated from rpc nomos.MobileApi.ListPlugins
+   */
+  listPlugins: {
+    methodKind: "unary";
+    input: typeof EmptySchema;
+    output: typeof MPluginsResponseSchema;
+  },
   /**
    * Earnings tab
    *
@@ -2056,7 +3500,7 @@ export const MobileApi: GenService<{
     methodKind: "unary";
     input: typeof MEarningsRequestSchema;
     output: typeof MEarningsResponseSchema;
-  };
+  },
   /**
    * Brain tab (knowledge graph)
    *
@@ -2066,7 +3510,7 @@ export const MobileApi: GenService<{
     methodKind: "unary";
     input: typeof MGraphRequestSchema;
     output: typeof MGraphResponseSchema;
-  };
+  },
   /**
    * @generated from rpc nomos.MobileApi.GetGraphNeighbors
    */
@@ -2074,7 +3518,7 @@ export const MobileApi: GenService<{
     methodKind: "unary";
     input: typeof MGraphNeighborsRequestSchema;
     output: typeof MGraphResponseSchema;
-  };
+  },
   /**
    * @generated from rpc nomos.MobileApi.SearchGraph
    */
@@ -2082,7 +3526,7 @@ export const MobileApi: GenService<{
     methodKind: "unary";
     input: typeof MGraphSearchRequestSchema;
     output: typeof MGraphResponseSchema;
-  };
+  },
   /**
    * Settings tab
    *
@@ -2092,7 +3536,7 @@ export const MobileApi: GenService<{
     methodKind: "unary";
     input: typeof EmptySchema;
     output: typeof MSettingsResponseSchema;
-  };
+  },
   /**
    * @generated from rpc nomos.MobileApi.UpdateConsent
    */
@@ -2100,7 +3544,7 @@ export const MobileApi: GenService<{
     methodKind: "unary";
     input: typeof MConsentRequestSchema;
     output: typeof MAckSchema;
-  };
+  },
   /**
    * @generated from rpc nomos.MobileApi.UpdateTrustTier
    */
@@ -2108,7 +3552,7 @@ export const MobileApi: GenService<{
     methodKind: "unary";
     input: typeof MTrustTierRequestSchema;
     output: typeof MAckSchema;
-  };
+  },
   /**
    * @generated from rpc nomos.MobileApi.UpdatePermission
    */
@@ -2116,7 +3560,23 @@ export const MobileApi: GenService<{
     methodKind: "unary";
     input: typeof MPermissionRequestSchema;
     output: typeof MAckSchema;
-  };
+  },
+  /**
+   * @generated from rpc nomos.MobileApi.UpdateAppSetting
+   */
+  updateAppSetting: {
+    methodKind: "unary";
+    input: typeof MAppSettingRequestSchema;
+    output: typeof MAckSchema;
+  },
+  /**
+   * @generated from rpc nomos.MobileApi.UpdateAgentIdentity
+   */
+  updateAgentIdentity: {
+    methodKind: "unary";
+    input: typeof MAgentIdentityRequestSchema;
+    output: typeof MAckSchema;
+  },
   /**
    * @generated from rpc nomos.MobileApi.ListIntegrations
    */
@@ -2124,7 +3584,7 @@ export const MobileApi: GenService<{
     methodKind: "unary";
     input: typeof EmptySchema;
     output: typeof MIntegrationsResponseSchema;
-  };
+  },
   /**
    * @generated from rpc nomos.MobileApi.StartConnectIntegration
    */
@@ -2132,7 +3592,7 @@ export const MobileApi: GenService<{
     methodKind: "unary";
     input: typeof MStartConnectRequestSchema;
     output: typeof MStartConnectResponseSchema;
-  };
+  },
   /**
    * @generated from rpc nomos.MobileApi.ConnectGoogleAccount
    */
@@ -2140,7 +3600,7 @@ export const MobileApi: GenService<{
     methodKind: "unary";
     input: typeof MConnectGoogleRequestSchema;
     output: typeof MAckSchema;
-  };
+  },
   /**
    * @generated from rpc nomos.MobileApi.SetGoogleSend
    */
@@ -2148,7 +3608,7 @@ export const MobileApi: GenService<{
     methodKind: "unary";
     input: typeof MSetGoogleSendRequestSchema;
     output: typeof MAckSchema;
-  };
+  },
   /**
    * @generated from rpc nomos.MobileApi.DisconnectIntegration
    */
@@ -2156,7 +3616,7 @@ export const MobileApi: GenService<{
     methodKind: "unary";
     input: typeof MDisconnectRequestSchema;
     output: typeof MAckSchema;
-  };
+  },
   /**
    * Push notifications
    *
@@ -2166,7 +3626,7 @@ export const MobileApi: GenService<{
     methodKind: "unary";
     input: typeof MDeviceRegisterSchema;
     output: typeof MAckSchema;
-  };
+  },
   /**
    * @generated from rpc nomos.MobileApi.UnregisterDevice
    */
@@ -2174,7 +3634,7 @@ export const MobileApi: GenService<{
     methodKind: "unary";
     input: typeof MDeviceUnregisterSchema;
     output: typeof MAckSchema;
-  };
+  },
   /**
    * Vault tab (long-term memory / knowledge base)
    *
@@ -2184,7 +3644,7 @@ export const MobileApi: GenService<{
     methodKind: "unary";
     input: typeof MVaultListRequestSchema;
     output: typeof MVaultListResponseSchema;
-  };
+  },
   /**
    * @generated from rpc nomos.MobileApi.GetVaultNote
    */
@@ -2192,7 +3652,7 @@ export const MobileApi: GenService<{
     methodKind: "unary";
     input: typeof MVaultGetRequestSchema;
     output: typeof MVaultNoteSchema;
-  };
+  },
   /**
    * @generated from rpc nomos.MobileApi.WriteVaultNote
    */
@@ -2200,7 +3660,7 @@ export const MobileApi: GenService<{
     methodKind: "unary";
     input: typeof MVaultWriteRequestSchema;
     output: typeof MAckSchema;
-  };
+  },
   /**
    * @generated from rpc nomos.MobileApi.DeleteVaultNote
    */
@@ -2208,8 +3668,158 @@ export const MobileApi: GenService<{
     methodKind: "unary";
     input: typeof MVaultDeleteRequestSchema;
     output: typeof MAckSchema;
-  };
-}> /*@__PURE__*/ = serviceDesc(file_nomos, 1);
+  },
+  /**
+   * Loops tab (autonomous recurring jobs — audit + disable agent-created loops)
+   *
+   * @generated from rpc nomos.MobileApi.ListLoops
+   */
+  listLoops: {
+    methodKind: "unary";
+    input: typeof EmptySchema;
+    output: typeof MLoopsResponseSchema;
+  },
+  /**
+   * @generated from rpc nomos.MobileApi.SetLoopEnabled
+   */
+  setLoopEnabled: {
+    methodKind: "unary";
+    input: typeof MSetLoopEnabledRequestSchema;
+    output: typeof MAckSchema;
+  },
+  /**
+   * @generated from rpc nomos.MobileApi.DeleteLoop
+   */
+  deleteLoop: {
+    methodKind: "unary";
+    input: typeof MLoopDeleteRequestSchema;
+    output: typeof MAckSchema;
+  },
+  /**
+   * Tasks tab (the user's scheduled tasks: one-off reminders + recurring jobs,
+   * editable: reschedule, rename, edit instruction, enable/disable, delete)
+   *
+   * @generated from rpc nomos.MobileApi.ListTasks
+   */
+  listTasks: {
+    methodKind: "unary";
+    input: typeof EmptySchema;
+    output: typeof MTasksResponseSchema;
+  },
+  /**
+   * @generated from rpc nomos.MobileApi.UpdateTask
+   */
+  updateTask: {
+    methodKind: "unary";
+    input: typeof MTaskUpdateRequestSchema;
+    output: typeof MAckSchema;
+  },
+  /**
+   * @generated from rpc nomos.MobileApi.DeleteTask
+   */
+  deleteTask: {
+    methodKind: "unary";
+    input: typeof MTaskDeleteRequestSchema;
+    output: typeof MAckSchema;
+  },
+  /**
+   * Brain tab (the user's knowledge graph + learned facts, for the feed + map)
+   *
+   * @generated from rpc nomos.MobileApi.GetBrain
+   */
+  getBrain: {
+    methodKind: "unary";
+    input: typeof EmptySchema;
+    output: typeof MBrainResponseSchema;
+  },
+  /**
+   * Inbox tab (drafts to approve + CATE agent requests). Actions reuse
+   * ApproveDraft/RejectDraft (drafts) + ActOnInboxItem (CATE).
+   *
+   * @generated from rpc nomos.MobileApi.GetInbox
+   */
+  getInbox: {
+    methodKind: "unary";
+    input: typeof EmptySchema;
+    output: typeof MGetInboxResponseSchema;
+  },
+  /**
+   * Today tab (the daily brief: calendar + commitments + tasks, gated on the
+   * daily briefing being enabled).
+   *
+   * @generated from rpc nomos.MobileApi.GetToday
+   */
+  getToday: {
+    methodKind: "unary";
+    input: typeof EmptySchema;
+    output: typeof MTodayResponseSchema;
+  },
+  /**
+   * Studio (hosted-only feature). Blobs move via presigned PUT/GET, never gRPC.
+   *
+   * @generated from rpc nomos.MobileApi.StudioCreateAsset
+   */
+  studioCreateAsset: {
+    methodKind: "unary";
+    input: typeof MStudioCreateAssetRequestSchema;
+    output: typeof MStudioCreateAssetResponseSchema;
+  },
+  /**
+   * @generated from rpc nomos.MobileApi.StudioGetAssetUrl
+   */
+  studioGetAssetUrl: {
+    methodKind: "unary";
+    input: typeof MStudioAssetRefSchema;
+    output: typeof MStudioAssetUrlResponseSchema;
+  },
+  /**
+   * @generated from rpc nomos.MobileApi.StudioEdit
+   */
+  studioEdit: {
+    methodKind: "server_streaming";
+    input: typeof MStudioEditRequestSchema;
+    output: typeof MStudioEventSchema;
+  },
+  /**
+   * @generated from rpc nomos.MobileApi.StudioHistory
+   */
+  studioHistory: {
+    methodKind: "unary";
+    input: typeof MStudioAssetRefSchema;
+    output: typeof MStudioHistoryResponseSchema;
+  },
+  /**
+   * Recent editing sessions for the Home launchpad ("Pick up where you left off").
+   *
+   * @generated from rpc nomos.MobileApi.StudioListAssets
+   */
+  studioListAssets: {
+    methodKind: "unary";
+    input: typeof MStudioListAssetsRequestSchema;
+    output: typeof MStudioListAssetsResponseSchema;
+  },
+  /**
+   * AI-native: a vision model looks at the photo and proposes tap-to-apply edits.
+   *
+   * @generated from rpc nomos.MobileApi.StudioSuggestEdits
+   */
+  studioSuggestEdits: {
+    methodKind: "unary";
+    input: typeof MStudioAssetRefSchema;
+    output: typeof MStudioSuggestionsResponseSchema;
+  },
+  /**
+   * The on-device identity check reports its score for an edit (0..1).
+   *
+   * @generated from rpc nomos.MobileApi.StudioReportIdentity
+   */
+  studioReportIdentity: {
+    methodKind: "unary";
+    input: typeof MStudioIdentityReportSchema;
+    output: typeof MAckSchema;
+  },
+}> = /*@__PURE__*/
+  serviceDesc(file_nomos, 1);
 
 /**
  * @generated from service nomos.OAuthDeposit
@@ -2222,5 +3832,7 @@ export const OAuthDeposit: GenService<{
     methodKind: "unary";
     input: typeof DepositRequestSchema;
     output: typeof DepositResponseSchema;
-  };
-}> /*@__PURE__*/ = serviceDesc(file_nomos, 2);
+  },
+}> = /*@__PURE__*/
+  serviceDesc(file_nomos, 2);
+

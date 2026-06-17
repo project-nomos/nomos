@@ -202,6 +202,127 @@ export const FEATURES: FeatureSpec[] = [
     entry: ["registerDeltaSyncJobs"],
     effects: [{ claim: "emits ingest:trigger for delta runs (behavioral)", notExercised: true }],
   },
+  {
+    id: "studio-gc",
+    summary:
+      "Daily Studio object/row cleanup per owner: expire unconfirmed uploads (assets stuck pending past a TTL) and aged intermediate edit results no longer at the chain head, dropping their objects. Originals + the live head output are kept; the DB is the single clock (rows expired before object delete).",
+    trigger: { kind: "cron", sentinel: "__studio_gc__", schedule: "24h", fanOut: true },
+    entry: ["runStudioGc", "runStudioGcForUser"],
+    effects: [
+      {
+        claim: "GC marks expired Studio rows (status = 'expired')",
+        sql: {
+          query: "SELECT count(*) FROM studio_edits WHERE status = 'expired'",
+          expect: "nonzero",
+        },
+        notExercised: true, // the eval does not age rows past the TTL
+      },
+    ],
+    invariants: [
+      "the original asset object is never deleted by GC",
+      "a row is marked expired before its object is deleted",
+      "every GC query is user_id-filtered",
+    ],
+  },
+
+  // ── Studio (hosted-only feature) ──
+  {
+    id: "studio",
+    summary:
+      "Hosted-only media asset + edit pipeline (gated). Immutable original + a non-destructive op chain: validate op -> consent gate (cloud ops only) -> append (optimistic concurrency: parent must be a done+output edit) + idempotency -> provider (local-sharp deterministic / mediapipe-sidecar deterministic / GCP generative) -> identity gate (face-risk ops) -> persist output + preview. Manual on-device renders (adjust/makeup/reshape/hair/body) commit via the deviceRender op (the client uploads its own pixels, re-encoded server-side). retouch routes to the deterministic sidecar when up, else the generative cloud fallback. Phase-3 depth ops (muscle/hairstyle/beard/relight/expand/sky) are generative. Per-user scoped.",
+    trigger: { kind: "turn", gate: "studio" },
+    entry: [
+      "buildStudioMcpServer",
+      "buildStudioEngine",
+      "assertIdentityPreserved",
+      "ensureStudioSidecar",
+      "listAssets",
+      "suggestEdits",
+    ],
+    effects: [
+      {
+        claim: "uploaded originals are recorded as studio_assets rows",
+        sql: { query: "SELECT count(*) FROM studio_assets", expect: "nonzero" },
+        notExercised: true,
+      },
+      {
+        claim: "each edit appends a completed studio_edits op row",
+        sql: {
+          query: "SELECT count(*) FROM studio_edits WHERE status = 'done'",
+          expect: "nonzero",
+        },
+        notExercised: true,
+      },
+      {
+        claim: "on-device renders commit as deviceRender edits (client-uploaded pixels)",
+        sql: {
+          query: "SELECT count(*) FROM studio_edits WHERE op = 'deviceRender' AND status = 'done'",
+          expect: "nonzero",
+        },
+        notExercised: true,
+      },
+      {
+        claim: "one-tap retouch records a done studio_edits row (sidecar or cloud fallback)",
+        sql: {
+          query: "SELECT count(*) FROM studio_edits WHERE op = 'retouch' AND status = 'done'",
+          expect: "nonzero",
+        },
+        notExercised: true,
+      },
+      {
+        claim: "Phase-3 generative depth ops record done studio_edits rows",
+        sql: {
+          query:
+            "SELECT count(*) FROM studio_edits WHERE op IN ('muscle','hairstyle','beard','relight','expand','sky') AND status = 'done'",
+          expect: "nonzero",
+        },
+        notExercised: true,
+      },
+      {
+        claim: "op params are stored as a jsonb object, never double-encoded",
+        noDoubleEncode: { table: "studio_edits", column: "params" },
+        notExercised: true,
+      },
+    ],
+    invariants: [
+      "the original asset row is never mutated by an edit",
+      "every studio_assets / studio_edits query is user_id-filtered (zero-trust)",
+      "every generative (cloud) op is gated by the cloudAI consent toggle",
+      "every face-touching generative op passes the identity gate (assertIdentityPreserved)",
+      "a retried edit with a committed idempotency_key returns the existing row, never re-charges",
+      "an edit only chains onto a parent that is done with an output (no half-built chain)",
+      "deviceRender requires client bytes and is free + never consent/identity-gated (WYSIWYG)",
+      "a client-supplied mask must resolve to a studio asset owned by the same user",
+    ],
+  },
+  {
+    id: "studio-learn",
+    summary:
+      "Studio learns the user's photo-editing taste from the edits they apply. Each committed editSemantic fires a signal (recordEditSignal); a background pass every few edits distills them (Haiku) into an editable photo-style.md vault note + photo_style user_model entries. It's injected back as personalized recommendations (suggestEdits style block) and a personalized auto-enhance (editSemantic personalize flag -> styleHint in the generative prompt), never overriding an explicit typed edit. Gated by NOMOS_ADAPTIVE_MEMORY; per-user scoped.",
+    trigger: { kind: "turn", gate: "studio" },
+    entry: ["recordEditSignal", "flushPhotoStyle", "readPhotoStyle"],
+    effects: [
+      {
+        // Exercised by runStudioLearn: 4 edits -> flushPhotoStyle distills the note.
+        claim: "learned editing taste is written as an editable photo-style.md vault note",
+        sql: {
+          query: "SELECT count(*) FROM vault_notes WHERE path = 'photo-style.md'",
+          expect: "nonzero",
+        },
+      },
+      {
+        claim: "structured photo_style preferences accumulate in the user model",
+        sql: {
+          query: "SELECT count(*) FROM user_model WHERE category = 'photo_style'",
+          expect: "nonzero",
+        },
+      },
+    ],
+    invariants: [
+      "learning is gated by NOMOS_ADAPTIVE_MEMORY and is per-user scoped",
+      "personalization biases auto-enhance + suggestions, never an explicit typed edit",
+    ],
+  },
 
   // ── Per-turn (memory-indexer) ──
   {

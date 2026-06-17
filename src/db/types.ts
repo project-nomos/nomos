@@ -398,6 +398,43 @@ export interface KgEdgesTable {
   user_id: Generated<string>;
 }
 
+export interface StudioAssetsTable {
+  id: Generated<string>;
+  user_id: Generated<string>;
+  object_key: string;
+  content_hash: string;
+  mime: string;
+  width: number | null;
+  height: number | null;
+  bytes: Generated<number>;
+  status: Generated<string>;
+  head_edit_id: string | null;
+  metadata: ColumnType<Record<string, unknown>, string | undefined, string>;
+  created_at: Generated<Date>;
+  updated_at: Generated<Date>;
+}
+
+export interface StudioEditsTable {
+  id: Generated<string>;
+  asset_id: string;
+  user_id: Generated<string>;
+  parent_edit_id: string | null;
+  idempotency_key: string;
+  op: string;
+  op_spec_version: Generated<number>;
+  params: ColumnType<Record<string, unknown>, string | undefined, string>;
+  provider: string | null;
+  input_key: string | null;
+  output_key: string | null;
+  preview_key: string | null;
+  status: Generated<string>;
+  cost_usd: Generated<number>;
+  identity_score: number | null;
+  error: string | null;
+  created_at: Generated<Date>;
+  updated_at: Generated<Date>;
+}
+
 // ---------------------------------------------------------------------------
 // Database interface
 // ---------------------------------------------------------------------------
@@ -432,6 +469,8 @@ export interface Database {
   cate_inbound: CateInboundTable;
   kg_nodes: KgNodesTable;
   kg_edges: KgEdgesTable;
+  studio_assets: StudioAssetsTable;
+  studio_edits: StudioEditsTable;
 }
 
 // ---------------------------------------------------------------------------

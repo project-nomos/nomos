@@ -8,8 +8,6 @@
  * Pricing data from https://docs.anthropic.com/en/docs/about-claude/pricing
  */
 
-import { formatTokenCount } from "./token-estimation.ts";
-
 // ── Pricing Tiers ──
 
 export interface ModelCosts {
@@ -266,76 +264,6 @@ export class CostTracker {
       this.modelUsage.set(model, { ...usage });
     }
   }
-}
-
-// ── Formatting ──
-
-/**
- * Format a cost in USD for display.
- */
-export function formatCost(cost: number): string {
-  if (cost >= 0.5) {
-    return `$${cost.toFixed(2)}`;
-  }
-  return `$${cost.toFixed(4)}`;
-}
-
-/**
- * Format a duration in milliseconds for display.
- */
-export function formatDuration(ms: number): string {
-  if (ms < 1000) return `${ms}ms`;
-  const seconds = ms / 1000;
-  if (seconds < 60) return `${seconds.toFixed(1)}s`;
-  const minutes = Math.floor(seconds / 60);
-  const remainingSeconds = Math.round(seconds % 60);
-  return `${minutes}m ${remainingSeconds}s`;
-}
-
-/**
- * Format a full session cost summary for CLI display.
- */
-export function formatSessionSummary(summary: SessionCostSummary): string {
-  const lines: string[] = [];
-
-  const costStr = formatCost(summary.totalCostUsd);
-  lines.push(`Total cost:    ${costStr}`);
-  lines.push(`Duration:      ${formatDuration(summary.durationMs)}`);
-  lines.push(`Turns:         ${summary.totalTurns}`);
-  lines.push("");
-
-  // Per-model breakdown
-  const models = Object.entries(summary.modelUsage);
-  if (models.length > 0) {
-    lines.push("Usage by model:");
-    for (const [model, usage] of models) {
-      const short = model.replace("claude-", "");
-      lines.push(
-        `  ${short}: ${formatTokenCount(usage.inputTokens)} in, ${formatTokenCount(usage.outputTokens)} out` +
-          (usage.cacheReadTokens > 0
-            ? `, ${formatTokenCount(usage.cacheReadTokens)} cache read`
-            : "") +
-          (usage.cacheWriteTokens > 0
-            ? `, ${formatTokenCount(usage.cacheWriteTokens)} cache write`
-            : "") +
-          ` (${formatCost(usage.costUsd)})`,
-      );
-    }
-  }
-
-  return lines.join("\n");
-}
-
-/**
- * Format model pricing for display (e.g., "$3/$15 per Mtok").
- */
-export function formatModelPricing(model: string): string | undefined {
-  const canonical = canonicalizeModel(model);
-  const costs = MODEL_PRICING[canonical];
-  if (!costs) return undefined;
-
-  const fmtPrice = (n: number) => (Number.isInteger(n) ? `$${n}` : `$${n.toFixed(2)}`);
-  return `${fmtPrice(costs.inputTokens)}/${fmtPrice(costs.outputTokens)} per Mtok`;
 }
 
 // ── Helpers ──

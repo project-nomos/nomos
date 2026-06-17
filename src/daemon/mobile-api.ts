@@ -66,6 +66,21 @@ import { getTodayOverview } from "./today.ts";
 import { createLogger } from "../lib/logger.ts";
 import type { TenantContext } from "../auth/tenant-context.ts";
 import { resolveMemoryUserId, systemTenant } from "../auth/tenant-context.ts";
+import { buildStudioEngine } from "../sdk/studio-mcp.ts";
+import {
+  confirmAsset,
+  createAsset,
+  getAsset,
+  getEdit,
+  listAssets,
+  listEdits,
+  recordIdentityScore,
+  StaleParentError,
+} from "../studio/assets.ts";
+import { ConsentRequiredError, isCloudAIEnabled, setCloudAIEnabled } from "../studio/consent.ts";
+import { readPhotoStyle } from "../studio/learn.ts";
+import { suggestEdits } from "../studio/suggest.ts";
+import { getObjectStore, objectKey } from "../storage/object-store.ts";
 
 const log = createLogger("mobile-api");
 
@@ -181,6 +196,29 @@ export function buildMobileApiHandlers(deps: MobileApiDeps) {
     GetBrain: withAuthUnary("/nomos.MobileApi/GetBrain", (_, ctx) => handleGetBrain(ctx)),
     GetInbox: withAuthUnary("/nomos.MobileApi/GetInbox", (_, ctx) => handleGetInbox(ctx)),
     GetToday: withAuthUnary("/nomos.MobileApi/GetToday", (_, ctx) => handleGetToday(ctx)),
+
+    // Studio (hosted-only feature)
+    StudioCreateAsset: withAuthUnary("/nomos.MobileApi/StudioCreateAsset", (call, ctx) =>
+      handleStudioCreateAsset(call, ctx),
+    ),
+    StudioGetAssetUrl: withAuthUnary("/nomos.MobileApi/StudioGetAssetUrl", (call, ctx) =>
+      handleStudioGetAssetUrl(call, ctx),
+    ),
+    StudioEdit: withAuthStream("/nomos.MobileApi/StudioEdit", (call, ctx) =>
+      handleStudioEdit(call, ctx),
+    ),
+    StudioHistory: withAuthUnary("/nomos.MobileApi/StudioHistory", (call, ctx) =>
+      handleStudioHistory(call, ctx),
+    ),
+    StudioListAssets: withAuthUnary("/nomos.MobileApi/StudioListAssets", (call, ctx) =>
+      handleStudioListAssets(call, ctx),
+    ),
+    StudioSuggestEdits: withAuthUnary("/nomos.MobileApi/StudioSuggestEdits", (call, ctx) =>
+      handleStudioSuggestEdits(call, ctx),
+    ),
+    StudioReportIdentity: withAuthUnary("/nomos.MobileApi/StudioReportIdentity", (call, ctx) =>
+      handleStudioReportIdentity(call, ctx),
+    ),
   };
 }
 
@@ -652,13 +690,18 @@ const TRUST_TIER_DEFS = [
 async function handleGetSettings(ctx: TenantContext) {
   const integrations = await listIntegrationsForUser(ctx.userId);
 
-  const permissions = await Promise.all(
-    PERMISSION_DEFS.map(async (p) => ({
-      id: p.id,
-      label: p.label,
-      enabled: (await getConfigValue<boolean>(`permission.${p.id}`)) ?? p.def,
-    })),
-  );
+  // Studio cloud-AI consent is stored separately (setCloudAIEnabled), so it's surfaced
+  // as its own permission row alongside the config-driven ones.
+  const permissions = [
+    { id: "studio_cloud_ai", label: "Cloud AI photo edits", enabled: await isCloudAIEnabled() },
+    ...(await Promise.all(
+      PERMISSION_DEFS.map(async (p) => ({
+        id: p.id,
+        label: p.label,
+        enabled: (await getConfigValue<boolean>(`permission.${p.id}`)) ?? p.def,
+      })),
+    )),
+  ];
 
   const trustTiers = await Promise.all(
     TRUST_TIER_DEFS.map(async (t) => {
@@ -817,7 +860,14 @@ async function handleUpdateTrustTier(
 async function handleUpdatePermission(
   call: grpc.ServerUnaryCall<unknown, unknown>,
 ): Promise<{ success: boolean; message: string }> {
-  await setConfigKey(`permission.${(call.request as any).id}`, (call.request as any).enabled);
+  const id = String((call.request as { id?: string }).id ?? "");
+  const enabled = Boolean((call.request as { enabled?: boolean }).enabled);
+  if (id === "studio_cloud_ai") {
+    // Studio cloud-AI consent → the boolean key the consent gate reads.
+    await setCloudAIEnabled(enabled);
+  } else {
+    await setConfigKey(`permission.${id}`, enabled);
+  }
   return { success: true, message: "ok" };
 }
 
@@ -1152,6 +1202,297 @@ async function handleGetInbox(ctx: TenantContext) {
 
 async function handleGetToday(ctx: TenantContext) {
   return getTodayOverview({ orgId: ctx.orgId, userId: resolveMemoryUserId(ctx.userId) });
+}
+
+// ──────────── Studio (hosted-only feature) ────────────
+// Blobs move via presigned PUT/GET, never gRPC. Every handler is user_id-scoped
+// through the authenticated TenantContext.
+
+function notFound(message: string): Error {
+  return Object.assign(new Error(message), { code: grpc.status.NOT_FOUND });
+}
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const isUuid = (s: string): boolean => UUID_RE.test(s);
+
+async function handleStudioCreateAsset(
+  call: grpc.ServerUnaryCall<unknown, unknown>,
+  ctx: TenantContext,
+): Promise<{
+  assetId: string;
+  uploadUrl: string;
+  objectKey: string;
+  expiresAt: number;
+}> {
+  const req = call.request as {
+    mime?: string;
+    contentHash?: string;
+    width?: number;
+    height?: number;
+    bytes?: number;
+  };
+  const mime = req.mime || "image/jpeg";
+  const ext = mime === "image/png" ? "png" : "jpg";
+  // The object key must embed the asset's OWN id (not a throwaway uuid): a mask
+  // uploaded via this same RPC is later passed back as `maskKey`, and the engine
+  // resolves it by extracting `/studio/<id>/` and requiring getAsset(<id>) to
+  // exist. A mismatched id is exactly what produced "invalid mask reference".
+  const assetId = randomUUID();
+  const key = objectKey("studio", assetId, `original.${ext}`);
+  const asset = await createAsset(ctx, {
+    id: assetId,
+    objectKey: key,
+    contentHash: req.contentHash ?? "",
+    mime,
+    width: req.width ?? null,
+    height: req.height ?? null,
+    bytes: req.bytes ?? 0,
+  });
+  const presigned = await getObjectStore().presignPut(key, { contentType: mime });
+  return {
+    assetId: asset.id,
+    uploadUrl: presigned.url,
+    objectKey: key,
+    expiresAt: presigned.expiresAt,
+  };
+}
+
+async function handleStudioGetAssetUrl(
+  call: grpc.ServerUnaryCall<unknown, unknown>,
+  ctx: TenantContext,
+): Promise<{ url: string; expiresAt: number }> {
+  const req = call.request as { assetId?: string; original?: boolean };
+  const assetId = req.assetId ?? "";
+  if (!isUuid(assetId)) throw notFound("studio asset not found");
+  const asset = await getAsset(ctx, assetId);
+  if (!asset) throw notFound("studio asset not found");
+  // The immutable original (before/after compare) vs the current head.
+  let key = asset.objectKey;
+  if (!req.original && asset.headEditId) {
+    const head = await getEdit(ctx, asset.headEditId);
+    if (head?.outputKey) key = head.outputKey;
+  }
+  const presigned = await getObjectStore().presignGet(key);
+  return { url: presigned.url, expiresAt: presigned.expiresAt };
+}
+
+async function handleStudioEdit(
+  call: grpc.ServerWritableStream<unknown, unknown>,
+  ctx: TenantContext,
+): Promise<void> {
+  // Everything is inside try/finally so the stream ALWAYS ends cleanly (a thrown
+  // getAsset/engine error emits an error event instead of destroying the stream).
+  try {
+    const req = call.request as {
+      assetId?: string;
+      op?: string;
+      paramsJson?: string;
+      parentEditId?: string;
+      idempotencyKey?: string;
+      maskKey?: string;
+      inputImage?: Uint8Array;
+    };
+    const assetId = req.assetId ?? "";
+    if (!isUuid(assetId)) {
+      call.write({ kind: "error", message: "invalid asset id" });
+      return;
+    }
+    // Inline device-render bytes are only valid for the deviceRender op, and are
+    // capped well above a 4096px JPEG to keep the request bounded.
+    const inputImage = req.inputImage && req.inputImage.length > 0 ? req.inputImage : null;
+    if (inputImage && inputImage.length > 12 * 1024 * 1024) {
+      call.write({ kind: "error", message: "input image too large" });
+      return;
+    }
+    if (inputImage && req.op !== "deviceRender") {
+      call.write({ kind: "error", message: "input_image is only valid for deviceRender" });
+      return;
+    }
+    // A client-supplied mask must live under this tenant's object prefix; never
+    // let a request read an arbitrary (or another tenant's) object as a mask.
+    if (req.maskKey && !req.maskKey.startsWith(`org/${ctx.orgId}/`)) {
+      call.write({ kind: "error", message: "invalid mask reference" });
+      return;
+    }
+    let params: unknown = {};
+    if (req.paramsJson) {
+      try {
+        params = JSON.parse(req.paramsJson);
+      } catch {
+        call.write({ kind: "error", message: "invalid params_json" });
+        return;
+      }
+    }
+
+    const asset = await getAsset(ctx, assetId);
+    if (!asset) {
+      call.write({ kind: "error", message: "studio asset not found" });
+      return;
+    }
+    const parentEditId =
+      req.parentEditId && req.parentEditId.length > 0 ? req.parentEditId : asset.headEditId;
+
+    call.write({ kind: "progress", status: "running", message: `applying ${req.op ?? ""}` });
+    try {
+      // engine.edit confirms a pending asset, gates consent, and runs the op.
+      const engine = buildStudioEngine();
+      const edit = await engine.edit(ctx, {
+        assetId: asset.id,
+        op: { op: req.op ?? "", params },
+        parentEditId,
+        idempotencyKey: req.idempotencyKey || randomUUID(),
+        maskKey: req.maskKey || null,
+        inlineInputBytes: inputImage,
+      });
+      call.write({
+        kind: "done",
+        editId: edit.id,
+        status: edit.status,
+        previewKey: edit.previewKey ?? "",
+        outputKey: edit.outputKey ?? "",
+        costUsd: edit.costUsd,
+      });
+    } catch (err) {
+      const message =
+        err instanceof ConsentRequiredError
+          ? "Cloud AI is turned off. Enable it in Studio settings to use this edit."
+          : err instanceof StaleParentError
+            ? "This photo changed since you started. Refresh and try again."
+            : err instanceof Error
+              ? err.message
+              : String(err);
+      call.write({ kind: "error", message });
+    }
+  } catch (err) {
+    call.write({ kind: "error", message: err instanceof Error ? err.message : String(err) });
+  } finally {
+    call.end();
+  }
+}
+
+async function handleStudioHistory(
+  call: grpc.ServerUnaryCall<unknown, unknown>,
+  ctx: TenantContext,
+): Promise<{
+  edits: Array<{
+    id: string;
+    op: string;
+    status: string;
+    previewKey: string;
+    outputKey: string;
+    costUsd: number;
+    parentEditId: string;
+    createdAt: string;
+  }>;
+  headEditId: string;
+}> {
+  const assetId = (call.request as { assetId?: string }).assetId ?? "";
+  if (!isUuid(assetId)) return { edits: [], headEditId: "" };
+  const asset = await getAsset(ctx, assetId);
+  // Fetching history means the client is using this asset; confirm it out of
+  // `pending` so the orphan-upload GC sweep never reaps an in-use original.
+  if (asset?.status === "pending") await confirmAsset(ctx, asset.id);
+  const edits = await listEdits(ctx, assetId);
+  return {
+    edits: edits.map((e) => ({
+      id: e.id,
+      op: e.op,
+      status: e.status,
+      previewKey: e.previewKey ?? "",
+      outputKey: e.outputKey ?? "",
+      costUsd: e.costUsd,
+      parentEditId: e.parentEditId ?? "",
+      createdAt: e.createdAt.toISOString(),
+    })),
+    headEditId: asset?.headEditId ?? "",
+  };
+}
+
+async function handleStudioListAssets(
+  call: grpc.ServerUnaryCall<unknown, unknown>,
+  ctx: TenantContext,
+): Promise<{
+  assets: Array<{
+    assetId: string;
+    previewUrl: string;
+    updatedAt: number;
+    finalized: boolean;
+    editCount: number;
+    headOp: string;
+    expiresAt: number;
+  }>;
+}> {
+  const limit = Number((call.request as { limit?: number }).limit ?? 0) || 30;
+  const sessions = await listAssets(ctx, limit);
+  const store = getObjectStore();
+  const assets = await Promise.all(
+    sessions.map(async (s) => {
+      // Thumbnail: the head edit's ~256px preview, else its full output, else the original.
+      const key = s.headPreviewKey ?? s.headOutputKey ?? s.objectKey;
+      let previewUrl = "";
+      let expiresAt = 0;
+      try {
+        const presigned = await store.presignGet(key);
+        previewUrl = presigned.url;
+        expiresAt = presigned.expiresAt;
+      } catch {
+        // A missing/unreadable object just yields no thumbnail; the card still lists.
+      }
+      return {
+        assetId: s.id,
+        previewUrl,
+        updatedAt: s.updatedAt.getTime(),
+        finalized: s.finalized,
+        editCount: s.editCount,
+        headOp: s.headOp ?? "",
+        expiresAt,
+      };
+    }),
+  );
+  return { assets };
+}
+
+async function handleStudioSuggestEdits(
+  call: grpc.ServerUnaryCall<unknown, unknown>,
+  ctx: TenantContext,
+): Promise<{ suggestions: Array<{ label: string; prompt: string }> }> {
+  const assetId = (call.request as { assetId?: string }).assetId ?? "";
+  if (!isUuid(assetId)) return { suggestions: [] };
+  // Analysis sends the photo to the cloud vision model, so it rides the SAME Cloud-AI
+  // consent as editing. Off -> empty, and the client falls back to its static chips.
+  if (!(await isCloudAIEnabled())) return { suggestions: [] };
+  const asset = await getAsset(ctx, assetId);
+  if (!asset) return { suggestions: [] };
+  // Analyze the CURRENT head so the chips reflect the latest result, not the original.
+  let key = asset.objectKey;
+  if (asset.headEditId) {
+    const head = await getEdit(ctx, asset.headEditId);
+    if (head?.outputKey) key = head.outputKey;
+  }
+  let bytes: Uint8Array;
+  try {
+    bytes = await getObjectStore().get(key);
+  } catch {
+    return { suggestions: [] };
+  }
+  // Personalize: bias the suggestions toward the user's learned editing taste.
+  const style = await readPhotoStyle(ctx.userId);
+  const suggestions = await suggestEdits(bytes, asset.mime, { style: style || undefined });
+  return { suggestions };
+}
+
+async function handleStudioReportIdentity(
+  call: grpc.ServerUnaryCall<unknown, unknown>,
+  ctx: TenantContext,
+): Promise<{ success: boolean; message: string }> {
+  const req = call.request as { editId?: string; score?: number };
+  const editId = req.editId ?? "";
+  if (!isUuid(editId)) return { success: false, message: "invalid edit id" };
+  const score = Math.max(0, Math.min(1, Number(req.score ?? 0)));
+  const edit = await recordIdentityScore(ctx, editId, score);
+  return edit
+    ? { success: true, message: "recorded" }
+    : { success: false, message: "edit not found" };
 }
 
 // Helpers

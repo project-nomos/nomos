@@ -409,6 +409,45 @@ export class Gateway {
         process.emit("cron:refresh" as never);
       }
 
+      // Studio GC: clean up Studio objects/rows daily (hosted-only feature, so
+      // seed only when Studio is enabled; the runner is a no-op without rows).
+      if (FEATURES.studio() && !(await cronStore.getJobByName("studio-gc"))) {
+        await cronStore.createJob({
+          userId: systemTenant().userId,
+          name: "studio-gc",
+          schedule: "24h",
+          scheduleType: "every",
+          sessionTarget: "isolated",
+          deliveryMode: "none",
+          prompt: "__studio_gc__",
+          enabled: true,
+          errorCount: 0,
+        });
+        log.info("Registered studio GC cron job (every 24h)");
+        process.emit("cron:refresh" as never);
+      }
+
+      // Studio: install the optional server-side face embedder for the identity
+      // gate when a model is configured (NOMOS_FACE_MODEL_PATH). No-op otherwise;
+      // the privacy-preferred path is the on-device check via StudioReportIdentity.
+      if (FEATURES.studio()) {
+        try {
+          const { installServerFaceEmbedder } = await import("../studio/face-embedder.ts");
+          await installServerFaceEmbedder();
+        } catch (err) {
+          log.warn({ err }, "studio: face embedder install skipped");
+        }
+        // Best-effort: bring up the deterministic beauty-ops sidecar (external URL
+        // or `uv run` from the sibling clone). Non-fatal — retouch falls back to
+        // the cloud provider when it's absent.
+        try {
+          const { ensureStudioSidecar } = await import("../studio/sidecar-launcher.ts");
+          await ensureStudioSidecar();
+        } catch (err) {
+          log.warn({ err }, "studio: sidecar launch skipped");
+        }
+      }
+
       // Style analysis: re-derive the user's writing voice daily. Self-gates on
       // config.styleMatching at fire time, so the job is harmless when the
       // feature is off (and reflects a later toggle without reseeding).
@@ -584,6 +623,14 @@ export class Gateway {
     await this.grpcServer.stop();
     await this.connectServer.stop();
     await this.wsServer.stop();
+    if (FEATURES.studio()) {
+      try {
+        const { stopStudioSidecar } = await import("../studio/sidecar-launcher.ts");
+        await stopStudioSidecar();
+      } catch {
+        // best-effort
+      }
+    }
     await closeBrowser();
 
     log.info("Daemon stopped");

@@ -135,6 +135,20 @@ export class CronEngine {
       return;
     }
 
+    // Intercept studio-gc sentinel -- clean up Studio objects/rows per owner
+    // (unconfirmed uploads + aged intermediate edit results). DB is the clock.
+    if (job.prompt === "__studio_gc__") {
+      log.info("Firing studio GC");
+      (async () => {
+        const { runStudioGc } = await import("../studio/gc.ts");
+        const r = await runStudioGc();
+        log.info(r, "Studio GC complete");
+      })().catch((err) => {
+        log.error({ err: err instanceof Error ? err.message : err }, "Studio GC failed");
+      });
+      return;
+    }
+
     // Intercept magic-docs sentinel -- refresh stale self-updating docs.
     if (job.prompt === "__magic_docs__") {
       log.info("Firing magic-docs refresh");
