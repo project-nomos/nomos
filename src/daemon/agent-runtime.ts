@@ -34,6 +34,7 @@ import { buildVaultMcpServer } from "../sdk/vault-mcp.ts";
 import { buildThinkMcpServer } from "../sdk/think-mcp.ts";
 import { buildLoopMcpServer } from "../sdk/loop-mcp.ts";
 import { buildMemoryDigest } from "../memory/digest.ts";
+import { captureMoodFromTurn } from "../memory/mood-log.ts";
 import { getRelevantArticles } from "../memory/wiki-reader.ts";
 import { loadEnvConfig, type NomosConfig } from "../config/env.ts";
 import { FEATURES, isHosted } from "../config/mode.ts";
@@ -49,6 +50,19 @@ function getDisallowedTools(): string[] {
     blocked.push("Bash", "BashOutput", "KillBash");
   }
   return blocked;
+}
+
+/** Human "N minutes/hours/days/months" since `date`. "" when under ~10 min (too recent to anchor). */
+function formatElapsedSince(date: Date): string {
+  const min = Math.floor((Date.now() - date.getTime()) / 60000);
+  if (min < 10) return "";
+  if (min < 60) return `${min} minutes`;
+  const hours = Math.floor(min / 60);
+  if (hours < 24) return `${hours} hour${hours === 1 ? "" : "s"}`;
+  const days = Math.floor(hours / 24);
+  if (days < 30) return `${days} day${days === 1 ? "" : "s"}`;
+  const months = Math.floor(days / 30);
+  return `${months} month${months === 1 ? "" : "s"}`;
 }
 import { classifyQuery } from "../routing/classifier.ts";
 import {
@@ -465,7 +479,15 @@ export class AgentRuntime {
   private buildIntegrationsSummary(): string {
     const parts: string[] = [];
 
-    if (this.slackWorkspaces && this.slackWorkspaces.length > 0) {
+    // BYO messaging channels (Slack/Discord/Telegram/WhatsApp/iMessage) are a power-user
+    // feature only. On a hosted deployment the daemon may physically have one configured
+    // (e.g. a Mac with Messages.app), but a hosted tenant's only channel is the mobile app
+    // (see mode.ts: "Channels are limited to what the central app supports"). Advertising
+    // these in hosted mode makes the agent claim a multi-channel presence it does not have
+    // for this tenant — so suppress them unless we are power-user.
+    const showByoChannels = !isHosted();
+
+    if (showByoChannels && this.slackWorkspaces && this.slackWorkspaces.length > 0) {
       const wsList = this.slackWorkspaces
         .map(
           (ws) =>
@@ -481,10 +503,10 @@ export class AgentRuntime {
         ].join("\n"),
       );
     }
-    if (isDiscordConfigured()) {
+    if (showByoChannels && isDiscordConfigured()) {
       parts.push("- **Discord**: Send and receive messages via Discord bot");
     }
-    if (isTelegramConfigured()) {
+    if (showByoChannels && isTelegramConfigured()) {
       parts.push("- **Telegram**: Send and receive messages via Telegram bot");
     }
     if (!isHosted() && this.gwsAccounts && this.gwsAccounts.length > 0) {
@@ -510,11 +532,11 @@ export class AgentRuntime {
     }
 
     // Check for WhatsApp
-    if (process.env.WHATSAPP_ENABLED === "true") {
+    if (showByoChannels && process.env.WHATSAPP_ENABLED === "true") {
       parts.push("- **WhatsApp**: Receive and respond to messages via WhatsApp");
     }
     // Check for Messages.app (macOS only)
-    if (this.isImessageEnabled()) {
+    if (showByoChannels && this.isImessageEnabled()) {
       parts.push(
         "- **Messages.app (iMessage)**: Receive and respond to messages via Messages.app. You have access to the user's iMessage conversations.",
       );
@@ -525,6 +547,10 @@ export class AgentRuntime {
       const nd = this.notificationDefault;
       parts.push(
         `- **Default notification channel**: ${nd.label ?? nd.channelId} (${nd.platform}/${nd.channelId}). When creating scheduled tasks with \`announce: true\`, this channel is used automatically if no explicit target is given.`,
+      );
+    } else if (isHosted()) {
+      parts.push(
+        '- **Nomos app** — this conversation IS the Nomos app, and it is your ONLY messaging channel. The user talks to you here, and you reach them in the same place: you can send push notifications to their phone and follow up or check in unprompted, even when the app is closed. When the user asks how the two of you keep in touch, the answer is simply: right here in the app, plus notifications. Do NOT describe this conversation as "Claude Code", a terminal, or a developer tool, do NOT claim to be on any other messaging channel (no iMessage, Slack, Telegram, WhatsApp, or Discord), and do NOT tell the user to "configure" or "set up" channels. (Non-channel tool integrations the user has connected, like Google, remain available when present.)',
       );
     } else {
       parts.push(
@@ -715,8 +741,19 @@ export class AgentRuntime {
       tomTracker = new TheoryOfMindTracker();
       this.tomTrackers.set(sessionKey, tomTracker);
     }
-    tomTracker.update(message.content);
+    const tomState = tomTracker.update(message.content);
     const userState = tomTracker.formatForPrompt();
+
+    // Emotional presence: when the live read flags genuine strain this turn, capture a
+    // mood EPISODE (its cause, not a standing state) for continuity. Fire-and-forget and
+    // cost-bounded to strain turns; the live read above always wins for the moment.
+    if (tomState.emotion === "stressed" || tomState.emotion === "frustrated") {
+      void captureMoodFromTurn(
+        resolveMemoryUserId(message.userId),
+        message.content,
+        tomState.summary,
+      ).catch(() => {});
+    }
 
     // Detect active persona for this message context
     const personaMatches =
@@ -995,6 +1032,40 @@ export class AgentRuntime {
     // so it stays continuous without having to call a recall tool first.
     const memoryDigest = await buildMemoryDigest(vaultUserId).catch(() => "");
 
+    // Elapsed-time anchor: how long since the last conversation, so the agent has a
+    // temporal sense between sessions (not just "now") — it can pick up naturally.
+    let elapsedAnchor = "";
+    if (sessionKey) {
+      try {
+        const { getPreviousSessionEnd } = await import("../db/sessions.ts");
+        const last = await getPreviousSessionEnd(vaultUserId, sessionKey);
+        const ago = last ? formatElapsedSince(last) : "";
+        if (ago) {
+          elapsedAnchor = `## Continuity\nYour last conversation with the user ended **${ago} ago**. Your memory carries over, but time has passed — don't assume nothing has changed since then.`;
+        }
+      } catch {
+        /* sessions unavailable; skip */
+      }
+    }
+
+    // Open mood episodes: the cause(s) the user was recently stretched about, so the
+    // agent can gently follow up on the THING — never assert a mood. Decayed; the live
+    // read always wins.
+    let moodContext = "";
+    try {
+      const { readOpenMoodEpisodes } = await import("../memory/mood-log.ts");
+      const open = await readOpenMoodEpisodes(vaultUserId);
+      if (open.length > 0) {
+        const lines = open
+          .slice(0, 5)
+          .map((e) => `- ${e.cause} (seemed ${e.emotion}, ${e.date})`)
+          .join("\n");
+        moodContext = `## Recently weighing on them\nThings the user was stretched about lately. You MAY gently follow up on the cause ("how'd the launch land?") — never assert their current mood. The live read above wins: if they seem fine now, they're fine.\n${lines}`;
+      }
+    } catch {
+      /* mood log unavailable; skip */
+    }
+
     // Query-specific: surface the most relevant compiled wiki articles for this
     // turn (FTS over the owner's wiki, 4000-char budget). Empty when the wiki is
     // empty or the prompt has no matches. Scoped to the resolved owner.
@@ -1032,6 +1103,16 @@ export class AgentRuntime {
     // Inject the reasoning-first memory digest (what the agent knows about the user)
     if (memoryDigest) {
       systemPromptAppend = systemPromptAppend + "\n\n" + memoryDigest;
+    }
+
+    // Inject the elapsed-time anchor (how long since the last conversation)
+    if (elapsedAnchor) {
+      systemPromptAppend = systemPromptAppend + "\n\n" + elapsedAnchor;
+    }
+
+    // Inject open mood episodes (gentle follow-up on the cause, never assert a mood)
+    if (moodContext) {
+      systemPromptAppend = systemPromptAppend + "\n\n" + moodContext;
     }
 
     // Inject query-relevant wiki articles LAST so the stable prefix (system

@@ -39,6 +39,13 @@ describe("loadEnvConfig", () => {
     expect(config.permissionMode).toBe("default");
   });
 
+  it("defaults commitmentTracking to on (opt-out)", () => {
+    delete process.env.NOMOS_COMMITMENT_TRACKING;
+    expect(loadEnvConfig().commitmentTracking).toBe(true);
+    process.env.NOMOS_COMMITMENT_TRACKING = "false";
+    expect(loadEnvConfig().commitmentTracking).toBe(false);
+  });
+
   it("applies defaults when env vars are not set", () => {
     const config = loadEnvConfig();
 

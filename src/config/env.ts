@@ -168,7 +168,10 @@ export function loadEnvConfig(): NomosConfig {
     anthropicBaseUrl: process.env.ANTHROPIC_BASE_URL,
     openrouterApiKey: process.env.OPENROUTER_API_KEY,
     adaptiveMemory: process.env.NOMOS_ADAPTIVE_MEMORY !== "false",
-    commitmentTracking: process.env.NOMOS_COMMITMENT_TRACKING === "true",
+    // Opt-out (default on): the agent reaches out about your own commitments. The
+    // per-turn extraction is cost-gated on a deliverable channel (see memory-indexer),
+    // so there's no added cost until reach-out is actually possible.
+    commitmentTracking: process.env.NOMOS_COMMITMENT_TRACKING !== "false",
     styleMatching: process.env.NOMOS_STYLE_MATCHING === "true",
     extractionModel: process.env.NOMOS_EXTRACTION_MODEL,
     wikiEnabled: process.env.NOMOS_WIKI_ENABLED !== "false",

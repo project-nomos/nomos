@@ -20,6 +20,80 @@ describe("buildSystemPromptAppend", () => {
     expect(result).toContain("user_model_recall");
   });
 
+  it("always asserts the persistent/proactive/learning self-model (Agent Nature)", () => {
+    // Unconditional — present even with an empty profile, so it survives a custom SOUL.
+    const result = buildSystemPromptAppend({
+      profile: {},
+      identity: defaultIdentity,
+    });
+
+    expect(result).toContain("## Agent Nature");
+    expect(result).toContain("You persist");
+    expect(result).toContain("You reach out");
+    expect(result).toContain("You grow");
+    expect(result).toContain("You attune");
+    expect(result).toContain("not a therapist"); // the safety boundary
+  });
+
+  it("power-user memory provenance names the user's own channels", () => {
+    const priorMode = process.env.NOMOS_MODE;
+    const priorJwks = process.env.AUTH_JWKS_URL;
+    delete process.env.NOMOS_MODE;
+    delete process.env.AUTH_JWKS_URL;
+    try {
+      const result = buildSystemPromptAppend({ profile: {}, identity: defaultIdentity });
+      expect(result).toContain("Slack, iMessage, email");
+    } finally {
+      if (priorMode === undefined) delete process.env.NOMOS_MODE;
+      else process.env.NOMOS_MODE = priorMode;
+      if (priorJwks === undefined) delete process.env.AUTH_JWKS_URL;
+      else process.env.AUTH_JWKS_URL = priorJwks;
+    }
+  });
+
+  it("hosted mode does not claim BYO channels in the memory provenance", () => {
+    const priorMode = process.env.NOMOS_MODE;
+    process.env.NOMOS_MODE = "hosted";
+    try {
+      const result = buildSystemPromptAppend({ profile: {}, identity: defaultIdentity });
+      // The agent must not tell a hosted user it ingests from self-hosted channels.
+      expect(result).not.toContain("Slack, iMessage, email");
+      expect(result).toContain("built from your conversations with the user in the Nomos app");
+    } finally {
+      if (priorMode === undefined) delete process.env.NOMOS_MODE;
+      else process.env.NOMOS_MODE = priorMode;
+    }
+  });
+
+  it("hosted mode adds a consumer-voice directive (jargon-free)", () => {
+    const priorMode = process.env.NOMOS_MODE;
+    process.env.NOMOS_MODE = "hosted";
+    try {
+      const result = buildSystemPromptAppend({ profile: {}, identity: defaultIdentity });
+      expect(result).toContain("## Talking with the user");
+      expect(result).toContain("No jargon");
+    } finally {
+      if (priorMode === undefined) delete process.env.NOMOS_MODE;
+      else process.env.NOMOS_MODE = priorMode;
+    }
+  });
+
+  it("power-user mode has no consumer-voice directive (technical detail is welcome)", () => {
+    const priorMode = process.env.NOMOS_MODE;
+    const priorJwks = process.env.AUTH_JWKS_URL;
+    delete process.env.NOMOS_MODE;
+    delete process.env.AUTH_JWKS_URL;
+    try {
+      const result = buildSystemPromptAppend({ profile: {}, identity: defaultIdentity });
+      expect(result).not.toContain("## Talking with the user");
+    } finally {
+      if (priorMode === undefined) delete process.env.NOMOS_MODE;
+      else process.env.NOMOS_MODE = priorMode;
+      if (priorJwks === undefined) delete process.env.AUTH_JWKS_URL;
+      else process.env.AUTH_JWKS_URL = priorJwks;
+    }
+  });
+
   it("includes agent identity when name is not default", () => {
     const result = buildSystemPromptAppend({
       profile: {},

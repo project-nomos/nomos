@@ -38,6 +38,16 @@ export async function buildMemoryDigest(
     /* vault unavailable; skip */
   }
 
+  // The agent's own first-person continuity journal — what it noticed last time and
+  // where it left off. Continuity in the agent's voice, always injected if present.
+  let journal = "";
+  try {
+    const note = await vaultRead(userId, "agent-journal.md");
+    if (note?.content.trim()) journal = note.content.trim();
+  } catch {
+    /* vault unavailable; skip */
+  }
+
   // High-confidence structured user model, grouped by category.
   let modelSection = "";
   try {
@@ -59,7 +69,7 @@ export async function buildMemoryDigest(
     /* user_model unavailable; skip */
   }
 
-  if (!profile && !modelSection) return "";
+  if (!profile && !modelSection && !journal) return "";
 
   const parts = [
     "## What you know about this user",
@@ -67,5 +77,6 @@ export async function buildMemoryDigest(
   ];
   if (profile) parts.push(profile);
   if (modelSection) parts.push(modelSection);
+  if (journal) parts.push(`### Where we left off (your journal)\n${journal}`);
   return parts.join("\n");
 }

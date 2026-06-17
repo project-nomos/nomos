@@ -18,7 +18,9 @@ describe("buildMemoryDigest", () => {
   });
 
   it("includes the profile note and high-confidence model entries grouped by category", async () => {
-    vaultRead.mockResolvedValue({ content: "Meidad, founder of Nomos." });
+    vaultRead.mockImplementation((_u: string, p: string) =>
+      p === "profile.md" ? { content: "Meidad, founder of Nomos." } : null,
+    );
     getUserModel.mockResolvedValue([
       { category: "preference", key: "coffee", value: "black", confidence: 0.9 },
       { category: "fact", key: "city", value: "SF", confidence: 0.8 },
@@ -34,9 +36,20 @@ describe("buildMemoryDigest", () => {
   });
 
   it("survives a failing user_model and still injects the profile", async () => {
-    vaultRead.mockResolvedValue({ content: "Just the profile." });
+    vaultRead.mockImplementation((_u: string, p: string) =>
+      p === "profile.md" ? { content: "Just the profile." } : null,
+    );
     getUserModel.mockRejectedValue(new Error("db down"));
     const d = await buildMemoryDigest("u1");
     expect(d).toContain("Just the profile.");
+  });
+
+  it("injects the agent's own journal under 'Where we left off'", async () => {
+    vaultRead.mockImplementation((_u: string, p: string) =>
+      p === "agent-journal.md" ? { content: "Picking up from the launch work." } : null,
+    );
+    const d = await buildMemoryDigest("u1");
+    expect(d).toContain("Where we left off");
+    expect(d).toContain("Picking up from the launch work.");
   });
 });
