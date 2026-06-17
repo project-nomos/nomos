@@ -135,3 +135,107 @@ export async function compositeMasked(
     .toBuffer();
   return new Uint8Array(out);
 }
+
+export interface MaskBox {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
+/**
+ * The bounding box of the brushed (white) region of a mask, in the ORIGINAL's pixel
+ * space, padded by `padFrac` of the box's larger side and clamped to the image. Returns
+ * null when the mask is empty (caller falls back to a whole-image edit). This is what
+ * lets a region edit CROP to the marked area so the model focuses there.
+ */
+export async function maskBoundingBox(
+  mask: Uint8Array,
+  width: number,
+  height: number,
+  padFrac = 0.08,
+): Promise<MaskBox | null> {
+  if (width <= 0 || height <= 0) return null;
+  const { data } = await sharp(Buffer.from(mask))
+    .resize(width, height, { fit: "fill" })
+    .greyscale()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  let minX = width;
+  let minY = height;
+  let maxX = -1;
+  let maxY = -1;
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      if (data[y * width + x] > 127) {
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+      }
+    }
+  }
+  if (maxX < 0) return null; // no brushed pixels
+  const pad = Math.round(Math.max(maxX - minX, maxY - minY) * padFrac) + 1;
+  const left = Math.max(0, minX - pad);
+  const top = Math.max(0, minY - pad);
+  const right = Math.min(width, maxX + pad + 1);
+  const bottom = Math.min(height, maxY + pad + 1);
+  return { left, top, width: Math.max(1, right - left), height: Math.max(1, bottom - top) };
+}
+
+/** The brushed-region box for an original + mask (reads the original's pixel dims). */
+export async function regionBox(
+  original: Uint8Array,
+  mask: Uint8Array,
+  padFrac = 0.08,
+): Promise<MaskBox | null> {
+  const meta = await sharp(Buffer.from(original)).metadata();
+  return maskBoundingBox(mask, meta.width ?? 0, meta.height ?? 0, padFrac);
+}
+
+/** Extract the masked region from the original (a JPEG crop the model edits in isolation). */
+export async function cropRegion(original: Uint8Array, box: MaskBox): Promise<Uint8Array> {
+  const out = await sharp(Buffer.from(original))
+    .extract({ left: box.left, top: box.top, width: box.width, height: box.height })
+    .jpeg({ quality: 95 })
+    .toBuffer();
+  return new Uint8Array(out);
+}
+
+/**
+ * Paste an edited crop back into the original at `box`, blended by the brushed mask
+ * (cropped to the box + lightly feathered) so only the marked area changes and the rest
+ * stays bit-exact at the ORIGINAL dimensions — no reframing, no whole-image replacement.
+ */
+export async function compositeRegion(
+  original: Uint8Array,
+  editedCrop: Uint8Array,
+  mask: Uint8Array,
+  box: MaskBox,
+): Promise<Uint8Array> {
+  const base = sharp(Buffer.from(original));
+  const meta = await base.metadata();
+  const width = meta.width ?? 0;
+  const height = meta.height ?? 0;
+
+  const editedRgb = await sharp(Buffer.from(editedCrop))
+    .resize(box.width, box.height, { fit: "fill" })
+    .removeAlpha()
+    .toBuffer();
+  const feather = Math.max(0.5, Math.min(box.width, box.height) * 0.02);
+  const alpha = await sharp(Buffer.from(mask))
+    .resize(width, height, { fit: "fill" })
+    .extract({ left: box.left, top: box.top, width: box.width, height: box.height })
+    .greyscale()
+    .blur(feather)
+    .toColourspace("b-w")
+    .toBuffer();
+
+  const editedWithAlpha = await sharp(editedRgb).joinChannel(alpha).png().toBuffer();
+  const out = await base
+    .composite([{ input: editedWithAlpha, left: box.left, top: box.top, blend: "over" }])
+    .jpeg({ quality: 92 })
+    .toBuffer();
+  return new Uint8Array(out);
+}

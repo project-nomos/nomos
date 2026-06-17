@@ -13,7 +13,7 @@
 import { GoogleGenAI, HarmBlockThreshold, HarmCategory, type SafetySetting } from "@google/genai";
 import type { ProviderInput, ProviderOutput, StudioProvider } from "../engine.ts";
 import { OP_META, type StudioOp, type StudioOpName } from "../ops.ts";
-import { compositeMasked } from "./local-sharp.ts";
+import { compositeRegion, cropRegion, regionBox } from "./local-sharp.ts";
 
 const GENERATIVE_OPS: readonly StudioOpName[] = [
   "editSemantic",
@@ -127,19 +127,33 @@ export class GeminiImageProvider implements StudioProvider {
   }
 
   async execute(op: StudioOp, input: ProviderInput): Promise<ProviderOutput> {
+    const prompt = `${promptFor(op)}\n\n${QUALITY_GUARD}`;
+
+    // Region edit: when the user brushed a mask on a localized op, CROP to that area,
+    // edit just the crop (so the model focuses on what's marked — "remove this" works),
+    // and composite it back at the original dimensions. No whole-image replacement, no
+    // reframing. Falls through to a whole-image edit if the mask is empty.
+    if (input.maskBytes && OP_META[op.op].localized) {
+      const box = await regionBox(input.bytes, input.maskBytes);
+      if (box) {
+        const crop = await cropRegion(input.bytes, box);
+        const edited = await this.client.editImage({
+          imageBase64: Buffer.from(crop).toString("base64"),
+          mimeType: "image/jpeg",
+          prompt,
+        });
+        const editedBytes = new Uint8Array(Buffer.from(edited.base64, "base64"));
+        const out = await compositeRegion(input.bytes, editedBytes, input.maskBytes, box);
+        return { bytes: out, mime: "image/jpeg", costUsd: this.cost, provider: this.name };
+      }
+    }
+
     const result = await this.client.editImage({
       imageBase64: Buffer.from(input.bytes).toString("base64"),
       mimeType: input.mime,
-      prompt: `${promptFor(op)}\n\n${QUALITY_GUARD}`,
+      prompt,
     });
     const modelBytes = new Uint8Array(Buffer.from(result.base64, "base64"));
-
-    // Mask-bounded paste-back: composite the model output onto the original,
-    // region-only, so untouched pixels stay bit-exact down the chain.
-    if (input.maskBytes && OP_META[op.op].localized) {
-      const composited = await compositeMasked(input.bytes, modelBytes, input.maskBytes);
-      return { bytes: composited, mime: "image/jpeg", costUsd: this.cost, provider: this.name };
-    }
     return { bytes: modelBytes, mime: result.mimeType, costUsd: this.cost, provider: this.name };
   }
 }

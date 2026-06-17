@@ -1,7 +1,13 @@
 import sharp from "sharp";
 import { describe, expect, it } from "vitest";
 import { validateOp } from "../ops.ts";
-import { compositeMasked, LocalSharpProvider, makePreview } from "./local-sharp.ts";
+import {
+  compositeMasked,
+  compositeRegion,
+  LocalSharpProvider,
+  makePreview,
+  maskBoundingBox,
+} from "./local-sharp.ts";
 
 async function solid(
   w: number,
@@ -10,6 +16,31 @@ async function solid(
 ): Promise<Uint8Array> {
   const buf = await sharp({ create: { width: w, height: h, channels: 3, background: color } })
     .jpeg()
+    .toBuffer();
+  return new Uint8Array(buf);
+}
+
+/** A black mask with a single white rectangle (the "brushed" region). */
+async function maskWithRect(
+  w: number,
+  h: number,
+  rect: { left: number; top: number; width: number; height: number },
+): Promise<Uint8Array> {
+  const white = await sharp({
+    create: {
+      width: rect.width,
+      height: rect.height,
+      channels: 3,
+      background: { r: 255, g: 255, b: 255 },
+    },
+  })
+    .png()
+    .toBuffer();
+  const buf = await sharp({
+    create: { width: w, height: h, channels: 3, background: { r: 0, g: 0, b: 0 } },
+  })
+    .composite([{ input: white, left: rect.left, top: rect.top }])
+    .png()
     .toBuffer();
   return new Uint8Array(buf);
 }
@@ -117,5 +148,48 @@ describe("compositeMasked (mask-bounded paste-back)", () => {
     const right = px(17, 10);
     expect(left[2]).toBeGreaterThan(left[0]); // blue dominant on the edited (left) side
     expect(right[0]).toBeGreaterThan(right[2]); // red dominant on the kept (right) side
+  });
+});
+
+describe("region edit helpers (crop-inpaint)", () => {
+  it("maskBoundingBox wraps the brushed region (padded) and is null when empty", async () => {
+    const mask = await maskWithRect(100, 100, { left: 40, top: 30, width: 20, height: 25 });
+    const box = await maskBoundingBox(mask, 100, 100, 0.1);
+    expect(box).not.toBeNull();
+    expect(box!.left).toBeLessThanOrEqual(40); // padded outward
+    expect(box!.top).toBeLessThanOrEqual(30);
+    expect(box!.left + box!.width).toBeGreaterThanOrEqual(60);
+    expect(box!.top + box!.height).toBeGreaterThanOrEqual(55);
+    expect(box!.left).toBeGreaterThanOrEqual(0); // clamped to the image
+    expect(box!.top + box!.height).toBeLessThanOrEqual(100);
+
+    const black = await solid(50, 50, { r: 0, g: 0, b: 0 }); // nothing brushed
+    expect(await maskBoundingBox(black, 50, 50)).toBeNull();
+  });
+
+  it("compositeRegion changes only the masked area, keeping the original dimensions", async () => {
+    const original = await solid(100, 100, { r: 255, g: 0, b: 0 }); // red
+    const box = { left: 40, top: 30, width: 20, height: 25 };
+    const editedCrop = await solid(box.width, box.height, { r: 0, g: 0, b: 255 }); // blue
+    const mask = await maskWithRect(100, 100, box);
+
+    const out = await compositeRegion(original, editedCrop, mask, box);
+    const meta = await sharp(Buffer.from(out)).metadata();
+    expect(meta.width).toBe(100);
+    expect(meta.height).toBe(100);
+
+    const { data } = await sharp(Buffer.from(out))
+      .removeAlpha()
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+    const px = (x: number, y: number) => {
+      const i = (y * 100 + x) * 3;
+      return { r: data[i], g: data[i + 1], b: data[i + 2] };
+    };
+    const inside = px(50, 42); // within the box + mask
+    const outside = px(5, 5); // far away
+    expect(inside.b).toBeGreaterThan(inside.r); // turned blue-ish
+    expect(outside.r).toBeGreaterThan(200); // still red
+    expect(outside.b).toBeLessThan(60);
   });
 });
