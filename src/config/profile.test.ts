@@ -35,6 +35,36 @@ describe("buildSystemPromptAppend", () => {
     expect(result).toContain("not a therapist"); // the safety boundary
   });
 
+  it("power-user memory provenance names the user's own channels", () => {
+    const priorMode = process.env.NOMOS_MODE;
+    const priorJwks = process.env.AUTH_JWKS_URL;
+    delete process.env.NOMOS_MODE;
+    delete process.env.AUTH_JWKS_URL;
+    try {
+      const result = buildSystemPromptAppend({ profile: {}, identity: defaultIdentity });
+      expect(result).toContain("Slack, iMessage, email");
+    } finally {
+      if (priorMode === undefined) delete process.env.NOMOS_MODE;
+      else process.env.NOMOS_MODE = priorMode;
+      if (priorJwks === undefined) delete process.env.AUTH_JWKS_URL;
+      else process.env.AUTH_JWKS_URL = priorJwks;
+    }
+  });
+
+  it("hosted mode does not claim BYO channels in the memory provenance", () => {
+    const priorMode = process.env.NOMOS_MODE;
+    process.env.NOMOS_MODE = "hosted";
+    try {
+      const result = buildSystemPromptAppend({ profile: {}, identity: defaultIdentity });
+      // The agent must not tell a hosted user it ingests from self-hosted channels.
+      expect(result).not.toContain("Slack, iMessage, email");
+      expect(result).toContain("built from your conversations with the user in the Nomos app");
+    } finally {
+      if (priorMode === undefined) delete process.env.NOMOS_MODE;
+      else process.env.NOMOS_MODE = priorMode;
+    }
+  });
+
   it("includes agent identity when name is not default", () => {
     const result = buildSystemPromptAppend({
       profile: {},

@@ -114,12 +114,23 @@ delivers each owner's reminders to that owner's notification default.
 Hosted mode's only channel is the mobile app, so a registered device counts toward the cost
 gate, and the scheduler enables commitment reminders without a global channel
 (`target || isHosted()` in `src/proactive/scheduler.ts`). When no notification default is
-set, the agent is told, in its prompt, that the app is how it reaches the user:
+set, the agent is told, in its prompt, that the app is its only messaging channel and that
+the self-hosted (power-user) channels are not available to it:
 
-> **Reach-out channel**: the Nomos mobile app. In hosted mode you reach the user through
-> push notifications to their phone — `proactive_send` and your scheduled-task announcements
-> are delivered there. You are NOT limited to existing only when the user opens the app: you
-> can follow up on their commitments and check in unprompted, and it will reach them.
+> **Reach-out channel**: the Nomos mobile app — your ONLY messaging channel here. You reach
+> the user through push notifications to their phone; `proactive_send` and your scheduled-task
+> announcements are delivered there. You are NOT limited to existing only when the user opens
+> the app: you can follow up on their commitments and check in unprompted, and it will reach
+> them. You do NOT have iMessage, Slack, Telegram, WhatsApp, or Discord — those are self-hosted
+> (power-user) channels, not part of this hosted setup, so never tell the user you show up
+> across them. (Tool integrations the user has explicitly connected, like Google, stay
+> available where listed above.)
+
+Relatedly, the `## Memory` section's description of where the knowledge base comes from is
+mode-aware (`src/config/profile.ts`): a power-user install says it is built from the user's
+real messages across Slack/iMessage/email/etc., while a hosted tenant (which has none of
+those BYO channels) is told it is built from conversations with the user in the Nomos app. So
+the agent does not claim a multi-channel presence it does not have.
 
 > **Known limitation (delivery wiring).** A registered device satisfies the extraction
 > _cost gate_, but proactive _delivery_ currently routes through the configured notification

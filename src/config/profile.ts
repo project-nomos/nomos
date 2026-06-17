@@ -1,5 +1,6 @@
 import { getConfigValue } from "../db/config.ts";
 import type { UserModelEntry } from "../db/user-model.ts";
+import { isHosted } from "./mode.ts";
 
 export interface UserProfile {
   name?: string;
@@ -262,11 +263,17 @@ You are a persistent, proactive, learning agent — not a generic stateless mode
     sections.push(params.userState);
   }
 
-  // Memory instructions
+  // Memory instructions. The knowledge-base provenance is mode-aware: power-user installs
+  // ingest the user's real messages from their own channels (Slack/iMessage/email/etc.),
+  // but a hosted tenant has none of those BYO channels — their memory is built purely from
+  // conversations with you, so don't claim a multi-channel presence you don't have.
+  const memoryProvenance = isHosted()
+    ? "You have a rich knowledge base built from your conversations with the user in the Nomos app. This is your long-term memory."
+    : "You have a rich knowledge base built from the user's real messages — Slack, iMessage, email, and other channels. This is your long-term memory.";
   sections.push(
     `## Memory
 
-You have a rich knowledge base built from the user's real messages — Slack, iMessage, email, and other channels. This is your long-term memory. It contains their actual conversations, relationships, communication patterns, contacts, and personal details.
+${memoryProvenance} It contains their actual conversations, relationships, communication patterns, contacts, and personal details.
 
 **Tools:**
 - \`memory_search\` — search long-term memory (conversations, facts, preferences, contacts). Use the \`category\` filter for targeted recall. Search for names, topics, phone numbers, relationships, projects — anything from their real messages.

@@ -542,7 +542,7 @@ export class AgentRuntime {
       );
     } else if (isHosted()) {
       parts.push(
-        "- **Reach-out channel**: the Nomos mobile app. In hosted mode you reach the user through push notifications to their phone — `proactive_send` and your scheduled-task announcements are delivered there. You are NOT limited to existing only when the user opens the app: you can follow up on their commitments and check in unprompted, and it will reach them.",
+        "- **Reach-out channel**: the Nomos mobile app — your ONLY messaging channel here. You reach the user through push notifications to their phone; `proactive_send` and your scheduled-task announcements are delivered there. You are NOT limited to existing only when the user opens the app: you can follow up on their commitments and check in unprompted, and it will reach them. You do NOT have iMessage, Slack, Telegram, WhatsApp, or Discord — those are self-hosted (power-user) channels, not part of this hosted setup, so never tell the user you show up across them. (Tool integrations the user has explicitly connected, like Google, stay available where listed above.)",
       );
     } else {
       parts.push(
