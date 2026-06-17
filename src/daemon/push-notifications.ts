@@ -32,6 +32,21 @@ interface ExpoResponse {
   data?: ExpoTicket[];
 }
 
+/**
+ * Whether the user has at least one registered mobile device — i.e. the hosted app's
+ * push channel exists. Used to cost-gate proactive work that can only reach the user
+ * through the Nomos mobile app.
+ */
+export async function hasRegisteredDevice(userId: string): Promise<boolean> {
+  const db = getKysely();
+  const row = await db
+    .selectFrom("mobile_devices")
+    .select((eb) => eb.fn.countAll<number>().as("n"))
+    .where("user_id", "=", userId)
+    .executeTakeFirst();
+  return Number(row?.n ?? 0) > 0;
+}
+
 export async function notifyUser(userId: string, payload: PushPayload): Promise<void> {
   const db = getKysely();
   const rows = await db

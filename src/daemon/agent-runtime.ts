@@ -526,6 +526,10 @@ export class AgentRuntime {
       parts.push(
         `- **Default notification channel**: ${nd.label ?? nd.channelId} (${nd.platform}/${nd.channelId}). When creating scheduled tasks with \`announce: true\`, this channel is used automatically if no explicit target is given.`,
       );
+    } else if (isHosted()) {
+      parts.push(
+        "- **Reach-out channel**: the Nomos mobile app. In hosted mode you reach the user through push notifications to their phone — `proactive_send` and your scheduled-task announcements are delivered there. You are NOT limited to existing only when the user opens the app: you can follow up on their commitments and check in unprompted, and it will reach them.",
+      );
     } else {
       parts.push(
         "- **No default notification channel configured.** When creating scheduled tasks with `announce: true`, you must specify `platform` and `channel_id` explicitly, or ask the user to set a default in Settings.",

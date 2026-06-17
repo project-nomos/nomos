@@ -24,6 +24,7 @@ import { calendarScanJobSpec } from "./calendar-watcher.ts";
 import { morningBriefingJobSpec, DEFAULT_BRIEFING_CRON } from "./morning-briefing.ts";
 import { loadEnvConfigAsync } from "../config/env.ts";
 import { getNotificationDefault } from "../db/notification-defaults.ts";
+import { isHosted } from "../config/mode.ts";
 import { createLogger } from "../lib/logger.ts";
 
 const log = createLogger("proactive-scheduler");
@@ -52,15 +53,16 @@ export async function registerProactiveJobs(): Promise<void> {
 
   // Commitment reminders are gated on the commitmentTracking switch (the same
   // switch that gates capture in the indexer), INDEPENDENT of inbox autonomy --
-  // capture-without-autonomy is still useful. Delivery needs a notification
-  // target, so the sentinel only runs when both are present.
+  // capture-without-autonomy is still useful. Delivery needs a notification target;
+  // in hosted mode that's each owner's mobile push, resolved per-owner when the
+  // sentinel fans out, so a global `target` isn't required there.
   changed =
     (await syncSentinelJob(store, {
       name: COMMITMENT_JOB_NAME,
       prompt: "__commitment_reminders__",
       schedule: "1h",
       scheduleType: "every",
-      enabled: Boolean(config.commitmentTracking && target),
+      enabled: Boolean(config.commitmentTracking && (target || isHosted())),
     })) || changed;
 
   if (autonomy === "off") {

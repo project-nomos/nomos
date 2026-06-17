@@ -100,14 +100,26 @@ are continuous; you don't need to remember between sessions."_
 Acceptance: ask the agent the same "can you be a real companion?" question and it should
 describe reaching out, persisting, and growing — accurately, not with disclaimers.
 
-### Phase 2 — Turn proactive on by default (safely) _(small)_
+### Phase 2 — Proactive reach-out on by default, cost-gated _(implemented)_
 
-- Ship a first-run step that sets a **notification default channel** (today the bundled
-  proactive jobs silently no-op without one).
-- Flip conservative defaults on: commitment reminders + a daily check-in loop, **opt-out**
-  not opt-in, with `passive` autonomy (notify, don't act) as the floor.
-- Surface `proactive_send` / `loop_create` in the manifesto (Phase 1) so the agent
-  actually uses them, e.g. offering "want me to check in on this Friday?" and scheduling it.
+`commitmentTracking` is now **opt-out** (on unless `NOMOS_COMMITMENT_TRACKING=false`): the
+agent reminds you about your own commitments. To stay honest about cost, the per-turn
+extraction (its own LLM call) is **cost-gated** — it only runs when reach-out is actually
+deliverable: a configured notification channel, **or** a registered mobile device (the
+hosted app's push channel). No channel ⇒ no extraction, no cost.
+
+Hosted mode's only channel is the **mobile app**, so a registered device counts as the
+channel: reminders are on by default there (delivered via push), the commitment-reminder
+cron fires without a global channel (it fans out per-owner), and the agent is told it
+reaches the user through the Nomos mobile app — so it follows up + checks in unprompted.
+
+Left opt-in (the cost-heavy / intrusive ones): inbox/calendar autonomy and any
+unconditional daily check-in. The Phase 1 manifesto already has the agent _offer_ check-ins
+("want me to check in Friday?") and schedule them per request, rather than auto-spamming.
+
+Files: `config/env.ts` (default flip), `daemon/memory-indexer.ts` (cost gate) +
+`daemon/push-notifications.ts` (`hasRegisteredDevice`), `proactive/scheduler.ts` (hosted
+reminder gate), `daemon/agent-runtime.ts` (mobile-app reach-out awareness).
 
 ### Phase 3 — Continuity depth _(small / medium)_
 

@@ -15,6 +15,8 @@ import { generateEmbeddings, isEmbeddingAvailable } from "../memory/embeddings.t
 import { storeMemoryChunk } from "../db/memory.ts";
 import { loadEnvConfig } from "../config/env.ts";
 import { resolveMemoryUserId } from "../auth/tenant-context.ts";
+import { getNotificationDefaultFor } from "../db/notification-defaults.ts";
+import { hasRegisteredDevice } from "./push-notifications.ts";
 import { traceMemory } from "../memory/trace.ts";
 import type { IncomingMessage, OutgoingMessage } from "./types.ts";
 import { createLogger } from "../lib/logger.ts";
@@ -31,6 +33,16 @@ const log = createLogger("memory-indexer");
  */
 export function isEphemeralSession(sessionKey: string): boolean {
   return /(^|:)ephemeral(:|$)/.test(sessionKey);
+}
+
+/**
+ * Whether the user can actually receive a proactive message: a configured notification
+ * channel (per-owner or global), or the hosted app's push channel (a registered mobile
+ * device). Used to cost-gate per-turn commitment extraction.
+ */
+async function hasDeliverableTarget(userId: string): Promise<boolean> {
+  if (await getNotificationDefaultFor(userId)) return true;
+  return hasRegisteredDevice(userId);
 }
 
 /**
@@ -129,9 +141,11 @@ export async function indexConversationTurn(
   }
 
   // Commitment tracking: extract promises/follow-ups from the turn and store them
-  // for deadline reminders. Separate opt-in flag (default off) since it adds its
-  // own LLM call -- don't piggyback on adaptiveMemory (which defaults on).
-  if (config.commitmentTracking) {
+  // for deadline reminders. Opt-out (default on), but the extraction is its own LLM
+  // call -- so it's cost-gated on reach-out being deliverable: a configured
+  // notification channel, or a registered mobile device (the hosted app's push
+  // channel). No deliverable channel ⇒ no extraction, no cost.
+  if (config.commitmentTracking && (await hasDeliverableTarget(userId))) {
     extractAndStoreCommitmentsFromTurn(incoming, outgoing, userId).catch((err) => {
       log.debug({ err }, "Commitment extraction failed");
     });
