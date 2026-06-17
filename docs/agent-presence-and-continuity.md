@@ -18,13 +18,13 @@ It has five parts:
 
 1. **Self-model** (`## Agent Nature`): an always-on block telling the agent it persists,
    reaches out, grows, and attunes.
-2. **Reach out**: proactive tools, opt-out commitment tracking, and hosted-mobile awareness.
+2. **Reach out**: proactive tools, opt-out commitment tracking, and channel awareness.
 3. **Continuity depth**: an elapsed-time anchor and an agent-authored journal.
 4. **Shared experience**: a weekly agent-authored relationship narrative.
 5. **Emotional presence**: mood episodes and a graduated support protocol (its own doc).
 
-Everything lands in the MIT-licensed core (no hosted-only layer), is `user_id`-scoped, and
-stores what the agent writes in the user-editable vault, so the owner can read and correct it.
+Everything is `user_id`-scoped and stores what the agent writes in the user-editable vault,
+so the owner can read and correct it.
 
 ## 1. Self-model: the "Agent Nature" block
 
@@ -100,57 +100,25 @@ attune`), and `not a therapist`, so the block can never silently drop out.
 `commitmentTracking` is **opt-out**: on unless `NOMOS_COMMITMENT_TRACKING=false`
 (`src/config/env.ts`). The agent reminds the user about their own commitments. To stay
 honest about cost, the per-turn extraction (its own LLM call) is **cost-gated** in
-`src/daemon/memory-indexer.ts`: it runs only when a reach-out is actually deliverable, which
-`hasDeliverableTarget()` defines as a configured notification default (per-owner or global)
-**or** a registered mobile device (`hasRegisteredDevice`). No deliverable target means no
-extraction and no cost.
+`src/daemon/memory-indexer.ts`: it runs only when a reach-out is actually deliverable (a
+notification channel is configured, per `hasDeliverableTarget()`). No deliverable target
+means no extraction and no cost.
 
 The reminder job (`__commitment_reminders__`, every `1h`) fans out per owner via
 `listMemoryOwners()`, collecting due reminders for each `user_id`, and the cron handler
 delivers each owner's reminders to that owner's notification default.
 
-### Hosted mode
+### Channel awareness
 
-Hosted mode's only channel is the mobile app, so a registered device counts toward the cost
-gate, and the scheduler enables commitment reminders without a global channel
-(`target || isHosted()` in `src/proactive/scheduler.ts`).
-
-The agent's channel awareness is gated to match. `buildIntegrationsSummary`
-(`src/daemon/agent-runtime.ts`) **suppresses the BYO messaging channels**
-(Slack/Discord/Telegram/WhatsApp/iMessage) when `isHosted()`, even if the host daemon
-happens to have one configured. This matters in practice: the hosted daemon often runs on a
-Mac whose Messages.app is set up, so `isImessageEnabled()` is true, but a hosted tenant's
-only channel is still the app. Without the gate the prompt would both list iMessage as active
-and say the agent has no iMessage, and the agent would resolve the contradiction by claiming
-iMessage. With it, the only entry in hosted mode is the reach-out line, which also tells the
-agent that the current conversation _is_ the app (so it stops inventing a separate "Claude
-Code" channel):
-
-> **Nomos mobile app** — this conversation IS the Nomos app, and it is your ONLY messaging
-> channel. The user talks to you here, and you reach them in the same place: `proactive_send`
-> and your scheduled-task announcements arrive as push notifications on their phone. [...] Do
-> NOT describe this conversation as "Claude Code", a terminal, or anything else. You do NOT
-> have iMessage, Slack, Telegram, WhatsApp, or Discord — those are self-hosted (power-user)
-> channels [...] not active here, so never claim to be on them.
-
-Relatedly, the `## Memory` section's description of where the knowledge base comes from is
-mode-aware (`src/config/profile.ts`): a power-user install says it is built from the user's
-real messages across Slack/iMessage/email/etc., while a hosted tenant (which has none of
-those BYO channels) is told it is built from conversations with the user in the Nomos app. So
-the agent does not claim a multi-channel presence it does not have. Both behaviors are guarded
-by tests (`agent-runtime.test.ts`, `profile.test.ts`).
-
-> **Known limitation (delivery wiring).** A registered device satisfies the extraction
-> _cost gate_, but proactive _delivery_ currently routes through the configured notification
-> default and the registered channel adapters (Slack, Discord, Telegram, Email, iMessage):
-> `proactive_send` and the commitment-reminder cron resolve `notifications.default` and send
-> via the channel manager. Direct Expo push (`notifyUser`) is wired only for the draft
-> approval flow and the CATE inbound queue, not yet for commitment reminders or
-> `proactive_send`, and there is no `mobile`/`push` channel adapter. So in a hosted setup
-> with only a registered device and no notification default, the agent's awareness line is
-> ahead of the delivery path: extraction runs, but per-owner delivery is skipped until a
-> notification default with a matching adapter is configured. Closing this gap (a push
-> adapter that delivers `proactive_send`/reminders through `notifyUser`) is tracked separately.
+Every turn, the agent is told which channels and integrations are actually connected, via
+`buildIntegrationsSummary` (`src/daemon/agent-runtime.ts`). It lists only what is configured
+and authenticated, so the agent acts on the real channel set and never claims access it does
+not have. These are the user's own channels: Slack (user-token mode), Discord, Telegram,
+WhatsApp, **iMessage** (Messages.app on macOS), and email, plus connected tool integrations
+like Google. Proactive reach-out (`proactive_send`, and `schedule_task` with
+`announce: true`) is delivered to the configured **default notification channel**; when none
+is set, the agent is told to ask the user to set one or to pass an explicit target rather
+than guessing.
 
 ## 3. Continuity depth
 
@@ -256,17 +224,17 @@ that keep it honest: **[Stress & Anxiety Support](./stress-anxiety-support.md)**
 
 ## Where it lives
 
-| Concern                    | File                                                                                          |
-| -------------------------- | --------------------------------------------------------------------------------------------- |
-| Agent Nature manifesto     | `src/config/profile.ts` (`buildSystemPromptAppend`)                                           |
-| SOUL resolution            | `src/config/soul.ts`                                                                          |
-| Proactive tools            | `src/sdk/tools.ts` (`proactive_send`, `schedule_task`), `src/sdk/loop-mcp.ts` (`loop_create`) |
-| Commitment cost gate       | `src/daemon/memory-indexer.ts`, `src/daemon/push-notifications.ts`                            |
-| Proactive scheduler        | `src/proactive/scheduler.ts`                                                                  |
-| Hosted reach-out awareness | `src/daemon/agent-runtime.ts`                                                                 |
-| Memory digest + journal    | `src/memory/digest.ts`                                                                        |
-| Elapsed-time anchor        | `src/daemon/agent-runtime.ts`, `src/db/sessions.ts`                                           |
-| Relationship narrative     | `src/memory/relationship-narrative.ts`, `src/daemon/cron-engine.ts`, `src/daemon/gateway.ts`  |
+| Concern                 | File                                                                                          |
+| ----------------------- | --------------------------------------------------------------------------------------------- |
+| Agent Nature manifesto  | `src/config/profile.ts` (`buildSystemPromptAppend`)                                           |
+| SOUL resolution         | `src/config/soul.ts`                                                                          |
+| Proactive tools         | `src/sdk/tools.ts` (`proactive_send`, `schedule_task`), `src/sdk/loop-mcp.ts` (`loop_create`) |
+| Commitment cost gate    | `src/daemon/memory-indexer.ts`                                                                |
+| Proactive scheduler     | `src/proactive/scheduler.ts`                                                                  |
+| Channel awareness       | `src/daemon/agent-runtime.ts` (`buildIntegrationsSummary`)                                    |
+| Memory digest + journal | `src/memory/digest.ts`                                                                        |
+| Elapsed-time anchor     | `src/daemon/agent-runtime.ts`, `src/db/sessions.ts`                                           |
+| Relationship narrative  | `src/memory/relationship-narrative.ts`, `src/daemon/cron-engine.ts`, `src/daemon/gateway.ts`  |
 
 ## Evals and audit
 
@@ -298,8 +266,6 @@ prints `AUDIT: PASS` + `SPEC-AUDIT: PASS`.
 
 - Parts 1 to 5 ship. Continuity (the digest, anchor, and journal) and the relationship
   narrative are live and audited.
-- **Hosted push delivery** is not yet wired end-to-end (see the limitation note in
-  [§2](#hosted-mode)).
 - The **proactive emotional check-in**, **return-after-absence warmth**, and
   **learn-what-helps** extensions are designed but not built; see the Status notes in
   [Stress & Anxiety Support](./stress-anxiety-support.md).
