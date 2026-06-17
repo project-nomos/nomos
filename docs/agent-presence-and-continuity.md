@@ -121,15 +121,20 @@ Files: `config/env.ts` (default flip), `daemon/memory-indexer.ts` (cost gate) +
 `daemon/push-notifications.ts` (`hasRegisteredDevice`), `proactive/scheduler.ts` (hosted
 reminder gate), `daemon/agent-runtime.ts` (mobile-app reach-out awareness).
 
-### Phase 3 — Continuity depth _(small / medium)_
+### Phase 3 — Continuity depth _(implemented)_
 
-- **Elapsed-time anchor**: inject "last conversation ended N hours/days ago" from the
-  `sessions` table into the prompt, so the agent has a temporal sense between sessions.
-- **Agent journal** (`agent-journal.md` in the vault): at the end of substantive sessions
-  the agent writes a short first-person note ("picking up from… / I noticed… / expect
-  next…"). Re-injected next session → continuity _in the agent's own voice_.
-- **Isolation test**: an integration check that the digest survives session rotation and
-  never leaks across users (extends `pnpm check:isolation`).
+- **Elapsed-time anchor**: `agent-runtime` injects "Your last conversation ended **N ago**"
+  from the `sessions` table (`getPreviousSessionEnd`, excluding the current session;
+  suppressed under ~10 min), so the agent has a temporal sense between sessions.
+- **Agent journal** (`agent-journal.md` in the vault): the Phase 1 manifesto nudges the
+  agent to jot a short first-person note at the end of substantive sessions;
+  `buildMemoryDigest` re-injects it next session under **"Where we left off (your
+  journal)"** — continuity in the agent's own voice. Rides the existing vault
+  (`user_id`-scoped, user-editable), so no new store.
+
+Files: `daemon/agent-runtime.ts` (anchor + `formatElapsedSince`), `db/sessions.ts`
+(`getPreviousSessionEnd`), `memory/digest.ts` (journal injection), `config/profile.ts`
+(journal nudge).
 
 ### Phase 4 — Shared experience: the genuine new capability _(medium)_
 

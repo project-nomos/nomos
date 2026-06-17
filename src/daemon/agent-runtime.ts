@@ -50,6 +50,19 @@ function getDisallowedTools(): string[] {
   }
   return blocked;
 }
+
+/** Human "N minutes/hours/days/months" since `date`. "" when under ~10 min (too recent to anchor). */
+function formatElapsedSince(date: Date): string {
+  const min = Math.floor((Date.now() - date.getTime()) / 60000);
+  if (min < 10) return "";
+  if (min < 60) return `${min} minutes`;
+  const hours = Math.floor(min / 60);
+  if (hours < 24) return `${hours} hour${hours === 1 ? "" : "s"}`;
+  const days = Math.floor(hours / 24);
+  if (days < 30) return `${days} day${days === 1 ? "" : "s"}`;
+  const months = Math.floor(days / 30);
+  return `${months} month${months === 1 ? "" : "s"}`;
+}
 import { classifyQuery } from "../routing/classifier.ts";
 import {
   loadUserProfile,
@@ -999,6 +1012,22 @@ export class AgentRuntime {
     // so it stays continuous without having to call a recall tool first.
     const memoryDigest = await buildMemoryDigest(vaultUserId).catch(() => "");
 
+    // Elapsed-time anchor: how long since the last conversation, so the agent has a
+    // temporal sense between sessions (not just "now") — it can pick up naturally.
+    let elapsedAnchor = "";
+    if (sessionKey) {
+      try {
+        const { getPreviousSessionEnd } = await import("../db/sessions.ts");
+        const last = await getPreviousSessionEnd(vaultUserId, sessionKey);
+        const ago = last ? formatElapsedSince(last) : "";
+        if (ago) {
+          elapsedAnchor = `## Continuity\nYour last conversation with the user ended **${ago} ago**. Your memory carries over, but time has passed — don't assume nothing has changed since then.`;
+        }
+      } catch {
+        /* sessions unavailable; skip */
+      }
+    }
+
     // Query-specific: surface the most relevant compiled wiki articles for this
     // turn (FTS over the owner's wiki, 4000-char budget). Empty when the wiki is
     // empty or the prompt has no matches. Scoped to the resolved owner.
@@ -1036,6 +1065,11 @@ export class AgentRuntime {
     // Inject the reasoning-first memory digest (what the agent knows about the user)
     if (memoryDigest) {
       systemPromptAppend = systemPromptAppend + "\n\n" + memoryDigest;
+    }
+
+    // Inject the elapsed-time anchor (how long since the last conversation)
+    if (elapsedAnchor) {
+      systemPromptAppend = systemPromptAppend + "\n\n" + elapsedAnchor;
     }
 
     // Inject query-relevant wiki articles LAST so the stable prefix (system

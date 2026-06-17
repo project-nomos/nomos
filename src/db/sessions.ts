@@ -69,6 +69,27 @@ export async function getSessionByKey(sessionKey: string): Promise<SessionRow | 
   return (row as unknown as SessionRow) ?? null;
 }
 
+/**
+ * When the user's most recent OTHER conversation (not `currentSessionKey`) was last
+ * active — for an elapsed-time "we last talked N ago" anchor. Null if there's no
+ * prior session.
+ */
+export async function getPreviousSessionEnd(
+  userId: string,
+  currentSessionKey: string,
+): Promise<Date | null> {
+  const db = getKysely();
+  const row = await db
+    .selectFrom("sessions")
+    .select("updated_at")
+    .where("user_id", "=", userId)
+    .where("session_key", "!=", currentSessionKey)
+    .orderBy("updated_at", "desc")
+    .limit(1)
+    .executeTakeFirst();
+  return row?.updated_at ?? null;
+}
+
 export async function listSessions(params?: {
   status?: string;
   limit?: number;
