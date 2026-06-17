@@ -479,7 +479,15 @@ export class AgentRuntime {
   private buildIntegrationsSummary(): string {
     const parts: string[] = [];
 
-    if (this.slackWorkspaces && this.slackWorkspaces.length > 0) {
+    // BYO messaging channels (Slack/Discord/Telegram/WhatsApp/iMessage) are a power-user
+    // feature only. On a hosted deployment the daemon may physically have one configured
+    // (e.g. a Mac with Messages.app), but a hosted tenant's only channel is the mobile app
+    // (see mode.ts: "Channels are limited to what the central app supports"). Advertising
+    // these in hosted mode makes the agent claim a multi-channel presence it does not have
+    // for this tenant — so suppress them unless we are power-user.
+    const showByoChannels = !isHosted();
+
+    if (showByoChannels && this.slackWorkspaces && this.slackWorkspaces.length > 0) {
       const wsList = this.slackWorkspaces
         .map(
           (ws) =>
@@ -495,10 +503,10 @@ export class AgentRuntime {
         ].join("\n"),
       );
     }
-    if (isDiscordConfigured()) {
+    if (showByoChannels && isDiscordConfigured()) {
       parts.push("- **Discord**: Send and receive messages via Discord bot");
     }
-    if (isTelegramConfigured()) {
+    if (showByoChannels && isTelegramConfigured()) {
       parts.push("- **Telegram**: Send and receive messages via Telegram bot");
     }
     if (!isHosted() && this.gwsAccounts && this.gwsAccounts.length > 0) {
@@ -524,11 +532,11 @@ export class AgentRuntime {
     }
 
     // Check for WhatsApp
-    if (process.env.WHATSAPP_ENABLED === "true") {
+    if (showByoChannels && process.env.WHATSAPP_ENABLED === "true") {
       parts.push("- **WhatsApp**: Receive and respond to messages via WhatsApp");
     }
     // Check for Messages.app (macOS only)
-    if (this.isImessageEnabled()) {
+    if (showByoChannels && this.isImessageEnabled()) {
       parts.push(
         "- **Messages.app (iMessage)**: Receive and respond to messages via Messages.app. You have access to the user's iMessage conversations.",
       );
@@ -542,7 +550,7 @@ export class AgentRuntime {
       );
     } else if (isHosted()) {
       parts.push(
-        "- **Reach-out channel**: the Nomos mobile app — your ONLY messaging channel here. You reach the user through push notifications to their phone; `proactive_send` and your scheduled-task announcements are delivered there. You are NOT limited to existing only when the user opens the app: you can follow up on their commitments and check in unprompted, and it will reach them. You do NOT have iMessage, Slack, Telegram, WhatsApp, or Discord — those are self-hosted (power-user) channels, not part of this hosted setup, so never tell the user you show up across them. (Tool integrations the user has explicitly connected, like Google, stay available where listed above.)",
+        '- **Nomos mobile app** — this conversation IS the Nomos app, and it is your ONLY messaging channel. The user talks to you here, and you reach them in the same place: `proactive_send` and your scheduled-task announcements arrive as push notifications on their phone. You are NOT limited to existing only when the user opens the app — you can follow up on their commitments and check in unprompted, and it will reach them. When the user asks how you two talk, the answer is: the Nomos app (this chat + push). Do NOT describe this conversation as "Claude Code", a terminal, or anything else. You do NOT have iMessage, Slack, Telegram, WhatsApp, or Discord — those are self-hosted (power-user) channels they could set up if they ran their own daemon, but they are NOT active here, so never claim to be on them. (Non-channel tool integrations the user has explicitly connected, like Google, remain available when present.)',
       );
     } else {
       parts.push(

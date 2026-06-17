@@ -113,24 +113,32 @@ delivers each owner's reminders to that owner's notification default.
 
 Hosted mode's only channel is the mobile app, so a registered device counts toward the cost
 gate, and the scheduler enables commitment reminders without a global channel
-(`target || isHosted()` in `src/proactive/scheduler.ts`). When no notification default is
-set, the agent is told, in its prompt, that the app is its only messaging channel and that
-the self-hosted (power-user) channels are not available to it:
+(`target || isHosted()` in `src/proactive/scheduler.ts`).
 
-> **Reach-out channel**: the Nomos mobile app — your ONLY messaging channel here. You reach
-> the user through push notifications to their phone; `proactive_send` and your scheduled-task
-> announcements are delivered there. You are NOT limited to existing only when the user opens
-> the app: you can follow up on their commitments and check in unprompted, and it will reach
-> them. You do NOT have iMessage, Slack, Telegram, WhatsApp, or Discord — those are self-hosted
-> (power-user) channels, not part of this hosted setup, so never tell the user you show up
-> across them. (Tool integrations the user has explicitly connected, like Google, stay
-> available where listed above.)
+The agent's channel awareness is gated to match. `buildIntegrationsSummary`
+(`src/daemon/agent-runtime.ts`) **suppresses the BYO messaging channels**
+(Slack/Discord/Telegram/WhatsApp/iMessage) when `isHosted()`, even if the host daemon
+happens to have one configured. This matters in practice: the hosted daemon often runs on a
+Mac whose Messages.app is set up, so `isImessageEnabled()` is true, but a hosted tenant's
+only channel is still the app. Without the gate the prompt would both list iMessage as active
+and say the agent has no iMessage, and the agent would resolve the contradiction by claiming
+iMessage. With it, the only entry in hosted mode is the reach-out line, which also tells the
+agent that the current conversation _is_ the app (so it stops inventing a separate "Claude
+Code" channel):
+
+> **Nomos mobile app** — this conversation IS the Nomos app, and it is your ONLY messaging
+> channel. The user talks to you here, and you reach them in the same place: `proactive_send`
+> and your scheduled-task announcements arrive as push notifications on their phone. [...] Do
+> NOT describe this conversation as "Claude Code", a terminal, or anything else. You do NOT
+> have iMessage, Slack, Telegram, WhatsApp, or Discord — those are self-hosted (power-user)
+> channels [...] not active here, so never claim to be on them.
 
 Relatedly, the `## Memory` section's description of where the knowledge base comes from is
 mode-aware (`src/config/profile.ts`): a power-user install says it is built from the user's
 real messages across Slack/iMessage/email/etc., while a hosted tenant (which has none of
 those BYO channels) is told it is built from conversations with the user in the Nomos app. So
-the agent does not claim a multi-channel presence it does not have.
+the agent does not claim a multi-channel presence it does not have. Both behaviors are guarded
+by tests (`agent-runtime.test.ts`, `profile.test.ts`).
 
 > **Known limitation (delivery wiring).** A registered device satisfies the extraction
 > _cost gate_, but proactive _delivery_ currently routes through the configured notification
