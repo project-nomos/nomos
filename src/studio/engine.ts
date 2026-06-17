@@ -29,6 +29,7 @@ import {
 } from "./assets.ts";
 import { ConsentRequiredError, isCloudAIEnabled } from "./consent.ts";
 import { assertIdentityPreserved } from "./identity-gate.ts";
+import { readPhotoStyle, recordEditSignal } from "./learn.ts";
 import { OP_META, type StudioOp, type StudioOpName, validateOp } from "./ops.ts";
 
 const log = createLogger("studio-engine");
@@ -39,6 +40,9 @@ export interface ProviderInput {
   params: Record<string, unknown>;
   /** Device/tap mask for localized ops (mask-bounded paste-back happens in the provider). */
   maskBytes?: Uint8Array | null;
+  /** The user's learned photo-editing taste, injected into the prompt for a personalized
+   * edit (auto-enhance). Never set for an explicit typed edit. */
+  styleHint?: string;
 }
 
 export interface ProviderOutput {
@@ -212,12 +216,18 @@ export class StudioEngine {
       const providerBytes = inlineBytes ?? sourceBytes;
       const providerMime = inlineBytes ? (req.inlineInputMime ?? asset.mime) : asset.mime;
       const maskBytes = await this.resolveMask(ctx, req, op);
+      // Personalized edit (auto-enhance): inject the user's learned taste into the prompt.
+      const styleHint =
+        op.op === "editSemantic" && (op.params as { personalize?: boolean }).personalize
+          ? await readPhotoStyle(ctx.userId)
+          : undefined;
 
       const out = await provider.execute(op, {
         bytes: providerBytes,
         mime: providerMime,
         params: op.params,
         maskBytes,
+        styleHint: styleHint || undefined,
       });
 
       // Identity gate for face-risk ops (skips when no embedder is configured).
@@ -248,6 +258,12 @@ export class StudioEngine {
         costUsd: out.costUsd ?? 0,
         identityScore,
       });
+      // Learn the user's taste from the edits they apply (fire-and-forget). Only the
+      // rich natural-language edits carry a signal worth distilling.
+      if (op.op === "editSemantic") {
+        const instruction = String((op.params as { instruction?: unknown }).instruction ?? "");
+        void recordEditSignal(ctx.userId, op.op, instruction).catch(() => {});
+      }
       return done ?? edit;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);

@@ -295,6 +295,35 @@ export const FEATURES: FeatureSpec[] = [
       "a client-supplied mask must resolve to a studio asset owned by the same user",
     ],
   },
+  {
+    id: "studio-learn",
+    summary:
+      "Studio learns the user's photo-editing taste from the edits they apply. Each committed editSemantic fires a signal (recordEditSignal); a background pass every few edits distills them (Haiku) into an editable photo-style.md vault note + photo_style user_model entries. It's injected back as personalized recommendations (suggestEdits style block) and a personalized auto-enhance (editSemantic personalize flag -> styleHint in the generative prompt), never overriding an explicit typed edit. Gated by NOMOS_ADAPTIVE_MEMORY; per-user scoped.",
+    trigger: { kind: "turn", gate: "studio" },
+    entry: ["recordEditSignal", "flushPhotoStyle", "readPhotoStyle"],
+    effects: [
+      {
+        claim: "learned editing taste is written as an editable photo-style.md vault note",
+        sql: {
+          query: "SELECT count(*) FROM vault_notes WHERE path = 'photo-style.md'",
+          expect: "nonzero",
+        },
+        notExercised: true,
+      },
+      {
+        claim: "structured photo_style preferences accumulate in the user model",
+        sql: {
+          query: "SELECT count(*) FROM user_model WHERE category = 'photo_style'",
+          expect: "nonzero",
+        },
+        notExercised: true,
+      },
+    ],
+    invariants: [
+      "learning is gated by NOMOS_ADAPTIVE_MEMORY and is per-user scoped",
+      "personalization biases auto-enhance + suggestions, never an explicit typed edit",
+    ],
+  },
 
   // ── Per-turn (memory-indexer) ──
   {

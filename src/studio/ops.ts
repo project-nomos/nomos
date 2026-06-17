@@ -46,6 +46,8 @@ const editSemantic = z.strictObject({
   instruction: z.string().min(1).max(1000),
   strength: z.number().min(0).max(1).optional(),
   maskKey: z.string().optional(),
+  /** Lean the edit toward the user's learned taste (auto-enhance only). */
+  personalize: z.boolean().optional(),
 });
 
 /** Mask-bounded object removal (magic eraser). */

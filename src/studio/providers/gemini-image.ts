@@ -127,7 +127,10 @@ export class GeminiImageProvider implements StudioProvider {
   }
 
   async execute(op: StudioOp, input: ProviderInput): Promise<ProviderOutput> {
-    const prompt = `${promptFor(op)}\n\n${QUALITY_GUARD}`;
+    const styleSuffix = input.styleHint
+      ? `\n\nThe user usually prefers this editing style: ${input.styleHint} Lean toward that taste where it fits, without overriding the explicit request above.`
+      : "";
+    const prompt = `${promptFor(op)}\n\n${QUALITY_GUARD}${styleSuffix}`;
 
     // Region edit: when the user brushed a mask on a localized op, CROP to that area,
     // edit just the crop (so the model focuses on what's marked — "remove this" works),

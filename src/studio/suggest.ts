@@ -43,10 +43,13 @@ interface RawSuggestion {
 export async function suggestEdits(
   bytes: Uint8Array,
   mime: string,
-  opts?: { model?: string; count?: number },
+  opts?: { model?: string; count?: number; style?: string },
 ): Promise<EditSuggestion[]> {
   const model = opts?.model ?? process.env.NOMOS_STUDIO_SUGGEST_MODEL ?? "gemini-2.5-flash";
   const count = opts?.count ?? 5;
+  const styleBlock = opts?.style
+    ? `\n\nThe user's learned photo-editing style: ${opts.style}\nFavor suggestions that match this taste WHEN they also genuinely fit this photo; never force the style.`
+    : "";
   try {
     const { ai } = createGenAI();
     const resp = await ai.models.generateContent({
@@ -56,7 +59,7 @@ export async function suggestEdits(
           role: "user",
           parts: [
             { inlineData: { mimeType: mime, data: Buffer.from(bytes).toString("base64") } },
-            { text: SYSTEM },
+            { text: SYSTEM + styleBlock },
           ],
         },
       ],

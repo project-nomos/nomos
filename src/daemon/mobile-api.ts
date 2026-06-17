@@ -57,6 +57,7 @@ import {
   StaleParentError,
 } from "../studio/assets.ts";
 import { ConsentRequiredError, isCloudAIEnabled, setCloudAIEnabled } from "../studio/consent.ts";
+import { readPhotoStyle } from "../studio/learn.ts";
 import { suggestEdits } from "../studio/suggest.ts";
 import { getObjectStore, objectKey } from "../storage/object-store.ts";
 
@@ -1222,7 +1223,9 @@ async function handleStudioSuggestEdits(
   } catch {
     return { suggestions: [] };
   }
-  const suggestions = await suggestEdits(bytes, asset.mime);
+  // Personalize: bias the suggestions toward the user's learned editing taste.
+  const style = await readPhotoStyle(ctx.userId);
+  const suggestions = await suggestEdits(bytes, asset.mime, { style: style || undefined });
   return { suggestions };
 }
 
