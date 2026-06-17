@@ -173,6 +173,32 @@ export const FEATURES: FeatureSpec[] = [
     invariants: ["per-user scoped (UNIQUE user_id, scope)", "no jsonb double-encode"],
   },
   {
+    id: "relationship-narrative",
+    summary:
+      "Weekly per-owner: the agent writes a first-person 'how we've come to work together' narrative from the learned user_model into an editable relationship.md vault note — closing the understanding != articulation gap. Forked-Haiku, NOMOS_ADAPTIVE_MEMORY-gated.",
+    trigger: {
+      kind: "cron",
+      sentinel: "__relationship_narrative__",
+      schedule: "168h",
+      fanOut: true,
+    },
+    entry: ["writeRelationshipNarrative"],
+    effects: [
+      {
+        claim:
+          "an agent-authored relationship narrative is written as an editable relationship.md vault note",
+        sql: {
+          query: "SELECT count(*) FROM vault_notes WHERE path = 'relationship.md'",
+          expect: "nonzero",
+        },
+      },
+    ],
+    invariants: [
+      "per-owner scoped (user_id)",
+      "grounded in the learned user_model; no fabrication",
+    ],
+  },
+  {
     id: "graph-semantic",
     summary: "Embed kg_nodes + materialize meaning-based edges per owner.",
     trigger: { kind: "cron", sentinel: "__graph_semantic__", schedule: "6h", fanOut: true },
@@ -321,6 +347,26 @@ export const FEATURES: FeatureSpec[] = [
     invariants: [
       "learning is gated by NOMOS_ADAPTIVE_MEMORY and is per-user scoped",
       "personalization biases auto-enhance + suggestions, never an explicit typed edit",
+    ],
+  },
+  {
+    id: "mood-episodes",
+    summary:
+      "On a turn where the live theory-of-mind flags strain, the agent captures a mood EPISODE (its cause, not a standing state) into an editable mood-log.md vault note; episodes decay (30d/20) and the live read always wins. Open episodes are surfaced so the agent follows up on the CAUSE, never asserts a mood. Forked-Haiku cause-naming, NOMOS_ADAPTIVE_MEMORY-gated, per-user.",
+    trigger: { kind: "turn" },
+    entry: ["recordMoodEpisode", "captureMoodFromTurn", "readOpenMoodEpisodes"],
+    effects: [
+      {
+        claim: "mood episodes are persisted as an editable mood-log.md vault note",
+        sql: {
+          query: "SELECT count(*) FROM vault_notes WHERE path = 'mood-log.md'",
+          expect: "nonzero",
+        },
+      },
+    ],
+    invariants: [
+      "per-user scoped (user_id)",
+      "episodes-with-causes, not a standing mood; the live read wins; decay applies",
     ],
   },
 

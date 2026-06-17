@@ -1404,6 +1404,139 @@ async function runStudioLearn(): Promise<void> {
   }
 }
 
+async function runMoodLog(): Promise<void> {
+  // Emotional presence: record a mood EPISODE (cause, not a standing state) -> the
+  // editable mood-log.md vault note. Deterministic (no LLM) -- recordMoodEpisode just
+  // upserts. Asserts the durable effect, the open-episode read, and per-user isolation.
+  const { recordMoodEpisode, readOpenMoodEpisodes } = await import("../src/memory/mood-log.ts");
+  const db = getKysely();
+  const A = "eval-mood-a";
+  const B = "eval-mood-b";
+  const clear = async (): Promise<void> => {
+    await db
+      .deleteFrom("vault_notes")
+      .where("user_id", "in", [A, B])
+      .where("path", "=", "mood-log.md")
+      .execute();
+  };
+  const moodCount = async (userId: string): Promise<number> =>
+    Number(
+      (
+        await db
+          .selectFrom("vault_notes")
+          .select((eb) => eb.fn.countAll<number>().as("n"))
+          .where("user_id", "=", userId)
+          .where("path", "=", "mood-log.md")
+          .executeTakeFirst()
+      )?.n ?? 0,
+    );
+  await clear();
+
+  const priorAdaptive = process.env.NOMOS_ADAPTIVE_MEMORY;
+  process.env.NOMOS_ADAPTIVE_MEMORY = "true";
+  try {
+    await recordMoodEpisode(A, "stressed", "Q3 launch");
+    check(
+      "[mood-episodes] persists an editable mood-log.md vault note",
+      (await moodCount(A)) >= 1,
+      `count=${await moodCount(A)}`,
+    );
+    const open = await readOpenMoodEpisodes(A);
+    check(
+      "[mood-episodes] readOpenMoodEpisodes surfaces the open episode by cause",
+      open.some((e) => /q3 launch/i.test(e.cause)),
+    );
+    check(
+      "[mood-episodes] B (no episode) has no mood log (per-user scoped)",
+      (await moodCount(B)) === 0,
+    );
+  } finally {
+    if (priorAdaptive === undefined) delete process.env.NOMOS_ADAPTIVE_MEMORY;
+    else process.env.NOMOS_ADAPTIVE_MEMORY = priorAdaptive;
+    if (!KEEP) await clear();
+  }
+}
+
+async function runRelationshipNarrative(): Promise<void> {
+  // Shared experience: seed a learned user_model, then generate an agent-authored
+  // narrative (forked Haiku) -> the editable relationship.md vault note. Asserts the
+  // durable effect + that B (nothing learned) writes nothing (per-user scoped).
+  const { writeRelationshipNarrative } = await import("../src/memory/relationship-narrative.ts");
+  const { upsertUserModel } = await import("../src/db/user-model.ts");
+  const db = getKysely();
+  const A = "eval-rel-a";
+  const B = "eval-rel-b";
+  const clear = async (): Promise<void> => {
+    await db
+      .deleteFrom("vault_notes")
+      .where("user_id", "in", [A, B])
+      .where("path", "=", "relationship.md")
+      .execute();
+    await db
+      .deleteFrom("user_model")
+      .where("user_id", "in", [A, B])
+      .where("category", "=", "rel_eval")
+      .execute();
+  };
+  const relCount = async (userId: string): Promise<number> =>
+    Number(
+      (
+        await db
+          .selectFrom("vault_notes")
+          .select((eb) => eb.fn.countAll<number>().as("n"))
+          .where("user_id", "=", userId)
+          .where("path", "=", "relationship.md")
+          .executeTakeFirst()
+      )?.n ?? 0,
+    );
+  await clear();
+
+  const priorAdaptive = process.env.NOMOS_ADAPTIVE_MEMORY;
+  process.env.NOMOS_ADAPTIVE_MEMORY = "true";
+  try {
+    if (!hasLLM) {
+      skip(
+        "[relationship-narrative] writes a relationship.md narrative from the user model",
+        "no LLM provider configured",
+      );
+      return;
+    }
+    const seeded: [string, string][] = [
+      ["ships_fast", "prioritizes shipping speed over premature optimization"],
+      ["testing", "values integration tests as much as unit tests"],
+      ["tone", "prefers terse, direct answers"],
+      ["role", "founder of an early-stage startup"],
+      ["decisions", "asks clarifying questions before diving in"],
+    ];
+    for (const [key, value] of seeded) {
+      await upsertUserModel({
+        userId: A,
+        category: "rel_eval",
+        key,
+        value,
+        sourceIds: [],
+        confidence: 0.8,
+      });
+    }
+
+    const r = await writeRelationshipNarrative(A);
+    check(
+      "[relationship-narrative] writes an editable relationship.md vault note",
+      r.wrote && (await relCount(A)) >= 1,
+      r.reason ?? "wrote",
+    );
+    const rb = await writeRelationshipNarrative(B);
+    check(
+      "[relationship-narrative] B (nothing learned) writes nothing (per-user scoped)",
+      !rb.wrote && (await relCount(B)) === 0,
+    );
+  } finally {
+    if (priorAdaptive === undefined) delete process.env.NOMOS_ADAPTIVE_MEMORY;
+    else process.env.NOMOS_ADAPTIVE_MEMORY = priorAdaptive;
+    if (!KEEP) await clear();
+  }
+}
+
 async function runWikiArticles(): Promise<void> {
   // Derived store: wiki_articles. Deterministic write + per-user isolation, then
   // the full LLM compile (2 Sonnet passes) pointed at a temp NOMOS_WIKI_DIR so it
@@ -3080,6 +3213,8 @@ async function runEval(): Promise<void> {
   await runManagedFiles();
   await runStyleProfiles();
   await runStudioLearn();
+  await runMoodLog();
+  await runRelationshipNarrative();
   await runGraphMetadata();
   await runBacklinks();
   await runMetadataColumns();

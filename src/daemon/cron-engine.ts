@@ -245,6 +245,36 @@ export class CronEngine {
       return;
     }
 
+    // Intercept relationship-narrative sentinel -- the agent-authored "how we've come to
+    // work together" reflection from the learned user_model, per owner. Self-gates on
+    // adaptive memory (no-op when off, or when too little is learned yet).
+    if (job.prompt === "__relationship_narrative__") {
+      (async () => {
+        const { loadEnvConfig } = await import("../config/env.ts");
+        if (!loadEnvConfig().adaptiveMemory) return;
+        log.info("Firing relationship narrative");
+        const { writeRelationshipNarrative } = await import("../memory/relationship-narrative.ts");
+        const { listMemoryOwners } = await import("../auth/org-members.ts");
+        for (const userId of await listMemoryOwners()) {
+          try {
+            const r = await writeRelationshipNarrative(userId);
+            if (r.wrote) log.info({ userId }, "Relationship narrative written");
+          } catch (err) {
+            log.warn(
+              { err: err instanceof Error ? err.message : err, userId },
+              "Relationship narrative failed for owner",
+            );
+          }
+        }
+      })().catch((err) => {
+        log.error(
+          { err: err instanceof Error ? err.message : err },
+          "Relationship narrative failed",
+        );
+      });
+      return;
+    }
+
     // Intercept graph-semantic sentinel -- the full graph self-population pass,
     // per owner: (1) backfillGraph promotes vault notes / wiki articles / contacts
     // into kg_nodes (+ summaries) and frontmatter link edges, (2) embedMissingNodes

@@ -486,6 +486,25 @@ export class Gateway {
         log.info("Registered graph-semantic cron job (every 6h)");
         process.emit("cron:refresh" as never);
       }
+
+      // Relationship narrative: weekly, the agent writes "how we've come to work
+      // together" from the learned user_model into relationship.md. Otherwise the agent
+      // deepens its understanding but never articulates it (understanding != narrative).
+      if (!(await cronStore.getJobByName("relationship-narrative"))) {
+        await cronStore.createJob({
+          userId: systemTenant().userId,
+          name: "relationship-narrative",
+          schedule: "168h",
+          scheduleType: "every",
+          sessionTarget: "isolated",
+          deliveryMode: "none",
+          prompt: "__relationship_narrative__",
+          enabled: true,
+          errorCount: 0,
+        });
+        log.info("Registered relationship-narrative cron job (every 168h)");
+        process.emit("cron:refresh" as never);
+      }
     } catch (err) {
       log.warn({ err }, "Auto-dream/magic-docs cron registration failed");
     }
