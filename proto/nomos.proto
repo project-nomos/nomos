@@ -164,6 +164,7 @@ service MobileApi {
   // Skills tab
   rpc ListSkills (Empty) returns (MSkillsResponse);
   rpc ToggleSkill (MSkillToggleRequest) returns (MSkillToggleResponse);
+  rpc ListPlugins (Empty) returns (MPluginsResponse);
 
   // Earnings tab
   rpc GetEarnings (MEarningsRequest) returns (MEarningsResponse);
@@ -178,6 +179,8 @@ service MobileApi {
   rpc UpdateConsent (MConsentRequest) returns (MAck);
   rpc UpdateTrustTier (MTrustTierRequest) returns (MAck);
   rpc UpdatePermission (MPermissionRequest) returns (MAck);
+  rpc UpdateAppSetting (MAppSettingRequest) returns (MAck);
+  rpc UpdateAgentIdentity (MAgentIdentityRequest) returns (MAck);
   rpc ListIntegrations (Empty) returns (MIntegrationsResponse);
   rpc StartConnectIntegration (MStartConnectRequest) returns (MStartConnectResponse);
   rpc ConnectGoogleAccount (MConnectGoogleRequest) returns (MAck);
@@ -198,6 +201,23 @@ service MobileApi {
   rpc ListLoops (Empty) returns (MLoopsResponse);
   rpc SetLoopEnabled (MSetLoopEnabledRequest) returns (MAck);
   rpc DeleteLoop (MLoopDeleteRequest) returns (MAck);
+
+  // Tasks tab (the user's scheduled tasks: one-off reminders + recurring jobs,
+  // editable: reschedule, rename, edit instruction, enable/disable, delete)
+  rpc ListTasks (Empty) returns (MTasksResponse);
+  rpc UpdateTask (MTaskUpdateRequest) returns (MAck);
+  rpc DeleteTask (MTaskDeleteRequest) returns (MAck);
+
+  // Brain tab (the user's knowledge graph + learned facts, for the feed + map)
+  rpc GetBrain (Empty) returns (MBrainResponse);
+
+  // Inbox tab (drafts to approve + CATE agent requests). Actions reuse
+  // ApproveDraft/RejectDraft (drafts) + ActOnInboxItem (CATE).
+  rpc GetInbox (Empty) returns (MGetInboxResponse);
+
+  // Today tab (the daily brief: calendar + commitments + tasks, gated on the
+  // daily briefing being enabled).
+  rpc GetToday (Empty) returns (MTodayResponse);
 
   // Studio (hosted-only feature). Blobs move via presigned PUT/GET, never gRPC.
   rpc StudioCreateAsset (MStudioCreateAssetRequest) returns (MStudioCreateAssetResponse);
@@ -232,6 +252,109 @@ message MSetLoopEnabledRequest {
 }
 message MLoopDeleteRequest {
   string name = 1;
+}
+
+// Tasks (the user's scheduled tasks)
+message MTask {
+  string id = 1;
+  string name = 2;
+  string prompt = 3;             // the instruction the task runs
+  string schedule = 4;           // raw: "15m" | cron expr | ISO timestamp
+  string schedule_type = 5;      // every | cron | at
+  string display_schedule = 6;   // friendly, display-only
+  bool enabled = 7;
+  string source = 8;
+  string last_run = 9;           // ISO-8601, empty if never run
+}
+message MTasksResponse {
+  repeated MTask tasks = 1;
+}
+// Full-state update (the client sends the edited task); empty name/schedule are
+// ignored so a toggle-only call never blanks fields.
+message MTaskUpdateRequest {
+  string id = 1;
+  string name = 2;
+  string prompt = 3;
+  string schedule = 4;
+  string schedule_type = 5;
+  bool enabled = 6;
+}
+message MTaskDeleteRequest {
+  string id = 1;
+}
+
+// Brain (knowledge graph + learned facts)
+message MBrainNode {
+  string id = 1;
+  string label = 2;
+  string kind = 3;       // person | org | topic | decision | project | value | event | wiki | vault
+  string summary = 4;
+  int32 degree = 5;      // connection count within the returned subgraph
+  double confidence = 6;
+}
+message MBrainEdge {
+  string src = 1;
+  string dst = 2;
+  string relation = 3;
+}
+message MBrainFact {
+  string text = 1;
+  string source = 2;
+  int32 confidence = 3;  // 0..3
+  string learned_at = 4; // ISO-8601
+}
+message MBrainResponse {
+  repeated MBrainNode nodes = 1;
+  repeated MBrainEdge edges = 2;
+  repeated MBrainFact facts = 3;
+  int32 entity_count = 4;
+  int32 fact_count = 5;
+}
+
+// Inbox (drafts + CATE agent requests)
+message MInboxDraft {
+  string id = 1;
+  string recipient = 2;
+  string preview = 3;
+  string status = 4;        // pending | approved | sent
+  string platform = 5;
+  string created_at = 6;
+}
+message MInboxCate {
+  string id = 1;
+  string from_label = 2;
+  string trust_tier = 3;
+  string subject = 4;
+  string bond_amount = 5;
+  string created_at = 6;
+}
+message MGetInboxResponse {
+  repeated MInboxDraft drafts = 1;
+  repeated MInboxCate cate = 2;
+  int32 blocked_count = 3;
+}
+
+// Today (the daily brief)
+message MTodayEvent {
+  string time = 1;
+  string title = 2;
+  string meta = 3;
+}
+message MTodayCommitment {
+  string id = 1;
+  string description = 2;
+  string due = 3;
+}
+message MTodayTask {
+  string id = 1;
+  string name = 2;
+  string schedule = 3;
+}
+message MTodayResponse {
+  bool briefing_enabled = 1;
+  repeated MTodayEvent events = 2;
+  repeated MTodayCommitment commitments = 3;
+  repeated MTodayTask tasks = 4;
 }
 
 message MAck {
@@ -372,6 +495,16 @@ message MSkillsResponse {
   repeated MSkill skills = 1;
 }
 
+message MPlugin {
+  string name = 1;
+  string description = 2;
+  string marketplace = 3;
+}
+
+message MPluginsResponse {
+  repeated MPlugin plugins = 1;
+}
+
 message MSkillToggleRequest {
   string name = 1;
   bool enabled = 2;
@@ -478,6 +611,42 @@ message MSettingsResponse {
   repeated MTrustTier trust_tiers = 2;
   repeated MPermission permissions = 3;
   repeated MIntegration integrations = 4;
+  repeated MConsentEntry consent = 5;
+  MAgentIdentity identity = 6;
+  repeated MAppToggle app_toggles = 7;
+  MProactive proactive = 8;
+}
+
+message MProactive {
+  string mode = 1;          // off | passive | active (app.inboxAutonomy)
+  string briefing = 2;      // cron for the daily briefing (app.briefingCron)
+}
+
+message MConsentEntry {
+  string platform = 1;
+  string mode = 2;          // always_ask | auto_approve | notify_only
+}
+
+message MAgentIdentity {
+  string name = 1;
+  string voice = 2;         // personality / voice & tone (the SOUL)
+  string avatar = 3;        // chosen avatar (an emoji), empty = monogram fallback
+}
+
+message MAppToggle {
+  string key = 1;           // app.<field> config key
+  bool enabled = 2;
+}
+
+message MAppSettingRequest {
+  string key = 1;           // app.<field> config key (consumer-safe subset only)
+  string value = 2;         // "true"/"false" for bools, raw string otherwise
+}
+
+message MAgentIdentityRequest {
+  string name = 1;
+  string voice = 2;
+  string avatar = 3;
 }
 
 message MConsentRequest {

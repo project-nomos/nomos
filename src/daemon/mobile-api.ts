@@ -22,6 +22,8 @@ import type { DraftManager } from "./draft-manager.ts";
 import type { AgentEvent, IncomingMessage } from "./types.ts";
 import { getKysely } from "../db/client.ts";
 import { listIntegrations } from "../db/integrations.ts";
+import { getConfigValue, setConfigValue } from "../db/config.ts";
+import { setConsentMode, listConsentModes, type ConsentMode } from "../db/consent-config.ts";
 import {
   buildAuthUrl,
   exchangeCode,
@@ -36,15 +38,34 @@ import {
   verifyOAuthState,
 } from "../auth/google-integration.ts";
 import { loadSkills } from "../skills/loader.ts";
+import {
+  curateConsumerSkills,
+  resolveSkillName,
+  isConsumerSkill,
+  type ConsumerSkill,
+} from "../skills/skill-view.ts";
+import { BUILTIN_TOOLS } from "../plugins/builtin-tools.ts";
 import { getProjection, neighborhood, searchNodes } from "../memory/graph.ts";
 import type { GraphNode, GraphEdge } from "../memory/graph.ts";
 import { withAuthUnary, withAuthStream } from "../auth/grpc-interceptor.ts";
 import { registerDevice, unregisterDevice } from "./push-notifications.ts";
 import { vaultDelete, vaultList, vaultRead, vaultWrite } from "../memory/vault.ts";
 import { CronStore } from "../cron/store.ts";
+import { isLoopUserDisabled, setLoopUserEnabled } from "../cron/loop-overrides.ts";
+import {
+  curateConsumerLoops,
+  MANAGED_LOOPS,
+  MANAGED_LABEL_TO_NAME,
+  type ConsumerLoop,
+} from "../cron/loop-view.ts";
+import { curateConsumerTasks, type ConsumerTask } from "../cron/task-view.ts";
+import type { CronJobUpdate, ScheduleType } from "../cron/types.ts";
+import { getBrainOverview } from "../memory/brain.ts";
+import { getInboxOverview } from "./inbox.ts";
+import { getTodayOverview } from "./today.ts";
 import { createLogger } from "../lib/logger.ts";
 import type { TenantContext } from "../auth/tenant-context.ts";
-import { resolveMemoryUserId } from "../auth/tenant-context.ts";
+import { resolveMemoryUserId, systemTenant } from "../auth/tenant-context.ts";
 import { buildStudioEngine } from "../sdk/studio-mcp.ts";
 import {
   confirmAsset,
@@ -99,6 +120,7 @@ export function buildMobileApiHandlers(deps: MobileApiDeps) {
     ),
     ListSkills: withAuthUnary("/nomos.MobileApi/ListSkills", () => handleListSkills()),
     ToggleSkill: withAuthUnary("/nomos.MobileApi/ToggleSkill", (call) => handleToggleSkill(call)),
+    ListPlugins: withAuthUnary("/nomos.MobileApi/ListPlugins", () => handleListPlugins()),
     GetEarnings: withAuthUnary("/nomos.MobileApi/GetEarnings", () => handleGetEarnings()),
     GetGraph: withAuthUnary("/nomos.MobileApi/GetGraph", (call, ctx) => handleGetGraph(call, ctx)),
     GetGraphNeighbors: withAuthUnary("/nomos.MobileApi/GetGraphNeighbors", (call, ctx) =>
@@ -116,6 +138,12 @@ export function buildMobileApiHandlers(deps: MobileApiDeps) {
     ),
     UpdatePermission: withAuthUnary("/nomos.MobileApi/UpdatePermission", (call) =>
       handleUpdatePermission(call),
+    ),
+    UpdateAppSetting: withAuthUnary("/nomos.MobileApi/UpdateAppSetting", (call) =>
+      handleUpdateAppSetting(call),
+    ),
+    UpdateAgentIdentity: withAuthUnary("/nomos.MobileApi/UpdateAgentIdentity", (call) =>
+      handleUpdateAgentIdentity(call),
     ),
     ListIntegrations: withAuthUnary("/nomos.MobileApi/ListIntegrations", (_, ctx) =>
       handleListIntegrations(ctx),
@@ -158,6 +186,16 @@ export function buildMobileApiHandlers(deps: MobileApiDeps) {
     DeleteLoop: withAuthUnary("/nomos.MobileApi/DeleteLoop", (call, ctx) =>
       handleDeleteLoop(call, ctx),
     ),
+    ListTasks: withAuthUnary("/nomos.MobileApi/ListTasks", (_, ctx) => handleListTasks(ctx)),
+    UpdateTask: withAuthUnary("/nomos.MobileApi/UpdateTask", (call, ctx) =>
+      handleUpdateTask(call, ctx),
+    ),
+    DeleteTask: withAuthUnary("/nomos.MobileApi/DeleteTask", (call, ctx) =>
+      handleDeleteTask(call, ctx),
+    ),
+    GetBrain: withAuthUnary("/nomos.MobileApi/GetBrain", (_, ctx) => handleGetBrain(ctx)),
+    GetInbox: withAuthUnary("/nomos.MobileApi/GetInbox", (_, ctx) => handleGetInbox(ctx)),
+    GetToday: withAuthUnary("/nomos.MobileApi/GetToday", (_, ctx) => handleGetToday(ctx)),
 
     // Studio (hosted-only feature)
     StudioCreateAsset: withAuthUnary("/nomos.MobileApi/StudioCreateAsset", (call, ctx) =>
@@ -553,43 +591,42 @@ async function handleActOnInboxItem(
 
 // ──────────── Skills ────────────
 
-async function handleListSkills(): Promise<{
-  skills: Array<{
-    name: string;
-    description: string;
-    source: string;
-    enabled: boolean;
-    certs: string[];
-    price: string;
-  }>;
-}> {
-  const skills = loadSkills().map((s) => ({
-    name: s.name,
-    description: s.description ?? "",
-    source: s.source,
-    enabled: true,
-    certs: [] as string[],
-    price: "Free",
-  }));
-  return { skills };
+async function handleListSkills(): Promise<{ skills: ConsumerSkill[] }> {
+  const all = loadSkills();
+  // Resolve each surfaced skill's persisted on/off (default on) before curating.
+  const enabled = new Map<string, boolean>();
+  for (const s of all) {
+    if (isConsumerSkill(s)) {
+      enabled.set(s.name, (await getConfigValue<boolean>(`skill.${s.name}.enabled`)) ?? true);
+    }
+  }
+  return { skills: curateConsumerSkills(all, (name) => enabled.get(name) ?? true) };
 }
 
 async function handleToggleSkill(
   call: grpc.ServerUnaryCall<unknown, unknown>,
 ): Promise<{ success: boolean; message: string }> {
-  const db = getKysely();
-  const key = `skill.${(call.request as any).name}.enabled`;
-  await db
-    .insertInto("config")
-    .values({ key, value: JSON.stringify((call.request as any).enabled) })
-    .onConflict((oc) =>
-      oc.column("key").doUpdateSet({
-        value: JSON.stringify((call.request as any).enabled),
-        updated_at: new Date(),
-      }),
-    )
-    .execute();
-  return { success: true, message: (call.request as any).enabled ? "enabled" : "disabled" };
+  const req = call.request as { name?: string; enabled?: boolean };
+  if (!req.name) return { success: false, message: "missing_name" };
+  // The client sends the friendly label; resolve it back to the raw skill name.
+  const name = resolveSkillName(loadSkills(), req.name);
+  await setConfigValue(`skill.${name}.enabled`, Boolean(req.enabled));
+  return { success: true, message: req.enabled ? "enabled" : "disabled" };
+}
+
+/** Read-only list of the assistant's out-of-the-box capabilities. The Claude
+ * marketplace plugins are all developer tools, so consumers see this curated
+ * built-in set instead (marketplace install is a later iteration). */
+async function handleListPlugins(): Promise<{
+  plugins: Array<{ name: string; description: string; marketplace: string }>;
+}> {
+  return {
+    plugins: BUILTIN_TOOLS.map((t) => ({
+      name: t.name,
+      description: t.description,
+      marketplace: "built-in",
+    })),
+  };
 }
 
 // ──────────── Earnings (stub) ────────────
@@ -612,59 +649,173 @@ async function handleGetEarnings(): Promise<{
 
 // ──────────── Settings ────────────
 
+// Catalog of consumer permissions + trust tiers. Labels/defaults are fixed; the
+// actual on/off + tier mode are read back from the config table (where the
+// UpdatePermission / UpdateTrustTier handlers persist them), so settings
+// round-trip instead of returning literals.
+const PERMISSION_DEFS = [
+  { id: "p1", label: "Read emails", def: true },
+  { id: "p2", label: "Draft replies", def: true },
+  { id: "p3", label: "Send (with approval)", def: true },
+  { id: "p4", label: "Send (auto)", def: false },
+  { id: "p5", label: "Schedule meetings", def: true },
+  { id: "p6", label: "Make purchases", def: false },
+] as const;
+
+const TRUST_TIER_DEFS = [
+  { id: "friends", name: "Friends", description: "Always allowed", mode: "free", bondAmount: "" },
+  {
+    id: "healthcare",
+    name: "Healthcare",
+    description: "Verified professionals",
+    mode: "free",
+    bondAmount: "",
+  },
+  {
+    id: "brands",
+    name: "Brands",
+    description: "Min bid per impression",
+    mode: "bond",
+    bondAmount: "0.05",
+  },
+  {
+    id: "unknown",
+    name: "Unknown",
+    description: "No identity = blocked",
+    mode: "blocked",
+    bondAmount: "",
+  },
+] as const;
+
 async function handleGetSettings(ctx: TenantContext) {
   const integrations = await listIntegrationsForUser(ctx.userId);
-  return {
-    profile: {
-      name: "Nomos",
-      plan: "Pro",
-      messageCount: 0,
-      earnedCents: 0,
-      savedCents: 0,
-    },
-    trustTiers: [
-      {
-        id: "friends",
-        name: "Friends",
-        description: "Always allowed",
-        mode: "free",
-        bondAmount: "",
-      },
-      {
-        id: "healthcare",
-        name: "Healthcare",
-        description: "Verified professionals",
-        mode: "free",
-        bondAmount: "",
-      },
-      {
-        id: "brands",
-        name: "Brands",
-        description: "Min bid per impression",
-        mode: "bond",
-        bondAmount: "0.05",
-      },
-      {
-        id: "unknown",
-        name: "Unknown",
-        description: "No identity = blocked",
-        mode: "blocked",
-        bondAmount: "",
-      },
-    ],
-    permissions: [
-      // Studio cloud-AI consent: a real toggle (the iOS app surfaces it as its own
-      // "Cloud AI" row) plumbed through UpdatePermission → setCloudAIEnabled.
-      { id: "studio_cloud_ai", label: "Cloud AI photo edits", enabled: await isCloudAIEnabled() },
-      { id: "p1", label: "Read emails", enabled: true },
-      { id: "p2", label: "Draft replies", enabled: true },
-      { id: "p3", label: "Send (with approval)", enabled: true },
-      { id: "p4", label: "Send (auto)", enabled: false },
-      { id: "p5", label: "Schedule meetings", enabled: true },
-      { id: "p6", label: "Make purchases", enabled: false },
-    ],
-    integrations,
+
+  // Studio cloud-AI consent is stored separately (setCloudAIEnabled), so it's surfaced
+  // as its own permission row alongside the config-driven ones.
+  const permissions = [
+    { id: "studio_cloud_ai", label: "Cloud AI photo edits", enabled: await isCloudAIEnabled() },
+    ...(await Promise.all(
+      PERMISSION_DEFS.map(async (p) => ({
+        id: p.id,
+        label: p.label,
+        enabled: (await getConfigValue<boolean>(`permission.${p.id}`)) ?? p.def,
+      })),
+    )),
+  ];
+
+  const trustTiers = await Promise.all(
+    TRUST_TIER_DEFS.map(async (t) => {
+      const stored = await getConfigValue<{ mode?: string; bondAmount?: string }>(
+        `trust_tier.${t.id}`,
+      );
+      return {
+        id: t.id,
+        name: t.name,
+        description: t.description,
+        mode: stored?.mode ?? t.mode,
+        bondAmount: stored?.bondAmount ?? t.bondAmount,
+      };
+    }),
+  );
+
+  // Usage: real message count for this user; plan/name from config (consumer
+  // onboarding sets these; earned/saved stay 0 until CATE bond receipts land).
+  const messageCount = await countUserMessages(ctx.userId);
+  const profile = {
+    name: (await getConfigValue<string>("profile.name")) ?? "",
+    plan: (await getConfigValue<string>("profile.plan")) ?? "Free",
+    messageCount,
+    earnedCents: 0,
+    savedCents: 0,
   };
+
+  // Per-platform consent modes (so the app's picker reflects current state).
+  const consentModes = await listConsentModes();
+  const consent = Object.entries(consentModes).map(([platform, mode]) => ({ platform, mode }));
+
+  // Agent identity (name + voice/tone), and the consumer behavior toggles.
+  const identity = {
+    name: (await getConfigValue<string>("agent.name")) ?? "Nomos",
+    voice: (await getConfigValue<string>("agent.soul")) ?? "",
+    avatar: (await getConfigValue<string>("agent.avatar")) ?? "",
+  };
+  const appToggles = await Promise.all(
+    CONSUMER_TOGGLE_KEYS.map(async (key) => ({
+      key,
+      enabled: (await getConfigValue<boolean>(key)) ?? true,
+    })),
+  );
+
+  // Proactive agency: autonomy level + daily-briefing schedule.
+  const proactive = {
+    mode: (await getConfigValue<string>("app.inboxAutonomy")) ?? "passive",
+    briefing: (await getConfigValue<string>("app.briefingCron")) ?? "",
+  };
+
+  return {
+    profile,
+    trustTiers,
+    permissions,
+    integrations,
+    consent,
+    identity,
+    appToggles,
+    proactive,
+  };
+}
+
+/** App-config keys the mobile app may read/flip (consumer-safe bool toggles). */
+const CONSUMER_TOGGLE_KEYS = [
+  "app.adaptiveMemory",
+  "app.commitmentTracking",
+  "app.styleMatching",
+] as const;
+
+/** Consumer-safe string app-config keys (proactive scheduling, DM policy). */
+const CONSUMER_STRING_KEYS = [
+  "app.inboxAutonomy",
+  "app.briefingCron",
+  "app.defaultDmPolicy",
+] as const;
+
+async function handleUpdateAppSetting(
+  call: grpc.ServerUnaryCall<unknown, unknown>,
+): Promise<{ success: boolean; message: string }> {
+  const req = call.request as { key?: string; value?: string };
+  if (req.key && (CONSUMER_TOGGLE_KEYS as readonly string[]).includes(req.key)) {
+    await setConfigValue(req.key, req.value === "true");
+    return { success: true, message: "ok" };
+  }
+  if (req.key && (CONSUMER_STRING_KEYS as readonly string[]).includes(req.key)) {
+    await setConfigValue(req.key, req.value ?? "");
+    return { success: true, message: "ok" };
+  }
+  return { success: false, message: "key_not_allowed" };
+}
+
+async function handleUpdateAgentIdentity(
+  call: grpc.ServerUnaryCall<unknown, unknown>,
+): Promise<{ success: boolean; message: string }> {
+  const req = call.request as { name?: string; voice?: string; avatar?: string };
+  if (req.name !== undefined) await setConfigValue("agent.name", req.name);
+  if (req.voice !== undefined) await setConfigValue("agent.soul", req.voice);
+  if (req.avatar !== undefined) await setConfigValue("agent.avatar", req.avatar);
+  return { success: true, message: "ok" };
+}
+
+/** Count transcript messages belonging to this user (best-effort; 0 on error). */
+async function countUserMessages(userId: string): Promise<number> {
+  try {
+    const db = getKysely();
+    const row = await db
+      .selectFrom("transcript_messages")
+      .select((eb) => eb.fn.countAll<string>().as("n"))
+      .where("user_id", "=", userId)
+      .executeTakeFirst();
+    return row ? Number(row.n) : 0;
+  } catch {
+    return 0;
+  }
 }
 
 async function setConfigKey(key: string, value: unknown): Promise<void> {
@@ -684,8 +835,16 @@ async function setConfigKey(key: string, value: unknown): Promise<void> {
 async function handleUpdateConsent(
   call: grpc.ServerUnaryCall<unknown, unknown>,
 ): Promise<{ success: boolean; message: string }> {
-  await setConfigKey(`consent.${(call.request as any).platform}`, (call.request as any).mode);
-  return { success: true, message: "ok" };
+  const req = call.request as { platform?: string; mode?: string };
+  if (!req.platform) return { success: false, message: "missing_platform" };
+  try {
+    // Writes `consent.mode.<platform>` (what DraftManager reads) and validates
+    // against always_ask / auto_approve / notify_only.
+    await setConsentMode(req.platform, req.mode as ConsentMode);
+    return { success: true, message: "ok" };
+  } catch (err) {
+    return { success: false, message: err instanceof Error ? err.message : "invalid_mode" };
+  }
 }
 
 async function handleUpdateTrustTier(
@@ -886,38 +1045,30 @@ async function handleDeleteVaultNote(
 }
 
 // ──────────── Loops (autonomous recurring jobs) ────────────
-// Owner-scoped via the JWT-resolved user. System infra jobs are never mutable
-// here (they belong to the daemon); these handlers run in the daemon process, so
-// they emit cron:refresh directly to apply a change live.
+// The instance runs its background loops under the synthetic `system` owner
+// (see gateway.ts + proactive/scheduler.ts), so a hosted user owns none of them
+// and a naive per-user query returns nothing. The consumer Loops page is an
+// audit + control surface, so we ALSO surface a curated set of the always-on
+// "managed" loops the assistant runs on the user's behalf -- under a friendly
+// label, with a per-user enable/disable override. Those rows are permanently
+// enabled, so the override (an AND-gate honored by cron-engine at fire time) can
+// meaningfully turn them off without mutating the shared `system` row. Pure infra
+// plumbing (wiki/graph/magic-docs/delta-sync) and the proactive family (gated by
+// the Proactive setting) are hidden. User/agent-created loops show under their
+// real name and toggle the row directly.
 
-async function handleListLoops(ctx: TenantContext): Promise<{
-  loops: Array<{
-    id: string;
-    name: string;
-    schedule: string;
-    enabled: boolean;
-    source: string;
-    errorCount: number;
-    lastRun: string;
-    prompt: string;
-  }>;
-}> {
-  const userId = resolveMemoryUserId(ctx.userId);
-  const jobs = await new CronStore().listJobs({ userId });
-  return {
-    loops: jobs
-      .sort((a, b) => a.name.localeCompare(b.name))
-      .map((j) => ({
-        id: j.id,
-        name: j.name,
-        schedule: j.schedule,
-        enabled: j.enabled,
-        source: j.source ?? "system",
-        errorCount: j.errorCount,
-        lastRun: j.lastRun ? j.lastRun.toISOString() : "",
-        prompt: j.prompt,
-      })),
-  };
+async function handleListLoops(_ctx: TenantContext): Promise<{ loops: ConsumerLoop[] }> {
+  // Loops = the assistant's always-on background behaviors (owned by the `system`
+  // tenant). The user's own scheduled jobs live on the Tasks surface, not here.
+  const system = await new CronStore().listJobs({ userId: systemTenant().userId });
+
+  // Which managed loops the user has turned off (folded into `enabled`).
+  const optedOut = new Set<string>();
+  for (const j of system) {
+    if (MANAGED_LOOPS[j.name] && (await isLoopUserDisabled(j.name))) optedOut.add(j.name);
+  }
+
+  return { loops: curateConsumerLoops(system, optedOut) };
 }
 
 async function handleSetLoopEnabled(
@@ -926,6 +1077,17 @@ async function handleSetLoopEnabled(
 ): Promise<{ success: boolean; message: string }> {
   const req = call.request as { name?: string; enabled?: boolean };
   if (!req.name) return { success: false, message: "missing_name" };
+
+  // Managed loop: the client sends the friendly label. Persist a per-user
+  // override (honored by cron-engine at fire time) instead of mutating the
+  // shared `system` row.
+  const managedName = MANAGED_LABEL_TO_NAME.get(req.name);
+  if (managedName) {
+    await setLoopUserEnabled(managedName, Boolean(req.enabled));
+    process.emit("cron:refresh" as never);
+    return { success: true, message: req.enabled ? "enabled" : "disabled" };
+  }
+
   const userId = resolveMemoryUserId(ctx.userId);
   const store = new CronStore();
   const job = await store.getJobByName(req.name);
@@ -950,6 +1112,96 @@ async function handleDeleteLoop(
   await store.deleteJob(job.id);
   process.emit("cron:refresh" as never);
   return { success: true, message: "deleted" };
+}
+
+// ──────────── Tasks (the user's scheduled tasks) ────────────
+// Owner-scoped by user_id: a per-user query never returns the instance's
+// `system`-owned background loops, so Tasks and Loops stay cleanly separate.
+// Update/Delete additionally assert ownership before mutating.
+
+async function handleListTasks(ctx: TenantContext): Promise<{ tasks: ConsumerTask[] }> {
+  const userId = resolveMemoryUserId(ctx.userId);
+  const jobs = await new CronStore().listJobs({ userId });
+  return { tasks: curateConsumerTasks(jobs) };
+}
+
+async function handleUpdateTask(
+  call: grpc.ServerUnaryCall<unknown, unknown>,
+  ctx: TenantContext,
+): Promise<{ success: boolean; message: string }> {
+  const req = call.request as {
+    id?: string;
+    name?: string;
+    prompt?: string;
+    schedule?: string;
+    scheduleType?: string;
+    enabled?: boolean;
+  };
+  if (!req.id) return { success: false, message: "missing_id" };
+  const userId = resolveMemoryUserId(ctx.userId);
+  const store = new CronStore();
+  const job = await store.getJob(req.id);
+  if (!job || job.userId !== userId) return { success: false, message: "task_not_found" };
+
+  // Full-state update from the editor; empty name/schedule are ignored so a
+  // toggle-only call (which still sends the whole proto) never blanks a field.
+  const updates: CronJobUpdate = { enabled: Boolean(req.enabled) };
+  if (req.name?.trim()) updates.name = req.name.trim();
+  if (req.prompt?.trim()) updates.prompt = req.prompt;
+  if (req.schedule?.trim()) {
+    updates.schedule = req.schedule.trim();
+    updates.scheduleType = (req.scheduleType as ScheduleType) || job.scheduleType;
+  }
+  await store.updateJob(job.id, updates);
+  process.emit("cron:refresh" as never);
+  return { success: true, message: "updated" };
+}
+
+async function handleDeleteTask(
+  call: grpc.ServerUnaryCall<unknown, unknown>,
+  ctx: TenantContext,
+): Promise<{ success: boolean; message: string }> {
+  const req = call.request as { id?: string };
+  if (!req.id) return { success: false, message: "missing_id" };
+  const userId = resolveMemoryUserId(ctx.userId);
+  const store = new CronStore();
+  const job = await store.getJob(req.id);
+  if (!job || job.userId !== userId) return { success: false, message: "task_not_found" };
+  await store.deleteJob(job.id);
+  process.emit("cron:refresh" as never);
+  return { success: true, message: "deleted" };
+}
+
+// ──────────── Brain (knowledge graph + learned facts) ────────────
+
+async function handleGetBrain(ctx: TenantContext): Promise<{
+  nodes: Array<{
+    id: string;
+    label: string;
+    kind: string;
+    summary: string;
+    degree: number;
+    confidence: number;
+  }>;
+  edges: Array<{ src: string; dst: string; relation: string }>;
+  facts: Array<{ text: string; source: string; confidence: number; learnedAt: string }>;
+  entityCount: number;
+  factCount: number;
+}> {
+  // The graph + user_model are already owner-scoped by the TenantContext.
+  const overview = await getBrainOverview({
+    orgId: ctx.orgId,
+    userId: resolveMemoryUserId(ctx.userId),
+  });
+  return overview;
+}
+
+async function handleGetInbox(ctx: TenantContext) {
+  return getInboxOverview({ orgId: ctx.orgId, userId: resolveMemoryUserId(ctx.userId) });
+}
+
+async function handleGetToday(ctx: TenantContext) {
+  return getTodayOverview({ orgId: ctx.orgId, userId: resolveMemoryUserId(ctx.userId) });
 }
 
 // ──────────── Studio (hosted-only feature) ────────────

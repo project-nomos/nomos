@@ -12,6 +12,7 @@ import type { ChannelManager } from "./channel-manager.ts";
 import type { AgentEvent } from "./types.ts";
 import { createLogger } from "../lib/logger.ts";
 import { stripHeartbeatToken } from "../auto-reply/heartbeat.ts";
+import { isLoopUserDisabled } from "../cron/loop-overrides.ts";
 
 const log = createLogger("cron-engine");
 
@@ -66,6 +67,16 @@ export class CronEngine {
   }
 
   private async handleCronJob(job: CronJob): Promise<void> {
+    // Per-user (per-customer DB) loop opt-out. The consumer Loops UI toggles a
+    // config override rather than mutating the shared `system` row, so honor it
+    // here: a managed loop the user turned off must actually stop firing. Absent
+    // flag = enabled (default on). Keyed generically by job name so any future
+    // override is covered without special-casing.
+    if (await isLoopUserDisabled(job.name)) {
+      log.info(`Skipping ${job.name}: disabled by user`);
+      return;
+    }
+
     // Intercept delta-sync sentinel prompts -- route to ingest scheduler
     // instead of the agent message queue.
     if (job.prompt.startsWith("__delta_sync__:")) {

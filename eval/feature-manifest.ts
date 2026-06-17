@@ -490,6 +490,34 @@ export const FEATURES: FeatureSpec[] = [
       "agent-created loops carry source='agent' + the owner's user_id (auditable + per-owner scoped)",
     ],
   },
+  {
+    id: "managed-loop-override",
+    summary:
+      "Consumer Loops audit + control surface (MobileApi.ListLoops/SetLoopEnabled). The hosted user owns none of the instance's `system`-owned background loops, so ListLoops also surfaces a curated managed set (auto-dream -> 'Brain consolidation', style-analyze -> 'Writing style learning') under friendly labels. Toggling one writes a per-user app.userLoop.<name>.enabled config override (setLoopUserEnabled) instead of mutating the shared system row; cron-engine honors it at fire time as an AND-gate (isLoopUserDisabled).",
+    trigger: { kind: "turn" },
+    entry: [
+      "curateConsumerLoops",
+      "isLoopUserDisabled",
+      "setLoopUserEnabled",
+      "userLoopOverrideKey",
+    ],
+    effects: [
+      {
+        claim: "toggling a managed loop persists app.userLoop.<name>.enabled in the config table",
+        sql: {
+          query: "SELECT count(*) FROM config WHERE key LIKE 'app.userLoop.%'",
+          expect: "nonzero",
+        },
+        notExercised: true,
+      },
+    ],
+    invariants: [
+      "managed loops display friendly labels but toggle/delete key off the real job name",
+      "AND-gate: a managed loop fires only if its system row is enabled AND the user has not opted out",
+      "the shared system cron_jobs row is never mutated per-user (per-customer DB scoping)",
+      "infra plumbing (wiki/graph/magic-docs/delta-sync) + the proactive family are hidden from the consumer surface",
+    ],
+  },
 
   // ── Wired runtime helpers (dormant-prone) ──
   {
@@ -794,20 +822,27 @@ export const FEATURES: FeatureSpec[] = [
   },
   {
     id: "draft-edit-learning",
-    summary: "Capture user edits to drafts as corrections that update the user model.",
+    summary:
+      "Capture user edits to drafts as corrections that update the user model (approveWithEdit -> captureDraftEdit -> updateUserModel). Only an actual edit (edited != original) is captured; a plain approve is not.",
     trigger: { kind: "turn" },
     entry: ["approveWithEdit"],
     effects: [
       {
-        claim: "edits land as user_model corrections",
+        // A correction is stored as a fact whose key is `correction_<slug>` and
+        // whose value is { text: corrected, original } (see updateUserModel).
+        claim: "edits land as user_model corrections (category='fact', key LIKE 'correction_%')",
         sql: {
-          query: "SELECT count(*) FROM user_model WHERE category='correction'",
+          query:
+            "SELECT count(*) FROM user_model WHERE category = 'fact' AND key LIKE 'correction_%'",
           expect: "nonzero",
         },
         notExercised: true,
       },
     ],
-    invariants: ["per-owner scoped"],
+    invariants: [
+      "per-owner scoped",
+      "only an actual edit is learned (plain approve writes no correction)",
+    ],
   },
   {
     id: "shadow-observer",
@@ -875,6 +910,105 @@ export const FEATURES: FeatureSpec[] = [
           "plugin configs are passed to every SDK query (behavioral; state in ~/.nomos/plugins)",
         notExercised: true,
       },
+    ],
+  },
+  {
+    id: "consumer-advanced-surface",
+    summary:
+      "Hosted Advanced curation (MobileApi.ListSkills/ToggleSkill/ListPlugins). ListSkills filters the full skill catalog to consumer-facing skills (operator-curated external Google skills + an allowlist of bundled consumer skills like pdf/xlsx/weather), under friendly labels, with each skill's persisted on/off folded in (skill.<name>.enabled). ToggleSkill resolves the friendly label back to the raw name (resolveSkillName) before persisting. ListPlugins returns a curated read-only built-in tool set instead of the developer marketplace plugins.",
+    trigger: { kind: "turn" },
+    entry: ["curateConsumerSkills", "resolveSkillName", "isConsumerSkill"],
+    effects: [
+      {
+        claim: "toggling a skill persists skill.<name>.enabled in the config table",
+        sql: {
+          query: "SELECT count(*) FROM config WHERE key LIKE 'skill.%.enabled'",
+          expect: "nonzero",
+        },
+        notExercised: true,
+      },
+    ],
+    invariants: [
+      "consumer skills = external (operator-curated) + an allowlist of bundled consumer skills; dev/internal/channel skills are hidden",
+      "skills display friendly labels but the toggle round-trips back to the raw skill name",
+      "ListPlugins surfaces the curated built-in tool set (read-only), not the developer marketplace plugins",
+    ],
+  },
+  {
+    id: "scheduled-tasks",
+    summary:
+      "Consumer Tasks surface (MobileApi.ListTasks/UpdateTask/DeleteTask). ListTasks returns the user's own scheduled cron_jobs (one-off 'at' reminders + recurring jobs created via schedule_task/loop_create), owner-scoped by user_id so the instance's system-owned background loops never appear. UpdateTask reschedules/renames/edits the instruction/enables; DeleteTask removes one. Both assert ownership before mutating.",
+    trigger: { kind: "turn" },
+    entry: ["curateConsumerTasks", "toConsumerTask"],
+    effects: [
+      {
+        claim: "the user's scheduled tasks are stored as owner-scoped cron_jobs",
+        sql: {
+          query: "SELECT count(*) FROM cron_jobs WHERE source IN ('agent','user')",
+          expect: "nonzero",
+        },
+        notExercised: true,
+      },
+    ],
+    invariants: [
+      "Tasks are owner-scoped (user_id); managed/system loops never appear on this surface",
+      "UpdateTask/DeleteTask assert job.userId === the resolved owner before mutating",
+      "schedule_task stamps source='agent' (a user-owned task, not infra)",
+    ],
+  },
+  {
+    id: "brain-overview",
+    summary:
+      "Consumer Brain page (MobileApi.GetBrain). Composes the read model from real per-user memory: the knowledge graph (kg_nodes/kg_edges via getProjection) drives the map + entities, and the accumulated user_model drives the recently-learned facts feed. Owner-scoped via TenantContext.",
+    trigger: { kind: "turn" },
+    entry: ["getBrainOverview", "getProjection"],
+    effects: [
+      {
+        claim: "the brain map reads nodes from the per-user knowledge graph",
+        sql: { query: "SELECT count(*) FROM kg_nodes", expect: "nonzero" },
+        notExercised: true,
+      },
+    ],
+    invariants: [
+      "owner-scoped: nodes/edges/facts filtered by user_id",
+      "facts come from user_model (confidence binned to 0..3); entities/edges from kg_nodes/kg_edges",
+    ],
+  },
+  {
+    id: "inbox-overview",
+    summary:
+      "Consumer Inbox (MobileApi.GetInbox). Two owner-scoped sections: the agent's drafted replies awaiting approval (draft_messages: pending=needs-you, approved/sent=handled) and the CATE agent-to-agent inbound queue (cate_inbound, best-effort). Draft actions reuse ApproveDraft/RejectDraft; CATE via ActOnInboxItem.",
+    trigger: { kind: "turn" },
+    entry: ["getInboxOverview"],
+    effects: [
+      {
+        claim: "pending drafts awaiting approval are owner-scoped in draft_messages",
+        sql: { query: "SELECT count(*) FROM draft_messages", expect: "nonzero" },
+        notExercised: true,
+      },
+    ],
+    invariants: [
+      "owner-scoped by user_id",
+      "drafts + CATE merged read-only; mutations via existing draft/inbox RPCs",
+    ],
+  },
+  {
+    id: "today-overview",
+    summary:
+      "Consumer Today brief (MobileApi.GetToday). Composes today's Google Calendar events (live via gapiFetch, best-effort -- empty when Google isn't connected), pending commitments, and the user's scheduled tasks. briefingEnabled=false (proactive autonomy off) tells the client to show the enable-briefing deep link.",
+    trigger: { kind: "turn" },
+    entry: ["getTodayOverview"],
+    effects: [
+      {
+        claim: "commitments feeding the brief are owner-scoped",
+        sql: { query: "SELECT count(*) FROM commitments", expect: "nonzero" },
+        notExercised: true,
+      },
+    ],
+    invariants: [
+      "owner-scoped",
+      "calendar is best-effort (empty when Google isn't connected)",
+      "gated on app.inboxAutonomy != 'off'",
     ],
   },
 
