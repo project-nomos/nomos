@@ -46,11 +46,31 @@ import { resolveMemoryUserId } from "../auth/tenant-context.ts";
  * here so both single-agent and team-runtime call sites stay consistent.
  */
 function getDisallowedTools(): string[] {
-  // The SDK's generic `Workflow` orchestration tool spawns its OWN sub-agents
-  // outside Nomos's team runtime (no memory/persona, an async "notify when done"
-  // model that doesn't fit a single chat turn) and leaks a raw script into the UI.
-  // Block it so "spin up a team" routes to the Nomos-native `delegate_to_team`.
-  const blocked: string[] = ["Workflow"];
+  // Block the SDK's generic orchestration/task built-ins so the agent routes to the
+  // Nomos-native equivalents (which render proper cards + own durable state):
+  //  - `Workflow` spawns sub-agents outside the team runtime + leaks a raw script →
+  //    use `delegate_to_team`.
+  //  - `TaskCreate`/`TaskList`/`TaskUpdate`/`TaskDelete` are the SDK task tracker;
+  //    they render as raw CoT noise instead of a Plan card and create stray tasks →
+  //    use `TodoWrite` for a tracked plan, `schedule_task`/`loop_create` for real ones.
+  //  - `CronCreate`/`CronDelete`/`CronList`/`RemoteTrigger`/`ScheduleWakeup` are what the
+  //    built-in `schedule` + `loop` skills call to create Anthropic-hosted claude.ai
+  //    Routines (1-hour minimum, results land on the claude.ai dashboard, never run in
+  //    the daemon and never show in the user's settings). A prompt warning alone didn't
+  //    stop the agent from reaching for them, so block them outright → the agent must use
+  //    the `schedule_task` / `loop_create` MCP tools, which run locally in the daemon.
+  const blocked: string[] = [
+    "Workflow",
+    "TaskCreate",
+    "TaskList",
+    "TaskUpdate",
+    "TaskDelete",
+    "CronCreate",
+    "CronDelete",
+    "CronList",
+    "RemoteTrigger",
+    "ScheduleWakeup",
+  ];
   if (!FEATURES.bashTool()) {
     blocked.push("Bash", "BashOutput", "KillBash");
   }
@@ -88,16 +108,25 @@ function summarizeToolInput(name: string, input: unknown): string {
     case "Grep":
     case "Glob":
       return str(o.pattern);
+    case "Skill":
+      return str(o.skill) || str(o.name) || str(o.command);
     default: {
-      const pick =
-        str(o.query) || str(o.prompt) || str(o.path) || str(o.message) || str(o.description);
-      if (pick) return pick;
-      try {
-        const j = JSON.stringify(input);
-        return j && j.length > 2 ? (j.length > 120 ? `${j.slice(0, 117)}…` : j) : "";
-      } catch {
-        return "";
-      }
+      // A friendly summary from a known field. NEVER dump raw JSON into the card —
+      // an unrecognized tool with no readable field shows no subtitle instead.
+      return (
+        str(o.query) ||
+        str(o.prompt) ||
+        str(o.path) ||
+        str(o.message) ||
+        str(o.description) ||
+        str(o.skill) ||
+        str(o.name) ||
+        str(o.command) ||
+        str(o.url) ||
+        str(o.content) ||
+        str(o.title) ||
+        ""
+      );
     }
   }
 }

@@ -8,6 +8,7 @@ import SlackBolt from "@slack/bolt";
 import type { ChannelAdapter, IncomingMessage, OutgoingMessage } from "../types.ts";
 import type { DraftManager } from "../draft-manager.ts";
 import { chunkResponse } from "../response-chunker.ts";
+import { markdownToSlackMrkdwn } from "./slack-mrkdwn.ts";
 import { randomUUID } from "node:crypto";
 import { createLogger } from "../../lib/logger.ts";
 
@@ -168,7 +169,9 @@ export class SlackAdapter implements ChannelAdapter {
   async send(message: OutgoingMessage): Promise<void> {
     if (!this.app) return;
     const token = process.env.SLACK_BOT_TOKEN!;
-    const result = chunkResponse(message.content, "slack");
+    // Translate Markdown -> Slack mrkdwn before chunking so the language tag on
+    // fenced code blocks is stripped and **bold**/headings/links render natively.
+    const result = chunkResponse(markdownToSlackMrkdwn(message.content), "slack");
 
     for (const text of result.chunks) {
       await this.app.client.chat.postMessage({
@@ -179,13 +182,14 @@ export class SlackAdapter implements ChannelAdapter {
       });
     }
 
-    // Upload full response as file for very long messages
+    // Upload full response as file for very long messages. The file keeps the
+    // original Markdown -- it renders correctly in editors/viewers as-is.
     if (result.strategy === "file" && result.fullText && result.filename) {
       const uploadArgs = {
         token,
         channel_id: message.channelId,
         filename: result.filename,
-        content: result.fullText,
+        content: message.content,
         title: "Full Response",
         ...(message.threadId ? { thread_ts: message.threadId } : {}),
       };
@@ -203,7 +207,7 @@ export class SlackAdapter implements ChannelAdapter {
     const result = await this.app.client.chat.postMessage({
       token: process.env.SLACK_BOT_TOKEN!,
       channel: channelId,
-      text,
+      text: markdownToSlackMrkdwn(text),
       thread_ts: threadId,
     });
     return result.ts;
@@ -215,7 +219,7 @@ export class SlackAdapter implements ChannelAdapter {
       token: process.env.SLACK_BOT_TOKEN!,
       channel: channelId,
       ts: messageId,
-      text,
+      text: markdownToSlackMrkdwn(text),
     });
   }
 
