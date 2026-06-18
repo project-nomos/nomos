@@ -89,6 +89,8 @@ const AUTH_BASE_URL = process.env.AUTH_BASE_URL ?? "https://auth.mynomos.ai";
 export interface MobileApiDeps {
   messageQueue: MessageQueue;
   draftManager: DraftManager | null;
+  /** Late-bound so AnswerQuestion can resolve a pending ask_user elicitation. */
+  getElicitationManager?: () => import("./elicitation-manager.ts").ElicitationManager | null;
 }
 
 /**
@@ -192,6 +194,9 @@ export function buildMobileApiHandlers(deps: MobileApiDeps) {
     ),
     DeleteTask: withAuthUnary("/nomos.MobileApi/DeleteTask", (call, ctx) =>
       handleDeleteTask(call, ctx),
+    ),
+    AnswerQuestion: withAuthUnary("/nomos.MobileApi/AnswerQuestion", (call, ctx) =>
+      handleAnswerQuestion(deps, call, ctx),
     ),
     GetBrain: withAuthUnary("/nomos.MobileApi/GetBrain", (_, ctx) => handleGetBrain(ctx)),
     GetInbox: withAuthUnary("/nomos.MobileApi/GetInbox", (_, ctx) => handleGetInbox(ctx)),
@@ -1170,6 +1175,19 @@ async function handleDeleteTask(
   await store.deleteJob(job.id);
   process.emit("cron:refresh" as never);
   return { success: true, message: "deleted" };
+}
+
+async function handleAnswerQuestion(
+  deps: MobileApiDeps,
+  call: grpc.ServerUnaryCall<unknown, unknown>,
+  _ctx: TenantContext,
+): Promise<{ success: boolean; message: string }> {
+  const req = call.request as { questionId?: string; answer?: string };
+  if (!req.questionId || req.answer == null) return { success: false, message: "missing_args" };
+  const ok = deps.getElicitationManager?.()?.resolveById(req.questionId, req.answer) ?? false;
+  return ok
+    ? { success: true, message: "answered" }
+    : { success: false, message: "no_pending_question" };
 }
 
 // ──────────── Brain (knowledge graph + learned facts) ────────────

@@ -21,7 +21,7 @@
 import { randomUUID } from "node:crypto";
 import type { ElicitationRequest, ElicitationResult } from "@anthropic-ai/claude-agent-sdk";
 import type { ChannelManager } from "./channel-manager.ts";
-import type { OutgoingMessage } from "./types.ts";
+import type { AgentEvent, OutgoingMessage } from "./types.ts";
 import { createLogger } from "../lib/logger.ts";
 
 const log = createLogger("elicitation-manager");
@@ -69,8 +69,31 @@ export class ElicitationManager {
   private pending = new Map<string, PendingElicitation>();
   /** Reverse index: channelId → pending id, for fast text-reply lookup. */
   private byChannel = new Map<string, string>();
+  /** Per-channel event emitters for clients without a channel adapter (mobile/terminal):
+   *  render the question over the open Chat stream and accept the answer out-of-band. */
+  private emitters = new Map<string, (e: AgentEvent) => void>();
 
   constructor(private readonly channelManager: ChannelManager) {}
+
+  /** Register an event emitter for a source so renderQuestion can push an `ask` event. */
+  registerEmitter(source: ElicitationSource, emit: (e: AgentEvent) => void): void {
+    this.emitters.set(channelKeyFor(source), emit);
+  }
+
+  unregisterEmitter(source: ElicitationSource): void {
+    this.emitters.delete(channelKeyFor(source));
+  }
+
+  /** Resolve a pending elicitation by id (out-of-band answer via a client RPC). */
+  resolveById(id: string, answer: string): boolean {
+    const entry = this.pending.get(id);
+    if (!entry) return false;
+    const matched = matchOption(answer, entry.options);
+    const label =
+      matched !== null && matched !== "ambiguous" ? entry.options[matched].label : answer;
+    this.resolvePending(entry, { action: "accept", content: { [ANSWER_PROPERTY]: label } });
+    return true;
+  }
 
   /**
    * Handle an MCP elicitation request from the agent SDK. Resolves with
@@ -230,6 +253,24 @@ export class ElicitationManager {
     options: Array<{ label: string; description?: string }>,
     source: ElicitationSource,
   ): Promise<void> {
+    // Mobile / terminal clients have no channel adapter — render the question over the
+    // open Chat stream via the registered emitter, and accept the answer out-of-band.
+    const emit = this.emitters.get(channelKeyFor(source));
+    if (emit) {
+      emit({
+        type: "ask",
+        id,
+        prompt: message,
+        options: options.map((o, i) => ({
+          label: o.label,
+          desc: o.description,
+          key: String(i + 1),
+        })),
+        multiSelect: false,
+      });
+      return;
+    }
+
     const adapter = this.channelManager.getAdapter(source.platform);
     if (!adapter) {
       throw new Error(`No adapter for platform ${source.platform}`);

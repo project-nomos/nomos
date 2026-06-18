@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { curateConsumerTasks, toConsumerTask } from "./task-view.ts";
+import { curateConsumerTasks, prettifyTaskName, toConsumerTask } from "./task-view.ts";
 import { prettifySchedule } from "./schedule-format.ts";
 import type { CronJob } from "./types.ts";
 
@@ -36,6 +36,23 @@ describe("toConsumerTask", () => {
   });
 });
 
+describe("prettifyTaskName", () => {
+  it("humanizes kebab/snake/camel slugs to Title Case", () => {
+    expect(prettifyTaskName("call-dentist")).toBe("Call Dentist");
+    expect(prettifyTaskName("water_plants")).toBe("Water Plants");
+    expect(prettifyTaskName("checkUrgentEmails")).toBe("Check Urgent Emails");
+  });
+
+  it("leaves real prose alone (only capitalizes the first letter)", () => {
+    expect(prettifyTaskName("Check my inbox")).toBe("Check my inbox");
+    expect(prettifyTaskName("review the PR diff")).toBe("Review the PR diff");
+  });
+
+  it("is applied by toConsumerTask so both transports show a friendly name", () => {
+    expect(toConsumerTask(job({ name: "call-dentist" })).name).toBe("Call Dentist");
+  });
+});
+
 describe("curateConsumerTasks", () => {
   it("sorts enabled first, then alphabetical", () => {
     const out = curateConsumerTasks([
@@ -43,12 +60,24 @@ describe("curateConsumerTasks", () => {
       job({ name: "apple", enabled: false }),
       job({ name: "mango", enabled: true }),
     ]);
-    expect(out.map((t) => t.name)).toEqual(["mango", "zebra", "apple"]);
+    expect(out.map((t) => t.name)).toEqual(["Mango", "Zebra", "Apple"]);
   });
 
-  it("passes through every owned job (filtering is done by the per-user query)", () => {
-    const out = curateConsumerTasks([job({ name: "a" }), job({ name: "b" })]);
+  it("passes through user/agent-scheduled jobs", () => {
+    const out = curateConsumerTasks([
+      job({ name: "a", source: "agent" }),
+      job({ name: "b", source: "user" }),
+    ]);
     expect(out).toHaveLength(2);
+  });
+
+  it("hides infra loops (system/bundled) that share the owner's user_id in power-user mode", () => {
+    const out = curateConsumerTasks([
+      job({ name: "call-dentist", source: "agent" }),
+      job({ name: "auto-dream", source: "system" }),
+      job({ name: "calendar-prep", source: "bundled" }),
+    ]);
+    expect(out.map((t) => t.name)).toEqual(["Call Dentist"]);
   });
 });
 

@@ -138,6 +138,7 @@ export class Gateway {
     // its `onElicitation` callback can dispatch through here.
     this.elicitationManager = new ElicitationManager(this.channelManager);
     this.runtime.setElicitationManager(this.elicitationManager);
+    this.grpcServer.setElicitationManager(this.elicitationManager);
 
     // 6. Create cron engine with broadcast to connected clients
     this.cronEngine = new CronEngine(this.messageQueue, this.channelManager, (event) => {

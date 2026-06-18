@@ -91,6 +91,7 @@ import {
 } from "../src/memory/magic-docs.ts";
 import { SessionStore } from "../src/sessions/store.ts";
 import { CronStore } from "../src/cron/store.ts";
+import { curateConsumerTasks } from "../src/cron/task-view.ts";
 import {
   createDraft,
   getDraft,
@@ -1084,6 +1085,64 @@ async function runCron(): Promise<void> {
   const stats = await store.getRunStats(jobId);
   check("[cron] run stats reflect the run", stats.totalRuns === 1 && stats.successCount === 1);
   if (!KEEP) await store.deleteJob(jobId); // cron_runs cascade via FK
+}
+
+async function runTasks(): Promise<void> {
+  // scheduled-tasks: the consumer Tasks surface (curateConsumerTasks, served behind
+  // BOTH NomosAgent.ListTasks and MobileApi.ListTasks). A reminder the assistant
+  // scheduled via schedule_task (source='agent') must surface; the instance's
+  // always-on system/bundled infra loops -- which collapse onto the owner's user_id
+  // in power-user mode -- must be filtered OUT by curateConsumerTasks' source guard.
+  // Deterministic (no LLM): the live agent->schedule_task->Tasks path is covered by
+  // the iOS XCUITest; here we guard the durable effect + the curation/filter.
+  const store = new CronStore();
+  const owner = "eval-tasks-a";
+  // cron_jobs.name is globally UNIQUE (idx_cron_name), so namespace both rows to avoid
+  // colliding with seeded loops in nomos_eval.
+  const reminderId = await store.createJob({
+    userId: owner,
+    name: "eval-tasks-call-dentist",
+    schedule: "2026-06-18T09:00:00",
+    scheduleType: "at",
+    sessionTarget: "isolated",
+    deliveryMode: "none",
+    prompt: "Remind the user to call the dentist",
+    enabled: true,
+    errorCount: 0,
+    source: "agent", // what schedule_task stamps for a user-owned task
+  });
+  const infraId = await store.createJob({
+    userId: owner, // same user_id as the reminder (power-user collapses system onto the owner)
+    name: "eval-tasks-infra-loop",
+    schedule: "6h",
+    scheduleType: "every",
+    sessionTarget: "isolated",
+    deliveryMode: "none",
+    prompt: "consolidate",
+    enabled: true,
+    errorCount: 0,
+    source: "system", // an infra loop -- must NOT appear on Tasks
+  });
+
+  const tasks = curateConsumerTasks(await store.listJobs({ userId: owner }));
+  check(
+    "[tasks] a schedule_task reminder (source=agent) surfaces on the consumer Tasks view",
+    tasks.some((t) => t.id === reminderId && t.source === "agent" && t.scheduleType === "at"),
+    `tasks=${tasks.map((t) => `${t.name}:${t.source}`).join(", ")}`,
+  );
+  check(
+    "[tasks] system/bundled infra loops are filtered out of Tasks (curateConsumerTasks source guard)",
+    !tasks.some((t) => t.id === infraId) &&
+      tasks.every((t) => t.source !== "system" && t.source !== "bundled"),
+  );
+
+  // Under --audit (KEEP) the source=agent reminder is intentionally left in nomos_eval
+  // so the scheduled-tasks effect SQL (source IN ('agent','user')) is exercised, not
+  // just declared. A plain run cleans both up.
+  if (!KEEP) {
+    await store.deleteJob(reminderId);
+    await store.deleteJob(infraId);
+  }
 }
 
 async function runDrafts(): Promise<void> {
@@ -3207,6 +3266,7 @@ async function runEval(): Promise<void> {
   await runCommitments();
   await runSessionResume();
   await runCron();
+  await runTasks();
   await runDrafts();
   await runAutoLinkerGuard();
   await runRelationshipStats();

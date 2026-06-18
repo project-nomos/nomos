@@ -819,14 +819,18 @@ export const FEATURES: FeatureSpec[] = [
   {
     id: "multi-agent-teams",
     summary:
-      "Coordinator/worker orchestration via the /team prefix; parallel workers, synthesized result.",
+      "Coordinator/worker orchestration: a coordinator decomposes a task into parallel workers and synthesizes one result. Triggered EITHER by the `/team` prefix (fast path) OR by the in-loop `delegate_to_team` tool (buildTeamMcpServer) the agent calls when the user asks in natural language ('research X from three angles', 'spin up a team') — both work in hosted + power-user modes (both converge on AgentRuntime.runAgent). Gated on teamMode. Workers receive only the BASE mcp set (no nomos-team), so they can never recurse into delegation.",
     trigger: { kind: "turn", gate: "teamMode" },
-    entry: ["stripTeamPrefix", "TeamRuntime"],
+    entry: ["stripTeamPrefix", "TeamRuntime", "buildTeamMcpServer"],
     effects: [
       {
         claim: "spawns parallel workers + synthesizes (transient, no durable DB state)",
         notExercised: true,
       },
+    ],
+    invariants: [
+      "invokable without the /team prefix via delegate_to_team, in both hosted + power-user modes",
+      "workers get only the base mcp set, so a worker can never spawn a nested team",
     ],
   },
 
@@ -983,23 +987,57 @@ export const FEATURES: FeatureSpec[] = [
   {
     id: "scheduled-tasks",
     summary:
-      "Consumer Tasks surface (MobileApi.ListTasks/UpdateTask/DeleteTask). ListTasks returns the user's own scheduled cron_jobs (one-off 'at' reminders + recurring jobs created via schedule_task/loop_create), owner-scoped by user_id so the instance's system-owned background loops never appear. UpdateTask reschedules/renames/edits the instruction/enables; DeleteTask removes one. Both assert ownership before mutating.",
+      "Consumer Tasks surface, served by BOTH NomosAgent.ListTasks/UpdateTask/DeleteTask (grpc-server, local power-user) and MobileApi.ListTasks/UpdateTask/DeleteTask (hosted, auth-gated); GetToday reuses curateConsumerTasks for its task strip. A 'task' is any cron_jobs row the user/assistant scheduled (one-off 'at' reminders + recurring 'every'/'cron' jobs created via schedule_task/loop_create). curateConsumerTasks(jobs) filters out INFRA_SOURCES (source in {system,bundled}) so the instance's always-on system loops + bundled templates never appear on Tasks even in power-user mode, where systemTenant() collapses onto the owner so they share the owner's user_id; sorts enabled-first then alphabetical. toConsumerTask shapes each row + prettifies the schedule. UpdateTask reschedules/renames/edits the instruction/enables; DeleteTask removes one; both assert ownership before mutating.",
     trigger: { kind: "turn" },
     entry: ["curateConsumerTasks", "toConsumerTask"],
     effects: [
       {
-        claim: "the user's scheduled tasks are stored as owner-scoped cron_jobs",
+        // Exercised by runTasks: a schedule_task-style reminder (source='agent')
+        // is created + survives under --audit (KEEP), so the count is nonzero.
+        claim:
+          "user/assistant-scheduled tasks are stored as owner-scoped cron_jobs (source='agent')",
         sql: {
           query: "SELECT count(*) FROM cron_jobs WHERE source IN ('agent','user')",
           expect: "nonzero",
         },
+      },
+      {
+        // The complement: infra loops genuinely EXIST in cron_jobs (so "Tasks hides
+        // them" is a non-vacuous claim); curateConsumerTasks filters them out of the
+        // view (asserted by runTasks' check() + the task-view unit test).
+        claim:
+          "infra loops (system/bundled) exist as cron_jobs but are filtered out of the Tasks view",
+        sql: {
+          query: "SELECT count(*) FROM cron_jobs WHERE source IN ('system','bundled')",
+          expect: "nonzero",
+        },
+      },
+    ],
+    invariants: [
+      "Tasks are owner-scoped (user_id); system/bundled infra loops are filtered out by INFRA_SOURCES and never appear on this surface, even when they share the owner's user_id in power-user mode",
+      "served by both NomosAgent (local) and MobileApi (hosted) ListTasks/UpdateTask/DeleteTask off the same curateConsumerTasks view",
+      "UpdateTask/DeleteTask assert job.userId === the resolved owner before mutating",
+      "schedule_task stamps source='agent' (a user-owned task, not infra)",
+    ],
+  },
+  {
+    id: "ask-user-elicitation",
+    summary:
+      "MCP-native ask_user round-trip: an in-process tool raises an elicitation/create request; the SDK relays it to AgentRuntime's onElicitation callback (handleElicitation), which renders the question on the user's active channel. Slack gets Block Kit buttons, any text channel matches a numbered/label reply, and channel-less clients (mobile/terminal) get an 'ask' AgentEvent over the open stream via a per-source registered emitter (registerEmitter/unregisterEmitter), with the answer returned OUT-OF-BAND through the AnswerQuestion RPC (NomosAgent + MobileApi) -> resolveById. Answering out-of-band (not as a new chat turn) avoids deadlocking the per-session FIFO queue behind the suspended turn. A pending entry is keyed by elicitation id with a TTL auto-decline.",
+    trigger: { kind: "turn" },
+    entry: ["handleElicitation", "registerEmitter", "unregisterEmitter", "resolveById"],
+    effects: [
+      {
+        claim:
+          "ask_user renders the question on the active channel / over the open stream and resolves the agent's suspended promise from the out-of-band answer (in-memory pending map + transient 'ask' stream event; no durable table)",
         notExercised: true,
       },
     ],
     invariants: [
-      "Tasks are owner-scoped (user_id); managed/system loops never appear on this surface",
-      "UpdateTask/DeleteTask assert job.userId === the resolved owner before mutating",
-      "schedule_task stamps source='agent' (a user-owned task, not infra)",
+      "the elicitation manager is created at gateway boot and handed to both the runtime and the gRPC server (setElicitationManager)",
+      "AnswerQuestion is served by BOTH NomosAgent (grpc-server) and MobileApi (auth-gated) and both resolve via resolveById",
+      "mobile/terminal sources (no channel adapter) register a per-source emitter that pushes an 'ask' AgentEvent and is torn down when the turn ends",
+      "the answer arrives out-of-band (a dedicated RPC), never as a new chat message, so the suspended turn never deadlocks the session queue",
     ],
   },
   {
