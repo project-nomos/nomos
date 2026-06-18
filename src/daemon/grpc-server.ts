@@ -43,11 +43,17 @@ export class GrpcServer {
   private draftManager: DraftManager | null;
   private port: number;
   private commandHandler?: (command: string) => Promise<string>;
+  private elicitationManager: import("./elicitation-manager.ts").ElicitationManager | null = null;
 
   constructor(messageQueue: MessageQueue, port: number = 8766, draftManager?: DraftManager) {
     this.messageQueue = messageQueue;
     this.draftManager = draftManager ?? null;
     this.port = port;
+  }
+
+  /** Wire in the elicitation manager so AnswerQuestion can resolve pending questions. */
+  setElicitationManager(mgr: import("./elicitation-manager.ts").ElicitationManager): void {
+    this.elicitationManager = mgr;
   }
 
   /** Register a handler for Command RPCs. */
@@ -88,6 +94,10 @@ export class GrpcServer {
         ListLoops: this.handleListLoops.bind(this),
         SetLoopEnabled: this.handleSetLoopEnabled.bind(this),
         DeleteLoop: this.handleDeleteLoop.bind(this),
+        ListTasks: this.handleListTasks.bind(this),
+        UpdateTask: this.handleUpdateTask.bind(this),
+        DeleteTask: this.handleDeleteTask.bind(this),
+        AnswerQuestion: this.handleAnswerQuestion.bind(this),
         Ping: this.handlePing.bind(this),
       });
       this.server.addService(OAuthDepositService, {
@@ -98,6 +108,7 @@ export class GrpcServer {
         buildMobileApiHandlers({
           messageQueue: this.messageQueue,
           draftManager: this.draftManager,
+          getElicitationManager: () => this.elicitationManager,
         }) as unknown as grpc.UntypedServiceImplementation,
       );
 
@@ -365,6 +376,103 @@ export class GrpcServer {
     } catch (err) {
       callback(err as grpc.ServiceError, null);
     }
+  }
+
+  /** ListTasks RPC -- the local owner's scheduled tasks (cron_jobs), curated. */
+  private async handleListTasks(
+    _call: grpc.ServerUnaryCall<unknown, unknown>,
+    callback: grpc.sendUnaryData<{ tasks: unknown[] }>,
+  ): Promise<void> {
+    try {
+      const { CronStore } = await import("../cron/store.ts");
+      const { curateConsumerTasks } = await import("../cron/task-view.ts");
+      const jobs = await new CronStore().listJobs({ userId: "local" });
+      callback(null, { tasks: curateConsumerTasks(jobs) });
+    } catch (err) {
+      callback(err as grpc.ServiceError, null);
+    }
+  }
+
+  /** UpdateTask RPC -- full-state edit of a local task (toggle/rename/reschedule). */
+  private async handleUpdateTask(
+    call: grpc.ServerUnaryCall<
+      {
+        id?: string;
+        name?: string;
+        prompt?: string;
+        schedule?: string;
+        scheduleType?: string;
+        enabled?: boolean;
+      },
+      unknown
+    >,
+    callback: grpc.sendUnaryData<{ success: boolean; message: string }>,
+  ): Promise<void> {
+    try {
+      const req = call.request ?? {};
+      if (!req.id) {
+        callback(null, { success: false, message: "missing_id" });
+        return;
+      }
+      const { CronStore } = await import("../cron/store.ts");
+      const store = new CronStore();
+      const job = await store.getJob(req.id);
+      if (!job || job.userId !== "local") {
+        callback(null, { success: false, message: "task_not_found" });
+        return;
+      }
+      const updates: Record<string, unknown> = { enabled: Boolean(req.enabled) };
+      if (req.name?.trim()) updates.name = req.name.trim();
+      if (req.prompt?.trim()) updates.prompt = req.prompt;
+      if (req.schedule?.trim()) {
+        updates.schedule = req.schedule.trim();
+        updates.scheduleType = req.scheduleType || job.scheduleType;
+      }
+      await store.updateJob(job.id, updates);
+      process.emit("cron:refresh" as never);
+      callback(null, { success: true, message: "updated" });
+    } catch (err) {
+      callback(err as grpc.ServiceError, null);
+    }
+  }
+
+  /** DeleteTask RPC -- delete a local task. */
+  private async handleDeleteTask(
+    call: grpc.ServerUnaryCall<{ id?: string }, unknown>,
+    callback: grpc.sendUnaryData<{ success: boolean; message: string }>,
+  ): Promise<void> {
+    try {
+      const id = call.request?.id;
+      if (!id) {
+        callback(null, { success: false, message: "missing_id" });
+        return;
+      }
+      const { CronStore } = await import("../cron/store.ts");
+      const store = new CronStore();
+      const job = await store.getJob(id);
+      if (!job || job.userId !== "local") {
+        callback(null, { success: false, message: "task_not_found" });
+        return;
+      }
+      await store.deleteJob(job.id);
+      process.emit("cron:refresh" as never);
+      callback(null, { success: true, message: "deleted" });
+    } catch (err) {
+      callback(err as grpc.ServiceError, null);
+    }
+  }
+
+  /** AnswerQuestion RPC -- resolve a pending ask_user elicitation out-of-band. */
+  private handleAnswerQuestion(
+    call: grpc.ServerUnaryCall<{ questionId?: string; answer?: string }, unknown>,
+    callback: grpc.sendUnaryData<{ success: boolean; message: string }>,
+  ): void {
+    const { questionId, answer } = call.request ?? {};
+    const ok =
+      questionId && answer != null
+        ? (this.elicitationManager?.resolveById(questionId, answer) ?? false)
+        : false;
+    callback(null, { success: Boolean(ok), message: ok ? "answered" : "no_pending_question" });
   }
 
   /** Handle ApproveDraft RPC. */

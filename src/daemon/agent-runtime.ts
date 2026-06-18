@@ -33,6 +33,7 @@ import { buildStudioMcpServer } from "../sdk/studio-mcp.ts";
 import { buildVaultMcpServer } from "../sdk/vault-mcp.ts";
 import { buildThinkMcpServer } from "../sdk/think-mcp.ts";
 import { buildLoopMcpServer } from "../sdk/loop-mcp.ts";
+import { buildTeamMcpServer } from "../sdk/team-mcp.ts";
 import { buildMemoryDigest } from "../memory/digest.ts";
 import { captureMoodFromTurn } from "../memory/mood-log.ts";
 import { getRelevantArticles } from "../memory/wiki-reader.ts";
@@ -63,6 +64,53 @@ function formatElapsedSince(date: Date): string {
   if (days < 30) return `${days} day${days === 1 ? "" : "s"}`;
   const months = Math.floor(days / 30);
   return `${months} month${months === 1 ? "" : "s"}`;
+}
+
+/** A short, human one-liner describing a tool call, derived from its input. */
+function summarizeToolInput(name: string, input: unknown): string {
+  const o = (input ?? {}) as Record<string, unknown>;
+  const str = (v: unknown): string => (typeof v === "string" ? v : "");
+  switch (name) {
+    case "WebSearch":
+      return str(o.query);
+    case "WebFetch":
+      return str(o.url);
+    case "Read":
+    case "Edit":
+    case "Write":
+      return str(o.file_path);
+    case "Bash":
+      return str(o.command);
+    case "Grep":
+    case "Glob":
+      return str(o.pattern);
+    default: {
+      const pick =
+        str(o.query) || str(o.prompt) || str(o.path) || str(o.message) || str(o.description);
+      if (pick) return pick;
+      try {
+        const j = JSON.stringify(input);
+        return j && j.length > 2 ? (j.length > 120 ? `${j.slice(0, 117)}…` : j) : "";
+      } catch {
+        return "";
+      }
+    }
+  }
+}
+
+/** Convert a TodoWrite tool input into a `plan` event for clients (PlanCard). */
+function todoWriteToPlan(input: unknown): Extract<AgentEvent, { type: "plan" }> | null {
+  const todos = (input as { todos?: unknown })?.todos;
+  if (!Array.isArray(todos) || todos.length === 0) return null;
+  const items = todos.map((t) => {
+    const o = (t ?? {}) as Record<string, unknown>;
+    const status = typeof o.status === "string" ? o.status : "pending";
+    const state = status === "completed" ? "done" : status === "in_progress" ? "active" : "todo";
+    const content = typeof o.content === "string" ? o.content : "";
+    const activeForm = typeof o.activeForm === "string" ? o.activeForm : undefined;
+    return { title: content, sub: state === "active" ? activeForm : undefined, state } as const;
+  });
+  return { type: "plan", title: "Plan", items };
 }
 import { classifyQuery } from "../routing/classifier.ts";
 import {
@@ -1028,6 +1076,34 @@ export class AgentRuntime {
       }
     }
 
+    // Team delegation as an in-loop tool: the agent spins up a parallel sub-agent
+    // team when the user asks in natural language ("research X from three angles",
+    // "spin up a team") — no `/team` prefix needed, in BOTH hosted and power-user
+    // modes (both converge here). The TeamTask carries only the BASE mcp set (which
+    // excludes `nomos-team`), so workers can never receive the delegate tool and
+    // recurse. Gated on teamMode; the `/team` prefix stays as a fast path.
+    if (this.config.teamMode && this.teamRuntime) {
+      const teamRuntime = this.teamRuntime;
+      const turnModel = model ?? this.config.model;
+      const teamServers: Record<string, ReturnType<typeof buildTeamMcpServer>> = {
+        "nomos-team": buildTeamMcpServer({
+          runTeam: (t, e) => teamRuntime.runTeam(t, e),
+          teamTaskBase: () => ({
+            systemPromptAppend: this.systemPromptAppend,
+            mcpServers: this.mcpServers,
+            permissionMode: "bypassPermissions",
+            allowedTools: Object.keys(this.mcpServers).map((n) => `mcp__${n}`),
+            disallowedTools: getDisallowedTools(),
+            model: turnModel,
+            plugins: this.plugins,
+          }),
+          isWorkerContext: false,
+          onProgress: (m) => emit({ type: "system", subtype: "status", message: m }),
+        }),
+      };
+      mcpServers = { ...mcpServers, ...teamServers };
+    }
+
     // Reasoning-first: always-inject what the agent already knows about the user,
     // so it stays continuous without having to call a recall tool first.
     const memoryDigest = await buildMemoryDigest(vaultUserId).catch(() => "");
@@ -1076,6 +1152,14 @@ export class AgentRuntime {
 
     // Inject team context from a previous /team turn (if any)
     let systemPromptAppend = this.systemPromptAppend;
+    // Tell the agent it can delegate to a parallel sub-agent team in-loop, just by
+    // the user asking — no `/team` prefix needed (the tool is registered above when
+    // teamMode is on, in both hosted and power-user modes).
+    if (this.config.teamMode && this.teamRuntime) {
+      systemPromptAppend =
+        systemPromptAppend +
+        "\n\n## Working as a team\nWhen a request is genuinely parallelizable — research from several angles at once, compare multiple options, or the user explicitly asks for a team / parallel work — call `delegate_to_team` with a self-contained task (and optional `angles`). It runs independent sub-agents and hands you back one synthesized result to weave into your reply. Reserve it for multi-angle or heavy work; don't use it for simple single-step tasks. (Power users can also start a message with `/team` for the same thing.)";
+    }
     if (sessionKey) {
       const teamCtx = this.teamContext.get(sessionKey);
       if (teamCtx) {
@@ -1142,6 +1226,12 @@ export class AgentRuntime {
       mgr && source
         ? (request, opts) => mgr.handleElicitation(request, source, opts.signal)
         : undefined;
+    // Mobile / local-terminal clients have no channel adapter, so render ask_user over
+    // THIS open chat stream via `emit` (the answer returns out-of-band via AnswerQuestion).
+    const elicitationOnStream = Boolean(
+      mgr && source && (source.platform === "mobile" || source.platform === "terminal"),
+    );
+    if (elicitationOnStream && mgr && source) mgr.registerEmitter(source, emit);
 
     const sdkQuery = runSession({
       prompt,
@@ -1187,6 +1277,28 @@ export class AgentRuntime {
             if (block.type === "text" && block.text) {
               if (fullText && !fullText.endsWith("\n")) fullText += "\n";
               fullText += block.text;
+            } else if (block.type === "tool_use" || block.type === "server_tool_use") {
+              // The model called a tool. Surface it as a tool_use_summary event so
+              // clients (CLI, mobile) can render a tool-use card. The SDK never sends
+              // a standalone "tool_use_summary" message -- tool calls only arrive as
+              // content blocks on the assistant turn, so this is the one place to
+              // catch them (incl. server tools like web_search).
+              const toolName = (block as { name?: string }).name ?? "unknown";
+              const summary = summarizeToolInput(toolName, (block as { input?: unknown }).input);
+              emit({ type: "tool_use_summary", tool_name: toolName, summary });
+              // TodoWrite also drives a richer Plan card (clients suppress its tool card).
+              if (toolName === "TodoWrite") {
+                const plan = todoWriteToPlan((block as { input?: unknown }).input);
+                if (plan) emit(plan);
+              }
+              // Shadow mode: record tool usage observation.
+              if (this.shadowObserver?.isEnabled() && sessionKey) {
+                this.shadowObserver.recordToolUse(toolName, summary, sessionKey);
+                if (["Read", "Edit", "Write"].includes(toolName) && summary) {
+                  const action = toolName.toLowerCase() as "read" | "edit" | "write";
+                  this.shadowObserver.recordFileAccess(summary, action);
+                }
+              }
             }
           }
           emit({ type: "stream_event", event: msg });
@@ -1195,28 +1307,6 @@ export class AgentRuntime {
 
         case "stream_event": {
           emit({ type: "stream_event", event: msg });
-          break;
-        }
-
-        case "tool_use_summary": {
-          const toolName = (msg as { tool_name?: string }).tool_name ?? "unknown";
-          emit({
-            type: "tool_use_summary",
-            tool_name: toolName,
-            summary: msg.summary,
-          });
-          // Shadow mode: record tool usage observation
-          if (this.shadowObserver?.isEnabled() && sessionKey) {
-            this.shadowObserver.recordToolUse(toolName, msg.summary, sessionKey);
-            // Record file access for Read/Edit/Write tools
-            if (["Read", "Edit", "Write"].includes(toolName) && typeof msg.summary === "string") {
-              const pathMatch = msg.summary.match(/(?:Read|Edit|Write)\s+(\S+)/);
-              if (pathMatch) {
-                const action = toolName.toLowerCase() as "read" | "edit" | "write";
-                this.shadowObserver.recordFileAccess(pathMatch[1]!, action);
-              }
-            }
-          }
           break;
         }
 
@@ -1267,6 +1357,8 @@ export class AgentRuntime {
           break;
       }
     }
+
+    if (elicitationOnStream && mgr && source) mgr.unregisterEmitter(source);
 
     return { text: fullText, sessionId, costUsd, inputTokens, outputTokens };
   }

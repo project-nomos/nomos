@@ -98,12 +98,16 @@ describe("prettifySchedule", () => {
     expect(prettifySchedule("15m", "every")).toBe("Every 15 minutes");
   });
 
-  it("renders daily cron expressions", () => {
+  it("renders daily + weekday/weekly/monthly cron expressions", () => {
     expect(prettifySchedule("0 8 * * *", "cron")).toBe("Daily at 8:00 AM");
     expect(prettifySchedule("30 17 * * *", "cron")).toBe("Daily at 5:30 PM");
+    expect(prettifySchedule("0 9 * * 1-5", "cron")).toBe("Weekdays at 9:00 AM");
+    expect(prettifySchedule("0 9 * * 1", "cron")).toBe("Weekly on Mon at 9:00 AM");
+    expect(prettifySchedule("0 8 15 * *", "cron")).toBe("Monthly on day 15 at 8:00 AM");
   });
 
-  it("falls back to the raw string for unrecognized shapes", () => {
-    expect(prettifySchedule("0 9 * * 1", "cron")).toBe("0 9 * * 1");
+  it("falls back to the raw string for genuinely unrecognized shapes", () => {
+    expect(prettifySchedule("*/5 * * * *", "cron")).toBe("*/5 * * * *");
+    expect(prettifySchedule("0 9 1 1 *", "cron")).toBe("0 9 1 1 *"); // specific month, not modeled
   });
 });

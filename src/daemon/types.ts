@@ -48,6 +48,18 @@ export type AgentEvent =
   | { type: "stream_event"; event: SDKMessage }
   | { type: "tool_use_summary"; tool_name: string; summary?: string }
   | {
+      type: "plan";
+      title: string;
+      items: { title: string; sub?: string; state: "done" | "active" | "todo" }[];
+    }
+  | {
+      type: "ask";
+      id: string;
+      prompt: string;
+      options: { label: string; desc?: string; key: string }[];
+      multiSelect: boolean;
+    }
+  | {
       type: "result";
       result: string;
       usage: { input_tokens: number; output_tokens: number };

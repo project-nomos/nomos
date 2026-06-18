@@ -26,6 +26,14 @@ service NomosAgent {
   rpc SetLoopEnabled (SetLoopEnabledRequest) returns (LoopActionResponse);
   rpc DeleteLoop (LoopDeleteRequest) returns (LoopActionResponse);
 
+  // Scheduled tasks (the local owner's cron_jobs) — mirrors MobileApi for local mode.
+  rpc ListTasks (Empty) returns (MTasksResponse);
+  rpc UpdateTask (MTaskUpdateRequest) returns (MAck);
+  rpc DeleteTask (MTaskDeleteRequest) returns (MAck);
+
+  // Answer a pending ask_user elicitation out-of-band (does not enqueue a turn).
+  rpc AnswerQuestion (MAnswerRequest) returns (MAck);
+
   // Health check
   rpc Ping (Empty) returns (PongResponse);
 }
@@ -208,6 +216,9 @@ service MobileApi {
   rpc UpdateTask (MTaskUpdateRequest) returns (MAck);
   rpc DeleteTask (MTaskDeleteRequest) returns (MAck);
 
+  // Answer a pending ask_user elicitation out-of-band (does not enqueue a turn).
+  rpc AnswerQuestion (MAnswerRequest) returns (MAck);
+
   // Brain tab (the user's knowledge graph + learned facts, for the feed + map)
   rpc GetBrain (Empty) returns (MBrainResponse);
 
@@ -360,6 +371,14 @@ message MTodayResponse {
 message MAck {
   bool success = 1;
   string message = 2;
+}
+
+// Answer to a pending ask_user elicitation, delivered out-of-band so it does not
+// queue behind the suspended turn that is awaiting it.
+message MAnswerRequest {
+  string session_key = 1;
+  string question_id = 2;
+  string answer = 3;
 }
 
 // Vault (long-term memory / knowledge base)

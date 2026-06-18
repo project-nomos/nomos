@@ -4,6 +4,8 @@
  * and toggle/delete key off the id/name); this is display-only.
  */
 
+const DOW = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
 export function prettifySchedule(schedule: string, scheduleType: string): string {
   const s = schedule.trim();
 
@@ -28,9 +30,19 @@ export function prettifySchedule(schedule: string, scheduleType: string): string
   if (scheduleType === "cron") {
     const parts = s.split(/\s+/);
     if (parts.length === 5) {
-      const [min, hour, dom, , dow] = parts;
-      if (/^\d+$/.test(min) && /^\d+$/.test(hour) && dom === "*" && dow === "*") {
-        return `Daily at ${formatClock(Number(hour), min)}`;
+      const [min, hour, dom, mon, dow] = parts;
+      if (/^\d+$/.test(min) && /^\d+$/.test(hour) && mon === "*") {
+        const clock = formatClock(Number(hour), min);
+        if (dom === "*" && dow === "*") return `Daily at ${clock}`;
+        if (dom === "*" && dow === "1-5") return `Weekdays at ${clock}`;
+        if (dom === "*" && /^[0-7](,[0-7])*$/.test(dow)) {
+          const names = dow
+            .split(",")
+            .map((d) => DOW[Number(d) === 7 ? 0 : Number(d)])
+            .join(", ");
+          return `Weekly on ${names} at ${clock}`;
+        }
+        if (dow === "*" && /^\d+$/.test(dom)) return `Monthly on day ${dom} at ${clock}`;
       }
     }
     return s;
