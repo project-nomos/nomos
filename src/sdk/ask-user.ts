@@ -40,6 +40,17 @@ export interface AskUserToolOptions {
    * `ToolConfig.askUserQuestion.previewFormat`.
    */
   previewFormat?: "markdown" | "html";
+  /**
+   * Host elicitation callback. When provided, `ask_user` routes the question
+   * through this (which calls the ElicitationManager directly) INSTEAD of the
+   * SDK's `extra.sendRequest`. The SDK does not forward `elicitation/create`
+   * from in-process MCP servers — it answers `-32601 Method not found` — so for
+   * the daemon's own tools this direct callback is the only working path.
+   */
+  elicit?: (
+    request: unknown,
+    opts: { signal?: AbortSignal },
+  ) => Promise<{ action: string; content?: Record<string, unknown> }>;
 }
 
 /**
@@ -49,7 +60,7 @@ export interface AskUserToolOptions {
  * accepts heterogeneous `SdkMcpToolDefinition<...>` values in its
  * tools array.
  */
-export function createAskUserTool(_options: AskUserToolOptions = {}) {
+export function createAskUserTool(options: AskUserToolOptions = {}) {
   return tool(
     "ask_user",
     ASK_USER_DESCRIPTION,
@@ -125,39 +136,46 @@ export function createAskUserTool(_options: AskUserToolOptions = {}) {
       // The Claude Agent SDK intercepts `elicitation/create` and routes
       // it to the host's `onElicitation` callback.
       try {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const ext = extra as {
-          sendRequest?: (
-            req: { method: string; params: unknown },
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            resultSchema: any,
-          ) => Promise<{ action: string; content?: Record<string, unknown> }>;
-        };
-        if (!ext?.sendRequest) {
-          return {
-            content: [
-              {
-                type: "text",
-                text: "ask_user: this MCP server is not connected to a host that supports elicitation; ask the user in plain prose instead.",
-              },
-            ],
-            isError: true,
+        let result: { action: string; content?: Record<string, unknown> };
+        if (options.elicit) {
+          // Direct host elicitation (the ElicitationManager). The SDK does NOT
+          // forward elicitation/create from in-process MCP servers (-32601), so
+          // this is the working path for the daemon's own tools.
+          result = await options.elicit(requestPayload, {
+            signal: (extra as { signal?: AbortSignal } | undefined)?.signal,
+          });
+        } else {
+          // Fallback: ask over MCP elicitation, for hosts that support it.
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const ext = extra as {
+            sendRequest?: (
+              req: { method: string; params: unknown },
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              resultSchema: any,
+            ) => Promise<{ action: string; content?: Record<string, unknown> }>;
           };
+          if (!ext?.sendRequest) {
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: "ask_user: this MCP server is not connected to a host that supports elicitation; ask the user in plain prose instead.",
+                },
+              ],
+              isError: true,
+            };
+          }
+          // Minimal zod result schema (the MCP SDK is only a transitive dep). The
+          // shape we accept is the same the ElicitationManager produces.
+          const resultSchema = z.object({
+            action: z.enum(["accept", "decline", "cancel"]),
+            content: z.record(z.string(), z.unknown()).optional(),
+          });
+          result = await ext.sendRequest(
+            { method: "elicitation/create", params: requestPayload },
+            resultSchema,
+          );
         }
-
-        // Build a minimal zod result schema rather than importing the MCP
-        // SDK's `ElicitResultSchema` directly (MCP SDK is only a
-        // transitive dep here). The shape we accept is the same one the
-        // ElicitationManager produces: `{action, content?}`.
-        const resultSchema = z.object({
-          action: z.enum(["accept", "decline", "cancel"]),
-          content: z.record(z.string(), z.unknown()).optional(),
-        });
-
-        const result = await ext.sendRequest(
-          { method: "elicitation/create", params: requestPayload },
-          resultSchema,
-        );
 
         if (result.action === "accept") {
           const answer = (result.content?.answer as string) ?? "";

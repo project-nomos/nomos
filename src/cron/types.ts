@@ -4,8 +4,8 @@ export type SessionTarget = "main" | "isolated";
 
 export type DeliveryMode = "none" | "announce";
 
-/** Provenance: system (infra crons) | bundled (LOOP.md examples) | user (CLI/UI) | agent (self-authored). */
-export type CronJobSource = "system" | "bundled" | "user" | "agent";
+/** Provenance: system (infra crons) | bundled (LOOP.md examples) | user (CLI/UI) | agent (self-authored TASK) | loop (self-authored LOOP — recurring background behavior, shown on the Loops surface, not Tasks/Today). */
+export type CronJobSource = "system" | "bundled" | "user" | "agent" | "loop";
 
 export interface CronJob {
   id: string;

@@ -7,7 +7,7 @@ import { z } from "zod/v4";
 import { traceMemory } from "../memory/trace.ts";
 import { handleBootstrapComplete } from "../ui/bootstrap.ts";
 import { createLogger } from "../lib/logger.ts";
-import { createAskUserTool } from "./ask-user.ts";
+import { createAskUserTool, type AskUserToolOptions } from "./ask-user.ts";
 
 const log = createLogger("sdk-tools");
 import {
@@ -52,7 +52,10 @@ function formatSubgraph(sub: Subgraph): string {
  * Creates an in-process MCP server that exposes memory tools to the agent.
  * The agent can call `memory_search` to query the pgvector-backed memory store.
  */
-export function createMemoryMcpServer(userId: string = "local"): McpSdkServerConfigWithInstance {
+export function createMemoryMcpServer(
+  userId: string = "local",
+  opts: { elicit?: AskUserToolOptions["elicit"] } = {},
+): McpSdkServerConfigWithInstance {
   const memorySearchTool = tool(
     "memory_search",
     "Search the long-term memory store using hybrid vector + text search. Returns relevant code snippets, documentation, and previously stored knowledge. Use the category filter for targeted recall.",
@@ -1350,7 +1353,7 @@ export function createMemoryMcpServer(userId: string = "local"): McpSdkServerCon
 
   // Multi-choice user prompt that routes through MCP elicitation. The
   // actual rendering happens host-side in `src/daemon/elicitation-manager.ts`.
-  const askUserTool = createAskUserTool();
+  const askUserTool = createAskUserTool({ elicit: opts.elicit });
 
   const proposePlanTool = tool(
     "propose_plan",
@@ -2211,6 +2214,10 @@ export function createMemoryMcpServer(userId: string = "local"): McpSdkServerCon
   return createSdkMcpServer({
     name: "nomos-memory",
     version: "0.1.0",
+    // Always in the prompt (never deferred behind tool search) so the agent can call
+    // ask_user / schedule_task / memory_search directly — never improvising a "load"
+    // step (which it does for deferred tools, e.g. a fake `echo "Loading ..." `).
+    alwaysLoad: true,
     tools: [
       memorySearchTool,
       userModelRecallTool,

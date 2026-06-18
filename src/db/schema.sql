@@ -660,6 +660,13 @@ BEGIN
     CREATE INDEX IF NOT EXISTS idx_cron_source ON cron_jobs(source);
   END IF;
 
+  -- Agent-authored LOOPS carry a distinct `loop` source so they surface on the Loops
+  -- page, not the Tasks/Today surfaces (which are user/assistant scheduled `agent`
+  -- tasks). Widen the source CHECK -- a superset, so all existing rows stay valid.
+  ALTER TABLE cron_jobs DROP CONSTRAINT IF EXISTS cron_jobs_source_check;
+  ALTER TABLE cron_jobs ADD CONSTRAINT cron_jobs_source_check
+    CHECK (source IN ('system', 'bundled', 'user', 'agent', 'loop'));
+
   -- slack_user_tokens
   IF NOT EXISTS (
     SELECT 1 FROM information_schema.columns

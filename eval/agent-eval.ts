@@ -859,7 +859,7 @@ async function runQuickFixWiring(): Promise<void> {
     "[quickfix] user_model value round-trips as an object after re-upsert (no double-encode)",
     typeof aVal?.value === "object" &&
       aVal?.value !== null &&
-      (aVal?.value as Record<string, unknown>).value === "ship fast",
+      (aVal?.value as Record<string, unknown> | undefined)?.value === "ship fast",
   );
 
   if (!KEEP) {
@@ -1202,7 +1202,7 @@ async function runAutoLinkerGuard(): Promise<void> {
   // another user's contacts.
   const A = "eval-autolink-a";
   const B = "eval-autolink-b";
-  const a1 = await resolveContact(A, "slack", "U_A1", "Alice", "dup@example.com");
+  await resolveContact(A, "slack", "U_A1", "Alice", "dup@example.com");
   await resolveContact(A, "email", "alice@work", "Alice", "dup@example.com");
   const b1 = await resolveContact(B, "slack", "U_B1", "Alice", "dup@example.com");
   await resolveContact(B, "email", "alice@work", "Alice", "dup@example.com");
@@ -1241,7 +1241,7 @@ async function runAutoLinkerGuard(): Promise<void> {
     "[identity] contact_identities.metadata round-trips as an object (not double-encoded)",
     typeof ciRow?.metadata === "object" &&
       ciRow?.metadata !== null &&
-      (ciRow?.metadata as Record<string, unknown>).handle === "u-meta",
+      (ciRow?.metadata as Record<string, unknown> | undefined)?.handle === "u-meta",
   );
 
   // Contact enrichment on resolution: a job title in the inbound metadata lands on
@@ -1343,12 +1343,13 @@ async function runStyleProfiles(): Promise<void> {
     "[style] profile round-trips as a jsonb object (not a double-encoded string)",
     typeof rowA?.profile === "object" &&
       rowA?.profile !== null &&
-      (rowA?.profile as Record<string, unknown>).formality === 1,
+      (rowA?.profile as Record<string, unknown> | undefined)?.formality === 1,
   );
   check(
     "[style] B's global profile is its own (per-user scoped)",
     (await getStyleProfile(B, "global"))?.profile &&
-      ((await getStyleProfile(B, "global"))?.profile as Record<string, unknown>).formality === 5,
+      ((await getStyleProfile(B, "global"))?.profile as Record<string, unknown> | undefined)
+        ?.formality === 5,
   );
   // Re-upsert A: the unique key is (user_id, scope), so it updates in place.
   await upsertStyleProfile(A, null, "global", mk(2), 11);
@@ -2034,7 +2035,7 @@ async function runAutoDreamDeep(): Promise<void> {
   // ── Phase 2: near-duplicate merge on real 768-d embeddings ──
   const U = "eval-dream-merge";
   const vec = (second: number) => {
-    const v = new Array(768).fill(0);
+    const v = Array.from({ length: 768 }, () => 0);
     v[0] = 1;
     v[1] = second;
     return v;

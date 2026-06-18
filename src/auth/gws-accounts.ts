@@ -231,7 +231,7 @@ export async function runGws(
   const env = {
     ...process.env,
     ...envForAccount(email),
-    ...(options.env ?? {}),
+    ...options.env,
   };
 
   try {
@@ -257,7 +257,7 @@ export async function runGwsJson<T = unknown>(
   options: RunGwsOptions = {},
 ): Promise<T> {
   const { stdout } = await runGws(email, args, options);
-  const jsonStart = stdout.search(/[\[{]/);
+  const jsonStart = stdout.search(/[[{]/);
   if (jsonStart < 0) {
     throw new Error(`gws ${args.join(" ")} returned no JSON output`);
   }

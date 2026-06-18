@@ -510,7 +510,7 @@ export const FEATURES: FeatureSpec[] = [
   {
     id: "autonomous-loops",
     summary:
-      "Load bundled LOOP.md definitions (3-tier: bundled/personal/project) and seed them into cron_jobs at boot (disabled by default). The agent authors + manages its OWN loops in-loop via the nomos-loops tools (source='agent'); the user audits/disables them in Settings.",
+      "Load bundled LOOP.md definitions (3-tier: bundled/personal/project) and seed them into cron_jobs at boot (disabled by default). The agent authors + manages its OWN loops in-loop via the nomos-loops tools (source='loop' — distinct from a user/assistant 'agent' TASK, so loops show on the Loops surface, not Tasks/Today); the user audits/disables them in Settings.",
     trigger: { kind: "boot" },
     entry: ["seedAutonomousLoops", "loadAllLoops", "buildLoopMcpServer"],
     effects: [
@@ -533,7 +533,7 @@ export const FEATURES: FeatureSpec[] = [
     invariants: [
       "seeded idempotently (INSERT ON CONFLICT (name) DO NOTHING)",
       "bundled loops ship enabled:false; only the user or the agent enables them",
-      "agent-created loops carry source='agent' + the owner's user_id (auditable + per-owner scoped)",
+      "agent-created loops carry source='loop' + the owner's user_id (auditable + per-owner scoped; excluded from Tasks/Today, surfaced on Loops)",
     ],
   },
   {

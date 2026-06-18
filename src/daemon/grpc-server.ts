@@ -306,20 +306,21 @@ export class GrpcServer {
   ): Promise<void> {
     try {
       const { CronStore } = await import("../cron/store.ts");
-      const jobs = await new CronStore().listJobs({ userId: "local" });
+      const { curateConsumerLoops, curateOwnedLoops, MANAGED_LOOPS } =
+        await import("../cron/loop-view.ts");
+      const { isLoopUserDisabled } = await import("../cron/loop-overrides.ts");
+      // Loops = the managed system loops + the agent's own self-authored loops
+      // (source 'loop'). The user's scheduled TASKS live on the Tasks surface, so
+      // curate rather than dumping every cron_jobs row here.
+      const store = new CronStore();
+      const system = await store.listJobs({ userId: "local" });
+      const owned = await store.listJobs({ userId: "local", source: "loop" });
+      const optedOut = new Set<string>();
+      for (const j of system) {
+        if (MANAGED_LOOPS[j.name] && (await isLoopUserDisabled(j.name))) optedOut.add(j.name);
+      }
       callback(null, {
-        loops: jobs
-          .sort((a, b) => a.name.localeCompare(b.name))
-          .map((j) => ({
-            id: j.id,
-            name: j.name,
-            schedule: j.schedule,
-            enabled: j.enabled,
-            source: j.source ?? "system",
-            errorCount: j.errorCount,
-            lastRun: j.lastRun ? j.lastRun.toISOString() : "",
-            prompt: j.prompt,
-          })),
+        loops: [...curateConsumerLoops(system, optedOut), ...curateOwnedLoops(owned)],
       });
     } catch (err) {
       callback(err as grpc.ServiceError, null);

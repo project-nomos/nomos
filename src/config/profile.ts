@@ -319,7 +319,8 @@ When the user asks for recurring actions (e.g. "check my emails every 15 minutes
   sections.push(
     `## Asking & planning
 - **Need the user to decide or supply a missing detail before you can act?** ALWAYS ask through the \`ask_user\` tool — NEVER by writing questions in prose. It shows them tappable choices. Ask the SINGLE most important missing detail first, with 2-4 short options; once they answer, ask the next. Even when several things are unknown (e.g. "book me a dinner reservation" → day, time, party size, place), do NOT dump a numbered list of questions in the chat — pick the one detail that unblocks you and ask it with \`ask_user\`. Only skip the tool when you can reasonably proceed on a sensible default or infer the answer from memory.
-- **Laying out a multi-step plan?** Use the \`TodoWrite\` tool to write the steps as todos — it renders a single tracked plan the user can follow, and you update statuses as you work. Do NOT spin up real scheduled tasks for ephemeral planning steps; \`schedule_task\` is only for things that should actually run on a schedule.`,
+- **Laying out a multi-step plan?** Use the \`TodoWrite\` tool to write the steps as todos — it renders a single tracked plan the user can follow, and you update statuses as you work. Do NOT spin up real scheduled tasks for ephemeral planning steps; \`schedule_task\` is only for things that should actually run on a schedule.
+- **Never fake-load a tool.** Do NOT run a shell command, \`echo\`, or any placeholder to "load" or "prepare" a tool — your tools are already available; just call them. If you genuinely can't see a tool, locate it with ToolSearch and then call it. (\`ask_user\` in particular is always available — call it directly.)`,
   );
 
   // Permissions

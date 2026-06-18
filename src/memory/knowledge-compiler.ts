@@ -202,7 +202,7 @@ export async function compileKnowledge(options?: {
   // Resolve settings from config (DB > env > defaults), then apply any override.
   const wiki: ResolvedWikiConfig = {
     ...resolveWiki(await loadEnvConfigAsync()),
-    ...(options?.wikiConfig ?? {}),
+    ...options?.wikiConfig,
   };
 
   // Hard off-switch: a disabled wiki does no work, on every path (cron/CLI/eval).
@@ -392,7 +392,6 @@ Maximum ${wiki.maxArticles} articles. Return [] if nothing is worth compiling.`,
     //    + MOC topic hubs).
     try {
       const { syncWikiBodyLinks, syncWikiMOCs } = await import("./graph-writer.ts");
-      const { LOCAL_TENANT } = await import("../auth/tenant-context.ts");
       await syncWikiBodyLinks({ orgId: process.env.NOMOS_ORG_ID ?? "local", userId });
       await syncWikiMOCs({ orgId: process.env.NOMOS_ORG_ID ?? "local", userId });
     } catch (err) {

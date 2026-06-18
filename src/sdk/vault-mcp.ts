@@ -167,6 +167,8 @@ export function buildVaultMcpServer(userId: string): McpSdkServerConfigWithInsta
   return createSdkMcpServer({
     name: "nomos-vault",
     version: "1.0.0",
+    // Always loaded so durable memory read/write is reachable every turn, not deferred.
+    alwaysLoad: true,
     tools: [memoryRead, memoryWrite, memoryList, memoryForget, loadThread],
   });
 }

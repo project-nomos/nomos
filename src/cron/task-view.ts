@@ -57,7 +57,7 @@ export interface ConsumerTask {
  * Tasks = what the user or the assistant (`source: "agent"`/`"user"`) scheduled;
  * the curated infra loops live on the Loops surface (see cron/loop-view.ts).
  */
-const INFRA_SOURCES = new Set(["system", "bundled"]);
+const INFRA_SOURCES = new Set(["system", "bundled", "loop"]);
 
 export function toConsumerTask(j: CronJob): ConsumerTask {
   return {
