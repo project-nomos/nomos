@@ -1079,7 +1079,7 @@ export const FEATURES: FeatureSpec[] = [
   {
     id: "today-overview",
     summary:
-      "Consumer Today brief (MobileApi.GetToday). Composes today's Google Calendar events (live via gapiFetch, best-effort -- empty when Google isn't connected), pending commitments, and the user's scheduled tasks. briefingEnabled=false (proactive autonomy off) tells the client to show the enable-briefing deep link.",
+      "Consumer Today brief (MobileApi.GetToday). Composes today's Google Calendar events (live via gapiFetch, best-effort -- empty when Google isn't connected), pending commitments, and one-off ('at') reminders due by end of today. Recurring tasks ('every'/'cron') are NOT shown here -- they live on the Tasks page, so Today never duplicates them. briefingEnabled=false (proactive autonomy off) tells the client to show the enable-briefing deep link.",
     trigger: { kind: "turn" },
     entry: ["getTodayOverview"],
     effects: [
