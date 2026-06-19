@@ -9,7 +9,7 @@
 import { createHash } from "node:crypto";
 import { storeMemoryChunk, searchMemoryByVector, searchMemoryByText } from "../db/memory.ts";
 import { generateEmbedding, isEmbeddingAvailable } from "./embeddings.ts";
-import { runSession } from "../sdk/session.ts";
+import { runForkedAgent } from "../sdk/forked-agent.ts";
 import { loadEnvConfig } from "../config/env.ts";
 import { createLogger } from "../lib/logger.ts";
 
@@ -85,29 +85,17 @@ export async function scoreExemplar(
     .replace("{contextHint}", contextHint ?? "unknown");
 
   try {
-    let fullText = "";
-
-    const sdkQuery = runSession({
+    // runForkedAgent (not a bare runSession): carries useSubscription so it
+    // authenticates on subscription-only installs, and uses bypassPermissions +
+    // allowedTools:[] so the fork emits JSON rather than entering plan mode.
+    const { text: fullText } = await runForkedAgent({
       prompt,
       model,
-      systemPrompt: "You are a JSON scoring system. Output only valid JSON. No explanations.",
-      permissionMode: "plan",
-      maxTurns: 1,
-      mcpServers: {},
+      systemPromptAppend: "You are a JSON scoring system. Output only valid JSON. No explanations.",
+      maxTurns: 2,
+      label: "exemplar-scoring",
+      allowedTools: [],
     });
-
-    for await (const msg of sdkQuery) {
-      if (msg.type === "assistant") {
-        for (const block of msg.message.content) {
-          if (block.type === "text" && block.text) {
-            fullText += block.text;
-          }
-        }
-      }
-      if (msg.type === "result" && "result" in msg) {
-        fullText += msg.result;
-      }
-    }
 
     const jsonMatch = fullText.match(/\{[\s\S]*\}/);
     if (!jsonMatch) return null;
