@@ -231,29 +231,20 @@ async function llmConsolidate(userId: string): Promise<number> {
   const prompt = LLM_CONSOLIDATION_PROMPT.replace("{chunks}", chunksText);
 
   try {
-    const { runSession } = await import("../sdk/session.ts");
+    const { runForkedAgent } = await import("../sdk/forked-agent.ts");
 
-    let fullText = "";
-    const sdkQuery = runSession({
+    // runForkedAgent (not a bare runSession): carries useSubscription so it
+    // authenticates on subscription-only installs, and uses bypassPermissions +
+    // allowedTools:[] so the fork emits JSON rather than entering plan mode.
+    const { text: fullText } = await runForkedAgent({
       prompt,
       model,
-      systemPrompt:
+      systemPromptAppend:
         "You are a JSON decision system. Output only valid JSON arrays. No explanations.",
-      permissionMode: "plan",
-      maxTurns: 1,
-      mcpServers: {},
+      maxTurns: 2,
+      label: "memory-consolidation",
+      allowedTools: [],
     });
-
-    for await (const msg of sdkQuery) {
-      if (msg.type === "assistant") {
-        for (const block of msg.message.content) {
-          if (block.type === "text" && block.text) fullText += block.text;
-        }
-      }
-      if (msg.type === "result" && "result" in msg) {
-        fullText += msg.result;
-      }
-    }
 
     // Parse LLM decisions
     const jsonMatch = fullText.match(/\[[\s\S]*\]/);

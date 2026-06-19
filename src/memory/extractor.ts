@@ -7,7 +7,7 @@
  */
 
 import { createHash } from "node:crypto";
-import { runSession } from "../sdk/session.ts";
+import { runForkedAgent } from "../sdk/forked-agent.ts";
 import { storeMemoryChunk } from "../db/memory.ts";
 import { generateEmbedding, isEmbeddingAvailable } from "./embeddings.ts";
 import { loadEnvConfig } from "../config/env.ts";
@@ -108,29 +108,20 @@ export async function extractKnowledge(
   ); // Truncate long responses
 
   try {
-    let fullText = "";
-
-    const sdkQuery = runSession({
+    // Route through runForkedAgent (not a bare runSession): it carries
+    // useSubscription so the call authenticates on subscription-only installs,
+    // runs with bypassPermissions + allowedTools:[] so a pure-reasoning fork
+    // actually emits the JSON (plan mode suppressed it), and retries transient
+    // 429/529s. A bare runSession here silently produced nothing in prod.
+    const { text: fullText } = await runForkedAgent({
       prompt,
       model,
-      systemPrompt: "You are a JSON extraction system. Output only valid JSON. No explanations.",
-      permissionMode: "plan", // Prevents tool execution
-      maxTurns: 1,
-      mcpServers: {},
+      systemPromptAppend:
+        "You are a JSON extraction system. Output only valid JSON. No explanations.",
+      maxTurns: 2,
+      label: "knowledge-extraction",
+      allowedTools: [],
     });
-
-    for await (const msg of sdkQuery) {
-      if (msg.type === "assistant") {
-        for (const block of msg.message.content) {
-          if (block.type === "text" && block.text) {
-            fullText += block.text;
-          }
-        }
-      }
-      if (msg.type === "result" && "result" in msg) {
-        fullText += msg.result;
-      }
-    }
 
     // Extract JSON from response (handle markdown code blocks)
     const jsonMatch = fullText.match(/\{[\s\S]*\}/);
