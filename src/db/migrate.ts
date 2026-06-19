@@ -390,9 +390,9 @@ ON CONFLICT (key) DO NOTHING;
 -- Style profiles for communication voice modeling
 CREATE TABLE IF NOT EXISTS style_profiles (
   id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id      TEXT NOT NULL DEFAULT 'local',
+  user_id      TEXT NOT NULL DEFAULT 'local',  -- owner; each person's voice is private
   contact_id   UUID,
-  scope        TEXT NOT NULL DEFAULT 'global',
+  scope        TEXT NOT NULL DEFAULT 'global',  -- 'global' or 'contact:<name>'
   profile      JSONB NOT NULL DEFAULT '{}',
   sample_count INT NOT NULL DEFAULT 0,
   last_updated TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -400,7 +400,11 @@ CREATE TABLE IF NOT EXISTS style_profiles (
   UNIQUE (user_id, scope)
 );
 
--- Per-user hardening for legacy style_profiles (mirror of wiki_articles).
+-- Per-user hardening: style_profiles used to be global with UNIQUE(contact_id,
+-- scope) and no user_id. On an existing DB the CREATE above is a no-op, so add
+-- the column then swap the unique key for a per-owner one. contact_id is always
+-- NULL in practice (the contact lives in scope as 'contact:<name>'), so the
+-- effective key is (user_id, scope). Both idempotent.
 DO $$ BEGIN
   IF NOT EXISTS (
     SELECT 1 FROM information_schema.columns
@@ -715,6 +719,28 @@ BEGIN
     CREATE INDEX IF NOT EXISTS idx_cron_source ON cron_jobs(source);
   END IF;
 
+  -- Agent-authored LOOPS carry a distinct 'loop' source so they surface on the Loops
+  -- page, not the Tasks/Today surfaces (which are user/assistant scheduled 'agent'
+  -- tasks). Widen the source CHECK -- a superset, so all existing rows stay valid.
+  ALTER TABLE cron_jobs DROP CONSTRAINT IF EXISTS cron_jobs_source_check;
+  ALTER TABLE cron_jobs ADD CONSTRAINT cron_jobs_source_check
+    CHECK (source IN ('system', 'bundled', 'user', 'agent', 'loop'));
+
+  -- One-time heal: agent-authored RECURRING jobs created before the 'loop' source
+  -- existed (e.g. the proactive "Morning digest" / "Inbox triage" features) are
+  -- autonomous loops, not one-off tasks -- but they were tagged 'agent', so they
+  -- leaked onto Tasks/Today instead of the Loops page. Reclassify recurring
+  -- (cron/every) 'agent' jobs to 'loop'. Guarded by a config marker so it runs
+  -- EXACTLY ONCE per database and never reclassifies a later user-scheduled
+  -- recurring reminder. One-off ('at') reminders stay 'agent' tasks.
+  IF NOT EXISTS (SELECT 1 FROM config WHERE key = 'migrations.reclassified_agent_loops') THEN
+    UPDATE cron_jobs SET source = 'loop'
+      WHERE source = 'agent' AND schedule_type IN ('cron', 'every');
+    INSERT INTO config (key, value)
+      VALUES ('migrations.reclassified_agent_loops', 'true'::jsonb)
+      ON CONFLICT (key) DO NOTHING;
+  END IF;
+
   -- slack_user_tokens
   IF NOT EXISTS (
     SELECT 1 FROM information_schema.columns
@@ -862,6 +888,35 @@ CREATE INDEX IF NOT EXISTS idx_kg_edges_origin ON kg_edges(origin_node, origin);
 CREATE INDEX IF NOT EXISTS idx_kg_edges_attrs  ON kg_edges USING gin(attrs);
 CREATE INDEX IF NOT EXISTS idx_kg_edges_user   ON kg_edges(user_id);
 
+-- ── Personality documents (wiki pattern: DB is the source of truth) ──────────
+-- Singleton-per-(owner, kind) documents the "Think Like You" features produce
+-- (personality DNA, shadow-mode observations). Replaces ~/.nomos/*.json files so
+-- the canonical store is the database, per-user scoped, like wiki_articles.
+CREATE TABLE IF NOT EXISTS personality_documents (
+  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id     TEXT NOT NULL DEFAULT 'local',
+  kind        TEXT NOT NULL,                 -- 'dna' | 'shadow_observations'
+  content     JSONB NOT NULL DEFAULT '{}',
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (user_id, kind)
+);
+CREATE INDEX IF NOT EXISTS idx_personality_docs_user ON personality_documents(user_id);
+
+-- ── Twin-test fidelity scores (history) ──────────────────────────────────────
+-- Each /twin-test run records a fidelity score (fraction the discriminator was
+-- fooled, 0-1) so "/twin-test score" can show the trend over time. Per-owner.
+CREATE TABLE IF NOT EXISTS fidelity_scores (
+  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id     TEXT NOT NULL DEFAULT 'local',
+  score       REAL NOT NULL,
+  pairs       INT  NOT NULL DEFAULT 0,
+  fooled      INT  NOT NULL DEFAULT 0,
+  detail      JSONB NOT NULL DEFAULT '{}',
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_fidelity_user ON fidelity_scores(user_id, created_at DESC);
+
 -- ── Repair: un-double-encode integrations JSONB ──────────────────────────────
 -- Earlier code wrote integrations.config / .metadata via JSON.stringify(...),
 -- which the postgres-js driver re-encoded into a json *string* scalar
@@ -877,5 +932,64 @@ DO $$ BEGIN
       WHERE jsonb_typeof(metadata) = 'string';
   END IF;
 END $$;
+
+-- ── Studio: image assets + edit chains (hosted-only feature) ────────────
+-- studio_assets: one row per uploaded original. Blobs live in object storage
+-- (org/<id>/studio/...); the row holds the object key + metadata. The original
+-- is immutable: edits never mutate it, they append to studio_edits. status is
+-- 'pending' until the client confirms its presigned upload; the __studio_gc__
+-- sentinel expires unconfirmed rows. head_edit_id is the current chain head
+-- (NULL = the original is the head). Per-user scoped on top of db-per-customer.
+CREATE TABLE IF NOT EXISTS studio_assets (
+  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id       TEXT NOT NULL DEFAULT 'local',
+  object_key    TEXT NOT NULL,
+  content_hash  TEXT NOT NULL,
+  mime          TEXT NOT NULL,
+  width         INT,
+  height        INT,
+  bytes         INT  NOT NULL DEFAULT 0,
+  status        TEXT NOT NULL DEFAULT 'pending',   -- 'pending' | 'ready' | 'expired'
+  head_edit_id  UUID,
+  metadata      JSONB NOT NULL DEFAULT '{}',
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_studio_assets_user   ON studio_assets(user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_studio_assets_status ON studio_assets(status, created_at);
+CREATE INDEX IF NOT EXISTS idx_studio_assets_hash   ON studio_assets(user_id, content_hash);
+
+-- studio_edits: the non-destructive op chain. Each row is one validated op
+-- (src/studio/ops.ts) applied on top of parent_edit_id (NULL = on the original).
+-- idempotency_key makes a retried-but-committed edit a no-op (UNIQUE per asset).
+-- parent_edit_id + an optimistic head check give a linear chain; a stale parent
+-- is rejected. preview_key is the ~256px history preview. identity_score is the
+-- face-embedding gate result for face-touching generative ops (NULL = n/a).
+-- params is the op params jsonb (stored object, never double-encoded).
+CREATE TABLE IF NOT EXISTS studio_edits (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  asset_id        UUID NOT NULL REFERENCES studio_assets(id) ON DELETE CASCADE,
+  user_id         TEXT NOT NULL DEFAULT 'local',
+  parent_edit_id  UUID,
+  idempotency_key TEXT NOT NULL,
+  op              TEXT NOT NULL,
+  op_spec_version INT  NOT NULL DEFAULT 1,
+  params          JSONB NOT NULL DEFAULT '{}',
+  provider        TEXT,
+  input_key       TEXT,
+  output_key      TEXT,
+  preview_key     TEXT,
+  status          TEXT NOT NULL DEFAULT 'pending',  -- pending|running|done|failed|expired
+  cost_usd        REAL NOT NULL DEFAULT 0,
+  identity_score  REAL,
+  error           TEXT,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (asset_id, idempotency_key)
+);
+CREATE INDEX IF NOT EXISTS idx_studio_edits_asset  ON studio_edits(asset_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_studio_edits_user   ON studio_edits(user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_studio_edits_status ON studio_edits(status, created_at);
+CREATE INDEX IF NOT EXISTS idx_studio_edits_parent ON studio_edits(parent_edit_id);
   `.trim();
 }
