@@ -81,6 +81,9 @@ export function buildTeamMcpServer(deps: TeamMcpDeps): McpSdkServerConfigWithIns
   return createSdkMcpServer({
     name: "nomos-team",
     version: "0.1.0",
+    // Always in the prompt (never deferred behind tool search) so the agent calls
+    // delegate_to_team directly instead of improvising a "load" step.
+    alwaysLoad: true,
     tools: [delegateToTeam],
   });
 }

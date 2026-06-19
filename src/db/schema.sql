@@ -660,6 +660,28 @@ BEGIN
     CREATE INDEX IF NOT EXISTS idx_cron_source ON cron_jobs(source);
   END IF;
 
+  -- Agent-authored LOOPS carry a distinct 'loop' source so they surface on the Loops
+  -- page, not the Tasks/Today surfaces (which are user/assistant scheduled 'agent'
+  -- tasks). Widen the source CHECK -- a superset, so all existing rows stay valid.
+  ALTER TABLE cron_jobs DROP CONSTRAINT IF EXISTS cron_jobs_source_check;
+  ALTER TABLE cron_jobs ADD CONSTRAINT cron_jobs_source_check
+    CHECK (source IN ('system', 'bundled', 'user', 'agent', 'loop'));
+
+  -- One-time heal: agent-authored RECURRING jobs created before the 'loop' source
+  -- existed (e.g. the proactive "Morning digest" / "Inbox triage" features) are
+  -- autonomous loops, not one-off tasks -- but they were tagged 'agent', so they
+  -- leaked onto Tasks/Today instead of the Loops page. Reclassify recurring
+  -- (cron/every) 'agent' jobs to 'loop'. Guarded by a config marker so it runs
+  -- EXACTLY ONCE per database and never reclassifies a later user-scheduled
+  -- recurring reminder. One-off ('at') reminders stay 'agent' tasks.
+  IF NOT EXISTS (SELECT 1 FROM config WHERE key = 'migrations.reclassified_agent_loops') THEN
+    UPDATE cron_jobs SET source = 'loop'
+      WHERE source = 'agent' AND schedule_type IN ('cron', 'every');
+    INSERT INTO config (key, value)
+      VALUES ('migrations.reclassified_agent_loops', 'true'::jsonb)
+      ON CONFLICT (key) DO NOTHING;
+  END IF;
+
   -- slack_user_tokens
   IF NOT EXISTS (
     SELECT 1 FROM information_schema.columns

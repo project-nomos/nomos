@@ -59,6 +59,8 @@ function getDisallowedTools(): string[] {
   //    the daemon and never show in the user's settings). A prompt warning alone didn't
   //    stop the agent from reaching for them, so block them outright → the agent must use
   //    the `schedule_task` / `loop_create` MCP tools, which run locally in the daemon.
+  //  - `AskUserQuestion` is the SDK's native ask tool; it bypasses Nomos's
+  //    elicitation (so no Ask card renders in the app) → use the `ask_user` MCP tool.
   const blocked: string[] = [
     "Workflow",
     "TaskCreate",
@@ -70,6 +72,7 @@ function getDisallowedTools(): string[] {
     "CronList",
     "RemoteTrigger",
     "ScheduleWakeup",
+    "AskUserQuestion",
   ];
   if (!FEATURES.bashTool()) {
     blocked.push("Bash", "BashOutput", "KillBash");
@@ -1068,12 +1071,26 @@ export class AgentRuntime {
     // channel sender id to the canonical local id (otherwise the vault fragments
     // per channel); in hosted mode this is the authenticated per-tenant user.
     const vaultUserId = resolveMemoryUserId(userId);
+    // Elicitation for the in-process `ask_user` tool. The SDK does NOT forward
+    // `elicitation/create` from in-process MCP servers (it answers -32601 Method
+    // not found), so hand the tool a direct callback into the ElicitationManager
+    // instead of relying on the SDK's `extra.sendRequest`.
+    const mgr = this.elicitationManager;
+    const elicit =
+      mgr && source
+        ? (request: unknown, opts: { signal?: AbortSignal }) =>
+            mgr.handleElicitation(
+              request as Parameters<typeof mgr.handleElicitation>[0],
+              source,
+              opts.signal ?? new AbortController().signal,
+            )
+        : undefined;
     let mcpServers = {
       ...this.mcpServers,
       "nomos-vault": buildVaultMcpServer(vaultUserId),
       // Rebuild the memory tools per-turn so memory_search is scoped to this
       // owner (the cached one at init has no user). Overrides the cached entry.
-      "nomos-memory": createMemoryMcpServer(vaultUserId),
+      "nomos-memory": createMemoryMcpServer(vaultUserId, { elicit }),
       // Loop self-management, scoped to this owner so loops the agent creates are
       // owned by (and auditable by) the right user. The cron engine runs in this
       // process; block self-replication when this turn is itself a loop fire.
@@ -1251,10 +1268,10 @@ export class AgentRuntime {
     }
 
     // Build the elicitation callback for this turn. The `ask_user` MCP
-    // tool calls `extra.sendRequest({method: "elicitation/create"})`;
-    // the SDK forwards to `onElicitation`, we route to the channel the
-    // user is currently talking to us on, and return their answer.
-    const mgr = this.elicitationManager;
+    // tool calls `extra.sendRequest({method: "elicitation/create"})`; for external
+    // MCP servers the SDK forwards to `onElicitation` (in-process servers go through
+    // the `elicit` callback wired into nomos-memory above). We route to the channel
+    // the user is talking to us on and return their answer. `mgr` is declared above.
     const onElicitation: import("../sdk/session.ts").RunSessionParams["onElicitation"] =
       mgr && source
         ? (request, opts) => mgr.handleElicitation(request, source, opts.signal)

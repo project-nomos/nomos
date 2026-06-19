@@ -96,7 +96,7 @@ export function buildLoopMcpServer(
       try {
         // Only the agent's OWN loops are listable/manageable here -- system infra
         // jobs and user-authored loops are not the agent's to surface or toggle.
-        const jobs = await store.listJobs({ userId, source: "agent" });
+        const jobs = await store.listJobs({ userId, source: "loop" });
         if (jobs.length === 0) {
           return ok("No autonomous loops yet. Create one with loop_create.");
         }
@@ -152,7 +152,7 @@ export function buildLoopMcpServer(
         const existing = await store.getJobByName(args.name);
         if (existing) return fail(`A loop named "${args.name}" already exists. Pick another name.`);
 
-        const agentLoops = (await store.listJobs({ userId, source: "agent" })).length;
+        const agentLoops = (await store.listJobs({ userId, source: "loop" })).length;
         if (agentLoops >= MAX_AGENT_LOOPS) {
           return fail(
             `You already have ${agentLoops} self-created loops (max ${MAX_AGENT_LOOPS}). Delete one with loop_delete first.`,
@@ -170,7 +170,7 @@ export function buildLoopMcpServer(
           prompt: args.prompt,
           enabled,
           errorCount: 0,
-          source: "agent",
+          source: "loop",
         });
         // Make the cron engine pick up the new job immediately.
         process.emit("cron:refresh" as never);
@@ -279,6 +279,8 @@ export function buildLoopMcpServer(
   return createSdkMcpServer({
     name: "nomos-loops",
     version: "1.0.0",
+    // Always loaded so loop_create/list/etc. are reachable every turn, not deferred.
+    alwaysLoad: true,
     tools: [loopList, loopCreate, loopEnable, loopDisable, loopUpdate, loopDelete],
   });
 }

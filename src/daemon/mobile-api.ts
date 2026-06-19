@@ -30,7 +30,6 @@ import {
   googleRedirectUri,
   GOOGLE_SCOPES,
   isGoogleIntegrationConfigured,
-  listGoogleAccounts,
   removeGoogleAccount,
   setSendEnabled,
   signOAuthState,
@@ -54,6 +53,7 @@ import { CronStore } from "../cron/store.ts";
 import { isLoopUserDisabled, setLoopUserEnabled } from "../cron/loop-overrides.ts";
 import {
   curateConsumerLoops,
+  curateOwnedLoops,
   MANAGED_LOOPS,
   MANAGED_LABEL_TO_NAME,
   type ConsumerLoop,
@@ -648,7 +648,7 @@ async function handleGetEarnings(): Promise<{
     bondsCount: 0,
     avgBondCents: 0,
     acceptRatePct: 0,
-    seriesCents: new Array(14).fill(0),
+    seriesCents: Array.from({ length: 14 }, () => 0),
   };
 }
 
@@ -1062,10 +1062,13 @@ async function handleDeleteVaultNote(
 // the Proactive setting) are hidden. User/agent-created loops show under their
 // real name and toggle the row directly.
 
-async function handleListLoops(_ctx: TenantContext): Promise<{ loops: ConsumerLoop[] }> {
-  // Loops = the assistant's always-on background behaviors (owned by the `system`
-  // tenant). The user's own scheduled jobs live on the Tasks surface, not here.
-  const system = await new CronStore().listJobs({ userId: systemTenant().userId });
+async function handleListLoops(ctx: TenantContext): Promise<{ loops: ConsumerLoop[] }> {
+  // Loops = the assistant's always-on background behaviors: the managed `system`
+  // loops PLUS the agent's own self-authored loops (source 'loop'). The user's
+  // scheduled TASKS (source 'agent'/'user') live on the Tasks surface, not here.
+  const store = new CronStore();
+  const system = await store.listJobs({ userId: systemTenant().userId });
+  const owned = await store.listJobs({ userId: resolveMemoryUserId(ctx.userId), source: "loop" });
 
   // Which managed loops the user has turned off (folded into `enabled`).
   const optedOut = new Set<string>();
@@ -1073,7 +1076,7 @@ async function handleListLoops(_ctx: TenantContext): Promise<{ loops: ConsumerLo
     if (MANAGED_LOOPS[j.name] && (await isLoopUserDisabled(j.name))) optedOut.add(j.name);
   }
 
-  return { loops: curateConsumerLoops(system, optedOut) };
+  return { loops: [...curateConsumerLoops(system, optedOut), ...curateOwnedLoops(owned)] };
 }
 
 async function handleSetLoopEnabled(

@@ -10,6 +10,7 @@
 
 import type { CronJob } from "./types.ts";
 import { prettifySchedule } from "./schedule-format.ts";
+import { prettifyTaskName } from "./task-view.ts";
 
 export { prettifySchedule };
 
@@ -69,5 +70,17 @@ export function curateConsumerLoops(system: CronJob[], optedOut: Set<string>): C
         enabled: j.enabled && !optedOut.has(j.name),
       }),
     )
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/**
+ * The owner's OWN agent-authored loops (source 'loop' -- created via loop_create),
+ * surfaced on the Loops page alongside the managed system loops, under their real
+ * (prettified) names. These are excluded from Tasks/Today (INFRA_SOURCES), so the
+ * Loops surface is where the user audits + toggles them.
+ */
+export function curateOwnedLoops(loops: CronJob[]): ConsumerLoop[] {
+  return loops
+    .map((j) => toWire(j, { name: prettifyTaskName(j.name), source: "loop" }))
     .sort((a, b) => a.name.localeCompare(b.name));
 }
