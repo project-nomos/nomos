@@ -94,9 +94,10 @@ export function createAskUserTool(options: AskUserToolOptions = {}) {
         ),
       header: z
         .string()
-        .max(12)
         .optional()
-        .describe("Very short tag (max 12 chars) summarizing the question. Example: 'Approach'."),
+        .describe(
+          "Very short tag summarizing the question (kept brief in the UI). Example: 'Approach'.",
+        ),
     },
     async (args, extra) => {
       // Convert our friendly options into an MCP elicitation form schema.
@@ -108,7 +109,11 @@ export function createAskUserTool(options: AskUserToolOptions = {}) {
         title: opt.label,
       }));
 
-      const message = args.header ? `[${args.header}] ${args.question}` : args.question;
+      // Trim a long tag rather than reject it: a hard zod `.max()` made the SDK
+      // reject the whole tool call when the model sent a longer header, which
+      // triggered the agent's "Let me fix that" + a duplicate retry.
+      const tag = args.header?.trim().slice(0, 20);
+      const message = tag ? `[${tag}] ${args.question}` : args.question;
 
       // Construct the elicitation/create params inline. Shape matches the
       // MCP spec's `ElicitRequestFormParamsSchema` (one string property

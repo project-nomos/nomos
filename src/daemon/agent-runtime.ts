@@ -1335,7 +1335,12 @@ export class AgentRuntime {
               // catch them (incl. server tools like web_search).
               const toolName = (block as { name?: string }).name ?? "unknown";
               const summary = summarizeToolInput(toolName, (block as { input?: unknown }).input);
-              emit({ type: "tool_use_summary", tool_name: toolName, summary });
+              // ask_user renders via its dedicated `ask` event (the Ask card); don't
+              // also emit a tool-use summary -- that drew a redundant "Ask user" tool
+              // card that duplicated whenever the agent retried the call.
+              if (toolName !== "ask_user" && !toolName.endsWith("__ask_user")) {
+                emit({ type: "tool_use_summary", tool_name: toolName, summary });
+              }
               // TodoWrite also drives a richer Plan card (clients suppress its tool card).
               if (toolName === "TodoWrite") {
                 const plan = todoWriteToPlan((block as { input?: unknown }).input);

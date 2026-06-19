@@ -2,8 +2,9 @@
  * Today overview -- the read model behind MobileApi.GetToday.
  *
  * Composes the day's brief from: today's Google Calendar events (live, best-effort
- * -- empty when Google isn't connected), pending commitments, and the user's
- * scheduled tasks. Gated on the daily briefing: when proactive autonomy is off,
+ * -- empty when Google isn't connected), pending commitments, and one-off reminders
+ * due today (recurring tasks live on the Tasks page, so Today never duplicates them).
+ * Gated on the daily briefing: when proactive autonomy is off,
  * `briefingEnabled` is false and the client shows a deep-link to enable it.
  */
 
@@ -59,12 +60,24 @@ export async function getTodayOverview(ctx: TenantContext): Promise<TodayOvervie
     due: c.deadline ? relativeDay(c.deadline) : "",
   }));
 
+  // Today shows ONLY one-off ("at") reminders that fall due by end of today --
+  // recurring tasks ("every"/"cron") live on the Tasks page, so Today never
+  // duplicates them (and recurring background automation lives on Loops).
   const tasks: TodayTask[] = curateConsumerTasks(jobs)
-    .filter((t) => t.enabled)
+    .filter((t) => t.enabled && t.scheduleType === "at" && dueByToday(t.schedule))
     .slice(0, 6)
     .map((t) => ({ id: t.id, name: t.name, schedule: t.displaySchedule }));
 
   return { briefingEnabled, events, commitments, tasks };
+}
+
+/** A one-off ("at") reminder is on Today's plate when it's due by the end of today. */
+function dueByToday(iso: string): boolean {
+  const t = Date.parse(iso);
+  if (Number.isNaN(t)) return false;
+  const end = new Date();
+  end.setHours(23, 59, 59, 999);
+  return t <= end.getTime();
 }
 
 async function fetchTodayEvents(userId: string): Promise<TodayEvent[]> {
