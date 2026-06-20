@@ -25,6 +25,7 @@ import {
 import { createHash } from "node:crypto";
 import { chunkText } from "./chunker.ts";
 import { generateEmbeddings, isEmbeddingAvailable } from "./embeddings.ts";
+import { enrichNoteRetrieval } from "./enrichment.ts";
 import { deleteMemoryByIdPrefix, storeMemoryChunk } from "../db/memory.ts";
 import { traceMemory, tracedRecall } from "./trace.ts";
 
@@ -168,4 +169,10 @@ async function indexNoteIntoVectorMemory(
       model: embeddings?.[i] ? model : undefined,
     });
   }
+
+  // Write-time retrieval enrichment: store paraphrase aliases so semantically
+  // phrased queries land on this note. Best-effort; already off the awaited path
+  // (vaultWrite fires indexNoteIntoVectorMemory fire-and-forget). Self-gates on
+  // config.memoryEnrichment + embeddings.
+  await enrichNoteRetrieval(userId, path, content);
 }

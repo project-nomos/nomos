@@ -64,6 +64,8 @@ export interface NomosConfig {
   openrouterApiKey?: string;
   /** Enable knowledge extraction and user model learning (default: false) */
   adaptiveMemory: boolean;
+  /** Write-time paraphrase enrichment of indexed notes (default on). */
+  memoryEnrichment: boolean;
   /** Extract + track commitments from each turn and remind on deadlines (default: false; opt-in -- adds an LLM call per turn) */
   commitmentTracking: boolean;
   /** Analyze the user's writing voice and write in it (default: false; opt-in -- daily analysis + per-turn style guidance) */
@@ -168,6 +170,7 @@ export function loadEnvConfig(): NomosConfig {
     anthropicBaseUrl: process.env.ANTHROPIC_BASE_URL,
     openrouterApiKey: process.env.OPENROUTER_API_KEY,
     adaptiveMemory: process.env.NOMOS_ADAPTIVE_MEMORY !== "false",
+    memoryEnrichment: process.env.NOMOS_MEMORY_ENRICHMENT !== "false",
     // Opt-out (default on): the agent reaches out about your own commitments. The
     // per-turn extraction is cost-gated on a deliverable channel (see memory-indexer),
     // so there's no added cost until reach-out is actually possible.

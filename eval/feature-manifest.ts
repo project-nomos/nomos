@@ -415,6 +415,40 @@ export const FEATURES: FeatureSpec[] = [
     invariants: ["UNIQUE(user_id, category, key)", "no jsonb double-encode"],
   },
   {
+    id: "memory-enrichment",
+    summary:
+      "Write-time retrieval enrichment: when a vault note is indexed, a bounded Haiku fork " +
+      "generates paraphrase 'search aliases' (the questions the note answers, in different words) " +
+      "that are embedded as extra memory_chunks (metadata.kind='alias') pointing at the SAME note " +
+      "path, so semantically phrased queries land on the note. Off the read path (fire-and-forget " +
+      "from vaultWrite); idempotent per (user,note) via deterministic alias ids; best-effort, never throws.",
+    trigger: { kind: "turn", gate: "memoryEnrichment" },
+    entry: ["enrichNoteRetrieval", "generateRetrievalAliases"],
+    effects: [
+      {
+        claim:
+          "indexed notes get embedded alias chunks (metadata.kind='alias') pointing at the note path",
+        sql: {
+          query:
+            "SELECT count(*) FROM memory_chunks WHERE metadata->>'kind' = 'alias' AND embedding IS NOT NULL",
+          expect: "nonzero",
+        },
+        noDoubleEncode: {
+          table: "memory_chunks",
+          column: "metadata",
+          where: "metadata->>'kind' = 'alias'",
+        },
+        notExercised: true,
+      },
+    ],
+    invariants: [
+      "per-owner scoped (user_id); alias ids namespaced vault:<hash(userId:path)>:alias:i",
+      "gated on memoryEnrichment + embeddings available; best-effort, never throws",
+      "idempotent on (user_id, path): deterministic alias ids upsert, never duplicate",
+      "forget removes alias chunks via the shared vault:<hash>: prefix",
+    ],
+  },
+  {
     id: "commitment-capture",
     summary: "Extract promises/follow-ups from turns into the commitments table (opt-in).",
     trigger: { kind: "turn", gate: "commitmentTracking" },
