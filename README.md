@@ -504,6 +504,9 @@ Beyond reactive responses — the clone tracks commitments, generates pre-meetin
 - **Commitment tracking** — Extracts "I'll do X by Y" from conversations, tracks deadlines, sends reminders
 - **Meeting briefs** — Before meetings, looks up attendees in the identity graph, retrieves recent conversations, generates context
 - **Priority triage** — Aggregates unread across channels, ranks by sender importance and urgency
+- **Wait-and-resume** — Kicks off long async work (CI, deploys, builds), frees the turn, and automatically resumes the same conversation with the result when it finishes — no dead-end "waiting…" message
+
+See [docs/wait-and-resume.md](docs/wait-and-resume.md) for the tool, the watcher, the Redis/in-memory substrate, and the opt-in live-session (zero-warmup) mode.
 
 </details>
 
