@@ -68,7 +68,10 @@ const check = (name: string, pass: boolean, detail?: string) =>
   results.push({ name, pass, detail });
 
 async function main(): Promise<void> {
-  setBackgroundTaskStore(new InProcessBackgroundTaskStore());
+  // Use the real default substrate when configured (Redis if REDIS_URL is set;
+  // disk for power-user), else a deterministic in-memory store so the E2E runs
+  // anywhere. With REDIS_URL set, this exercises the hosted substrate end-to-end.
+  if (!process.env.REDIS_URL) setBackgroundTaskStore(new InProcessBackgroundTaskStore());
   const runtime = new AgentRuntime();
   await runtime.initialize();
   const queue = new MessageQueue((msg, emit) => runtime.processMessage(msg, emit));

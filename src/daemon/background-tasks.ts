@@ -19,6 +19,7 @@ import { exec } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { createLogger } from "../lib/logger.ts";
 import { isRedisConfigured } from "../storage/redis.ts";
+import { DiskBackgroundTaskStore } from "./background-tasks-disk.ts";
 import { RedisBackgroundTaskStore } from "./background-tasks-redis.ts";
 
 const log = createLogger("background-tasks");
@@ -105,11 +106,14 @@ let store: BackgroundTaskStore | undefined;
 
 export function getBackgroundTaskStore(): BackgroundTaskStore {
   if (!store) {
-    // Mode-aware substrate: Redis for hosted (survives pod rolls, any pod's
-    // leased watcher sees it); in-process for power-user (lost on restart, fine).
+    // Substrate by mode: Redis (hosted — survives pod rolls + any pod's leased
+    // watcher) > disk (power-user default — survives the upgrade restart) >
+    // in-memory (opt-out via NOMOS_BACKGROUND_TASKS_DISK=false; also used in tests).
     store = isRedisConfigured()
       ? new RedisBackgroundTaskStore()
-      : new InProcessBackgroundTaskStore();
+      : process.env.NOMOS_BACKGROUND_TASKS_DISK === "false"
+        ? new InProcessBackgroundTaskStore()
+        : new DiskBackgroundTaskStore();
   }
   return store;
 }
