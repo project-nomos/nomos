@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { AgentRuntime } from "./agent-runtime.ts";
+import { AgentRuntime, formatSystemMessage } from "./agent-runtime.ts";
 
 // buildIntegrationsSummary is private; we exercise it directly to lock in the
 // mode-gated channel visibility (a hosted tenant must not be told it has BYO
@@ -48,5 +48,30 @@ describe("buildIntegrationsSummary channel visibility by mode", () => {
     expect(summary).not.toContain(WA_ENTRY);
     expect(summary).toContain("**Nomos app**");
     expect(summary).toContain("this conversation IS the Nomos app");
+  });
+});
+
+describe("formatSystemMessage: background-task lifecycle (Phase 3)", () => {
+  it("renders task_started / task_notification / task_updated meaningfully", () => {
+    expect(formatSystemMessage({ subtype: "task_started", description: "CI run for PR #96" })).toBe(
+      "Background task started: CI run for PR #96",
+    );
+    expect(
+      formatSystemMessage({
+        subtype: "task_notification",
+        status: "completed",
+        summary: "deploy ok",
+      }),
+    ).toBe("Background task completed: deploy ok");
+    expect(formatSystemMessage({ subtype: "task_updated", status: "running" })).toBe(
+      "Background task running",
+    );
+  });
+
+  it("preserves existing system subtypes", () => {
+    expect(formatSystemMessage({ subtype: "init", tools: [1, 2], mcp_servers: [1] })).toBe(
+      "2 tools, 1 MCP servers",
+    );
+    expect(formatSystemMessage({ subtype: "unknown_x" })).toBe("unknown_x");
   });
 });

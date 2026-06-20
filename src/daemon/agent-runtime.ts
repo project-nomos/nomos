@@ -1090,7 +1090,20 @@ export class AgentRuntime {
       "nomos-vault": buildVaultMcpServer(vaultUserId),
       // Rebuild the memory tools per-turn so memory_search is scoped to this
       // owner (the cached one at init has no user). Overrides the cached entry.
-      "nomos-memory": createMemoryMcpServer(vaultUserId, { elicit }),
+      "nomos-memory": createMemoryMcpServer(vaultUserId, {
+        elicit,
+        // Session context so `background_register` resumes THIS conversation when
+        // its watched work (CI/deploy) settles. Absent for cron/internal runs.
+        session:
+          sessionKey && source
+            ? {
+                sessionKey,
+                platform: source.platform,
+                channelId: source.channelId,
+                userId: userId ?? vaultUserId,
+              }
+            : undefined,
+      }),
       // Loop self-management, scoped to this owner so loops the agent creates are
       // owned by (and auditable by) the right user. The cron engine runs in this
       // process; block self-replication when this turn is itself a loop fire.
@@ -1419,11 +1432,14 @@ export class AgentRuntime {
   }
 }
 
-function formatSystemMessage(msg: {
+export function formatSystemMessage(msg: {
   subtype: string;
   tools?: unknown[];
   mcp_servers?: unknown[];
   status?: string;
+  description?: string;
+  summary?: string;
+  task_id?: string;
   compact_metadata?: { trigger: string; pre_tokens: number };
 }): string {
   if (msg.subtype === "init") {
@@ -1438,6 +1454,18 @@ function formatSystemMessage(msg: {
     const preTokens = msg.compact_metadata.pre_tokens;
     const formatted = preTokens >= 1000 ? `${(preTokens / 1000).toFixed(1)}K` : String(preTokens);
     return `Context compacted (was ~${formatted} tokens)`;
+  }
+  // Native background-task lifecycle (surfaced by streaming sessions) — render a
+  // real "pending CI / finished" status instead of the raw subtype, so the UI can
+  // show a live background-work chip and a meaningful completion.
+  if (msg.subtype === "task_started") {
+    return `Background task started: ${msg.description ?? msg.task_id ?? "task"}`;
+  }
+  if (msg.subtype === "task_notification") {
+    return `Background task ${msg.status ?? "settled"}: ${msg.summary ?? msg.task_id ?? "task"}`;
+  }
+  if (msg.subtype === "task_progress" || msg.subtype === "task_updated") {
+    return `Background task ${msg.status ?? "running"}`;
   }
   return msg.subtype;
 }
