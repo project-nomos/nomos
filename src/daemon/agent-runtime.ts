@@ -519,6 +519,7 @@ export class AgentRuntime {
         maxWorkers: this.config.maxTeamWorkers,
         workerBudgetUsd: this.config.workerBudgetUsd,
         coordinatorModel: this.config.model,
+        approvalPolicy: this.config.toolApprovalPolicy,
       });
     }
 

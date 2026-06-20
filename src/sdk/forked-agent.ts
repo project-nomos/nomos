@@ -10,6 +10,8 @@
  */
 
 import { runSession, type RunSessionParams } from "./session.ts";
+import { buildSdkHooks } from "../hooks/sdk-adapter.ts";
+import type { ApprovalPolicy } from "../security/tool-approval.ts";
 import { withRetry } from "./retry.ts";
 import { getCostTracker } from "./cost-tracker.ts";
 import { createLogger } from "../lib/logger.ts";
@@ -78,6 +80,9 @@ export async function runForkedAgent(options: ForkedAgentOptions): Promise<Forke
 
   // Check if subscription mode is enabled (reads env at call time)
   const useSubscription = process.env.NOMOS_USE_SUBSCRIPTION === "true";
+  // Owner/default approval policy: forks run bypassPermissions, so apply the
+  // same block_critical PreToolUse gate as the main path (reads env at call time).
+  const approvalPolicy = (process.env.TOOL_APPROVAL_POLICY as ApprovalPolicy) ?? "block_critical";
 
   const params: RunSessionParams = {
     prompt: options.prompt,
@@ -86,6 +91,7 @@ export async function runForkedAgent(options: ForkedAgentOptions): Promise<Forke
     permissionMode: "bypassPermissions",
     maxTurns: options.maxTurns ?? DEFAULT_FORK_MAX_TURNS,
     useSubscription,
+    hooks: buildSdkHooks({ sessionKey: `fork:${label}`, approvalPolicy }),
     ...(options.thinking ? { thinking: options.thinking } : {}),
     ...(options.effort ? { effort: options.effort } : {}),
     ...(options.allowedTools !== undefined ? { allowedTools: options.allowedTools } : {}),

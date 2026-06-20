@@ -405,6 +405,7 @@ export function App({
           const teamRuntime = new TeamRuntime({
             maxWorkers: config.maxTeamWorkers,
             coordinatorModel: stateRef.current.model,
+            approvalPolicy: config.toolApprovalPolicy,
           });
           const allowedTools = ["Bash", ...Object.keys(mcpServers).map((name) => `mcp__${name}`)];
           const result = await teamRuntime.runTeam(

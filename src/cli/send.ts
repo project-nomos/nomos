@@ -12,6 +12,7 @@
 
 import process from "node:process";
 import { runSession } from "../sdk/session.ts";
+import { buildSdkHooks } from "../hooks/sdk-adapter.ts";
 import { createMemoryMcpServer } from "../sdk/tools.ts";
 import { loadEnvConfig } from "../config/env.ts";
 import { loadAgentIdentity, loadUserProfile, buildSystemPromptAppend } from "../config/profile.ts";
@@ -133,6 +134,8 @@ async function processWithAgent(userMessage: string): Promise<string> {
     mcpServers: { "nomos-memory": memoryServer },
     allowedTools: ["mcp__nomos-memory"],
     permissionMode: cfg.permissionMode,
+    // block_critical PreToolUse gate (honored even under bypassPermissions).
+    hooks: buildSdkHooks({ sessionKey: "cli:send", approvalPolicy: cfg.toolApprovalPolicy }),
     maxTurns: 10,
   });
 

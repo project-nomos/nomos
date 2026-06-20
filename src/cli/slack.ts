@@ -109,6 +109,7 @@ async function startSlackListener(): Promise<void> {
   const { loadSkills, formatSkillsForPrompt } = await import("../skills/loader.ts");
   const { createMemoryMcpServer } = await import("../sdk/tools.ts");
   const { runSession } = await import("../sdk/session.ts");
+  const { buildSdkHooks } = await import("../hooks/sdk-adapter.ts");
 
   const cfg = loadEnvConfig();
   const [identity, profile] = await Promise.all([loadAgentIdentity(), loadUserProfile()]);
@@ -235,6 +236,8 @@ async function startSlackListener(): Promise<void> {
           mcpServers: { "nomos-memory": memoryServer },
           allowedTools: ["mcp__nomos-memory"],
           permissionMode: cfg.permissionMode,
+          // block_critical PreToolUse gate (honored even under bypassPermissions).
+          hooks: buildSdkHooks({ sessionKey, approvalPolicy: cfg.toolApprovalPolicy }),
           resume: resumeId,
           maxTurns: 10,
         });

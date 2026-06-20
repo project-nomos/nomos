@@ -22,6 +22,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { runSession, type McpServerConfig, type SdkPluginConfig } from "../sdk/session.ts";
+import { buildSdkHooks } from "../hooks/sdk-adapter.ts";
+import type { ApprovalPolicy } from "../security/tool-approval.ts";
 import { getTeamMailbox } from "./team-mailbox.ts";
 import { getTaskManager } from "./task-manager.ts";
 import { createLogger } from "../lib/logger.ts";
@@ -47,6 +49,13 @@ export interface TeamConfig {
   worktreeIsolation?: boolean;
   /** Enable verification agent after workers complete (adversarial testing) */
   verification?: boolean;
+  /**
+   * Approval policy for the block_critical PreToolUse gate applied to every
+   * coordinator/worker/verifier run. Workers run bypassPermissions, so without
+   * this gate a `/team` run (or delegate_to_team) could run a critical tool the
+   * main daemon path blocks. Defaults to "block_critical".
+   */
+  approvalPolicy?: ApprovalPolicy;
 }
 
 export interface TeamTask {
@@ -240,6 +249,7 @@ export class TeamRuntime {
       workerModel: config.workerModel,
       worktreeIsolation: config.worktreeIsolation ?? false,
       verification: config.verification ?? true,
+      approvalPolicy: config.approvalPolicy ?? "block_critical",
     };
   }
 
@@ -766,6 +776,13 @@ Verify the workers' changes are correct. Run builds, tests, linters, and adversa
       maxBudgetUsd: options.maxBudgetUsd,
       plugins: options.plugins,
       useSubscription: options.useSubscription,
+      // Apply the same block_critical PreToolUse gate as the main daemon path.
+      // Workers run bypassPermissions; this is the safety net that keeps a
+      // coordinator/worker/verifier from running a critical tool ungated.
+      hooks: buildSdkHooks({
+        sessionKey: "team-worker",
+        approvalPolicy: this.config.approvalPolicy,
+      }),
       stderr: (line: string) => {
         const trimmed = line.trim();
         if (trimmed) {

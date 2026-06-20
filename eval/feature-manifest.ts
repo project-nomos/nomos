@@ -890,6 +890,7 @@ export const FEATURES: FeatureSpec[] = [
     invariants: [
       "invokable without the /team prefix via delegate_to_team, in both hosted + power-user modes",
       "workers get only the base mcp set, so a worker can never spawn a nested team",
+      "coordinator/worker/verifier runs inherit the block_critical PreToolUse gate (buildSdkHooks in runSingleAgent) — workers run bypassPermissions and must NOT be ungated",
     ],
   },
 
