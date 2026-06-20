@@ -9,6 +9,7 @@
  */
 
 import type { IncomingMessage, OutgoingMessage, AgentEvent, MessageHandler } from "./types.ts";
+import type { Queue } from "./queue.ts";
 import { getTaskManager } from "./task-manager.ts";
 
 interface QueueEntry {
@@ -18,7 +19,7 @@ interface QueueEntry {
   emit: (event: AgentEvent) => void;
 }
 
-export class MessageQueue {
+export class MessageQueue implements Queue {
   private queues = new Map<string, QueueEntry[]>();
   private processing = new Set<string>();
   private handler: MessageHandler;

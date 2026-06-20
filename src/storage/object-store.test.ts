@@ -15,9 +15,15 @@ import {
 
 describe("object key safety", () => {
   it("builds an org-scoped key", () => {
-    expect(objectKey("studio", "abc123", "original.jpg")).toBe(
-      "org/local/studio/abc123/original.jpg",
-    );
+    const prev = process.env.NOMOS_ORG_ID;
+    delete process.env.NOMOS_ORG_ID;
+    try {
+      expect(objectKey("studio", "abc123", "original.jpg")).toBe(
+        "org/local/studio/abc123/original.jpg",
+      );
+    } finally {
+      if (prev !== undefined) process.env.NOMOS_ORG_ID = prev;
+    }
   });
 
   it("rejects traversal, absolute, and bad keys", () => {

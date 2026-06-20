@@ -9,9 +9,11 @@
 import {
   runSession,
   type McpServerConfig,
+  type RunSessionParams,
   type SDKMessage,
   type SdkPluginConfig,
 } from "../sdk/session.ts";
+import { LiveSessionManager, type LiveTurnState } from "./live-session.ts";
 import { buildSdkHooks } from "../hooks/sdk-adapter.ts";
 import { loadInstalledPlugins, toSdkPluginConfigs } from "../plugins/loader.ts";
 import { ensureDefaultPlugins } from "../plugins/installer.ts";
@@ -188,6 +190,8 @@ export class AgentRuntime {
   private identity!: AgentIdentity;
   private systemPromptAppend!: string;
   private mcpServers!: Record<string, McpServerConfig>;
+  /** Held-open streaming sessions (Layer A) when NOMOS_LIVE_SESSIONS=true; else undefined. */
+  private liveSessions?: LiveSessionManager;
 
   // SDK session ID cache: sessionKey → SDK session ID
   private sdkSessionIds = new Map<string, string>();
@@ -336,6 +340,17 @@ export class AgentRuntime {
     this.mcpServers["nomos-memory"] = createMemoryMcpServer();
     // "Think Like You" tools: bridge reflect/calibrate/dna skills to their backends.
     this.mcpServers["nomos-think"] = buildThinkMcpServer();
+
+    // Layer A: hold streaming sessions open so turns (and background-task resumes)
+    // continue in-process, in-context, zero-warmup. Opt-in; the one-shot path is
+    // the default. The manager drives the loop and calls back into the shared
+    // SDK-message handler so there is one drain implementation.
+    if (process.env.NOMOS_LIVE_SESSIONS === "true") {
+      this.liveSessions = new LiveSessionManager((msg, emit, state, sessionKey) =>
+        this.handleSdkMessage(msg, emit, state, sessionKey),
+      );
+      log.info("Live streaming sessions enabled (NOMOS_LIVE_SESSIONS=true)");
+    }
 
     // Pre-load DB-backed tokens for integrations that use sync getters
     await Promise.all([loadDiscordTokenFromDb(), loadTelegramTokenFromDb()]);
@@ -1039,6 +1054,11 @@ export class AgentRuntime {
   }
 
   /** Run the SDK agent and collect events. */
+  /** Observability: how many turns a held-open live session processed for a key (0 if disabled). */
+  liveSessionTurns(sessionKey: string): number {
+    return this.liveSessions?.turnCount(sessionKey) ?? 0;
+  }
+
   private async runAgent(
     prompt: string,
     resumeId: string | undefined,
@@ -1090,7 +1110,20 @@ export class AgentRuntime {
       "nomos-vault": buildVaultMcpServer(vaultUserId),
       // Rebuild the memory tools per-turn so memory_search is scoped to this
       // owner (the cached one at init has no user). Overrides the cached entry.
-      "nomos-memory": createMemoryMcpServer(vaultUserId, { elicit }),
+      "nomos-memory": createMemoryMcpServer(vaultUserId, {
+        elicit,
+        // Session context so `background_register` resumes THIS conversation when
+        // its watched work (CI/deploy) settles. Absent for cron/internal runs.
+        session:
+          sessionKey && source
+            ? {
+                sessionKey,
+                platform: source.platform,
+                channelId: source.channelId,
+                userId: userId ?? vaultUserId,
+              }
+            : undefined,
+      }),
       // Loop self-management, scoped to this owner so loops the agent creates are
       // owned by (and auditable by) the right user. The cron engine runs in this
       // process; block self-replication when this turn is itself a loop fire.
@@ -1283,7 +1316,7 @@ export class AgentRuntime {
     );
     if (elicitationOnStream && mgr && source) mgr.registerEmitter(source, emit);
 
-    const sdkQuery = runSession({
+    const runParams: RunSessionParams = {
       prompt,
       model: model ?? this.config.model,
       systemPromptAppend,
@@ -1311,7 +1344,25 @@ export class AgentRuntime {
         const trimmed = data.trim();
         if (trimmed) log.error(`[stderr] ${trimmed}`);
       },
-    });
+    };
+
+    // Layer A: when held-open streaming sessions are enabled and this is a real
+    // per-session turn, run it through the live session (in-context, zero-warmup);
+    // a background-task resume rides the same live session. Otherwise the default
+    // one-shot drain below runs unchanged.
+    if (this.liveSessions && sessionKey && typeof prompt === "string") {
+      const st = await this.liveSessions.runTurn(sessionKey, runParams, emit);
+      if (elicitationOnStream && mgr && source) mgr.unregisterEmitter(source);
+      return {
+        text: st.fullText,
+        sessionId: st.sessionId,
+        costUsd: st.costUsd,
+        inputTokens: st.inputTokens,
+        outputTokens: st.outputTokens,
+      };
+    }
+
+    const sdkQuery = runSession(runParams);
 
     let fullText = "";
     let sessionId: string | undefined;
@@ -1417,13 +1468,99 @@ export class AgentRuntime {
 
     return { text: fullText, sessionId, costUsd, inputTokens, outputTokens };
   }
+
+  /**
+   * Convert one SDK message into client events + accumulated turn state; returns
+   * true on turn-over (`result`). Used by the held-open live-session manager so it
+   * shares the same drain semantics as the one-shot path above.
+   */
+  private handleSdkMessage(
+    msg: SDKMessage,
+    emit: (event: AgentEvent) => void,
+    state: LiveTurnState,
+    sessionKey: string,
+  ): boolean {
+    switch (msg.type) {
+      case "assistant": {
+        for (const block of msg.message.content) {
+          if (block.type === "text" && block.text) {
+            if (state.fullText && !state.fullText.endsWith("\n")) state.fullText += "\n";
+            state.fullText += block.text;
+          } else if (block.type === "tool_use" || block.type === "server_tool_use") {
+            const toolName = (block as { name?: string }).name ?? "unknown";
+            const summary = summarizeToolInput(toolName, (block as { input?: unknown }).input);
+            if (toolName !== "ask_user" && !toolName.endsWith("__ask_user")) {
+              emit({ type: "tool_use_summary", tool_name: toolName, summary });
+            }
+            if (toolName === "TodoWrite") {
+              const plan = todoWriteToPlan((block as { input?: unknown }).input);
+              if (plan) emit(plan);
+            }
+            if (this.shadowObserver?.isEnabled()) {
+              this.shadowObserver.recordToolUse(toolName, summary, sessionKey);
+              if (["Read", "Edit", "Write"].includes(toolName) && summary) {
+                const action = toolName.toLowerCase() as "read" | "edit" | "write";
+                this.shadowObserver.recordFileAccess(summary, action);
+              }
+            }
+          }
+        }
+        emit({ type: "stream_event", event: msg });
+        return false;
+      }
+      case "stream_event": {
+        emit({ type: "stream_event", event: msg });
+        return false;
+      }
+      case "result": {
+        state.sessionId = msg.session_id;
+        state.costUsd = msg.total_cost_usd ?? 0;
+        state.inputTokens = msg.usage?.input_tokens ?? 0;
+        state.outputTokens = msg.usage?.output_tokens ?? 0;
+        if ("result" in msg && !state.fullText && typeof msg.result === "string") {
+          state.fullText = msg.result;
+        }
+        emit({
+          type: "result",
+          result: "result" in msg ? msg.result : "",
+          usage: msg.usage,
+          total_cost_usd: msg.total_cost_usd,
+          session_id: msg.session_id,
+        });
+        return true;
+      }
+      case "system": {
+        const sysMsg = msg as {
+          session_id?: string;
+          subtype: string;
+          tools?: unknown[];
+          mcp_servers?: unknown[];
+          status?: string;
+          compact_metadata?: { trigger: string; pre_tokens: number };
+        };
+        if (sysMsg.session_id && !state.sessionId) state.sessionId = sysMsg.session_id;
+        emit({
+          type: "system",
+          subtype: sysMsg.subtype,
+          message: formatSystemMessage(sysMsg),
+          data: sysMsg as unknown as Record<string, unknown>,
+        });
+        return false;
+      }
+      default:
+        return false;
+    }
+  }
 }
 
-function formatSystemMessage(msg: {
+export function formatSystemMessage(msg: {
   subtype: string;
   tools?: unknown[];
   mcp_servers?: unknown[];
   status?: string;
+  description?: string;
+  summary?: string;
+  task_id?: string;
   compact_metadata?: { trigger: string; pre_tokens: number };
 }): string {
   if (msg.subtype === "init") {
@@ -1438,6 +1575,18 @@ function formatSystemMessage(msg: {
     const preTokens = msg.compact_metadata.pre_tokens;
     const formatted = preTokens >= 1000 ? `${(preTokens / 1000).toFixed(1)}K` : String(preTokens);
     return `Context compacted (was ~${formatted} tokens)`;
+  }
+  // Native background-task lifecycle (surfaced by streaming sessions) — render a
+  // real "pending CI / finished" status instead of the raw subtype, so the UI can
+  // show a live background-work chip and a meaningful completion.
+  if (msg.subtype === "task_started") {
+    return `Background task started: ${msg.description ?? msg.task_id ?? "task"}`;
+  }
+  if (msg.subtype === "task_notification") {
+    return `Background task ${msg.status ?? "settled"}: ${msg.summary ?? msg.task_id ?? "task"}`;
+  }
+  if (msg.subtype === "task_progress" || msg.subtype === "task_updated") {
+    return `Background task ${msg.status ?? "running"}`;
   }
   return msg.subtype;
 }

@@ -393,6 +393,25 @@ export class Gateway {
         process.emit("cron:refresh" as never);
       }
 
+      // Background-task watcher: poll registered background tasks (CI/deploy/long
+      // bash) every 1m and resume the original session when one settles. No-op
+      // when nothing is registered. Sentinel handled in CronEngine.handleCronJob.
+      if (!(await cronStore.getJobByName("background-watch"))) {
+        await cronStore.createJob({
+          userId: systemTenant().userId,
+          name: "background-watch",
+          schedule: "1m",
+          scheduleType: "every",
+          sessionTarget: "isolated",
+          deliveryMode: "none",
+          prompt: "__background_watch__",
+          enabled: true,
+          errorCount: 0,
+        });
+        log.info("Registered background-watch cron job (every 1m)");
+        process.emit("cron:refresh" as never);
+      }
+
       // Magic-docs refresh: re-sync self-updating docs every 1h (content-gated).
       if (!(await cronStore.getJobByName("magic-docs-refresh"))) {
         await cronStore.createJob({

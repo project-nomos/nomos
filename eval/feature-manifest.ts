@@ -398,6 +398,31 @@ export const FEATURES: FeatureSpec[] = [
     invariants: ["per-owner scoped", "ephemeral sessions skipped"],
   },
   {
+    id: "background-tasks",
+    summary:
+      "Wait-and-resume: the agent registers long async work (CI/deploy/build) via the background_register " +
+      "tool; a __background_watch__ cron sentinel polls each task's `watch` command and, on completion, " +
+      "enqueues a RESUME turn keyed to the ORIGINAL sessionKey so the agent picks the same conversation back " +
+      "up with the result -- no dead-end 'waiting' message and no silent drop. In-process store for " +
+      "power-user (lost on restart by design); Redis-backed store + leased watcher in hosted (Phase 2). " +
+      "Idempotent: a settled task is marked and excluded from listPending, so it never re-fires.",
+    trigger: { kind: "cron", sentinel: "__background_watch__", schedule: "1m" },
+    entry: ["runBackgroundWatchSweep", "getBackgroundTaskStore"],
+    effects: [
+      {
+        claim:
+          "on settle, the watcher enqueues a resume turn to the task's original sessionKey, and pending/unsettled tasks produce no resume (verified deterministically by src/daemon/background-tasks.test.ts)",
+        notExercised: true,
+      },
+    ],
+    invariants: [
+      "resume targets the ORIGINAL sessionKey (same conversation), not an isolated cron key",
+      "idempotent: a settled task is excluded from listPending, so it never double-resumes",
+      "in-process store is lost on daemon restart by design (power-user); hosted uses Redis + a leased watcher",
+      "the sweep runs no agent turn except the resume it enqueues; one failed resume doesn't wedge the others",
+    ],
+  },
+  {
     id: "adaptive-memory",
     summary: "Extract knowledge from turns into the user model (opt-in adaptiveMemory).",
     trigger: { kind: "turn", gate: "adaptiveMemory" },

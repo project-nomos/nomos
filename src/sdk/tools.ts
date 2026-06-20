@@ -54,7 +54,11 @@ function formatSubgraph(sub: Subgraph): string {
  */
 export function createMemoryMcpServer(
   userId: string = "local",
-  opts: { elicit?: AskUserToolOptions["elicit"] } = {},
+  opts: {
+    elicit?: AskUserToolOptions["elicit"];
+    /** Current conversation context, so `background_register` can resume THIS thread. */
+    session?: { sessionKey: string; platform: string; channelId: string; userId: string };
+  } = {},
 ): McpSdkServerConfigWithInstance {
   const memorySearchTool = tool(
     "memory_search",
@@ -1349,6 +1353,66 @@ export function createMemoryMcpServer(
     },
   );
 
+  // ── Background Task (wait-and-resume) Tool ──
+
+  const backgroundRegisterTool = tool(
+    "background_register",
+    "Register long async work (a CI run, deploy, build, or any command that takes more than ~a minute) so the daemon watches it and AUTOMATICALLY resumes THIS conversation with the result when it finishes. Use this INSTEAD of blocking the turn or saying 'I'll wait / checking back' — you will be re-invoked with the output. Provide a `watch` shell command that exits 0 ONLY when the work has settled (and prints the outcome to stdout), and nonzero while still running. After registering, finish your turn; you'll be brought back automatically with the result.",
+    {
+      summary: z
+        .string()
+        .describe("Short description of what you're waiting on (e.g. 'deploy CI for PR #96')"),
+      watch: z
+        .string()
+        .describe(
+          'Shell command that exits 0 when the work is DONE and prints the outcome to stdout (e.g. `gh run view 123 --json status,conclusion -q \'if .status=="completed" then .conclusion else error("running") end\'`). Nonzero exit = still running; it is re-run every minute until it settles.',
+        ),
+      kind: z
+        .string()
+        .optional()
+        .describe("Category: ci | deploy | build | command (default: command)"),
+    },
+    async (args) => {
+      if (!opts.session) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: "background_register is only available inside a live conversation (no session context).",
+            },
+          ],
+          isError: true,
+        };
+      }
+      try {
+        const { getBackgroundTaskStore } = await import("../daemon/background-tasks.ts");
+        const task = await getBackgroundTaskStore().register({
+          sessionKey: opts.session.sessionKey,
+          platform: opts.session.platform,
+          channelId: opts.session.channelId,
+          userId: opts.session.userId,
+          kind: args.kind ?? "command",
+          summary: args.summary,
+          watch: args.watch,
+        });
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Registered background task ${task.id.slice(0, 8)} ("${args.summary}"). I'll resume this conversation automatically when it finishes — you can end the turn now.`,
+            },
+          ],
+        };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return {
+          content: [{ type: "text", text: `Failed to register background task: ${message}` }],
+          isError: true,
+        };
+      }
+    },
+  );
+
   // ── Plan Mode Tool ──
 
   // Multi-choice user prompt that routes through MCP elicitation. The
@@ -2256,6 +2320,8 @@ export function createMemoryMcpServer(
       memoryConsolidateTool,
       // Sleep / self-resume
       sleepTool,
+      // Background task wait-and-resume
+      backgroundRegisterTool,
       // iMessage tools
       imessageSendTool,
       imessageReadTool,

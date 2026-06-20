@@ -316,6 +316,44 @@ export class CronEngine {
       return;
     }
 
+    // Intercept background-watch sentinel -- poll registered background tasks
+    // (CI, deploys, long bash) and, on completion, RESUME the original session
+    // with the result so the agent picks the thread back up. The wait-and-resume
+    // bridge: each settle enqueues a synthetic turn keyed to the task's own
+    // sessionKey (not isolated), then delivers the follow-up to its channel.
+    if (job.prompt === "__background_watch__") {
+      (async () => {
+        const { runBackgroundWatchSweep, buildResumePrompt } =
+          await import("./background-tasks.ts");
+        const { withLease } = await import("../storage/leases.ts");
+        // In hosted (Redis) only one pod sweeps; withLease runs fn directly when
+        // Redis is unconfigured (power-user), so this is correct in both modes.
+        await withLease("background-watch", () =>
+          runBackgroundWatchSweep(async (task) => {
+            const incoming = {
+              id: randomUUID(),
+              platform: task.platform,
+              channelId: task.channelId,
+              userId: task.userId,
+              content: buildResumePrompt(task),
+              timestamp: new Date(),
+              metadata: { source: "background-resume", backgroundTaskId: task.id },
+            };
+            const result = await this.messageQueue.enqueue(task.sessionKey, incoming, (event) =>
+              this.broadcast(event),
+            );
+            const stripped = stripHeartbeatToken(result.content);
+            if (stripped !== null && !result.content.trimStart().startsWith("[NOACTION]")) {
+              await this.channelManager.send(result);
+            }
+          }),
+        );
+      })().catch((err) => {
+        log.error({ err: err instanceof Error ? err.message : err }, "Background watch failed");
+      });
+      return;
+    }
+
     log.info(`Triggering job: ${job.name} (${job.id})`);
 
     const sessionKey =

@@ -312,7 +312,10 @@ You can create background tasks that run automatically in the daemon:
 - \`list_scheduled_tasks\` — view all active scheduled tasks and their status.
 - \`delete_scheduled_task\` — remove a scheduled task by ID or name.
 
-When the user asks for recurring actions (e.g. "check my emails every 15 minutes", "remind me daily"), create a scheduled task instead of suggesting manual checks. Tasks run in the background even between conversations.`,
+When the user asks for recurring actions (e.g. "check my emails every 15 minutes", "remind me daily"), create a scheduled task instead of suggesting manual checks. Tasks run in the background even between conversations.
+
+### Waiting on long-running work (CI, deploys, builds)
+When you kick off async work that takes more than ~a minute — a CI run, a deploy, a long build/command — do NOT block the turn and do NOT just say "I'll wait" or "checking back" and stop (that dead-ends; nothing brings you back). Instead call \`background_register\` with a \`watch\` command that exits 0 only once the work has settled (and prints the outcome). Then finish your turn. The daemon polls it and AUTOMATICALLY resumes THIS conversation with the result when it's done, so you can report back and act on it. Example for a GitHub Actions run: \`watch: gh run view <id> --json status,conclusion -q 'if .status=="completed" then .conclusion else error("running") end'\`.`,
   );
 
   // Asking & planning — these tools render proper cards in the app.

@@ -5,6 +5,7 @@ import {
   type McpServerConfig,
   type SDKMessage,
   type SDKResultMessage,
+  type SDKUserMessage,
   type SdkPluginConfig,
   type OnElicitation,
   type HookCallbackMatcher,
@@ -16,14 +17,21 @@ export type {
   Query,
   SDKMessage,
   SDKResultMessage,
+  SDKUserMessage,
   McpServerConfig,
   SdkPluginConfig,
   OnElicitation,
 };
 
 export interface RunSessionParams {
-  /** The user prompt to send */
-  prompt: string;
+  /**
+   * The user prompt to send. A string runs a one-shot turn (the generator ends at
+   * `result`). An `AsyncIterable<SDKUserMessage>` opens a STREAMING-INPUT session:
+   * the generator stays alive past `result` and the host can push further messages
+   * into the live loop (the substrate for live wait-and-resume / `streamInput`).
+   * String callers are unchanged. See `Query.streamInput` / `backgroundTasks`.
+   */
+  prompt: string | AsyncIterable<SDKUserMessage>;
   /** Claude model to use */
   model?: string;
   /** Text appended to Claude Code's default system prompt */
@@ -274,6 +282,9 @@ export function isV2Available(): boolean {
  */
 export async function createV2Session(params: RunSessionParams): Promise<V2Session | null> {
   if (!isV2Available()) return null;
+  // The experimental V2 prompt path is string-only; streaming-input sessions use
+  // the standard query() with an AsyncIterable prompt instead.
+  if (typeof params.prompt !== "string") return null;
 
   try {
     const sdk = await import("@anthropic-ai/claude-agent-sdk");
@@ -328,6 +339,9 @@ export async function runV2Prompt(
   params: RunSessionParams,
 ): Promise<AsyncIterable<SDKMessage> | null> {
   if (!isV2Available()) return null;
+  // The experimental V2 prompt path is string-only; streaming-input sessions use
+  // the standard query() with an AsyncIterable prompt instead.
+  if (typeof params.prompt !== "string") return null;
 
   try {
     const sdk = await import("@anthropic-ai/claude-agent-sdk");
