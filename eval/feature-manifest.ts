@@ -640,18 +640,18 @@ export const FEATURES: FeatureSpec[] = [
   {
     id: "native-subagents",
     summary:
-      "Phase G (step 1, additive + flag-gated) — native SDK `agents` (team-worker + read-only verifier) passed to the main runSession when NOMOS_NATIVE_AGENTS=true, with `Agent` added to allowedTools. Subagents inherit the parent's hooks, so block_critical covers them structurally. The hand-rolled TeamRuntime stays the default; the ~800-LOC replacement is the eval-gated follow-on.",
-    trigger: { kind: "turn", gate: "powerUser" },
-    entry: ["buildNativeAgents", "nativeAgentsEnabled"],
+      "Phase G — team mode now uses the native SDK `agents` path BY DEFAULT (team-worker + read-only verifier; `Agent` in allowedTools). `/team` and natural-language delegation both route to the model's Agent tool inside the normal loop (so ToM + memory + cost tracking apply — the legacy /team early-return bypassed them). Subagents inherit the parent's hooks → block_critical is structural. The hand-rolled TeamRuntime is retained only behind NOMOS_LEGACY_TEAM as a one-release rollback; the physical ~800-LOC deletion is the next-release cleanup. Verified live by eval/grpc-native-team-e2e.ts (agentToolUses>=1).",
+    trigger: { kind: "turn", gate: "teamMode" },
+    entry: ["buildNativeAgents", "useNativeTeam"],
     effects: [
       {
         claim:
-          "when NOMOS_NATIVE_AGENTS=true the model can delegate via the Agent tool to inherited-permission subagents (behavioral)",
+          "with team mode on, the model delegates via the Agent tool to inherited-permission subagents (behavioral; eval/grpc-native-team-e2e.ts proves agentToolUses>=1)",
         notExercised: true,
       },
     ],
     invariants: [
-      "off by default; opt-in via NOMOS_NATIVE_AGENTS; does not replace TeamRuntime yet",
+      "native is the default team mechanism; NOMOS_LEGACY_TEAM forces the hand-rolled path",
       "the verifier subagent is read-only (no Write/Edit)",
       "subagents inherit parent permission + hooks (block_critical is structural, not hand-threaded)",
     ],

@@ -20,7 +20,12 @@ import { loadInstalledPlugins, toSdkPluginConfigs } from "../plugins/loader.ts";
 import { ensureDefaultPlugins } from "../plugins/installer.ts";
 import { createMemoryMcpServer } from "../sdk/tools.ts";
 import { getCostTracker } from "../sdk/cost-tracker.ts";
-import { buildNativeAgents, nativeAgentsEnabled } from "../sdk/agents.ts";
+import {
+  buildNativeAgents,
+  nativeAgentsEnabled,
+  legacyTeamEnabled,
+  useNativeTeam,
+} from "../sdk/agents.ts";
 import { TeamRuntime, stripTeamPrefix } from "./team-runtime.ts";
 import {
   isDiscordConfigured,
@@ -615,8 +620,12 @@ export class AgentRuntime {
       exemplars,
     });
 
-    // Initialize team runtime if team mode is enabled
-    if (this.config.teamMode) {
+    // Team mode now uses the native SDK `agents` path by default (Phase G step 2);
+    // the hand-rolled TeamRuntime is created ONLY when NOMOS_LEGACY_TEAM forces the
+    // old orchestration. When native, `this.teamRuntime` stays undefined, which
+    // routes both the `/team` prefix and natural-language delegation to the model's
+    // `Agent` tool (subagents inherit the parent's hooks → structural safety).
+    if (this.config.teamMode && legacyTeamEnabled()) {
       this.teamRuntime = new TeamRuntime({
         maxWorkers: this.config.maxTeamWorkers,
         workerBudgetUsd: this.config.workerBudgetUsd,
@@ -842,9 +851,11 @@ export class AgentRuntime {
       });
     }
 
-    // Check for team mode trigger (/team prefix)
-    const teamTask = this.teamRuntime ? stripTeamPrefix(message.content) : null;
-    log.info(`Team check: teamRuntime=${!!this.teamRuntime}, teamTask=${!!teamTask}`);
+    // Team mode trigger (/team prefix). LEGACY path early-returns to TeamRuntime;
+    // the NATIVE path (default) strips the prefix below and lets the model delegate
+    // via the Agent tool inside the normal loop, so ToM + memory + cost tracking all
+    // apply (the legacy early-return bypassed them — a defect this fixes).
+    const teamTask = this.config.teamMode ? stripTeamPrefix(message.content) : null;
     if (teamTask && this.teamRuntime) {
       log.info(`Executing team task: ${teamTask.slice(0, 100)}`);
 
@@ -932,6 +943,11 @@ export class AgentRuntime {
           content: `Team error: ${errMsg}`,
         };
       }
+    }
+    // Native team path: strip the /team prefix so the agent sees the bare task; the
+    // model delegates via the Agent tool (native agents are enabled in runAgent).
+    if (teamTask && !this.teamRuntime) {
+      message.content = teamTask;
     }
 
     // Shadow mode: record turn for response cadence tracking
@@ -1348,18 +1364,24 @@ export class AgentRuntime {
     // the Agent tool. Subagents inherit the parent hooks (block_critical), so safety
     // is structural. Additive: the hand-rolled TeamRuntime stays default until an
     // eval proves this path; the ~800-LOC deletion is the gated follow-on.
-    const useNativeAgents = nativeAgentsEnabled();
+    const useNativeAgents = nativeAgentsEnabled() || useNativeTeam(this.config.teamMode);
     if (useNativeAgents) allowedTools.push("Agent");
 
     // Inject team context from a previous /team turn (if any)
     let systemPromptAppend = this.systemPromptAppend;
     // Tell the agent it can delegate to a parallel sub-agent team in-loop, just by
-    // the user asking — no `/team` prefix needed (the tool is registered above when
-    // teamMode is on, in both hosted and power-user modes).
+    // the user asking — no `/team` prefix needed.
     if (this.config.teamMode && this.teamRuntime) {
+      // Legacy path: the hand-rolled delegate_to_team MCP tool.
       systemPromptAppend =
         systemPromptAppend +
         "\n\n## Working as a team\nWhen a request is genuinely parallelizable — research from several angles at once, compare multiple options, or the user explicitly asks for a team / parallel work — call `delegate_to_team` with a self-contained task (and optional `angles`). It runs independent sub-agents and hands you back one synthesized result to weave into your reply. Reserve it for multi-angle or heavy work; don't use it for simple single-step tasks. (Power users can also start a message with `/team` for the same thing.)";
+    } else if (useNativeTeam(this.config.teamMode)) {
+      // Native path (default): the SDK `Agent` tool. The model spawns subagents that
+      // run in parallel with isolated context and inherit this turn's permissions.
+      systemPromptAppend =
+        systemPromptAppend +
+        "\n\n## Working as a team\nWhen a request is genuinely parallelizable — research from several angles at once, audit multiple things, draft separate sections, compare options — delegate with the `Agent` tool: spawn a `team-worker` subagent per independent piece (they run in parallel, each with its own fresh context), then synthesize their results into one reply. Use the read-only `verifier` subagent to adversarially check important results before you trust them. Reserve delegation for multi-angle or heavy work; do the simple single-step tasks yourself. (Power users can also start a message with `/team`.)";
     }
     if (sessionKey) {
       const teamCtx = this.teamContext.get(sessionKey);

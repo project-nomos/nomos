@@ -55,7 +55,21 @@ export function buildNativeAgents(): Record<string, AgentDefinition> {
   };
 }
 
-/** Whether the native-agents path is enabled (reads env at call time). */
+/** Whether the native-agents path is force-enabled regardless of team mode. */
 export function nativeAgentsEnabled(): boolean {
   return process.env.NOMOS_NATIVE_AGENTS === "true";
+}
+
+/**
+ * Escape hatch back to the hand-rolled TeamRuntime. With team mode on, Nomos uses
+ * the native `agents` path by default (Phase G step 2); set NOMOS_LEGACY_TEAM=true
+ * to fall back to the old coordinator/worker orchestration for one release.
+ */
+export function legacyTeamEnabled(): boolean {
+  return process.env.NOMOS_LEGACY_TEAM === "true";
+}
+
+/** The default team mechanism is native subagents unless legacy is forced. */
+export function useNativeTeam(teamMode: boolean): boolean {
+  return teamMode && !legacyTeamEnabled();
 }
