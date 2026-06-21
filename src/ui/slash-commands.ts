@@ -17,7 +17,7 @@ export const SLASH_COMMANDS = [
   { name: "compact", desc: "Compact conversation" },
   { name: "model", desc: "Show/switch model" },
   { name: "thinking", desc: "Set thinking level" },
-  { name: "sandbox", desc: "Toggle sandbox mode" },
+  { name: "sandbox", desc: "Show OS Bash sandbox status (daemon-controlled)" },
   { name: "status", desc: "System status overview" },
   { name: "context", desc: "Context usage estimate" },
   { name: "cost", desc: "Session token usage" },
@@ -237,7 +237,7 @@ function cmdHelp(): string {
     "  /model             Show current model and available options",
     "  /model <name|num>  Switch model by name or number",
     "  /thinking          Show/set thinking level (off/minimal/low/medium/high/max)",
-    "  /sandbox           Show/toggle sandbox mode (on/off)",
+    "  /sandbox           Show OS Bash sandbox status (daemon-controlled)",
     "",
     chalk.bold("Profile"),
     "  /profile           View user profile",
@@ -359,33 +359,19 @@ function cmdThinking(ctx: CommandContext, args: string[], cmd: string): string {
   return chalk.dim(`Thinking level set to: ${level}`);
 }
 
-function cmdSandbox(ctx: CommandContext, args: string[]): string {
-  const input = args[0];
-
-  // Show current status if no argument
-  if (!input) {
-    const current = ctx.state.sandboxEnabled ?? false;
-    const status = current ? chalk.green("enabled") : chalk.red("disabled");
-    const lines = [
-      chalk.dim(`Sandbox mode: ${status}`),
-      "",
-      chalk.dim("Use /sandbox on or /sandbox off to toggle."),
-      chalk.dim("When enabled, code execution runs in an isolated sandbox environment."),
-    ];
-    return lines.join("\n");
-  }
-
-  // Toggle sandbox mode
-  const normalized = input.toLowerCase();
-  if (normalized === "on" || normalized === "enable" || normalized === "enabled") {
-    ctx.state.sandboxEnabled = true;
-    return chalk.dim("Sandbox mode enabled. Code will run in isolated environment.");
-  } else if (normalized === "off" || normalized === "disable" || normalized === "disabled") {
-    ctx.state.sandboxEnabled = false;
-    return chalk.dim("Sandbox mode disabled. Code runs in standard environment.");
-  } else {
-    return chalk.yellow(`Invalid option: ${input}. Use 'on' or 'off'.`);
-  }
+function cmdSandbox(_ctx: CommandContext, _args: string[]): string {
+  // The OS-level Bash sandbox is controlled by the DAEMON's environment, not a
+  // REPL toggle (a per-turn client flag cannot change what the agent subprocess
+  // is confined to). This command is informational.
+  const enabled = process.env.NOMOS_SANDBOX === "true";
+  const status = enabled ? chalk.green("enabled") : chalk.dim("disabled");
+  return [
+    chalk.dim(`OS Bash sandbox (power-user): ${status}`),
+    "",
+    chalk.dim("Controlled by NOMOS_SANDBOX=true in the daemon environment, with a"),
+    chalk.dim("network allowlist via NOMOS_SANDBOX_DOMAINS. When on, Bash runs"),
+    chalk.dim("under filesystem + network confinement. Restart the daemon to apply."),
+  ].join("\n");
 }
 
 const PERMISSION_MODES = [

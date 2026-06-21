@@ -57,12 +57,12 @@ export interface RunSessionParams {
   maxTurns?: number;
   /** Maximum budget in USD before stopping */
   maxBudgetUsd?: number;
-  /** Sandbox settings */
-  sandbox?: {
-    enabled: boolean;
-    autoAllowBashIfSandboxed?: boolean;
-    network?: { allowedDomains?: string[] };
-  };
+  /**
+   * OS-level sandbox settings (filesystem + network confinement via the SDK's
+   * SandboxSettings: enabled / failIfUnavailable / autoAllowBashIfSandboxed /
+   * network.allowedDomains / allowAppleEvents / …). Power-user opt-in (Phase E).
+   */
+  sandbox?: Options["sandbox"];
   /** SDK betas to enable */
   betas?: Options["betas"];
   /** Fallback models to try if primary model fails */

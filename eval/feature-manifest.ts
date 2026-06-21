@@ -620,6 +620,24 @@ export const FEATURES: FeatureSpec[] = [
     ],
   },
   {
+    id: "power-user-sandbox",
+    summary:
+      "Phase E — opt-in OS Bash sandbox (NOMOS_SANDBOX=true) on the main runParams for the power-user box (untrusted channel input + bypassPermissions + no container). Permissive network allowlist (NOMOS_SANDBOX_DOMAINS), failIfUnavailable:false, allowAppleEvents:true. Hosted is skipped (container isolation). The dead REPL /sandbox toggle is now informational; profile.ts no longer advises disabling protection.",
+    trigger: { kind: "turn", gate: "powerUser" },
+    entry: ["buildSandboxConfig"],
+    effects: [
+      {
+        claim:
+          "when NOMOS_SANDBOX=true (power-user), Bash runs under OS filesystem+network confinement (behavioral)",
+        notExercised: true,
+      },
+    ],
+    invariants: [
+      "off by default; opt-in via NOMOS_SANDBOX; never enabled in hosted mode",
+      "scoped permissively so legitimate file/network work still runs; degrades gracefully if unavailable",
+    ],
+  },
+  {
     id: "wiki-disk-reconcile",
     summary: "Reconcile the on-disk wiki cache with the DB at boot (power-user only).",
     trigger: { kind: "boot" },

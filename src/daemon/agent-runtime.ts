@@ -212,6 +212,41 @@ const BUDGET_CAP_NOTICE =
   "I reached the per-turn spending cap before finishing this. Reply to have me continue where I left off.";
 
 /**
+ * E — OS-level Bash sandbox for the power-user box. Opt-in via NOMOS_SANDBOX=true:
+ * the personal-machine threat model (untrusted Slack/email/iMessage input +
+ * bypassPermissions + no container) is the strongest case, but enabling a sandbox
+ * can break legitimate file/network work, so it is off by default and the operator
+ * turns it on deliberately. Hosted already has container isolation → skipped there.
+ * Scoped permissively (a domain allowlist that covers normal agent work);
+ * failIfUnavailable:false degrades gracefully on a host without the OS primitives;
+ * allowAppleEvents keeps `open`/`osascript`/browser-auth working on macOS.
+ */
+const DEFAULT_SANDBOX_DOMAINS = [
+  "api.anthropic.com",
+  "*.anthropic.com",
+  "*.googleapis.com",
+  "*.google.com",
+  "github.com",
+  "*.github.com",
+  "registry.npmjs.org",
+];
+function buildSandboxConfig(): RunSessionParams["sandbox"] | undefined {
+  if (process.env.NOMOS_SANDBOX !== "true" || isHosted()) return undefined;
+  const domains = process.env.NOMOS_SANDBOX_DOMAINS
+    ? process.env.NOMOS_SANDBOX_DOMAINS.split(",")
+        .map((d) => d.trim())
+        .filter(Boolean)
+    : DEFAULT_SANDBOX_DOMAINS;
+  return {
+    enabled: true,
+    failIfUnavailable: false,
+    autoAllowBashIfSandboxed: true,
+    allowAppleEvents: true,
+    network: { allowedDomains: domains },
+  };
+}
+
+/**
  * B.3 — feed an SDK result message's per-model usage (incl. cache read/creation
  * + web-search) into the global CostTracker. The bare `total_cost_usd → DB` write
  * loses the per-model split and the prompt-cache hit rate; `result.modelUsage`
@@ -1408,6 +1443,7 @@ export class AgentRuntime {
       // Unset = no cap (preserves today's behavior). The SDK ends the turn with a
       // result whose subtype is `error_max_budget_usd` (surfaced gracefully below).
       maxBudgetUsd: this.config.turnBudgetUsd,
+      sandbox: buildSandboxConfig(),
       anthropicBaseUrl: this.config.anthropicBaseUrl,
       plugins: this.plugins,
       useSubscription: this.config.useSubscription,
