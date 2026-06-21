@@ -657,6 +657,25 @@ export const FEATURES: FeatureSpec[] = [
     ],
   },
   {
+    id: "native-ask-user-question",
+    summary:
+      "Phase F (core) — native AskUserQuestion via canUseTool, opt-in NOMOS_NATIVE_ASK. §1.2 resolved (eval/canusetool-bypass-harness.ts proves canUseTool fires under bypassPermissions). When on, AskUserQuestion is un-blocked and a canUseTool handler routes each question through the SAME elicitation pipeline as the MCP ask_user tool → the existing Ask card on Slack/mobile/iOS. Questions asked sequentially (single-open-question invariant honored). Multi-question card widening + MAnswerRequest proto regen across iOS/Mac + REPL is the surface follow-on.",
+    trigger: { kind: "turn" },
+    entry: ["buildAskCanUseTool", "nativeAskEnabled"],
+    effects: [
+      {
+        claim:
+          "when NOMOS_NATIVE_ASK=true the model's native AskUserQuestion calls render on the Ask card and the answer is returned via canUseTool (behavioral; ask-canusetool.test.ts covers the mapping)",
+        notExercised: true,
+      },
+    ],
+    invariants: [
+      "off by default; opt-in via NOMOS_NATIVE_ASK; otherwise AskUserQuestion stays blocked (model uses MCP ask_user)",
+      "native asks route through the same ElicitationManager as ask_user (one card, two producers)",
+      "a declined/timed-out question yields no synthetic answer",
+    ],
+  },
+  {
     id: "wiki-disk-reconcile",
     summary: "Reconcile the on-disk wiki cache with the DB at boot (power-user only).",
     trigger: { kind: "boot" },

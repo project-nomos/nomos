@@ -15,6 +15,8 @@ import {
 } from "../sdk/session.ts";
 import { LiveSessionManager, type LiveTurnState } from "./live-session.ts";
 import { AssistantText } from "./assistant-text.ts";
+import type { ElicitationManager, ElicitationSource } from "./elicitation-manager.ts";
+import type { ElicitationRequest, Options } from "@anthropic-ai/claude-agent-sdk";
 import { buildSdkHooks } from "../hooks/sdk-adapter.ts";
 import { loadInstalledPlugins, toSdkPluginConfigs } from "../plugins/loader.ts";
 import { ensureDefaultPlugins } from "../plugins/installer.ts";
@@ -82,7 +84,6 @@ function getDisallowedTools(): string[] {
     "CronList",
     "RemoteTrigger",
     "ScheduleWakeup",
-    "AskUserQuestion",
     // D.1 — scoped Bash deny rules for the unambiguous CRITICAL patterns (mirrors
     // the critical entries in security/tool-approval.ts). These are declarative
     // defense-in-depth: honored even under bypassPermissions, and they survive even
@@ -90,6 +91,10 @@ function getDisallowedTools(): string[] {
     // remains the primary, more-precise gate; these never block legitimate work.
     ...CRITICAL_BASH_DENY,
   ];
+  // AskUserQuestion: the SDK's native ask tool. Blocked by default (so the model
+  // uses the `ask_user` MCP tool → the Nomos Ask card). When native-ask is opted
+  // in (NOMOS_NATIVE_ASK), allow it and route it through canUseTool → the SAME card.
+  if (!nativeAskEnabled()) blocked.push("AskUserQuestion");
   if (!FEATURES.bashTool()) {
     blocked.push("Bash", "BashOutput", "KillBash");
   }
@@ -212,6 +217,53 @@ import { ShadowObserver } from "../memory/shadow-observer.ts";
 import { createLogger } from "../lib/logger.ts";
 
 const log = createLogger("agent-runtime");
+
+/** F — native AskUserQuestion via canUseTool, routed through Nomos's elicitation card. Opt-in. */
+function nativeAskEnabled(): boolean {
+  return process.env.NOMOS_NATIVE_ASK === "true";
+}
+
+/**
+ * F — build the `canUseTool` permission callback. The SDK invokes it for the
+ * native `AskUserQuestion` tool (which fires even under bypassPermissions, proven
+ * by eval/canusetool-bypass-harness.ts). We route each question through the SAME
+ * elicitation pipeline as the MCP `ask_user` tool, so model-driven asks render on
+ * the existing Ask card across Slack / mobile / iOS. Questions are asked
+ * sequentially (respecting the single-open-question-per-channel invariant);
+ * multiSelect widening is the surface follow-on. All other tools pass through.
+ */
+export function buildAskCanUseTool(
+  mgr: ElicitationManager,
+  source: ElicitationSource,
+): NonNullable<Options["canUseTool"]> {
+  return async (toolName, input, opts) => {
+    if (toolName !== "AskUserQuestion") return { behavior: "allow", updatedInput: input };
+    const questions =
+      (input.questions as Array<{
+        question: string;
+        header?: string;
+        options?: Array<{ label: string; description?: string }>;
+      }>) ?? [];
+    const answers: Record<string, string> = {};
+    for (const q of questions) {
+      const labels = (q.options ?? []).map((o) => o.label).filter(Boolean);
+      if (labels.length === 0) continue;
+      const request = {
+        message: q.header ? `${q.header}: ${q.question}` : q.question,
+        requestedSchema: {
+          type: "object",
+          properties: { answer: { type: "string", enum: labels, enumNames: labels } },
+          required: ["answer"],
+        },
+      } as unknown as ElicitationRequest;
+      const res = await mgr.handleElicitation(request, source, opts.signal);
+      if (res.action === "accept" && res.content) {
+        answers[q.question] = String((res.content as Record<string, unknown>).answer ?? labels[0]);
+      }
+    }
+    return { behavior: "allow", updatedInput: { ...input, answers } };
+  };
+}
 
 /** Shown when a turn stops because it hit NOMOS_TURN_BUDGET_USD (B.1). */
 const BUDGET_CAP_NOTICE =
@@ -1456,6 +1508,11 @@ export class AgentRuntime {
     );
     if (elicitationOnStream && mgr && source) mgr.registerEmitter(source, emit);
 
+    // F — native AskUserQuestion via canUseTool (opt-in NOMOS_NATIVE_ASK), routed
+    // through the same elicitation card as the MCP ask_user tool.
+    const canUseTool =
+      nativeAskEnabled() && mgr && source ? buildAskCanUseTool(mgr, source) : undefined;
+
     const runParams: RunSessionParams = {
       prompt,
       model: model ?? this.config.model,
@@ -1474,6 +1531,9 @@ export class AgentRuntime {
       maxBudgetUsd: this.config.turnBudgetUsd,
       sandbox: buildSandboxConfig(),
       ...(useNativeAgents ? { agents: buildNativeAgents() } : {}),
+      ...(canUseTool
+        ? { canUseTool, toolConfig: { askUserQuestion: { previewFormat: "markdown" } } }
+        : {}),
       anthropicBaseUrl: this.config.anthropicBaseUrl,
       plugins: this.plugins,
       useSubscription: this.config.useSubscription,

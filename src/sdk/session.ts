@@ -107,6 +107,14 @@ export interface RunSessionParams {
    */
   agents?: Options["agents"];
   /**
+   * Permission callback. The SDK invokes it for the native `AskUserQuestion` tool
+   * (verified to fire even under bypassPermissions), so Nomos can route model-driven
+   * clarifications through its own elicitation/Ask-card pipeline (Phase F).
+   */
+  canUseTool?: Options["canUseTool"];
+  /** Tool display config (e.g. AskUserQuestion preview format). */
+  toolConfig?: Options["toolConfig"];
+  /**
    * AbortController whose `abort()` cancels the turn (kills the SDK subprocess,
    * stops billing). Used by the one-shot path; the live path interrupts via
    * `Query.interrupt()` instead so the held-open session survives (D.2).
@@ -292,6 +300,8 @@ export function runSession(params: RunSessionParams): Query {
       maxBudgetUsd: params.maxBudgetUsd,
       ...(params.outputFormat ? { outputFormat: params.outputFormat } : {}),
       ...(params.agents ? { agents: params.agents } : {}),
+      ...(params.canUseTool ? { canUseTool: params.canUseTool } : {}),
+      ...(params.toolConfig ? { toolConfig: params.toolConfig } : {}),
       persistSession: params.persistSession ?? true,
       enableFileCheckpointing: params.enableFileCheckpointing ?? true,
       ...(params.abortController ? { abortController: params.abortController } : {}),
