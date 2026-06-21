@@ -96,6 +96,109 @@ export class ElicitationManager {
   }
 
   /**
+   * F — ask 1-4 questions as ONE card (native AskUserQuestion → canUseTool). Each
+   * question gets its own pending entry + id, so the existing `AnswerQuestion`
+   * (resolveById) RPC answers them individually, and we resolve once all are in.
+   * Emitter clients (mobile/terminal) get ONE combined `ask` event with
+   * `questions[]`; channel adapters (Slack) fall back to one message per question.
+   * Returns the chosen label per question (aligned to `questions`; "" if declined).
+   */
+  async askQuestionSet(
+    questions: Array<{
+      prompt: string;
+      header?: string;
+      options: Array<{ label: string; description?: string }>;
+      multiSelect?: boolean;
+    }>,
+    source: ElicitationSource,
+    signal: AbortSignal,
+  ): Promise<string[]> {
+    const channelKey = channelKeyFor(source);
+
+    // Honor the single-open-question-per-channel invariant: cancel any prior set.
+    const prior = this.byChannel.get(channelKey);
+    if (prior) {
+      const p = this.pending.get(prior);
+      if (p) {
+        clearTimeout(p.ttlTimer);
+        p.resolve({ action: "cancel" });
+        this.pending.delete(prior);
+      }
+      this.byChannel.delete(channelKey);
+    }
+
+    const entries = questions.map((q) => ({ id: randomUUID(), q, options: q.options }));
+    const toEventOptions = (opts: Array<{ label: string; description?: string }>) =>
+      opts.map((o, i) => ({ label: o.label, desc: o.description, key: String(i + 1) }));
+    const labelOf = (q: { prompt: string; header?: string }) =>
+      q.header ? `${q.header}: ${q.prompt}` : q.prompt;
+
+    const promises = entries.map(
+      (e) =>
+        new Promise<string>((resolve) => {
+          const ttlTimer = setTimeout(() => {
+            if (!this.pending.delete(e.id)) return;
+            resolve("");
+          }, DEFAULT_TTL_MS);
+          const entry: PendingElicitation = {
+            id: e.id,
+            source,
+            message: labelOf(e.q),
+            options: e.options,
+            resolve: (result) =>
+              resolve(
+                result.action === "accept" && result.content
+                  ? String((result.content as Record<string, unknown>)[ANSWER_PROPERTY] ?? "")
+                  : "",
+              ),
+            createdAt: Date.now(),
+            ttlTimer,
+          };
+          this.pending.set(e.id, entry);
+          signal.addEventListener(
+            "abort",
+            () => {
+              const en = this.pending.get(e.id);
+              if (!en) return;
+              clearTimeout(en.ttlTimer);
+              this.pending.delete(e.id);
+              resolve("");
+            },
+            { once: true },
+          );
+        }),
+    );
+
+    const emit = this.emitters.get(channelKey);
+    if (emit) {
+      emit({
+        type: "ask",
+        id: entries[0]!.id,
+        prompt: labelOf(entries[0]!.q),
+        options: toEventOptions(entries[0]!.options),
+        multiSelect: entries[0]!.q.multiSelect ?? false,
+        questions: entries.map((e) => ({
+          id: e.id,
+          prompt: labelOf(e.q),
+          header: e.q.header,
+          options: toEventOptions(e.options),
+          multiSelect: e.q.multiSelect ?? false,
+        })),
+      });
+      // Track the set on the first id so a stray text reply / cancellation finds it.
+      this.byChannel.set(channelKey, entries[0]!.id);
+    } else {
+      for (const e of entries) {
+        await this.renderQuestion(e.id, labelOf(e.q), e.options, source).catch((err) => {
+          log.error({ err: err instanceof Error ? err.message : err, id: e.id }, "render failed");
+        });
+      }
+    }
+
+    return Promise.all(promises);
+  }
+
+  /**
    * Handle an MCP elicitation request from the agent SDK. Resolves with
    * the user's answer when they click a button or reply with a matching
    * text. Auto-declines if no answer arrives within the TTL.

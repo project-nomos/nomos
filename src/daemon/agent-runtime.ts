@@ -16,7 +16,7 @@ import {
 import { LiveSessionManager, type LiveTurnState } from "./live-session.ts";
 import { AssistantText } from "./assistant-text.ts";
 import type { ElicitationManager, ElicitationSource } from "./elicitation-manager.ts";
-import type { ElicitationRequest, Options } from "@anthropic-ai/claude-agent-sdk";
+import type { Options } from "@anthropic-ai/claude-agent-sdk";
 import { buildSdkHooks } from "../hooks/sdk-adapter.ts";
 import { loadInstalledPlugins, toSdkPluginConfigs } from "../plugins/loader.ts";
 import { ensureDefaultPlugins } from "../plugins/installer.ts";
@@ -237,25 +237,29 @@ export function buildAskCanUseTool(
       (input.questions as Array<{
         question: string;
         header?: string;
+        multiSelect?: boolean;
         options?: Array<{ label: string; description?: string }>;
       }>) ?? [];
+    const valid = questions.filter((q) => (q.options ?? []).some((o) => o.label));
+    if (valid.length === 0) return { behavior: "allow", updatedInput: input };
+
+    // ONE card for all questions (F multi-question). Each question is answered via
+    // the existing per-question AnswerQuestion RPC; we resolve when all are in.
+    const picked = await mgr.askQuestionSet(
+      valid.map((q) => ({
+        prompt: q.question,
+        header: q.header,
+        multiSelect: q.multiSelect,
+        options: (q.options ?? []).filter((o) => o.label),
+      })),
+      source,
+      opts.signal,
+    );
+
     const answers: Record<string, string> = {};
-    for (const q of questions) {
-      const labels = (q.options ?? []).map((o) => o.label).filter(Boolean);
-      if (labels.length === 0) continue;
-      const request = {
-        message: q.header ? `${q.header}: ${q.question}` : q.question,
-        requestedSchema: {
-          type: "object",
-          properties: { answer: { type: "string", enum: labels, enumNames: labels } },
-          required: ["answer"],
-        },
-      } as unknown as ElicitationRequest;
-      const res = await mgr.handleElicitation(request, source, opts.signal);
-      if (res.action === "accept" && res.content) {
-        answers[q.question] = String((res.content as Record<string, unknown>).answer ?? labels[0]);
-      }
-    }
+    valid.forEach((q, i) => {
+      if (picked[i]) answers[q.question] = picked[i]!;
+    });
     return { behavior: "allow", updatedInput: { ...input, answers } };
   };
 }

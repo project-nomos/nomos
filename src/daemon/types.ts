@@ -58,6 +58,18 @@ export type AgentEvent =
       prompt: string;
       options: { label: string; desc?: string; key: string }[];
       multiSelect: boolean;
+      /**
+       * F multi-question: when present, the client renders ALL of these in one card,
+       * each with its own `id` for the `AnswerQuestion` RPC. The top-level
+       * prompt/options/id mirror `questions[0]` so single-question clients still work.
+       */
+      questions?: {
+        id: string;
+        prompt: string;
+        header?: string;
+        options: { label: string; desc?: string; key: string }[];
+        multiSelect: boolean;
+      }[];
     }
   | {
       type: "result";
