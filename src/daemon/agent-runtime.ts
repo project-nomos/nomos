@@ -19,6 +19,7 @@ import { buildSdkHooks } from "../hooks/sdk-adapter.ts";
 import { loadInstalledPlugins, toSdkPluginConfigs } from "../plugins/loader.ts";
 import { ensureDefaultPlugins } from "../plugins/installer.ts";
 import { createMemoryMcpServer } from "../sdk/tools.ts";
+import { getCostTracker } from "../sdk/cost-tracker.ts";
 import { TeamRuntime, stripTeamPrefix } from "./team-runtime.ts";
 import {
   isDiscordConfigured,
@@ -182,6 +183,45 @@ import { ShadowObserver } from "../memory/shadow-observer.ts";
 import { createLogger } from "../lib/logger.ts";
 
 const log = createLogger("agent-runtime");
+
+/** Shown when a turn stops because it hit NOMOS_TURN_BUDGET_USD (B.1). */
+const BUDGET_CAP_NOTICE =
+  "I reached the per-turn spending cap before finishing this. Reply to have me continue where I left off.";
+
+/**
+ * B.3 — feed an SDK result message's per-model usage (incl. cache read/creation
+ * + web-search) into the global CostTracker. The bare `total_cost_usd → DB` write
+ * loses the per-model split and the prompt-cache hit rate; `result.modelUsage`
+ * (required on the result message) carries both. Safe no-op when absent. Called
+ * from BOTH the one-shot drain and the Layer-A live drain.
+ */
+function accrueModelUsage(msg: unknown): void {
+  const mu = (
+    msg as {
+      modelUsage?: Record<
+        string,
+        {
+          inputTokens?: number;
+          outputTokens?: number;
+          cacheReadInputTokens?: number;
+          cacheCreationInputTokens?: number;
+          webSearchRequests?: number;
+        }
+      >;
+    }
+  ).modelUsage;
+  if (!mu) return;
+  const tracker = getCostTracker();
+  for (const [model, u] of Object.entries(mu)) {
+    tracker.addTurn(model, {
+      input_tokens: u.inputTokens ?? 0,
+      output_tokens: u.outputTokens ?? 0,
+      cache_read_input_tokens: u.cacheReadInputTokens ?? 0,
+      cache_creation_input_tokens: u.cacheCreationInputTokens ?? 0,
+      server_tool_use: { web_search_requests: u.webSearchRequests ?? 0 },
+    });
+  }
+}
 
 export class AgentRuntime {
   // Cached at startup
@@ -892,9 +932,18 @@ export class AgentRuntime {
         message.userId,
       );
 
-      // Cache the new SDK session ID
+      // Cache the new SDK session ID, and persist it so the conversation resumes
+      // across a daemon restart (B.2). The daemon already READS metadata.sdkSessionId
+      // on resume; this is the missing write-back. Fire-and-forget, off-the-record
+      // sessions excluded. Continuity-of-thread, not data loss (durable state = vault).
       if (result.sessionId) {
         this.sdkSessionIds.set(sessionKey, result.sessionId);
+        if (!isEphemeralSession(sessionKey)) {
+          const sdkId = result.sessionId;
+          import("../db/sessions.ts")
+            .then(({ updateSessionSdkId }) => updateSessionSdkId(sessionKey, sdkId))
+            .catch(() => {});
+        }
       }
 
       // Persist cost data to sessions table (fire-and-forget)
@@ -1330,6 +1379,10 @@ export class AgentRuntime {
       disallowedTools: getDisallowedTools(),
       resume: resumeId,
       maxTurns: 50,
+      // B.1 — optional USD ceiling on the unattended main turn (NOMOS_TURN_BUDGET_USD).
+      // Unset = no cap (preserves today's behavior). The SDK ends the turn with a
+      // result whose subtype is `error_max_budget_usd` (surfaced gracefully below).
+      maxBudgetUsd: this.config.turnBudgetUsd,
       anthropicBaseUrl: this.config.anthropicBaseUrl,
       plugins: this.plugins,
       useSubscription: this.config.useSubscription,
@@ -1426,12 +1479,17 @@ export class AgentRuntime {
           costUsd = msg.total_cost_usd ?? 0;
           inputTokens = msg.usage?.input_tokens ?? 0;
           outputTokens = msg.usage?.output_tokens ?? 0;
+          accrueModelUsage(msg);
           // Don't append msg.result -- it's the same final text we already
           // accumulated from the `assistant` block.text events, so adding it
           // again would double the response. Use it only as a fallback when
           // we somehow missed every assistant event (rare; e.g. compaction).
           if ("result" in msg && acc.isEmpty && typeof msg.result === "string") {
             acc.setResult(msg.result);
+          }
+          // B.1 — graceful "hit the cap" message instead of an empty/opaque error.
+          if ((msg as { subtype?: string }).subtype === "error_max_budget_usd" && acc.isEmpty) {
+            acc.setResult(BUDGET_CAP_NOTICE);
           }
           emit({
             type: "result",
@@ -1528,8 +1586,15 @@ export class AgentRuntime {
         state.costUsd = msg.total_cost_usd ?? 0;
         state.inputTokens = msg.usage?.input_tokens ?? 0;
         state.outputTokens = msg.usage?.output_tokens ?? 0;
+        accrueModelUsage(msg);
         if ("result" in msg && state.text.isEmpty && typeof msg.result === "string") {
           state.text.setResult(msg.result);
+        }
+        if (
+          (msg as { subtype?: string }).subtype === "error_max_budget_usd" &&
+          state.text.isEmpty
+        ) {
+          state.text.setResult(BUDGET_CAP_NOTICE);
         }
         emit({
           type: "result",

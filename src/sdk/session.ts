@@ -160,22 +160,29 @@ function mergeHooks(a: Options["hooks"], b: Options["hooks"]): Options["hooks"] 
  * Returns the async generator of SDK messages.
  */
 export function runSession(params: RunSessionParams): Query {
-  // Build system prompt config
+  // Build system prompt config.
+  // B.4 — `excludeDynamicSections: true` drops the SDK's own per-environment
+  // sections (cwd/OS/git status/date) from the cached prefix. Those vary per env
+  // on a long-lived daemon and bust the prompt cache; Nomos injects the runtime
+  // context it actually needs via systemPromptAppend, so excluding the SDK's is a
+  // cache win with no behavior loss.
   let systemPrompt: Options["systemPrompt"];
   if (params.systemPrompt) {
     systemPrompt = {
       type: "preset",
       preset: "claude_code",
       append: params.systemPrompt,
+      excludeDynamicSections: true,
     };
   } else if (params.systemPromptAppend) {
     systemPrompt = {
       type: "preset",
       preset: "claude_code",
       append: params.systemPromptAppend,
+      excludeDynamicSections: true,
     };
   } else {
-    systemPrompt = { type: "preset", preset: "claude_code" };
+    systemPrompt = { type: "preset", preset: "claude_code", excludeDynamicSections: true };
   }
 
   // Build env, including custom base URL if provided.

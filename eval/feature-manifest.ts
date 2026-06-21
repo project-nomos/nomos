@@ -560,6 +560,28 @@ export const FEATURES: FeatureSpec[] = [
     ],
   },
   {
+    id: "session-resume-persistence",
+    summary:
+      "Phase B.2 — persist the SDK session id to sessions.metadata.sdkSessionId after each non-ephemeral daemon turn, so a conversation resumes across a daemon restart (the daemon already READS it on resume; this is the write-back). B.3 routes both drains' result.modelUsage through CostTracker; B.1 caps the main turn at NOMOS_TURN_BUDGET_USD.",
+    trigger: { kind: "turn" },
+    entry: ["updateSessionSdkId", "accrueModelUsage"],
+    effects: [
+      {
+        claim: "sessions.metadata.sdkSessionId is populated for resumed daemon sessions",
+        sql: {
+          query:
+            "SELECT count(*) FROM sessions WHERE metadata->>'sdkSessionId' IS NOT NULL AND session_key NOT LIKE '%ephemeral%'",
+          expect: "nonzero",
+        },
+        notExercised: true,
+      },
+    ],
+    invariants: [
+      "ephemeral sessions are NOT written back (off-the-record)",
+      "write-back is fire-and-forget; a DB failure never blocks the turn",
+    ],
+  },
+  {
     id: "wiki-disk-reconcile",
     summary: "Reconcile the on-disk wiki cache with the DB at boot (power-user only).",
     trigger: { kind: "boot" },
