@@ -601,6 +601,25 @@ export const FEATURES: FeatureSpec[] = [
     ],
   },
   {
+    id: "turn-safety-and-control",
+    summary:
+      "Phase D — D.1 scoped Bash(...) deny rules for irrecoverable criticals (defense-in-depth alongside the block_critical hook); D.2 cancellable turns (per-session AbortController for one-shot + Query.interrupt() for the live session, triggered by the gRPC `interrupt:<sessionKey>` command); D.4 forks skip persistSession + enableFileCheckpointing (pure overhead). D.3: PreCompact/PostCompact are real, wired observe-only; per-turn capture already flushes durable memory before compaction.",
+    trigger: { kind: "turn" },
+    entry: ["interruptSession", "CRITICAL_BASH_DENY"],
+    effects: [
+      {
+        claim:
+          "an in-flight turn can be cancelled (subprocess killed / Query.interrupt), and critical Bash patterns are denied declaratively (behavioral)",
+        notExercised: true,
+      },
+    ],
+    invariants: [
+      "live sessions interrupt via Query.interrupt (session survives); one-shot turns abort via AbortController",
+      "scoped Bash deny rules never block legitimate commands (criticals only)",
+      "forks run with persistSession:false + enableFileCheckpointing:false",
+    ],
+  },
+  {
     id: "wiki-disk-reconcile",
     summary: "Reconcile the on-disk wiki cache with the DB at boot (power-user only).",
     trigger: { kind: "boot" },

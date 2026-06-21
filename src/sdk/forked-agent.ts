@@ -101,6 +101,11 @@ export async function runForkedAgent(options: ForkedAgentOptions): Promise<Forke
     permissionMode: "bypassPermissions",
     maxTurns: options.maxTurns ?? DEFAULT_FORK_MAX_TURNS,
     useSubscription,
+    // Forks are one-shot: their transcripts are never resumed and they never
+    // rewind files, so skip session persistence + file checkpointing (D.4 +
+    // Appendix). Pure overhead reduction; no behavior change.
+    persistSession: false,
+    enableFileCheckpointing: false,
     hooks: buildSdkHooks({ sessionKey: `fork:${label}`, approvalPolicy }),
     ...(options.thinking ? { thinking: options.thinking } : {}),
     ...(options.effort ? { effort: options.effort } : {}),

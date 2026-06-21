@@ -99,6 +99,23 @@ export interface RunSessionParams {
   hooks?: Options["hooks"];
   /** Reasoning effort ('low'..'max'; 'xhigh' is the ultracode level). */
   effort?: Options["effort"];
+  /**
+   * AbortController whose `abort()` cancels the turn (kills the SDK subprocess,
+   * stops billing). Used by the one-shot path; the live path interrupts via
+   * `Query.interrupt()` instead so the held-open session survives (D.2).
+   */
+  abortController?: AbortController;
+  /**
+   * Persist the SDK session transcript to disk (default true). Set false for
+   * one-shot forks whose transcripts are never resumed (Appendix). Mutually
+   * exclusive with the SDK `sessionStore` option.
+   */
+  persistSession?: boolean;
+  /**
+   * Keep file-edit checkpoints for `Query.rewindFiles` (default true). Set false
+   * for forks (they never rewind) to drop the per-edit backup overhead (D.4).
+   */
+  enableFileCheckpointing?: boolean;
 }
 
 /**
@@ -267,8 +284,9 @@ export function runSession(params: RunSessionParams): Query {
       maxTurns: params.maxTurns ?? 50,
       maxBudgetUsd: params.maxBudgetUsd,
       ...(params.outputFormat ? { outputFormat: params.outputFormat } : {}),
-      persistSession: true,
-      enableFileCheckpointing: true,
+      persistSession: params.persistSession ?? true,
+      enableFileCheckpointing: params.enableFileCheckpointing ?? true,
+      ...(params.abortController ? { abortController: params.abortController } : {}),
       includePartialMessages: true,
       sandbox: params.sandbox,
       betas: params.betas,

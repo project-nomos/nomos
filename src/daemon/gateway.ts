@@ -704,6 +704,13 @@ export class Gateway {
       return `Delta sync triggered for ${platform}`;
     }
 
+    if (command.startsWith("interrupt:")) {
+      // D.2 — cancel the in-flight turn for a session (e.g. a runaway loop).
+      const sessionKey = command.slice("interrupt:".length);
+      const ok = this.runtime.interruptSession(sessionKey);
+      return ok ? `Interrupted ${sessionKey}` : `No active turn for ${sessionKey}`;
+    }
+
     if (command === "reload-proactive") {
       await registerProactiveJobs();
       return "Proactive jobs reloaded";

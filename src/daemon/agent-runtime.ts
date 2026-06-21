@@ -77,12 +77,35 @@ function getDisallowedTools(): string[] {
     "RemoteTrigger",
     "ScheduleWakeup",
     "AskUserQuestion",
+    // D.1 — scoped Bash deny rules for the unambiguous CRITICAL patterns (mirrors
+    // the critical entries in security/tool-approval.ts). These are declarative
+    // defense-in-depth: honored even under bypassPermissions, and they survive even
+    // if the block_critical PreToolUse hook is ever misconfigured. The AST hook
+    // remains the primary, more-precise gate; these never block legitimate work.
+    ...CRITICAL_BASH_DENY,
   ];
   if (!FEATURES.bashTool()) {
     blocked.push("Bash", "BashOutput", "KillBash");
   }
   return blocked;
 }
+
+/**
+ * Scoped Bash deny specifiers (Claude Code `Bash(prefix:*)` form) for the
+ * irrecoverable, unambiguous operations. Kept conservative on purpose — only
+ * commands with no legitimate agent use — so the rules never false-positive.
+ */
+const CRITICAL_BASH_DENY: string[] = [
+  "Bash(rm -rf:*)",
+  "Bash(rm -fr:*)",
+  "Bash(mkfs:*)",
+  "Bash(mkfs.*:*)",
+  "Bash(dd if=:*)",
+  "Bash(shutdown:*)",
+  "Bash(reboot:*)",
+  "Bash(git push --force:*)",
+  "Bash(git push -f:*)",
+];
 
 /** Human "N minutes/hours/days/months" since `date`. "" when under ~10 min (too recent to anchor). */
 function formatElapsedSince(date: Date): string {
@@ -236,6 +259,8 @@ export class AgentRuntime {
 
   // SDK session ID cache: sessionKey → SDK session ID
   private sdkSessionIds = new Map<string, string>();
+  /** D.2 — per-session AbortController for the in-flight one-shot turn (cancellation). */
+  private turnAborts = new Map<string, AbortController>();
 
   // Per-session team context: carries the team result into subsequent turns
   // so the regular agent has context of what the team did.
@@ -1417,7 +1442,12 @@ export class AgentRuntime {
       };
     }
 
-    const sdkQuery = runSession(runParams);
+    // D.2 — a per-session AbortController so an in-flight one-shot turn can be
+    // cancelled (kills the SDK subprocess, stops billing). Keyed by sessionKey and
+    // overwritten each turn, so no unbounded growth; cleared on normal completion.
+    const turnAbort = new AbortController();
+    if (sessionKey) this.turnAborts.set(sessionKey, turnAbort);
+    const sdkQuery = runSession({ ...runParams, abortController: turnAbort });
 
     const acc = new AssistantText();
     let sessionId: string | undefined;
@@ -1532,9 +1562,28 @@ export class AgentRuntime {
       }
     }
 
+    if (sessionKey) this.turnAborts.delete(sessionKey);
     if (elicitationOnStream && mgr && source) mgr.unregisterEmitter(source);
 
     return { text: acc.toString(), sessionId, costUsd, inputTokens, outputTokens };
+  }
+
+  /**
+   * D.2 — interrupt the in-flight turn for a session. The held-open live session
+   * is interrupted gracefully via `Query.interrupt()` (the session survives); a
+   * one-shot turn is cancelled by aborting its controller. Returns true if a turn
+   * was actually in flight. Wired to the gRPC `interrupt:<sessionKey>` command.
+   */
+  interruptSession(sessionKey: string): boolean {
+    let interrupted = this.liveSessions?.interrupt(sessionKey) ?? false;
+    const ac = this.turnAborts.get(sessionKey);
+    if (ac) {
+      ac.abort();
+      this.turnAborts.delete(sessionKey);
+      interrupted = true;
+    }
+    if (interrupted) log.info({ sessionKey }, "turn interrupted");
+    return interrupted;
   }
 
   /**

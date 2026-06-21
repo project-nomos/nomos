@@ -73,6 +73,14 @@ describe("LiveSessionManager (held-open streaming sessions)", () => {
     mgr.closeAll();
   });
 
+  it("interrupt(): true for a live session, false for an unknown key (D.2)", async () => {
+    const mgr = new LiveSessionManager(handle);
+    await mgr.runTurn("s1", params("hi"), noopEmit);
+    expect(mgr.interrupt("s1")).toBe(true); // session is live
+    expect(mgr.interrupt("nope")).toBe(false); // no such session
+    mgr.closeAll();
+  });
+
   it("evicts the oldest session past the cap", async () => {
     const mgr = new LiveSessionManager(handle, { maxSessions: 2 });
     await mgr.runTurn("a", params("x"), noopEmit);
