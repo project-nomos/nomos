@@ -582,6 +582,25 @@ export const FEATURES: FeatureSpec[] = [
     ],
   },
   {
+    id: "structured-outputs",
+    summary:
+      "Phase C — the three LLM-JSON forks (knowledge extractor, theory-of-mind, mood capture) pass a zod schema as the SDK `outputFormat` (JSON Schema) and consume `result.structured_output`, replacing the fragile regex + JSON.parse path. The SDK validates + bounded-retries; the existing parser still validates the shape, and the legacy text-parse remains a fallback.",
+    trigger: { kind: "turn" },
+    entry: ["runForkedAgent", "ExtractedKnowledgeSchema"],
+    effects: [
+      {
+        claim:
+          "knowledge extraction still populates memory_chunks (now via structured_output, no silent JSON.parse drop)",
+        sql: { query: "SELECT count(*) FROM memory_chunks", expect: "nonzero" },
+        notExercised: true,
+      },
+    ],
+    invariants: [
+      "outputSchema → JSON Schema via z.toJSONSchema; structured_output preferred, text-parse is the fallback",
+      "a malformed/absent structured output degrades to the legacy parse, never throws",
+    ],
+  },
+  {
     id: "wiki-disk-reconcile",
     summary: "Reconcile the on-disk wiki cache with the DB at boot (power-user only).",
     trigger: { kind: "boot" },

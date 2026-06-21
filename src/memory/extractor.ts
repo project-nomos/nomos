@@ -7,6 +7,7 @@
  */
 
 import { createHash } from "node:crypto";
+import { z } from "zod";
 import { runForkedAgent } from "../sdk/forked-agent.ts";
 import { storeMemoryChunk } from "../db/memory.ts";
 import { generateEmbedding, isEmbeddingAvailable } from "./embeddings.ts";
@@ -57,6 +58,62 @@ export interface ExtractedKnowledge {
   decisionPatterns: ExtractedDecisionPattern[];
   values: ExtractedValue[];
 }
+
+// Phase C — JSON Schema the SDK validates the model's output against (bounded
+// retry), replacing the fragile regex + JSON.parse path. Lenient: every array
+// defaults to [] and confidence defaults so a partial extraction still validates.
+const ExtractedKnowledgeSchema = z.object({
+  facts: z
+    .array(
+      z.object({
+        text: z.string(),
+        entities: z.array(z.string()).default([]),
+        confidence: z.number().default(0.6),
+      }),
+    )
+    .default([]),
+  preferences: z
+    .array(
+      z.object({
+        key: z.string(),
+        value: z.string(),
+        confidence: z.number().default(0.6),
+      }),
+    )
+    .default([]),
+  corrections: z
+    .array(
+      z.object({
+        original: z.string(),
+        corrected: z.string(),
+        confidence: z.number().default(0.6),
+      }),
+    )
+    .default([]),
+  decisionPatterns: z
+    .array(
+      z.object({
+        principle: z.string(),
+        evidence: z.array(z.string()).default([]),
+        context: z.string().default(""),
+        weight: z.number().default(0.5),
+        exceptions: z.array(z.string()).default([]),
+        confidence: z.number().default(0.6),
+      }),
+    )
+    .default([]),
+  values: z
+    .array(
+      z.object({
+        value: z.string(),
+        description: z.string().default(""),
+        context: z.string().default(""),
+        evidence: z.array(z.string()).default([]),
+        confidence: z.number().default(0.6),
+      }),
+    )
+    .default([]),
+});
 
 const EXTRACTION_PROMPT = `You are a knowledge extraction system. Extract structured knowledge from this conversation exchange. Return ONLY valid JSON, no other text.
 
@@ -113,7 +170,7 @@ export async function extractKnowledge(
     // runs with bypassPermissions + allowedTools:[] so a pure-reasoning fork
     // actually emits the JSON (plan mode suppressed it), and retries transient
     // 429/529s. A bare runSession here silently produced nothing in prod.
-    const { text: fullText } = await runForkedAgent({
+    const { text: fullText, structuredOutput } = await runForkedAgent({
       prompt,
       model,
       systemPromptAppend:
@@ -121,28 +178,27 @@ export async function extractKnowledge(
       maxTurns: 2,
       label: "knowledge-extraction",
       allowedTools: [],
+      outputSchema: ExtractedKnowledgeSchema,
     });
 
-    // Extract JSON from response (handle markdown code blocks)
+    // Phase C — prefer the SDK-validated structured output; the schema defaults
+    // fill any missing arrays. Fall back to the legacy regex + JSON.parse only
+    // when structured output is unavailable (older CLI / non-structured path).
+    const direct = ExtractedKnowledgeSchema.safeParse(structuredOutput);
+    if (direct.success) return direct.data;
+
     const jsonMatch = fullText.match(/\{[\s\S]*\}/);
     if (!jsonMatch) return empty;
-
-    let parsed: ExtractedKnowledge;
-    try {
-      parsed = JSON.parse(jsonMatch[0]) as ExtractedKnowledge;
-    } catch {
-      // LLM returned non-JSON text -- silently skip
-      return empty;
-    }
-
-    // Validate structure
-    return {
-      facts: Array.isArray(parsed.facts) ? parsed.facts : [],
-      preferences: Array.isArray(parsed.preferences) ? parsed.preferences : [],
-      corrections: Array.isArray(parsed.corrections) ? parsed.corrections : [],
-      decisionPatterns: Array.isArray(parsed.decisionPatterns) ? parsed.decisionPatterns : [],
-      values: Array.isArray(parsed.values) ? parsed.values : [],
-    };
+    const fallback = ExtractedKnowledgeSchema.safeParse(
+      (() => {
+        try {
+          return JSON.parse(jsonMatch[0]);
+        } catch {
+          return null;
+        }
+      })(),
+    );
+    return fallback.success ? fallback.data : empty;
   } catch (err) {
     log.debug({ err }, "Knowledge extraction failed");
     return empty;

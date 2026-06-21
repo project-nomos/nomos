@@ -67,6 +67,12 @@ export interface RunSessionParams {
   betas?: Options["betas"];
   /** Fallback models to try if primary model fails */
   fallbackModels?: string[];
+  /**
+   * Force structured JSON output. The SDK validates the model's output against
+   * this JSON Schema (with bounded retry) and returns it on
+   * `result.structured_output`. Use instead of regex + JSON.parse. (Phase C.)
+   */
+  outputFormat?: Options["outputFormat"];
   /** Tool names that are auto-allowed without prompting for permission */
   allowedTools?: string[];
   /** Tool names that are blocked entirely (removed from the agent's tool list) */
@@ -260,6 +266,7 @@ export function runSession(params: RunSessionParams): Query {
       resume: params.resume,
       maxTurns: params.maxTurns ?? 50,
       maxBudgetUsd: params.maxBudgetUsd,
+      ...(params.outputFormat ? { outputFormat: params.outputFormat } : {}),
       persistSession: true,
       enableFileCheckpointing: true,
       includePartialMessages: true,
