@@ -640,9 +640,9 @@ export const FEATURES: FeatureSpec[] = [
   {
     id: "native-subagents",
     summary:
-      "Phase G — team mode now uses the native SDK `agents` path BY DEFAULT (team-worker + read-only verifier; `Agent` in allowedTools). `/team` and natural-language delegation both route to the model's Agent tool inside the normal loop (so ToM + memory + cost tracking apply — the legacy /team early-return bypassed them). Subagents inherit the parent's hooks → block_critical is structural. The hand-rolled TeamRuntime is retained only behind NOMOS_LEGACY_TEAM as a one-release rollback; the physical ~800-LOC deletion is the next-release cleanup. Verified live by eval/grpc-native-team-e2e.ts (agentToolUses>=1).",
+      "Phase G — team mode uses the native SDK `agents` path EXCLUSIVELY (the ~1080-LOC hand-rolled TeamRuntime + team-mcp + team-mailbox were deleted). team-worker + read-only verifier AgentDefinitions; `Agent` in allowedTools. `/team` (prefix stripped) and natural-language delegation both route to the model's Agent tool inside the normal loop, so ToM + memory + cost tracking apply. Subagents inherit the parent's hooks → block_critical is structural. Verified live by eval/grpc-native-team-e2e.ts (agentToolUses>=1).",
     trigger: { kind: "turn", gate: "teamMode" },
-    entry: ["buildNativeAgents", "useNativeTeam"],
+    entry: ["buildNativeAgents", "useNativeTeam", "stripTeamPrefix"],
     effects: [
       {
         claim:
@@ -651,7 +651,7 @@ export const FEATURES: FeatureSpec[] = [
       },
     ],
     invariants: [
-      "native is the default team mechanism; NOMOS_LEGACY_TEAM forces the hand-rolled path",
+      "team mode is native-only; the hand-rolled TeamRuntime/team-mcp/team-mailbox are deleted",
       "the verifier subagent is read-only (no Write/Edit)",
       "subagents inherit parent permission + hooks (block_critical is structural, not hand-threaded)",
     ],
@@ -1011,24 +1011,8 @@ export const FEATURES: FeatureSpec[] = [
   },
 
   // ── Multi-agent teams ──
-  {
-    id: "multi-agent-teams",
-    summary:
-      "Coordinator/worker orchestration: a coordinator decomposes a task into parallel workers and synthesizes one result. Triggered EITHER by the `/team` prefix (fast path) OR by the in-loop `delegate_to_team` tool (buildTeamMcpServer) the agent calls when the user asks in natural language ('research X from three angles', 'spin up a team') — both work in hosted + power-user modes (both converge on AgentRuntime.runAgent). Gated on teamMode. Workers receive only the BASE mcp set (no nomos-team), so they can never recurse into delegation.",
-    trigger: { kind: "turn", gate: "teamMode" },
-    entry: ["stripTeamPrefix", "TeamRuntime", "buildTeamMcpServer"],
-    effects: [
-      {
-        claim: "spawns parallel workers + synthesizes (transient, no durable DB state)",
-        notExercised: true,
-      },
-    ],
-    invariants: [
-      "invokable without the /team prefix via delegate_to_team, in both hosted + power-user modes",
-      "workers get only the base mcp set, so a worker can never spawn a nested team",
-      "coordinator/worker/verifier runs inherit the block_critical PreToolUse gate (buildSdkHooks in runSingleAgent) — workers run bypassPermissions and must NOT be ungated",
-    ],
-  },
+  // (multi-agent teams: see `native-subagents` — the hand-rolled TeamRuntime was
+  // deleted in Phase G; team mode is native SDK `agents` only.)
 
   // ── Self-improvement (the learning loop) ──
   {

@@ -6,7 +6,7 @@ import { appendTranscriptMessage } from "../../db/transcripts.ts";
 import { updateSessionUsage, updateSessionSdkId } from "../../db/sessions.ts";
 import { runSession, type McpServerConfig, type SDKMessage } from "../../sdk/session.ts";
 import { buildSdkHooks } from "../../hooks/sdk-adapter.ts";
-import { TeamRuntime, stripTeamPrefix } from "../../daemon/team-runtime.ts";
+import { stripTeamPrefix, buildNativeAgents } from "../../sdk/agents.ts";
 import { dispatchSlashCommand, type CommandContext, type CommandState } from "../slash-commands.ts";
 import { shouldBootstrap, getBootstrapPrompt } from "../bootstrap.ts";
 import { getHeartbeat, isHeartbeatEmpty } from "../../auto-reply/heartbeat.ts";
@@ -397,69 +397,11 @@ export function App({
         return;
       }
 
-      // Team mode: handle /team prefix in CLI direct mode
+      // Team mode (Phase G): `/team` in CLI direct mode just strips the prefix; the
+      // native `Agent` tool (enabled on the runSession below when teamMode is on)
+      // handles parallel delegation inside the normal loop.
       const teamTask = config.teamMode ? stripTeamPrefix(input) : null;
-      if (teamTask) {
-        pushItem("system", "Running multi-agent team...");
-        try {
-          const teamRuntime = new TeamRuntime({
-            maxWorkers: config.maxTeamWorkers,
-            coordinatorModel: stateRef.current.model,
-            approvalPolicy: config.toolApprovalPolicy,
-          });
-          const allowedTools = ["Bash", ...Object.keys(mcpServers).map((name) => `mcp__${name}`)];
-          const result = await teamRuntime.runTeam(
-            {
-              prompt: teamTask,
-              systemPromptAppend: systemPromptAppendRef.current,
-              mcpServers,
-              permissionMode: stateRef.current.permissionMode ?? config.permissionMode,
-              allowedTools,
-            },
-            (event) => {
-              if (!parseWorkerToolUse(event.message)) {
-                clearWorkerStatus(event.message);
-                pushItem("system", event.message);
-              }
-            },
-          );
-
-          if (bufferRef.current || thinkingBufferRef.current) flushBuffer();
-          setIsThinking(false);
-          setTeamWorkerStatus(new Map());
-
-          const content = result || "_(no response)_";
-          appendDelta(content);
-          flushBuffer();
-
-          await appendTranscriptMessage({
-            sessionId: session.id,
-            role: "assistant",
-            content,
-          });
-          transcriptRef.current.push({ role: "assistant", content });
-
-          // Inject team result into system prompt so subsequent turns have context.
-          // Also clear SDK session — the old session doesn't know about the team result.
-          const teamSummary =
-            content.length > 4000 ? content.slice(0, 4000) + "\n...(truncated)" : content;
-          systemPromptAppendRef.current =
-            systemPromptAppendRef.current +
-            "\n\n## Previous Team Result\n" +
-            `The user asked: ${teamTask.slice(0, 500)}\n\n` +
-            `The multi-agent team produced this result:\n${teamSummary}`;
-          sdkSessionIdRef.current = null;
-
-          setIsInputActive(true);
-          return;
-        } catch (err) {
-          setIsThinking(false);
-          const message = err instanceof Error ? err.message : String(err);
-          pushItem("system", `Team error: ${message}`);
-          setIsInputActive(true);
-          return;
-        }
-      }
+      const prompt = teamTask ?? input;
 
       // Capture stderr for debug diagnostics on failure
       const stderrChunks: string[] = [];
@@ -500,6 +442,8 @@ export function App({
         // handles fine-grained command approval conversationally, so the SDK's built-in
         // permission layer should not block commands that the agent has already cleared.
         const allowedTools = ["Bash", ...Object.keys(mcpServers).map((name) => `mcp__${name}`)];
+        // Native team delegation in CLI direct mode: expose the Agent tool + agents.
+        if (config.teamMode) allowedTools.push("Agent");
 
         const stderrCallback = (data: string) => {
           stderrChunks.push(data);
@@ -508,7 +452,7 @@ export function App({
         };
 
         let sdkQuery = runSession({
-          prompt: input,
+          prompt,
           model: stateRef.current.model,
           mcpServers,
           systemPromptAppend: systemPromptAppendRef.current,
@@ -516,6 +460,7 @@ export function App({
           resume: sdkSessionIdRef.current ?? undefined,
           thinking,
           allowedTools,
+          ...(config.teamMode ? { agents: buildNativeAgents() } : {}),
           // PreToolUse blocking from hooks.json (matters most in CLI-direct mode,
           // which runs tools on the user's machine). No-op when no hooks registered.
           hooks: buildSdkHooks({ sessionKey: session.session_key }),

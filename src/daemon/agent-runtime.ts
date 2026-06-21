@@ -25,10 +25,9 @@ import { getCostTracker } from "../sdk/cost-tracker.ts";
 import {
   buildNativeAgents,
   nativeAgentsEnabled,
-  legacyTeamEnabled,
   useNativeTeam,
+  stripTeamPrefix,
 } from "../sdk/agents.ts";
-import { TeamRuntime, stripTeamPrefix } from "./team-runtime.ts";
 import {
   isDiscordConfigured,
   createDiscordMcpServer,
@@ -45,7 +44,6 @@ import { buildStudioMcpServer } from "../sdk/studio-mcp.ts";
 import { buildVaultMcpServer } from "../sdk/vault-mcp.ts";
 import { buildThinkMcpServer } from "../sdk/think-mcp.ts";
 import { buildLoopMcpServer } from "../sdk/loop-mcp.ts";
-import { buildTeamMcpServer } from "../sdk/team-mcp.ts";
 import { buildMemoryDigest } from "../memory/digest.ts";
 import { captureMoodFromTurn } from "../memory/mood-log.ts";
 import { getRelevantArticles } from "../memory/wiki-reader.ts";
@@ -60,8 +58,8 @@ import { resolveMemoryUserId } from "../auth/tenant-context.ts";
 function getDisallowedTools(): string[] {
   // Block the SDK's generic orchestration/task built-ins so the agent routes to the
   // Nomos-native equivalents (which render proper cards + own durable state):
-  //  - `Workflow` spawns sub-agents outside the team runtime + leaks a raw script →
-  //    use `delegate_to_team`.
+  //  - `Workflow` spawns sub-agents outside our control + leaks a raw script →
+  //    the model delegates via the native `Agent` tool (team mode) instead.
   //  - The SDK async task tracker (`Task`/`TaskCreate`/`TaskStop`/…) is NOT registered
   //    in our sessions (CLAUDE_CODE_ENABLE_TASKS is off), so we don't deny it — denying
   //    an unregistered tool only emits a "matches no known tool" warning. If the SDK's
@@ -351,13 +349,6 @@ export class AgentRuntime {
   private sdkSessionIds = new Map<string, string>();
   /** D.2 — per-session AbortController for the in-flight one-shot turn (cancellation). */
   private turnAborts = new Map<string, AbortController>();
-
-  // Per-session team context: carries the team result into subsequent turns
-  // so the regular agent has context of what the team did.
-  private teamContext = new Map<string, string>();
-
-  // Multi-agent team runtime (when teamMode is enabled)
-  private teamRuntime?: TeamRuntime;
 
   // Per-session Theory of Mind trackers (transient, session-scoped)
   private tomTrackers = new Map<string, TheoryOfMindTracker>();
@@ -669,19 +660,10 @@ export class AgentRuntime {
       exemplars,
     });
 
-    // Team mode now uses the native SDK `agents` path by default (Phase G step 2);
-    // the hand-rolled TeamRuntime is created ONLY when NOMOS_LEGACY_TEAM forces the
-    // old orchestration. When native, `this.teamRuntime` stays undefined, which
-    // routes both the `/team` prefix and natural-language delegation to the model's
-    // `Agent` tool (subagents inherit the parent's hooks → structural safety).
-    if (this.config.teamMode && legacyTeamEnabled()) {
-      this.teamRuntime = new TeamRuntime({
-        maxWorkers: this.config.maxTeamWorkers,
-        workerBudgetUsd: this.config.workerBudgetUsd,
-        coordinatorModel: this.config.model,
-        approvalPolicy: this.config.toolApprovalPolicy,
-      });
-    }
+    // Team mode uses the native SDK `agents` path exclusively (Phase G): both the
+    // `/team` prefix and natural-language delegation route to the model's `Agent`
+    // tool, whose subagents inherit this turn's permissions + hooks (structural
+    // safety). The hand-rolled TeamRuntime was deleted.
 
     // Initialize shadow observer for passive behavioral learning
     if (this.config.shadowMode) {
@@ -900,102 +882,11 @@ export class AgentRuntime {
       });
     }
 
-    // Team mode trigger (/team prefix). LEGACY path early-returns to TeamRuntime;
-    // the NATIVE path (default) strips the prefix below and lets the model delegate
-    // via the Agent tool inside the normal loop, so ToM + memory + cost tracking all
-    // apply (the legacy early-return bypassed them — a defect this fixes).
+    // Team mode trigger (/team prefix): strip the prefix so the agent sees the bare
+    // task; the model delegates via the native `Agent` tool inside the normal loop
+    // (native agents are enabled in runAgent), so ToM + memory + cost tracking apply.
     const teamTask = this.config.teamMode ? stripTeamPrefix(message.content) : null;
-    if (teamTask && this.teamRuntime) {
-      log.info(`Executing team task: ${teamTask.slice(0, 100)}`);
-
-      emit({
-        type: "system",
-        subtype: "status",
-        message: "Running multi-agent team...",
-      });
-
-      try {
-        const result = await this.teamRuntime.runTeam(
-          {
-            prompt: teamTask,
-            systemPromptAppend: this.systemPromptAppend,
-            mcpServers: this.mcpServers,
-            permissionMode: "bypassPermissions",
-            allowedTools: Object.keys(this.mcpServers).map((name) => `mcp__${name}`),
-            disallowedTools: getDisallowedTools(),
-            // Use smart-routed model (or default) — not the base config which may be haiku
-            model,
-            plugins: this.plugins,
-          },
-          (event) => {
-            emit({
-              type: "system",
-              subtype: "status",
-              message: event.message,
-            });
-          },
-        );
-
-        const content = result || "_(no response)_";
-        log.info(`Team result: ${content.length} chars`);
-
-        // Store team result so subsequent turns have context
-        const teamSummary =
-          content.length > 4000 ? content.slice(0, 4000) + "\n...(truncated)" : content;
-        this.teamContext.set(
-          sessionKey,
-          `## Previous Team Result\nThe user asked: ${teamTask.slice(0, 500)}\n\nThe multi-agent team produced this result:\n${teamSummary}`,
-        );
-
-        // Emit the team result as stream events so gRPC/WebSocket clients render it
-        emit({
-          type: "stream_event",
-          event: {
-            type: "stream_event",
-            event: {
-              type: "content_block_delta",
-              delta: { type: "text_delta", text: content },
-            },
-          } as unknown as SDKMessage,
-        });
-        emit({
-          type: "result",
-          result: content,
-          usage: { input_tokens: 0, output_tokens: 0 },
-          total_cost_usd: 0,
-        });
-
-        return {
-          inReplyTo: message.id,
-          platform: message.platform,
-          channelId: message.channelId,
-          threadId: message.threadId,
-          content,
-        };
-      } catch (err) {
-        const errMsg = err instanceof Error ? err.message : String(err);
-        emit({ type: "error", message: errMsg });
-
-        // Return error as content instead of re-throwing (prevents duplicate error events)
-        emit({
-          type: "result",
-          result: `Team error: ${errMsg}`,
-          usage: { input_tokens: 0, output_tokens: 0 },
-          total_cost_usd: 0,
-        });
-
-        return {
-          inReplyTo: message.id,
-          platform: message.platform,
-          channelId: message.channelId,
-          threadId: message.threadId,
-          content: `Team error: ${errMsg}`,
-        };
-      }
-    }
-    // Native team path: strip the /team prefix so the agent sees the bare task; the
-    // model delegates via the Agent tool (native agents are enabled in runAgent).
-    if (teamTask && !this.teamRuntime) {
+    if (teamTask) {
       message.content = teamTask;
     }
 
@@ -1336,33 +1227,9 @@ export class AgentRuntime {
       }
     }
 
-    // Team delegation as an in-loop tool: the agent spins up a parallel sub-agent
-    // team when the user asks in natural language ("research X from three angles",
-    // "spin up a team") — no `/team` prefix needed, in BOTH hosted and power-user
-    // modes (both converge here). The TeamTask carries only the BASE mcp set (which
-    // excludes `nomos-team`), so workers can never receive the delegate tool and
-    // recurse. Gated on teamMode; the `/team` prefix stays as a fast path.
-    if (this.config.teamMode && this.teamRuntime) {
-      const teamRuntime = this.teamRuntime;
-      const turnModel = model ?? this.config.model;
-      const teamServers: Record<string, ReturnType<typeof buildTeamMcpServer>> = {
-        "nomos-team": buildTeamMcpServer({
-          runTeam: (t, e) => teamRuntime.runTeam(t, e),
-          teamTaskBase: () => ({
-            systemPromptAppend: this.systemPromptAppend,
-            mcpServers: this.mcpServers,
-            permissionMode: "bypassPermissions",
-            allowedTools: Object.keys(this.mcpServers).map((n) => `mcp__${n}`),
-            disallowedTools: getDisallowedTools(),
-            model: turnModel,
-            plugins: this.plugins,
-          }),
-          isWorkerContext: false,
-          onProgress: (m) => emit({ type: "system", subtype: "status", message: m }),
-        }),
-      };
-      mcpServers = { ...mcpServers, ...teamServers };
-    }
+    // Team delegation is native (Phase G): when team mode is on, `Agent` is added to
+    // allowedTools below and the system prompt nudges the model to spawn parallel
+    // subagents via the Agent tool. No in-loop delegate_to_team MCP tool is needed.
 
     // Reasoning-first: always-inject what the agent already knows about the user,
     // so it stays continuous without having to call a recall tool first.
@@ -1409,36 +1276,21 @@ export class AgentRuntime {
 
     // Auto-approve all tools from our MCP servers
     const allowedTools = Object.keys(mcpServers).map((name) => `mcp__${name}`);
-    // G — native subagents (opt-in NOMOS_NATIVE_AGENTS): let the model delegate via
-    // the Agent tool. Subagents inherit the parent hooks (block_critical), so safety
-    // is structural. Additive: the hand-rolled TeamRuntime stays default until an
-    // eval proves this path; the ~800-LOC deletion is the gated follow-on.
+    // G — native subagents: with team mode on (or NOMOS_NATIVE_AGENTS), the model
+    // delegates via the Agent tool. Subagents inherit the parent hooks
+    // (block_critical), so safety is structural. This is the ONLY team mechanism
+    // now — the hand-rolled TeamRuntime was deleted.
     const useNativeAgents = nativeAgentsEnabled() || useNativeTeam(this.config.teamMode);
     if (useNativeAgents) allowedTools.push("Agent");
 
-    // Inject team context from a previous /team turn (if any)
     let systemPromptAppend = this.systemPromptAppend;
-    // Tell the agent it can delegate to a parallel sub-agent team in-loop, just by
-    // the user asking — no `/team` prefix needed.
-    if (this.config.teamMode && this.teamRuntime) {
-      // Legacy path: the hand-rolled delegate_to_team MCP tool.
-      systemPromptAppend =
-        systemPromptAppend +
-        "\n\n## Working as a team\nWhen a request is genuinely parallelizable — research from several angles at once, compare multiple options, or the user explicitly asks for a team / parallel work — call `delegate_to_team` with a self-contained task (and optional `angles`). It runs independent sub-agents and hands you back one synthesized result to weave into your reply. Reserve it for multi-angle or heavy work; don't use it for simple single-step tasks. (Power users can also start a message with `/team` for the same thing.)";
-    } else if (useNativeTeam(this.config.teamMode)) {
-      // Native path (default): the SDK `Agent` tool. The model spawns subagents that
-      // run in parallel with isolated context and inherit this turn's permissions.
+    // Native team delegation (Phase G): when team mode is on, nudge the model to
+    // spawn parallel subagents via the SDK `Agent` tool — they run with isolated
+    // context and inherit this turn's permissions. No `/team` prefix needed.
+    if (useNativeTeam(this.config.teamMode)) {
       systemPromptAppend =
         systemPromptAppend +
         "\n\n## Working as a team\nWhen a request is genuinely parallelizable — research from several angles at once, audit multiple things, draft separate sections, compare options — delegate with the `Agent` tool: spawn a `team-worker` subagent per independent piece (they run in parallel, each with its own fresh context), then synthesize their results into one reply. Use the read-only `verifier` subagent to adversarially check important results before you trust them. Reserve delegation for multi-angle or heavy work; do the simple single-step tasks yourself. (Power users can also start a message with `/team`.)";
-    }
-    if (sessionKey) {
-      const teamCtx = this.teamContext.get(sessionKey);
-      if (teamCtx) {
-        systemPromptAppend = systemPromptAppend + "\n\n" + teamCtx;
-        // Clear after one use -- it's now part of the conversation via the SDK session
-        this.teamContext.delete(sessionKey);
-      }
     }
 
     // Inject transient Theory of Mind state (per-message, not persisted)

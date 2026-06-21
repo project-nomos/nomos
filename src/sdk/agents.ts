@@ -1,17 +1,16 @@
 /**
  * Native SDK subagent definitions (Phase G of the SDK-adoption plan).
  *
- * The hand-rolled `TeamRuntime` decomposes/spawns/synthesizes workers by hand. The
- * Claude Agent SDK ships this natively: pass `agents` to `query()`, add `Agent` to
+ * Team mode is native-only: the ~1080-LOC hand-rolled TeamRuntime (+ team-mcp,
+ * team-mailbox) was deleted. We pass `agents` to `query()`, add `Agent` to
  * `allowedTools`, and the model delegates via the `Agent` tool. Subagents
  * auto-parallelize, run in fresh isolated context (only their final message
  * returns, tagged `parent_tool_use_id`), and INHERIT the parent's permission +
  * hook configuration — so the `block_critical` gate covers them structurally
  * rather than by hand-threading (which A.1 had to do for the hand-rolled path).
  *
- * Gated behind `NOMOS_NATIVE_AGENTS` (default off). The existing TeamRuntime stays
- * the default until an eval proves the native path; this is additive, not yet a
- * replacement (the ~800-LOC TeamRuntime deletion is the gated follow-on).
+ * Enabled whenever team mode is on; `NOMOS_NATIVE_AGENTS=true` force-enables it
+ * even with team mode off.
  */
 
 import type { Options } from "@anthropic-ai/claude-agent-sdk";
@@ -61,15 +60,16 @@ export function nativeAgentsEnabled(): boolean {
 }
 
 /**
- * Escape hatch back to the hand-rolled TeamRuntime. With team mode on, Nomos uses
- * the native `agents` path by default (Phase G step 2); set NOMOS_LEGACY_TEAM=true
- * to fall back to the old coordinator/worker orchestration for one release.
+ * Team mode now uses native subagents exclusively (the hand-rolled TeamRuntime was
+ * deleted in Phase G). This is just `teamMode` — kept as a named helper so the team
+ * gate reads clearly at the call sites.
  */
-export function legacyTeamEnabled(): boolean {
-  return process.env.NOMOS_LEGACY_TEAM === "true";
+export function useNativeTeam(teamMode: boolean): boolean {
+  return teamMode;
 }
 
-/** The default team mechanism is native subagents unless legacy is forced. */
-export function useNativeTeam(teamMode: boolean): boolean {
-  return teamMode && !legacyTeamEnabled();
+/** Detect and strip the `/team ` fast-path prefix; returns the bare task or null. */
+export function stripTeamPrefix(content: string): string | null {
+  const match = content.match(/^\/team\s+([\s\S]+)/i);
+  return match ? match[1]!.trim() : null;
 }

@@ -2,8 +2,8 @@ import { describe, it, expect, afterEach } from "vitest";
 import {
   buildNativeAgents,
   nativeAgentsEnabled,
-  legacyTeamEnabled,
   useNativeTeam,
+  stripTeamPrefix,
 } from "./agents.ts";
 
 describe("native agents (Phase G)", () => {
@@ -34,24 +34,19 @@ describe("native agents (Phase G)", () => {
     if (prev !== undefined) process.env.NOMOS_NATIVE_AGENTS = prev;
   });
 
-  it("team mode uses the native path by default; NOMOS_LEGACY_TEAM forces legacy (G step 2)", () => {
-    const prev = process.env.NOMOS_LEGACY_TEAM;
-    delete process.env.NOMOS_LEGACY_TEAM;
-    // teamMode on + no legacy flag → native team
+  it("team mode is native-only (G); useNativeTeam == teamMode", () => {
     expect(useNativeTeam(true)).toBe(true);
-    expect(legacyTeamEnabled()).toBe(false);
-    // teamMode off → no native team regardless
     expect(useNativeTeam(false)).toBe(false);
-    // legacy flag forces the hand-rolled path
-    process.env.NOMOS_LEGACY_TEAM = "true";
-    expect(legacyTeamEnabled()).toBe(true);
-    expect(useNativeTeam(true)).toBe(false);
-    if (prev !== undefined) process.env.NOMOS_LEGACY_TEAM = prev;
-    else delete process.env.NOMOS_LEGACY_TEAM;
+  });
+
+  it("stripTeamPrefix detects and strips the /team fast-path", () => {
+    expect(stripTeamPrefix("/team research X from 2 angles")).toBe("research X from 2 angles");
+    expect(stripTeamPrefix("/TEAM  do it")).toBe("do it");
+    expect(stripTeamPrefix("just a normal message")).toBeNull();
+    expect(stripTeamPrefix("/teamwork is great")).toBeNull(); // needs whitespace after /team
   });
 
   afterEach(() => {
     delete process.env.NOMOS_NATIVE_AGENTS;
-    delete process.env.NOMOS_LEGACY_TEAM;
   });
 });
