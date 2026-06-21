@@ -638,6 +638,25 @@ export const FEATURES: FeatureSpec[] = [
     ],
   },
   {
+    id: "native-subagents",
+    summary:
+      "Phase G (step 1, additive + flag-gated) — native SDK `agents` (team-worker + read-only verifier) passed to the main runSession when NOMOS_NATIVE_AGENTS=true, with `Agent` added to allowedTools. Subagents inherit the parent's hooks, so block_critical covers them structurally. The hand-rolled TeamRuntime stays the default; the ~800-LOC replacement is the eval-gated follow-on.",
+    trigger: { kind: "turn", gate: "powerUser" },
+    entry: ["buildNativeAgents", "nativeAgentsEnabled"],
+    effects: [
+      {
+        claim:
+          "when NOMOS_NATIVE_AGENTS=true the model can delegate via the Agent tool to inherited-permission subagents (behavioral)",
+        notExercised: true,
+      },
+    ],
+    invariants: [
+      "off by default; opt-in via NOMOS_NATIVE_AGENTS; does not replace TeamRuntime yet",
+      "the verifier subagent is read-only (no Write/Edit)",
+      "subagents inherit parent permission + hooks (block_critical is structural, not hand-threaded)",
+    ],
+  },
+  {
     id: "wiki-disk-reconcile",
     summary: "Reconcile the on-disk wiki cache with the DB at boot (power-user only).",
     trigger: { kind: "boot" },

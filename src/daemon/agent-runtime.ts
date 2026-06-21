@@ -20,6 +20,7 @@ import { loadInstalledPlugins, toSdkPluginConfigs } from "../plugins/loader.ts";
 import { ensureDefaultPlugins } from "../plugins/installer.ts";
 import { createMemoryMcpServer } from "../sdk/tools.ts";
 import { getCostTracker } from "../sdk/cost-tracker.ts";
+import { buildNativeAgents, nativeAgentsEnabled } from "../sdk/agents.ts";
 import { TeamRuntime, stripTeamPrefix } from "./team-runtime.ts";
 import {
   isDiscordConfigured,
@@ -1343,6 +1344,12 @@ export class AgentRuntime {
 
     // Auto-approve all tools from our MCP servers
     const allowedTools = Object.keys(mcpServers).map((name) => `mcp__${name}`);
+    // G — native subagents (opt-in NOMOS_NATIVE_AGENTS): let the model delegate via
+    // the Agent tool. Subagents inherit the parent hooks (block_critical), so safety
+    // is structural. Additive: the hand-rolled TeamRuntime stays default until an
+    // eval proves this path; the ~800-LOC deletion is the gated follow-on.
+    const useNativeAgents = nativeAgentsEnabled();
+    if (useNativeAgents) allowedTools.push("Agent");
 
     // Inject team context from a previous /team turn (if any)
     let systemPromptAppend = this.systemPromptAppend;
@@ -1444,6 +1451,7 @@ export class AgentRuntime {
       // result whose subtype is `error_max_budget_usd` (surfaced gracefully below).
       maxBudgetUsd: this.config.turnBudgetUsd,
       sandbox: buildSandboxConfig(),
+      ...(useNativeAgents ? { agents: buildNativeAgents() } : {}),
       anthropicBaseUrl: this.config.anthropicBaseUrl,
       plugins: this.plugins,
       useSubscription: this.config.useSubscription,

@@ -100,6 +100,13 @@ export interface RunSessionParams {
   /** Reasoning effort ('low'..'max'; 'xhigh' is the ultracode level). */
   effort?: Options["effort"];
   /**
+   * Native subagent definitions (Phase G). When set, the model can delegate to
+   * these via the `Agent` tool; subagents auto-parallelize, get fresh isolated
+   * context, and INHERIT the parent's permission + hook config (so the
+   * block_critical gate covers them structurally). Add "Agent" to allowedTools.
+   */
+  agents?: Options["agents"];
+  /**
    * AbortController whose `abort()` cancels the turn (kills the SDK subprocess,
    * stops billing). Used by the one-shot path; the live path interrupts via
    * `Query.interrupt()` instead so the held-open session survives (D.2).
@@ -284,6 +291,7 @@ export function runSession(params: RunSessionParams): Query {
       maxTurns: params.maxTurns ?? 50,
       maxBudgetUsd: params.maxBudgetUsd,
       ...(params.outputFormat ? { outputFormat: params.outputFormat } : {}),
+      ...(params.agents ? { agents: params.agents } : {}),
       persistSession: params.persistSession ?? true,
       enableFileCheckpointing: params.enableFileCheckpointing ?? true,
       ...(params.abortController ? { abortController: params.abortController } : {}),
