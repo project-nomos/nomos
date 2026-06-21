@@ -62,9 +62,10 @@ function getDisallowedTools(): string[] {
   // Nomos-native equivalents (which render proper cards + own durable state):
   //  - `Workflow` spawns sub-agents outside the team runtime + leaks a raw script →
   //    use `delegate_to_team`.
-  //  - `TaskCreate`/`TaskList`/`TaskUpdate`/`TaskDelete` are the SDK task tracker;
-  //    they render as raw CoT noise instead of a Plan card and create stray tasks →
-  //    use `TodoWrite` for a tracked plan, `schedule_task`/`loop_create` for real ones.
+  //  - The SDK async task tracker (`Task`/`TaskCreate`/`TaskStop`/…) is NOT registered
+  //    in our sessions (CLAUDE_CODE_ENABLE_TASKS is off), so we don't deny it — denying
+  //    an unregistered tool only emits a "matches no known tool" warning. If the SDK's
+  //    default ever flips tasks on, re-add the registered names here.
   //  - `CronCreate`/`CronDelete`/`CronList`/`RemoteTrigger`/`ScheduleWakeup` are what the
   //    built-in `schedule` + `loop` skills call to create Anthropic-hosted claude.ai
   //    Routines (1-hour minimum, results land on the claude.ai dashboard, never run in
@@ -75,10 +76,6 @@ function getDisallowedTools(): string[] {
   //    elicitation (so no Ask card renders in the app) → use the `ask_user` MCP tool.
   const blocked: string[] = [
     "Workflow",
-    "TaskCreate",
-    "TaskList",
-    "TaskUpdate",
-    "TaskDelete",
     "CronCreate",
     "CronDelete",
     "CronList",
