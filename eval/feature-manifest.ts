@@ -659,18 +659,19 @@ export const FEATURES: FeatureSpec[] = [
   {
     id: "native-ask-user-question",
     summary:
-      "Phase F (core) — native AskUserQuestion via canUseTool, opt-in NOMOS_NATIVE_ASK. §1.2 resolved (eval/canusetool-bypass-harness.ts proves canUseTool fires under bypassPermissions). When on, AskUserQuestion is un-blocked and a canUseTool handler routes each question through the SAME elicitation pipeline as the MCP ask_user tool → the existing Ask card on Slack/mobile/iOS. Questions asked sequentially (single-open-question invariant honored). Multi-question card widening + MAnswerRequest proto regen across iOS/Mac + REPL is the surface follow-on.",
+      "Phase F — native AskUserQuestion via canUseTool, opt-in NOMOS_NATIVE_ASK. §1.2 resolved (eval/canusetool-bypass-harness.ts proves canUseTool fires under bypassPermissions). When on, AskUserQuestion is un-blocked and a canUseTool handler routes the questions through ElicitationManager.askQuestionSet → ONE multi-question Ask card (1-4 questions, each with its own id/header/multiSelect) on Slack/mobile/iOS, answered via the existing per-question AnswerQuestion RPC (no proto change). iOS renders the widened card (emulator-verified). Same ElicitationManager as the MCP ask_user tool (one card, two producers).",
     trigger: { kind: "turn" },
-    entry: ["buildAskCanUseTool", "nativeAskEnabled"],
+    entry: ["buildAskCanUseTool", "nativeAskEnabled", "askQuestionSet"],
     effects: [
       {
         claim:
-          "when NOMOS_NATIVE_ASK=true the model's native AskUserQuestion calls render on the Ask card and the answer is returned via canUseTool (behavioral; ask-canusetool.test.ts covers the mapping)",
+          "when NOMOS_NATIVE_ASK=true the model's native AskUserQuestion calls render 1-4 questions on ONE Ask card and answers return via canUseTool (behavioral; ask-canusetool.test.ts + elicitation-manager.test.ts cover the mapping + set resolution)",
         notExercised: true,
       },
     ],
     invariants: [
       "off by default; opt-in via NOMOS_NATIVE_ASK; otherwise AskUserQuestion stays blocked (model uses MCP ask_user)",
+      "askQuestionSet emits ONE ask event with questions[]; the set resolves only when every sub-question is answered",
       "native asks route through the same ElicitationManager as ask_user (one card, two producers)",
       "a declined/timed-out question yields no synthetic answer",
     ],
