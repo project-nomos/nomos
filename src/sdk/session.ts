@@ -36,7 +36,12 @@ export interface RunSessionParams {
   model?: string;
   /** Text appended to Claude Code's default system prompt */
   systemPromptAppend?: string;
-  /** Full system prompt override (takes precedence over systemPromptAppend) */
+  /**
+   * Text appended to the claude_code preset, taking precedence over
+   * systemPromptAppend. NOTE: still an `append` to the preset (the SDK builds
+   * `{ preset: "claude_code", append }`), NOT a full replacement — Nomos always
+   * keeps Claude Code's base prompt.
+   */
   systemPrompt?: string;
   /** Custom Anthropic API base URL (for Ollama, LiteLLM, etc.) */
   anthropicBaseUrl?: string;
@@ -182,6 +187,22 @@ export function runSession(params: RunSessionParams): Query {
   };
   delete env.CLAUDECODE;
 
+  // A.3 — Hermetic runtime. `settingSources: []` (in the options below) gates most
+  // filesystem `.claude/` config, but Claude Code's auto-memory loads into the system
+  // prompt UNCONDITIONALLY, so disable it explicitly. Nomos owns its own memory (the
+  // vault + digest), so this prevents stray `.claude/projects/*/memory` leakage. Opt
+  // back in with NOMOS_AUTO_MEMORY=1.
+  if (process.env.NOMOS_AUTO_MEMORY !== "1") {
+    env.CLAUDE_CODE_DISABLE_AUTO_MEMORY = "1";
+  }
+  // A.4 — Tool search: collapse 13+ MCP servers' tool schemas out of the per-turn
+  // context (defaults to "auto"). It self-disables on non-first-party / Vertex hosts,
+  // so when a custom base URL is set we do NOT force it on (the proxy would have to
+  // forward `tool_reference` blocks); honor only an explicit operator value there.
+  if (!params.anthropicBaseUrl && !env.ENABLE_TOOL_SEARCH) {
+    env.ENABLE_TOOL_SEARCH = "auto";
+  }
+
   // Subscription mode: remove API key so the SDK subprocess uses the
   // Claude subscription (Max/Pro) OAuth credentials from ~/.claude/.credentials.json.
   // This avoids API rate limits and uses the subscription's higher limits instead.
@@ -215,8 +236,16 @@ export function runSession(params: RunSessionParams): Query {
     prompt: params.prompt,
     options: {
       model: params.model,
+      // A.2 — fallback model(s). The SDK option is a SINGLE comma-separated string
+      // (tried in order, primary re-tried each turn), not an array.
+      ...(params.fallbackModels?.length ? { fallbackModel: params.fallbackModels.join(",") } : {}),
       permissionMode: params.permissionMode ?? "acceptEdits",
       systemPrompt,
+      // A.3 — hermetic runtime: do not load filesystem `.claude/` settings (agents,
+      // hooks, skills, `.mcp.json`, memory). Nomos is DB-backed and self-reimplements
+      // its config, so cwd `.claude/` must not leak in. Re-opt into project settings
+      // only via NOMOS_SETTING_SOURCES=project.
+      settingSources: process.env.NOMOS_SETTING_SOURCES === "project" ? ["project"] : [],
       mcpServers: params.mcpServers,
       allowedTools: params.allowedTools,
       disallowedTools: params.disallowedTools,
@@ -239,136 +268,4 @@ export function runSession(params: RunSessionParams): Query {
       ...(params.effort ? { effort: params.effort } : {}),
     },
   });
-}
-
-/**
- * V2 SDK Session interface with typed methods.
- */
-export interface V2Session {
-  /** Send a prompt and get streaming response */
-  send(prompt: string): AsyncIterable<SDKMessage>;
-  /** Stream messages from the session */
-  stream(): AsyncIterable<SDKMessage>;
-  /** Close the session */
-  close(): Promise<void>;
-}
-
-/**
- * Check if V2 SDK session API is available.
- * Returns false if the SDK doesn't export all required V2 functions.
- */
-export function isV2Available(): boolean {
-  try {
-    // Dynamic check — V2 API may not exist in installed SDK version
-    const sdk = require("@anthropic-ai/claude-agent-sdk");
-    return (
-      typeof sdk.unstable_v2_createSession === "function" &&
-      typeof sdk.unstable_v2_resumeSession === "function" &&
-      typeof sdk.unstable_v2_prompt === "function"
-    );
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Create a V2 SDK session (if available).
- * Returns null if V2 is not available.
- *
- * Note: The following V1 options are not yet supported in V2:
- * - maxBudgetUsd
- * - enableFileCheckpointing
- * - env
- */
-export async function createV2Session(params: RunSessionParams): Promise<V2Session | null> {
-  if (!isV2Available()) return null;
-  // The experimental V2 prompt path is string-only; streaming-input sessions use
-  // the standard query() with an AsyncIterable prompt instead.
-  if (typeof params.prompt !== "string") return null;
-
-  try {
-    const sdk = await import("@anthropic-ai/claude-agent-sdk");
-    const createSession = (sdk as Record<string, unknown>).unstable_v2_createSession as (
-      opts: Record<string, unknown>,
-    ) => V2Session;
-    const resumeSession = (sdk as Record<string, unknown>).unstable_v2_resumeSession as (
-      sessionId: string,
-    ) => V2Session;
-
-    if (typeof createSession !== "function" || typeof resumeSession !== "function") {
-      return null;
-    }
-
-    // Handle resume case
-    if (params.resume) {
-      return resumeSession(params.resume);
-    }
-
-    // Create new session
-    return createSession({
-      model: params.model,
-      permissionMode: params.permissionMode ?? "acceptEdits",
-      systemPrompt: params.systemPromptAppend
-        ? {
-            type: "preset",
-            preset: "claude_code",
-            append: params.systemPromptAppend,
-          }
-        : { type: "preset", preset: "claude_code" },
-      mcpServers: params.mcpServers,
-      thinking: params.thinking ?? { type: "adaptive" },
-      maxTurns: params.maxTurns ?? 50,
-      sandbox: params.sandbox,
-      betas: params.betas,
-    });
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Run a one-shot V2 prompt without creating a session.
- * Returns null if V2 is not available.
- *
- * Note: The following V1 options are not yet supported in V2:
- * - maxBudgetUsd
- * - enableFileCheckpointing
- * - env
- */
-export async function runV2Prompt(
-  params: RunSessionParams,
-): Promise<AsyncIterable<SDKMessage> | null> {
-  if (!isV2Available()) return null;
-  // The experimental V2 prompt path is string-only; streaming-input sessions use
-  // the standard query() with an AsyncIterable prompt instead.
-  if (typeof params.prompt !== "string") return null;
-
-  try {
-    const sdk = await import("@anthropic-ai/claude-agent-sdk");
-    const prompt = (sdk as Record<string, unknown>).unstable_v2_prompt as (
-      promptText: string,
-      opts: Record<string, unknown>,
-    ) => AsyncIterable<SDKMessage>;
-
-    if (typeof prompt !== "function") return null;
-
-    return prompt(params.prompt, {
-      model: params.model,
-      permissionMode: params.permissionMode ?? "acceptEdits",
-      systemPrompt: params.systemPromptAppend
-        ? {
-            type: "preset",
-            preset: "claude_code",
-            append: params.systemPromptAppend,
-          }
-        : { type: "preset", preset: "claude_code" },
-      mcpServers: params.mcpServers,
-      thinking: params.thinking ?? { type: "adaptive" },
-      maxTurns: params.maxTurns ?? 50,
-      sandbox: params.sandbox,
-      betas: params.betas,
-    });
-  } catch {
-    return null;
-  }
 }

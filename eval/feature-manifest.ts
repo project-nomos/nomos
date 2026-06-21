@@ -540,6 +540,26 @@ export const FEATURES: FeatureSpec[] = [
     ],
   },
   {
+    id: "sdk-runtime-hardening",
+    summary:
+      "Phase A config wires on the central runSession options/env: A.2 fallbackModel (singular comma-joined string + refusal-fallback eviction via AssistantText), A.3 settingSources:[] + CLAUDE_CODE_DISABLE_AUTO_MEMORY (hermetic runtime, no stray .claude/ leakage), A.4 ENABLE_TOOL_SEARCH=auto (off on custom base URL). Applies to BOTH the one-shot and Layer-A live paths since both flow through runSession.",
+    trigger: { kind: "turn" },
+    entry: ["runSession", "AssistantText"],
+    effects: [
+      {
+        claim:
+          "refusal-fallback retracted/superseded message uuids are evicted from the final turn text (behavioral; unit-tested in assistant-text.test.ts)",
+        notExercised: true,
+      },
+    ],
+    invariants: [
+      "settingSources:[] unless NOMOS_SETTING_SOURCES=project (no filesystem .claude/ config loads)",
+      "CLAUDE_CODE_DISABLE_AUTO_MEMORY=1 unless NOMOS_AUTO_MEMORY=1 (auto-memory loads even with settingSources:[])",
+      "fallbackModel is a single comma-joined string, never an array",
+      "ENABLE_TOOL_SEARCH defaults to auto only when no custom anthropicBaseUrl is set",
+    ],
+  },
+  {
     id: "wiki-disk-reconcile",
     summary: "Reconcile the on-disk wiki cache with the DB at boot (power-user only).",
     trigger: { kind: "boot" },

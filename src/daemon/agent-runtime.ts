@@ -14,6 +14,7 @@ import {
   type SdkPluginConfig,
 } from "../sdk/session.ts";
 import { LiveSessionManager, type LiveTurnState } from "./live-session.ts";
+import { AssistantText } from "./assistant-text.ts";
 import { buildSdkHooks } from "../hooks/sdk-adapter.ts";
 import { loadInstalledPlugins, toSdkPluginConfigs } from "../plugins/loader.ts";
 import { ensureDefaultPlugins } from "../plugins/installer.ts";
@@ -1355,7 +1356,7 @@ export class AgentRuntime {
       const st = await this.liveSessions.runTurn(sessionKey, runParams, emit);
       if (elicitationOnStream && mgr && source) mgr.unregisterEmitter(source);
       return {
-        text: st.fullText,
+        text: st.text.toString(),
         sessionId: st.sessionId,
         costUsd: st.costUsd,
         inputTokens: st.inputTokens,
@@ -1365,7 +1366,7 @@ export class AgentRuntime {
 
     const sdkQuery = runSession(runParams);
 
-    let fullText = "";
+    const acc = new AssistantText();
     let sessionId: string | undefined;
     let costUsd = 0;
     let inputTokens = 0;
@@ -1375,10 +1376,13 @@ export class AgentRuntime {
       // Forward all SDK events to the emitter
       switch (msg.type) {
         case "assistant": {
+          // A.2 — a refusal-fallback replacement carries `supersedes`; evict the
+          // refused partial on arrival (idempotent with the end-of-turn notice).
+          acc.evict((msg as { supersedes?: string[] }).supersedes);
+          const uuid = (msg as { uuid?: string }).uuid ?? "";
           for (const block of msg.message.content) {
             if (block.type === "text" && block.text) {
-              if (fullText && !fullText.endsWith("\n")) fullText += "\n";
-              fullText += block.text;
+              acc.add(uuid, block.text);
             } else if (block.type === "tool_use" || block.type === "server_tool_use") {
               // The model called a tool. Surface it as a tool_use_summary event so
               // clients (CLI, mobile) can render a tool-use card. The SDK never sends
@@ -1426,8 +1430,8 @@ export class AgentRuntime {
           // accumulated from the `assistant` block.text events, so adding it
           // again would double the response. Use it only as a fallback when
           // we somehow missed every assistant event (rare; e.g. compaction).
-          if ("result" in msg && !fullText && typeof msg.result === "string") {
-            fullText = msg.result;
+          if ("result" in msg && acc.isEmpty && typeof msg.result === "string") {
+            acc.setResult(msg.result);
           }
           emit({
             type: "result",
@@ -1451,6 +1455,11 @@ export class AgentRuntime {
           if (sysMsg.session_id && !sessionId) {
             sessionId = sysMsg.session_id;
           }
+          // A.2 — end-of-turn refusal-fallback notice: evict the refused partial
+          // (idempotent backstop to the per-message `supersedes` above).
+          if (sysMsg.subtype === "model_refusal_fallback") {
+            acc.evict((msg as { retracted_message_uuids?: string[] }).retracted_message_uuids);
+          }
           emit({
             type: "system",
             subtype: sysMsg.subtype,
@@ -1467,7 +1476,7 @@ export class AgentRuntime {
 
     if (elicitationOnStream && mgr && source) mgr.unregisterEmitter(source);
 
-    return { text: fullText, sessionId, costUsd, inputTokens, outputTokens };
+    return { text: acc.toString(), sessionId, costUsd, inputTokens, outputTokens };
   }
 
   /**
@@ -1483,10 +1492,11 @@ export class AgentRuntime {
   ): boolean {
     switch (msg.type) {
       case "assistant": {
+        state.text.evict((msg as { supersedes?: string[] }).supersedes);
+        const uuid = (msg as { uuid?: string }).uuid ?? "";
         for (const block of msg.message.content) {
           if (block.type === "text" && block.text) {
-            if (state.fullText && !state.fullText.endsWith("\n")) state.fullText += "\n";
-            state.fullText += block.text;
+            state.text.add(uuid, block.text);
           } else if (block.type === "tool_use" || block.type === "server_tool_use") {
             const toolName = (block as { name?: string }).name ?? "unknown";
             const summary = summarizeToolInput(toolName, (block as { input?: unknown }).input);
@@ -1518,8 +1528,8 @@ export class AgentRuntime {
         state.costUsd = msg.total_cost_usd ?? 0;
         state.inputTokens = msg.usage?.input_tokens ?? 0;
         state.outputTokens = msg.usage?.output_tokens ?? 0;
-        if ("result" in msg && !state.fullText && typeof msg.result === "string") {
-          state.fullText = msg.result;
+        if ("result" in msg && state.text.isEmpty && typeof msg.result === "string") {
+          state.text.setResult(msg.result);
         }
         emit({
           type: "result",
@@ -1540,6 +1550,9 @@ export class AgentRuntime {
           compact_metadata?: { trigger: string; pre_tokens: number };
         };
         if (sysMsg.session_id && !state.sessionId) state.sessionId = sysMsg.session_id;
+        if (sysMsg.subtype === "model_refusal_fallback") {
+          state.text.evict((msg as { retracted_message_uuids?: string[] }).retracted_message_uuids);
+        }
         emit({
           type: "system",
           subtype: sysMsg.subtype,

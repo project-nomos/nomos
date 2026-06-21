@@ -36,11 +36,6 @@ The returned value is the label string of whichever option the user picked. If t
 
 export interface AskUserToolOptions {
   /**
-   * Format hint for option preview content. Mirrors the SDK's
-   * `ToolConfig.askUserQuestion.previewFormat`.
-   */
-  previewFormat?: "markdown" | "html";
-  /**
    * Host elicitation callback. When provided, `ask_user` routes the question
    * through this (which calls the ElicitationManager directly) INSTEAD of the
    * SDK's `extra.sendRequest`. The SDK does not forward `elicitation/create`

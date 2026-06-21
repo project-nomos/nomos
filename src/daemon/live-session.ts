@@ -26,12 +26,14 @@ import {
   type SDKUserMessage,
 } from "../sdk/session.ts";
 import type { AgentEvent } from "./types.ts";
+import { AssistantText } from "./assistant-text.ts";
 
 const log = createLogger("live-session");
 
 /** Accumulated result of one turn within a live session. */
 export interface LiveTurnState {
-  fullText: string;
+  /** Per-UUID assistant-text accumulator (supports refusal-fallback eviction). */
+  text: AssistantText;
   sessionId?: string;
   costUsd: number;
   inputTokens: number;
@@ -39,7 +41,13 @@ export interface LiveTurnState {
 }
 
 export function newTurnState(): LiveTurnState {
-  return { fullText: "", sessionId: undefined, costUsd: 0, inputTokens: 0, outputTokens: 0 };
+  return {
+    text: new AssistantText(),
+    sessionId: undefined,
+    costUsd: 0,
+    inputTokens: 0,
+    outputTokens: 0,
+  };
 }
 
 /** Handle one SDK message: mutate `state`, `emit` client events, return true on turn-over (`result`). */
