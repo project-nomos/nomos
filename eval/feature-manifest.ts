@@ -1357,4 +1357,44 @@ export const FEATURES: FeatureSpec[] = [
       },
     ],
   },
+  {
+    id: "hosted-google-oauth",
+    summary:
+      "Hosted Google connect: the central server's OAuth callback deposits the access+refresh token over mTLS to the customer instance, which stores it as a CANONICAL google:{userId}:{email} integrations row (config.account_email + token secrets) -- the exact shape the Google MCP read path looks up. The daemon then registers the official Gmail/Calendar/Drive MCP for connected accounts and refreshes the access token from the stored refresh token (no recurring re-auth). With nothing connected, the agent is told to reconnect in Settings rather than browser-driving Google. A migration drops any malformed pre-fix google:{userId} rows (no :email suffix) the read path can't see.",
+    trigger: { kind: "turn", gate: "isHosted + a connected Google account (official backend)" },
+    entry: [
+      "depositOAuthCredential",
+      "storeGoogleAccount",
+      "getValidAccessToken",
+      "buildGoogleMcpServers",
+      "buildGoogleIntegrationPrompt",
+    ],
+    effects: [
+      {
+        claim:
+          "a connected account is stored as the canonical google:{userId}:{email} row (the MCP read-path prefix) with config.account_email set",
+        sql: {
+          query:
+            "SELECT count(*) FROM integrations WHERE name LIKE 'google:%:%' AND config->>'account_email' IS NOT NULL",
+          expect: "nonzero",
+        },
+        noDoubleEncode: { table: "integrations", column: "config", where: "name LIKE 'google:%'" },
+      },
+      {
+        claim:
+          "no malformed google:{userId} rows (missing the :email suffix) survive -- the dedup migration removes them so the read path never misses a connected account",
+        sql: {
+          query:
+            "SELECT count(*) FROM integrations WHERE name LIKE 'google:%' AND name NOT LIKE 'google:%:%'",
+          expect: "zero",
+        },
+      },
+    ],
+    invariants: [
+      "hosted-only: the cli backend (power-user) registers nothing here and reaches Google via the gws CLI",
+      "user-scoped: listGoogleAccounts filters the google:{userId}: prefix, so a tenant never sees another's account",
+      "server and daemon must use the SAME OAuth client -- refresh tokens are client-bound",
+      "refresh token is persisted and reused (getValidAccessToken refreshes + writes the fresh token back) -- no recurring re-auth",
+    ],
+  },
 ];
