@@ -4,7 +4,12 @@ import type { NomosConfig } from "../../config/env.ts";
 import type { AgentIdentity } from "../../config/profile.ts";
 import { appendTranscriptMessage } from "../../db/transcripts.ts";
 import { updateSessionUsage, updateSessionSdkId } from "../../db/sessions.ts";
-import { runSession, type McpServerConfig, type SDKMessage } from "../../sdk/session.ts";
+import {
+  runSession,
+  type McpServerConfig,
+  type SDKMessage,
+  type RunSessionParams,
+} from "../../sdk/session.ts";
 import { buildSdkHooks } from "../../hooks/sdk-adapter.ts";
 import { stripTeamPrefix, buildNativeAgents } from "../../sdk/agents.ts";
 import { dispatchSlashCommand, type CommandContext, type CommandState } from "../slash-commands.ts";
@@ -21,6 +26,7 @@ import { CostLine } from "./cost-line.tsx";
 import { SystemMessage } from "./system-message.tsx";
 import { StatusLine } from "./status-line.tsx";
 import { CommandInput } from "./command-input.tsx";
+import { AskPrompt, type AskQuestion } from "./ask-prompt.tsx";
 import { StalledSpinner } from "./stalled-spinner.tsx";
 import { CopyModeIndicator } from "./copy-mode-indicator.tsx";
 import { ScrollableView } from "./scrollable-view.tsx";
@@ -100,6 +106,11 @@ export function App({
   // Whether input is active
   const [isInputActive, setIsInputActive] = useState(true);
   const [inputValue, setInputValue] = useState("");
+  // Native AskUserQuestion: a pending interactive Ask card + its answer resolver.
+  const [pendingAsk, setPendingAsk] = useState<{
+    questions: AskQuestion[];
+    resolve: (answers: Record<string, string>) => void;
+  } | null>(null);
   // Live thinking/reasoning text (streamed then finalized)
   const [thinkingText, setThinkingText] = useState("");
   // Last completed thinking content (kept outside Static so it can be toggled)
@@ -451,6 +462,35 @@ export function App({
           if (stderrChunks.length > 50) stderrChunks.shift();
         };
 
+        // Native AskUserQuestion → the interactive Ink Ask card. The handler suspends
+        // the turn, renders the card, and resolves with the user's picks.
+        const canUseTool: NonNullable<RunSessionParams["canUseTool"]> = async (toolName, input) => {
+          if (toolName !== "AskUserQuestion") return { behavior: "allow", updatedInput: input };
+          const raw =
+            (input.questions as Array<{
+              question: string;
+              header?: string;
+              multiSelect?: boolean;
+              options?: { label: string; description?: string }[];
+            }>) ?? [];
+          const valid: AskQuestion[] = raw
+            .filter((q) => (q.options ?? []).some((o) => o.label))
+            .map((q) => ({
+              question: q.question,
+              header: q.header,
+              multiSelect: q.multiSelect,
+              options: (q.options ?? []).filter((o) => o.label),
+            }));
+          if (!valid.length) return { behavior: "allow", updatedInput: input };
+          const answers = await new Promise<Record<string, string>>((resolve) => {
+            setIsInputActive(false);
+            setPendingAsk({ questions: valid, resolve });
+          });
+          setPendingAsk(null);
+          setIsInputActive(true);
+          return { behavior: "allow", updatedInput: { ...input, answers } };
+        };
+
         let sdkQuery = runSession({
           prompt,
           model: stateRef.current.model,
@@ -460,9 +500,7 @@ export function App({
           resume: sdkSessionIdRef.current ?? undefined,
           thinking,
           allowedTools,
-          // CLI direct mode has no Ask-card surface (no canUseTool wiring), so block
-          // the native AskUserQuestion tool — the model asks in prose in this REPL.
-          disallowedTools: ["AskUserQuestion"],
+          canUseTool,
           ...(config.teamMode ? { agents: buildNativeAgents() } : {}),
           // PreToolUse blocking from hooks.json (matters most in CLI-direct mode,
           // which runs tools on the user's machine). No-op when no hooks registered.
@@ -985,8 +1023,13 @@ export function App({
             </Box>
           )}
 
+          {/* Native AskUserQuestion: the interactive Ask card (preempts the input). */}
+          {pendingAsk && (
+            <AskPrompt questions={pendingAsk.questions} onSubmit={pendingAsk.resolve} />
+          )}
+
           {/* Input area */}
-          {isInputActive && (
+          {isInputActive && !pendingAsk && (
             <CommandInput
               value={inputValue}
               onChange={setInputValue}
