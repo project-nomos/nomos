@@ -11,10 +11,18 @@
  * supportive companionship, never therapy or crisis care — see docs/stress-anxiety-support.md.
  */
 
+import { z } from "zod";
 import { loadEnvConfig } from "../config/env.ts";
 import { createLogger } from "../lib/logger.ts";
 import { runForkedAgent } from "../sdk/forked-agent.ts";
 import { vaultRead, vaultWrite } from "./vault.ts";
+
+/** Phase C — schema for SDK-validated structured output (parseMoodCapture validates further). */
+const MoodCaptureSchema = z.object({
+  strain: z.boolean(),
+  emotion: z.string().optional(),
+  cause: z.string().optional(),
+});
 
 const log = createLogger("mood-log");
 
@@ -174,8 +182,13 @@ export async function captureMoodFromTurn(
       model: config.extractionModel ?? "claude-haiku-4-5",
       allowedTools: [],
       prompt: `${CAPTURE_PROMPT}\n\nEMOTION SIGNAL: ${tomSummary}\n\nUSER MESSAGE:\n${userMessage.slice(0, 1200)}`,
+      outputSchema: MoodCaptureSchema,
     });
-    const parsed = parseMoodCapture(result.text);
+    // Prefer the SDK-validated structured output; parseMoodCapture validates the
+    // strain/emotion/cause shape either way (it accepts the stringified object).
+    const parsed = parseMoodCapture(
+      result.structuredOutput !== undefined ? JSON.stringify(result.structuredOutput) : result.text,
+    );
     if (parsed) await recordMoodEpisode(userId, parsed.emotion, parsed.cause);
   } catch (err) {
     log.debug({ err: err instanceof Error ? err.message : String(err) }, "mood capture failed");

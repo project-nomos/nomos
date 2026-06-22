@@ -219,6 +219,24 @@ function emailFromIdToken(idToken: string | undefined): string | undefined {
   }
 }
 
+/**
+ * Resolve a Google account's email from an access token via the OpenID userinfo
+ * endpoint. Used by the OAuth deposit path (mTLS handoff carries the token but no
+ * id_token / email), so the account can be stored under `google:{userId}:{email}`.
+ */
+export async function fetchGoogleAccountEmail(accessToken: string): Promise<string | undefined> {
+  try {
+    const res = await fetch("https://openidconnect.googleapis.com/v1/userinfo", {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (!res.ok) return undefined;
+    const data = (await res.json()) as { email?: string };
+    return data.email?.toLowerCase();
+  } catch {
+    return undefined;
+  }
+}
+
 /** Exchange an authorization code for tokens + the account email. */
 export async function exchangeCode(opts: {
   code: string;

@@ -14,11 +14,20 @@ import {
   type SdkPluginConfig,
 } from "../sdk/session.ts";
 import { LiveSessionManager, type LiveTurnState } from "./live-session.ts";
+import { AssistantText } from "./assistant-text.ts";
+import type { ElicitationManager, ElicitationSource } from "./elicitation-manager.ts";
+import type { Options } from "@anthropic-ai/claude-agent-sdk";
 import { buildSdkHooks } from "../hooks/sdk-adapter.ts";
 import { loadInstalledPlugins, toSdkPluginConfigs } from "../plugins/loader.ts";
 import { ensureDefaultPlugins } from "../plugins/installer.ts";
 import { createMemoryMcpServer } from "../sdk/tools.ts";
-import { TeamRuntime, stripTeamPrefix } from "./team-runtime.ts";
+import { getCostTracker } from "../sdk/cost-tracker.ts";
+import {
+  buildNativeAgents,
+  nativeAgentsEnabled,
+  useNativeTeam,
+  stripTeamPrefix,
+} from "../sdk/agents.ts";
 import {
   isDiscordConfigured,
   createDiscordMcpServer,
@@ -35,7 +44,6 @@ import { buildStudioMcpServer } from "../sdk/studio-mcp.ts";
 import { buildVaultMcpServer } from "../sdk/vault-mcp.ts";
 import { buildThinkMcpServer } from "../sdk/think-mcp.ts";
 import { buildLoopMcpServer } from "../sdk/loop-mcp.ts";
-import { buildTeamMcpServer } from "../sdk/team-mcp.ts";
 import { buildMemoryDigest } from "../memory/digest.ts";
 import { captureMoodFromTurn } from "../memory/mood-log.ts";
 import { getRelevantArticles } from "../memory/wiki-reader.ts";
@@ -50,37 +58,57 @@ import { resolveMemoryUserId } from "../auth/tenant-context.ts";
 function getDisallowedTools(): string[] {
   // Block the SDK's generic orchestration/task built-ins so the agent routes to the
   // Nomos-native equivalents (which render proper cards + own durable state):
-  //  - `Workflow` spawns sub-agents outside the team runtime + leaks a raw script →
-  //    use `delegate_to_team`.
-  //  - `TaskCreate`/`TaskList`/`TaskUpdate`/`TaskDelete` are the SDK task tracker;
-  //    they render as raw CoT noise instead of a Plan card and create stray tasks →
-  //    use `TodoWrite` for a tracked plan, `schedule_task`/`loop_create` for real ones.
+  //  - `Workflow` spawns sub-agents outside our control + leaks a raw script →
+  //    the model delegates via the native `Agent` tool (team mode) instead.
+  //  - The SDK async task tracker (`Task`/`TaskCreate`/`TaskStop`/…) is NOT registered
+  //    in our sessions (CLAUDE_CODE_ENABLE_TASKS is off), so we don't deny it — denying
+  //    an unregistered tool only emits a "matches no known tool" warning. If the SDK's
+  //    default ever flips tasks on, re-add the registered names here.
   //  - `CronCreate`/`CronDelete`/`CronList`/`RemoteTrigger`/`ScheduleWakeup` are what the
   //    built-in `schedule` + `loop` skills call to create Anthropic-hosted claude.ai
   //    Routines (1-hour minimum, results land on the claude.ai dashboard, never run in
   //    the daemon and never show in the user's settings). A prompt warning alone didn't
   //    stop the agent from reaching for them, so block them outright → the agent must use
   //    the `schedule_task` / `loop_create` MCP tools, which run locally in the daemon.
-  //  - `AskUserQuestion` is the SDK's native ask tool; it bypasses Nomos's
-  //    elicitation (so no Ask card renders in the app) → use the `ask_user` MCP tool.
+  // NOTE: `AskUserQuestion` (the SDK's native ask tool) is NOT blocked — it's the agent's
+  // ONLY way to ask the user, routed through the ElicitationManager → the Ask card by the
+  // `canUseTool` handler in runAgent (Phase F; the hand-rolled `ask_user` MCP tool is gone).
   const blocked: string[] = [
     "Workflow",
-    "TaskCreate",
-    "TaskList",
-    "TaskUpdate",
-    "TaskDelete",
     "CronCreate",
     "CronDelete",
     "CronList",
     "RemoteTrigger",
     "ScheduleWakeup",
-    "AskUserQuestion",
+    // D.1 — scoped Bash deny rules for the unambiguous CRITICAL patterns (mirrors
+    // the critical entries in security/tool-approval.ts). These are declarative
+    // defense-in-depth: honored even under bypassPermissions, and they survive even
+    // if the block_critical PreToolUse hook is ever misconfigured. The AST hook
+    // remains the primary, more-precise gate; these never block legitimate work.
+    ...CRITICAL_BASH_DENY,
   ];
   if (!FEATURES.bashTool()) {
     blocked.push("Bash", "BashOutput", "KillBash");
   }
   return blocked;
 }
+
+/**
+ * Scoped Bash deny specifiers (Claude Code `Bash(prefix:*)` form) for the
+ * irrecoverable, unambiguous operations. Kept conservative on purpose — only
+ * commands with no legitimate agent use — so the rules never false-positive.
+ */
+const CRITICAL_BASH_DENY: string[] = [
+  "Bash(rm -rf:*)",
+  "Bash(rm -fr:*)",
+  "Bash(mkfs:*)",
+  "Bash(mkfs.*:*)",
+  "Bash(dd if=:*)",
+  "Bash(shutdown:*)",
+  "Bash(reboot:*)",
+  "Bash(git push --force:*)",
+  "Bash(git push -f:*)",
+];
 
 /** Human "N minutes/hours/days/months" since `date`. "" when under ~10 min (too recent to anchor). */
 function formatElapsedSince(date: Date): string {
@@ -93,6 +121,27 @@ function formatElapsedSince(date: Date): string {
   if (days < 30) return `${days} day${days === 1 ? "" : "s"}`;
   const months = Math.floor(days / 30);
   return `${months} month${months === 1 ? "" : "s"}`;
+}
+
+/**
+ * Tools that must NOT surface as a generic tool-use card. Either they have a
+ * dedicated card (AskUserQuestion → the Ask card) or they're internal plumbing
+ * the agent uses to set itself up, not an action taken for the user: ToolSearch
+ * loads tool schemas on demand, List/ReadMcpResource discover MCP resources, and
+ * Skill loads a playbook into context. Showing these as "tools" is just noise
+ * (and a Skill rendered with a wrench + DONE reads as if work was done).
+ */
+const SILENT_TOOLS = new Set<string>([
+  "AskUserQuestion",
+  "ToolSearch",
+  "ListMcpResourcesTool",
+  "ReadMcpResourceTool",
+  "Skill",
+]);
+
+/** Whether a tool call should be hidden from the tool-use activity stream. */
+export function isSilentTool(name: string): boolean {
+  return SILENT_TOOLS.has(name);
 }
 
 /** A short, human one-liner describing a tool call, derived from its input. */
@@ -182,6 +231,134 @@ import { createLogger } from "../lib/logger.ts";
 
 const log = createLogger("agent-runtime");
 
+/**
+ * F — build the `canUseTool` permission callback. The SDK invokes it for the
+ * native `AskUserQuestion` tool (which fires even under bypassPermissions, proven
+ * by eval/canusetool-bypass-harness.ts). We route each question through the SAME
+ * elicitation pipeline as the MCP `ask_user` tool, so model-driven asks render on
+ * the Ask card (one card with 1-4 questions) across Slack / mobile / iOS.
+ * multiSelect answers come back as a label[] array. All other tools pass through.
+ */
+export function buildAskCanUseTool(
+  mgr: ElicitationManager,
+  source: ElicitationSource,
+): NonNullable<Options["canUseTool"]> {
+  return async (toolName, input, opts) => {
+    if (toolName !== "AskUserQuestion") return { behavior: "allow", updatedInput: input };
+    const questions =
+      (input.questions as Array<{
+        question: string;
+        header?: string;
+        multiSelect?: boolean;
+        options?: Array<{ label: string; description?: string }>;
+      }>) ?? [];
+    const valid = questions.filter((q) => (q.options ?? []).some((o) => o.label));
+    if (valid.length === 0) return { behavior: "allow", updatedInput: input };
+
+    // ONE card for all questions (F multi-question). Each question is answered via
+    // the existing per-question AnswerQuestion RPC; we resolve when all are in.
+    const picked = await mgr.askQuestionSet(
+      valid.map((q) => ({
+        prompt: q.question,
+        header: q.header,
+        multiSelect: q.multiSelect,
+        options: (q.options ?? []).filter((o) => o.label),
+      })),
+      source,
+      opts.signal,
+    );
+
+    // multiSelect questions MUST return an array of labels (label[]); a single
+    // joined string reads as "no matching option" and the model re-asks forever.
+    const answers: Record<string, string | string[]> = {};
+    valid.forEach((q, i) => {
+      const a = picked[i];
+      if (!a) return;
+      answers[q.question] = q.multiSelect
+        ? a
+            .split(/\s*,\s*/)
+            .map((s) => s.trim())
+            .filter(Boolean)
+        : a;
+    });
+    return { behavior: "allow", updatedInput: { ...input, answers } };
+  };
+}
+
+/** Shown when a turn stops because it hit NOMOS_TURN_BUDGET_USD (B.1). */
+const BUDGET_CAP_NOTICE =
+  "I reached the per-turn spending cap before finishing this. Reply to have me continue where I left off.";
+
+/**
+ * E — OS-level Bash sandbox for the power-user box. Opt-in via NOMOS_SANDBOX=true:
+ * the personal-machine threat model (untrusted Slack/email/iMessage input +
+ * bypassPermissions + no container) is the strongest case, but enabling a sandbox
+ * can break legitimate file/network work, so it is off by default and the operator
+ * turns it on deliberately. Hosted already has container isolation → skipped there.
+ * Scoped permissively (a domain allowlist that covers normal agent work);
+ * failIfUnavailable:false degrades gracefully on a host without the OS primitives;
+ * allowAppleEvents keeps `open`/`osascript`/browser-auth working on macOS.
+ */
+const DEFAULT_SANDBOX_DOMAINS = [
+  "api.anthropic.com",
+  "*.anthropic.com",
+  "*.googleapis.com",
+  "*.google.com",
+  "github.com",
+  "*.github.com",
+  "registry.npmjs.org",
+];
+function buildSandboxConfig(): RunSessionParams["sandbox"] | undefined {
+  if (process.env.NOMOS_SANDBOX !== "true" || isHosted()) return undefined;
+  const domains = process.env.NOMOS_SANDBOX_DOMAINS
+    ? process.env.NOMOS_SANDBOX_DOMAINS.split(",")
+        .map((d) => d.trim())
+        .filter(Boolean)
+    : DEFAULT_SANDBOX_DOMAINS;
+  return {
+    enabled: true,
+    failIfUnavailable: false,
+    autoAllowBashIfSandboxed: true,
+    allowAppleEvents: true,
+    network: { allowedDomains: domains },
+  };
+}
+
+/**
+ * B.3 — feed an SDK result message's per-model usage (incl. cache read/creation
+ * + web-search) into the global CostTracker. The bare `total_cost_usd → DB` write
+ * loses the per-model split and the prompt-cache hit rate; `result.modelUsage`
+ * (required on the result message) carries both. Safe no-op when absent. Called
+ * from BOTH the one-shot drain and the Layer-A live drain.
+ */
+function accrueModelUsage(msg: unknown): void {
+  const mu = (
+    msg as {
+      modelUsage?: Record<
+        string,
+        {
+          inputTokens?: number;
+          outputTokens?: number;
+          cacheReadInputTokens?: number;
+          cacheCreationInputTokens?: number;
+          webSearchRequests?: number;
+        }
+      >;
+    }
+  ).modelUsage;
+  if (!mu) return;
+  const tracker = getCostTracker();
+  for (const [model, u] of Object.entries(mu)) {
+    tracker.addTurn(model, {
+      input_tokens: u.inputTokens ?? 0,
+      output_tokens: u.outputTokens ?? 0,
+      cache_read_input_tokens: u.cacheReadInputTokens ?? 0,
+      cache_creation_input_tokens: u.cacheCreationInputTokens ?? 0,
+      server_tool_use: { web_search_requests: u.webSearchRequests ?? 0 },
+    });
+  }
+}
+
 export class AgentRuntime {
   // Cached at startup
   private plugins: SdkPluginConfig[] = [];
@@ -195,13 +372,8 @@ export class AgentRuntime {
 
   // SDK session ID cache: sessionKey → SDK session ID
   private sdkSessionIds = new Map<string, string>();
-
-  // Per-session team context: carries the team result into subsequent turns
-  // so the regular agent has context of what the team did.
-  private teamContext = new Map<string, string>();
-
-  // Multi-agent team runtime (when teamMode is enabled)
-  private teamRuntime?: TeamRuntime;
+  /** D.2 — per-session AbortController for the in-flight one-shot turn (cancellation). */
+  private turnAborts = new Map<string, AbortController>();
 
   // Per-session Theory of Mind trackers (transient, session-scoped)
   private tomTrackers = new Map<string, TheoryOfMindTracker>();
@@ -513,15 +685,10 @@ export class AgentRuntime {
       exemplars,
     });
 
-    // Initialize team runtime if team mode is enabled
-    if (this.config.teamMode) {
-      this.teamRuntime = new TeamRuntime({
-        maxWorkers: this.config.maxTeamWorkers,
-        workerBudgetUsd: this.config.workerBudgetUsd,
-        coordinatorModel: this.config.model,
-        approvalPolicy: this.config.toolApprovalPolicy,
-      });
-    }
+    // Team mode uses the native SDK `agents` path exclusively (Phase G): both the
+    // `/team` prefix and natural-language delegation route to the model's `Agent`
+    // tool, whose subagents inherit this turn's permissions + hooks (structural
+    // safety). The hand-rolled TeamRuntime was deleted.
 
     // Initialize shadow observer for passive behavioral learning
     if (this.config.shadowMode) {
@@ -740,96 +907,12 @@ export class AgentRuntime {
       });
     }
 
-    // Check for team mode trigger (/team prefix)
-    const teamTask = this.teamRuntime ? stripTeamPrefix(message.content) : null;
-    log.info(`Team check: teamRuntime=${!!this.teamRuntime}, teamTask=${!!teamTask}`);
-    if (teamTask && this.teamRuntime) {
-      log.info(`Executing team task: ${teamTask.slice(0, 100)}`);
-
-      emit({
-        type: "system",
-        subtype: "status",
-        message: "Running multi-agent team...",
-      });
-
-      try {
-        const result = await this.teamRuntime.runTeam(
-          {
-            prompt: teamTask,
-            systemPromptAppend: this.systemPromptAppend,
-            mcpServers: this.mcpServers,
-            permissionMode: "bypassPermissions",
-            allowedTools: Object.keys(this.mcpServers).map((name) => `mcp__${name}`),
-            disallowedTools: getDisallowedTools(),
-            // Use smart-routed model (or default) — not the base config which may be haiku
-            model,
-            plugins: this.plugins,
-          },
-          (event) => {
-            emit({
-              type: "system",
-              subtype: "status",
-              message: event.message,
-            });
-          },
-        );
-
-        const content = result || "_(no response)_";
-        log.info(`Team result: ${content.length} chars`);
-
-        // Store team result so subsequent turns have context
-        const teamSummary =
-          content.length > 4000 ? content.slice(0, 4000) + "\n...(truncated)" : content;
-        this.teamContext.set(
-          sessionKey,
-          `## Previous Team Result\nThe user asked: ${teamTask.slice(0, 500)}\n\nThe multi-agent team produced this result:\n${teamSummary}`,
-        );
-
-        // Emit the team result as stream events so gRPC/WebSocket clients render it
-        emit({
-          type: "stream_event",
-          event: {
-            type: "stream_event",
-            event: {
-              type: "content_block_delta",
-              delta: { type: "text_delta", text: content },
-            },
-          } as unknown as SDKMessage,
-        });
-        emit({
-          type: "result",
-          result: content,
-          usage: { input_tokens: 0, output_tokens: 0 },
-          total_cost_usd: 0,
-        });
-
-        return {
-          inReplyTo: message.id,
-          platform: message.platform,
-          channelId: message.channelId,
-          threadId: message.threadId,
-          content,
-        };
-      } catch (err) {
-        const errMsg = err instanceof Error ? err.message : String(err);
-        emit({ type: "error", message: errMsg });
-
-        // Return error as content instead of re-throwing (prevents duplicate error events)
-        emit({
-          type: "result",
-          result: `Team error: ${errMsg}`,
-          usage: { input_tokens: 0, output_tokens: 0 },
-          total_cost_usd: 0,
-        });
-
-        return {
-          inReplyTo: message.id,
-          platform: message.platform,
-          channelId: message.channelId,
-          threadId: message.threadId,
-          content: `Team error: ${errMsg}`,
-        };
-      }
+    // Team mode trigger (/team prefix): strip the prefix so the agent sees the bare
+    // task; the model delegates via the native `Agent` tool inside the normal loop
+    // (native agents are enabled in runAgent), so ToM + memory + cost tracking apply.
+    const teamTask = this.config.teamMode ? stripTeamPrefix(message.content) : null;
+    if (teamTask) {
+      message.content = teamTask;
     }
 
     // Shadow mode: record turn for response cadence tracking
@@ -891,9 +974,18 @@ export class AgentRuntime {
         message.userId,
       );
 
-      // Cache the new SDK session ID
+      // Cache the new SDK session ID, and persist it so the conversation resumes
+      // across a daemon restart (B.2). The daemon already READS metadata.sdkSessionId
+      // on resume; this is the missing write-back. Fire-and-forget, off-the-record
+      // sessions excluded. Continuity-of-thread, not data loss (durable state = vault).
       if (result.sessionId) {
         this.sdkSessionIds.set(sessionKey, result.sessionId);
+        if (!isEphemeralSession(sessionKey)) {
+          const sdkId = result.sessionId;
+          import("../db/sessions.ts")
+            .then(({ updateSessionSdkId }) => updateSessionSdkId(sessionKey, sdkId))
+            .catch(() => {});
+        }
       }
 
       // Persist cost data to sessions table (fire-and-forget)
@@ -1092,27 +1184,15 @@ export class AgentRuntime {
     // channel sender id to the canonical local id (otherwise the vault fragments
     // per channel); in hosted mode this is the authenticated per-tenant user.
     const vaultUserId = resolveMemoryUserId(userId);
-    // Elicitation for the in-process `ask_user` tool. The SDK does NOT forward
-    // `elicitation/create` from in-process MCP servers (it answers -32601 Method
-    // not found), so hand the tool a direct callback into the ElicitationManager
-    // instead of relying on the SDK's `extra.sendRequest`.
+    // The agent asks the user via the native `AskUserQuestion` tool, routed through
+    // the ElicitationManager by the `canUseTool` handler below (see runParams).
     const mgr = this.elicitationManager;
-    const elicit =
-      mgr && source
-        ? (request: unknown, opts: { signal?: AbortSignal }) =>
-            mgr.handleElicitation(
-              request as Parameters<typeof mgr.handleElicitation>[0],
-              source,
-              opts.signal ?? new AbortController().signal,
-            )
-        : undefined;
     let mcpServers = {
       ...this.mcpServers,
       "nomos-vault": buildVaultMcpServer(vaultUserId),
       // Rebuild the memory tools per-turn so memory_search is scoped to this
       // owner (the cached one at init has no user). Overrides the cached entry.
       "nomos-memory": createMemoryMcpServer(vaultUserId, {
-        elicit,
         // Session context so `background_register` resumes THIS conversation when
         // its watched work (CI/deploy) settles. Absent for cron/internal runs.
         session:
@@ -1145,13 +1225,15 @@ export class AgentRuntime {
     if (isHosted() && userId) {
       try {
         const googleServers = await buildGoogleMcpServers(userId);
-        if (Object.keys(googleServers).length > 0) {
+        const hasGoogle = Object.keys(googleServers).length > 0;
+        if (hasGoogle) {
           mcpServers = { ...mcpServers, ...googleServers };
         }
-        // Tell the agent it actually HAS this access, otherwise it trusts the
-        // static integrations summary (which lists only power-user channels) and
-        // wrongly claims Gmail/Calendar/Drive aren't configured.
-        googlePrompt = await buildGoogleIntegrationPrompt(userId);
+        // State the truth either way: when connected, that it HAS access (so it
+        // stops claiming Google needs configuring); when NOT, that Google is
+        // disconnected (so it stops hunting for tools / browser-driving / faking a
+        // workaround and instead tells the user to reconnect in Settings).
+        googlePrompt = await buildGoogleIntegrationPrompt(userId, hasGoogle);
       } catch (err) {
         log.warn(
           { err: err instanceof Error ? err.message : err },
@@ -1160,33 +1242,9 @@ export class AgentRuntime {
       }
     }
 
-    // Team delegation as an in-loop tool: the agent spins up a parallel sub-agent
-    // team when the user asks in natural language ("research X from three angles",
-    // "spin up a team") — no `/team` prefix needed, in BOTH hosted and power-user
-    // modes (both converge here). The TeamTask carries only the BASE mcp set (which
-    // excludes `nomos-team`), so workers can never receive the delegate tool and
-    // recurse. Gated on teamMode; the `/team` prefix stays as a fast path.
-    if (this.config.teamMode && this.teamRuntime) {
-      const teamRuntime = this.teamRuntime;
-      const turnModel = model ?? this.config.model;
-      const teamServers: Record<string, ReturnType<typeof buildTeamMcpServer>> = {
-        "nomos-team": buildTeamMcpServer({
-          runTeam: (t, e) => teamRuntime.runTeam(t, e),
-          teamTaskBase: () => ({
-            systemPromptAppend: this.systemPromptAppend,
-            mcpServers: this.mcpServers,
-            permissionMode: "bypassPermissions",
-            allowedTools: Object.keys(this.mcpServers).map((n) => `mcp__${n}`),
-            disallowedTools: getDisallowedTools(),
-            model: turnModel,
-            plugins: this.plugins,
-          }),
-          isWorkerContext: false,
-          onProgress: (m) => emit({ type: "system", subtype: "status", message: m }),
-        }),
-      };
-      mcpServers = { ...mcpServers, ...teamServers };
-    }
+    // Team delegation is native (Phase G): when team mode is on, `Agent` is added to
+    // allowedTools below and the system prompt nudges the model to spawn parallel
+    // subagents via the Agent tool. No in-loop delegate_to_team MCP tool is needed.
 
     // Reasoning-first: always-inject what the agent already knows about the user,
     // so it stays continuous without having to call a recall tool first.
@@ -1233,24 +1291,21 @@ export class AgentRuntime {
 
     // Auto-approve all tools from our MCP servers
     const allowedTools = Object.keys(mcpServers).map((name) => `mcp__${name}`);
+    // G — native subagents: with team mode on (or NOMOS_NATIVE_AGENTS), the model
+    // delegates via the Agent tool. Subagents inherit the parent hooks
+    // (block_critical), so safety is structural. This is the ONLY team mechanism
+    // now — the hand-rolled TeamRuntime was deleted.
+    const useNativeAgents = nativeAgentsEnabled() || useNativeTeam(this.config.teamMode);
+    if (useNativeAgents) allowedTools.push("Agent");
 
-    // Inject team context from a previous /team turn (if any)
     let systemPromptAppend = this.systemPromptAppend;
-    // Tell the agent it can delegate to a parallel sub-agent team in-loop, just by
-    // the user asking — no `/team` prefix needed (the tool is registered above when
-    // teamMode is on, in both hosted and power-user modes).
-    if (this.config.teamMode && this.teamRuntime) {
+    // Native team delegation (Phase G): when team mode is on, nudge the model to
+    // spawn parallel subagents via the SDK `Agent` tool — they run with isolated
+    // context and inherit this turn's permissions. No `/team` prefix needed.
+    if (useNativeTeam(this.config.teamMode)) {
       systemPromptAppend =
         systemPromptAppend +
-        "\n\n## Working as a team\nWhen a request is genuinely parallelizable — research from several angles at once, compare multiple options, or the user explicitly asks for a team / parallel work — call `delegate_to_team` with a self-contained task (and optional `angles`). It runs independent sub-agents and hands you back one synthesized result to weave into your reply. Reserve it for multi-angle or heavy work; don't use it for simple single-step tasks. (Power users can also start a message with `/team` for the same thing.)";
-    }
-    if (sessionKey) {
-      const teamCtx = this.teamContext.get(sessionKey);
-      if (teamCtx) {
-        systemPromptAppend = systemPromptAppend + "\n\n" + teamCtx;
-        // Clear after one use -- it's now part of the conversation via the SDK session
-        this.teamContext.delete(sessionKey);
-      }
+        "\n\n## Working as a team\nWhen a request is genuinely parallelizable — research from several angles at once, audit multiple things, draft separate sections, compare options — delegate with the `Agent` tool: spawn a `team-worker` subagent per independent piece (they run in parallel, each with its own fresh context), then synthesize their results into one reply. Use the read-only `verifier` subagent to adversarially check important results before you trust them. Reserve delegation for multi-angle or heavy work; do the simple single-step tasks yourself. (Power users can also start a message with `/team`.)";
     }
 
     // Inject transient Theory of Mind state (per-message, not persisted)
@@ -1301,21 +1356,17 @@ export class AgentRuntime {
       }
     }
 
-    // Build the elicitation callback for this turn. The `ask_user` MCP
-    // tool calls `extra.sendRequest({method: "elicitation/create"})`; for external
-    // MCP servers the SDK forwards to `onElicitation` (in-process servers go through
-    // the `elicit` callback wired into nomos-memory above). We route to the channel
-    // the user is talking to us on and return their answer. `mgr` is declared above.
-    const onElicitation: import("../sdk/session.ts").RunSessionParams["onElicitation"] =
-      mgr && source
-        ? (request, opts) => mgr.handleElicitation(request, source, opts.signal)
-        : undefined;
-    // Mobile / local-terminal clients have no channel adapter, so render ask_user over
-    // THIS open chat stream via `emit` (the answer returns out-of-band via AnswerQuestion).
+    // Mobile / local-terminal clients have no channel adapter, so render the Ask card
+    // over THIS open chat stream via `emit` (the answer returns out-of-band via
+    // AnswerQuestion). Slack/other channels render via their adapter (Block Kit buttons).
     const elicitationOnStream = Boolean(
       mgr && source && (source.platform === "mobile" || source.platform === "terminal"),
     );
     if (elicitationOnStream && mgr && source) mgr.registerEmitter(source, emit);
+
+    // The agent asks via the native `AskUserQuestion` tool; this canUseTool handler
+    // routes its questions through the ElicitationManager → the Ask card (Phase F).
+    const canUseTool = mgr && source ? buildAskCanUseTool(mgr, source) : undefined;
 
     const runParams: RunSessionParams = {
       prompt,
@@ -1329,10 +1380,18 @@ export class AgentRuntime {
       disallowedTools: getDisallowedTools(),
       resume: resumeId,
       maxTurns: 50,
+      // B.1 — optional USD ceiling on the unattended main turn (NOMOS_TURN_BUDGET_USD).
+      // Unset = no cap (preserves today's behavior). The SDK ends the turn with a
+      // result whose subtype is `error_max_budget_usd` (surfaced gracefully below).
+      maxBudgetUsd: this.config.turnBudgetUsd,
+      sandbox: buildSandboxConfig(),
+      ...(useNativeAgents ? { agents: buildNativeAgents() } : {}),
+      ...(canUseTool
+        ? { canUseTool, toolConfig: { askUserQuestion: { previewFormat: "markdown" } } }
+        : {}),
       anthropicBaseUrl: this.config.anthropicBaseUrl,
       plugins: this.plugins,
       useSubscription: this.config.useSubscription,
-      onElicitation,
       // PreToolUse blocking from ~/.nomos/hooks.json (no-op when none registered)
       // PLUS the TOOL_APPROVAL_POLICY gate (block_critical by default). Honored
       // even in bypassPermissions mode -- the safety net for unattended runs.
@@ -1355,7 +1414,7 @@ export class AgentRuntime {
       const st = await this.liveSessions.runTurn(sessionKey, runParams, emit);
       if (elicitationOnStream && mgr && source) mgr.unregisterEmitter(source);
       return {
-        text: st.fullText,
+        text: st.text.toString(),
         sessionId: st.sessionId,
         costUsd: st.costUsd,
         inputTokens: st.inputTokens,
@@ -1363,9 +1422,14 @@ export class AgentRuntime {
       };
     }
 
-    const sdkQuery = runSession(runParams);
+    // D.2 — a per-session AbortController so an in-flight one-shot turn can be
+    // cancelled (kills the SDK subprocess, stops billing). Keyed by sessionKey and
+    // overwritten each turn, so no unbounded growth; cleared on normal completion.
+    const turnAbort = new AbortController();
+    if (sessionKey) this.turnAborts.set(sessionKey, turnAbort);
+    const sdkQuery = runSession({ ...runParams, abortController: turnAbort });
 
-    let fullText = "";
+    const acc = new AssistantText();
     let sessionId: string | undefined;
     let costUsd = 0;
     let inputTokens = 0;
@@ -1375,10 +1439,13 @@ export class AgentRuntime {
       // Forward all SDK events to the emitter
       switch (msg.type) {
         case "assistant": {
+          // A.2 — a refusal-fallback replacement carries `supersedes`; evict the
+          // refused partial on arrival (idempotent with the end-of-turn notice).
+          acc.evict((msg as { supersedes?: string[] }).supersedes);
+          const uuid = (msg as { uuid?: string }).uuid ?? "";
           for (const block of msg.message.content) {
             if (block.type === "text" && block.text) {
-              if (fullText && !fullText.endsWith("\n")) fullText += "\n";
-              fullText += block.text;
+              acc.add(uuid, block.text);
             } else if (block.type === "tool_use" || block.type === "server_tool_use") {
               // The model called a tool. Surface it as a tool_use_summary event so
               // clients (CLI, mobile) can render a tool-use card. The SDK never sends
@@ -1387,10 +1454,10 @@ export class AgentRuntime {
               // catch them (incl. server tools like web_search).
               const toolName = (block as { name?: string }).name ?? "unknown";
               const summary = summarizeToolInput(toolName, (block as { input?: unknown }).input);
-              // ask_user renders via its dedicated `ask` event (the Ask card); don't
-              // also emit a tool-use summary -- that drew a redundant "Ask user" tool
-              // card that duplicated whenever the agent retried the call.
-              if (toolName !== "ask_user" && !toolName.endsWith("__ask_user")) {
+              // Plumbing / dedicated-card tools don't render a generic tool card (see
+              // SILENT_TOOLS): AskUserQuestion has the Ask card; ToolSearch, the MCP
+              // resource tools, and Skill are internal setup, not user-meaningful work.
+              if (!isSilentTool(toolName)) {
                 emit({ type: "tool_use_summary", tool_name: toolName, summary });
               }
               // TodoWrite also drives a richer Plan card (clients suppress its tool card).
@@ -1422,12 +1489,17 @@ export class AgentRuntime {
           costUsd = msg.total_cost_usd ?? 0;
           inputTokens = msg.usage?.input_tokens ?? 0;
           outputTokens = msg.usage?.output_tokens ?? 0;
+          accrueModelUsage(msg);
           // Don't append msg.result -- it's the same final text we already
           // accumulated from the `assistant` block.text events, so adding it
           // again would double the response. Use it only as a fallback when
           // we somehow missed every assistant event (rare; e.g. compaction).
-          if ("result" in msg && !fullText && typeof msg.result === "string") {
-            fullText = msg.result;
+          if ("result" in msg && acc.isEmpty && typeof msg.result === "string") {
+            acc.setResult(msg.result);
+          }
+          // B.1 — graceful "hit the cap" message instead of an empty/opaque error.
+          if ((msg as { subtype?: string }).subtype === "error_max_budget_usd" && acc.isEmpty) {
+            acc.setResult(BUDGET_CAP_NOTICE);
           }
           emit({
             type: "result",
@@ -1451,6 +1523,11 @@ export class AgentRuntime {
           if (sysMsg.session_id && !sessionId) {
             sessionId = sysMsg.session_id;
           }
+          // A.2 — end-of-turn refusal-fallback notice: evict the refused partial
+          // (idempotent backstop to the per-message `supersedes` above).
+          if (sysMsg.subtype === "model_refusal_fallback") {
+            acc.evict((msg as { retracted_message_uuids?: string[] }).retracted_message_uuids);
+          }
           emit({
             type: "system",
             subtype: sysMsg.subtype,
@@ -1465,9 +1542,28 @@ export class AgentRuntime {
       }
     }
 
+    if (sessionKey) this.turnAborts.delete(sessionKey);
     if (elicitationOnStream && mgr && source) mgr.unregisterEmitter(source);
 
-    return { text: fullText, sessionId, costUsd, inputTokens, outputTokens };
+    return { text: acc.toString(), sessionId, costUsd, inputTokens, outputTokens };
+  }
+
+  /**
+   * D.2 — interrupt the in-flight turn for a session. The held-open live session
+   * is interrupted gracefully via `Query.interrupt()` (the session survives); a
+   * one-shot turn is cancelled by aborting its controller. Returns true if a turn
+   * was actually in flight. Wired to the gRPC `interrupt:<sessionKey>` command.
+   */
+  interruptSession(sessionKey: string): boolean {
+    let interrupted = this.liveSessions?.interrupt(sessionKey) ?? false;
+    const ac = this.turnAborts.get(sessionKey);
+    if (ac) {
+      ac.abort();
+      this.turnAborts.delete(sessionKey);
+      interrupted = true;
+    }
+    if (interrupted) log.info({ sessionKey }, "turn interrupted");
+    return interrupted;
   }
 
   /**
@@ -1483,14 +1579,15 @@ export class AgentRuntime {
   ): boolean {
     switch (msg.type) {
       case "assistant": {
+        state.text.evict((msg as { supersedes?: string[] }).supersedes);
+        const uuid = (msg as { uuid?: string }).uuid ?? "";
         for (const block of msg.message.content) {
           if (block.type === "text" && block.text) {
-            if (state.fullText && !state.fullText.endsWith("\n")) state.fullText += "\n";
-            state.fullText += block.text;
+            state.text.add(uuid, block.text);
           } else if (block.type === "tool_use" || block.type === "server_tool_use") {
             const toolName = (block as { name?: string }).name ?? "unknown";
             const summary = summarizeToolInput(toolName, (block as { input?: unknown }).input);
-            if (toolName !== "ask_user" && !toolName.endsWith("__ask_user")) {
+            if (!isSilentTool(toolName)) {
               emit({ type: "tool_use_summary", tool_name: toolName, summary });
             }
             if (toolName === "TodoWrite") {
@@ -1518,8 +1615,15 @@ export class AgentRuntime {
         state.costUsd = msg.total_cost_usd ?? 0;
         state.inputTokens = msg.usage?.input_tokens ?? 0;
         state.outputTokens = msg.usage?.output_tokens ?? 0;
-        if ("result" in msg && !state.fullText && typeof msg.result === "string") {
-          state.fullText = msg.result;
+        accrueModelUsage(msg);
+        if ("result" in msg && state.text.isEmpty && typeof msg.result === "string") {
+          state.text.setResult(msg.result);
+        }
+        if (
+          (msg as { subtype?: string }).subtype === "error_max_budget_usd" &&
+          state.text.isEmpty
+        ) {
+          state.text.setResult(BUDGET_CAP_NOTICE);
         }
         emit({
           type: "result",
@@ -1540,6 +1644,9 @@ export class AgentRuntime {
           compact_metadata?: { trigger: string; pre_tokens: number };
         };
         if (sysMsg.session_id && !state.sessionId) state.sessionId = sysMsg.session_id;
+        if (sysMsg.subtype === "model_refusal_fallback") {
+          state.text.evict((msg as { retracted_message_uuids?: string[] }).retracted_message_uuids);
+        }
         emit({
           type: "system",
           subtype: sysMsg.subtype,

@@ -124,11 +124,26 @@ export async function buildGoogleMcpServers(
  * when the MCP tools are in fact registered. Empty for the "cli" backend, when
  * Google isn't configured, or when no accounts are connected.
  */
-export async function buildGoogleIntegrationPrompt(userId: string): Promise<string> {
+export async function buildGoogleIntegrationPrompt(
+  userId: string,
+  hasGoogleServers: boolean,
+): Promise<string> {
   const raw = process.env.NOMOS_GOOGLE_BACKEND?.trim().toLowerCase();
   const backend = raw || (isHosted() ? "official" : "cli");
   if (backend === "cli") return ""; // power-user advertises Google via the gws CLI summary
-  if (!isGoogleIntegrationConfigured()) return "";
+
+  // No usable Google MCP registered for this user (not configured, no connected
+  // account, or a dead token). Tell the agent the TRUTH so it stops hunting for
+  // tools, confabulating that they're "loading in the background", browser-driving
+  // Google, or inventing workarounds (the live focus-block flailing).
+  if (!hasGoogleServers) {
+    return [
+      "## Google Workspace: not connected",
+      "Gmail, Calendar, and Drive are **not connected** for this user — you currently have NO Google tools.",
+      "Do NOT 'check for', 'wait for', or say Google tools are still loading. Do NOT use the Browser tool to open or sign into Google. Do NOT invent a workaround (a reminder, a manual checklist, a calendar.google.com walkthrough) unless the user explicitly asks for one.",
+      "If the user asks for something that needs Google, tell them plainly it isn't connected and that they can connect it in Settings → Google, then stop and wait — don't keep trying.",
+    ].join("\n");
+  }
 
   let accounts: Awaited<ReturnType<typeof listGoogleAccounts>>;
   try {
@@ -147,5 +162,6 @@ export async function buildGoogleIntegrationPrompt(userId: string): Promise<stri
     "You have **active, authenticated** Google Workspace access right now through the Google MCP: Gmail, Calendar, and Drive. Do NOT tell the user that Gmail, Calendar, or Drive needs to be connected or configured; you already have access for the accounts below.",
     ...lines,
     "Use the matching `mcp__google-gmail__*`, `mcp__google-calendar__*`, and `mcp__google-drive__*` tools (the default account uses the unsuffixed `google-*` servers; additional accounts are suffixed with an email slug). The `google-gmail`, `gmail-inbox-triage`, `google-calendar*`, and `google-drive` skills give workflow guidance. Gmail sending is opt-in per account; for draft-only accounts, create a draft and ask the user before sending.",
+    "If a Google call fails with an auth/permission error, the connection just needs reconnecting: tell the user to reconnect Google in the app's **Settings → Google**, and stop. NEVER suggest a terminal, `npx`, `gws`, or 'Claude Code' — those aren't part of this product. Don't silently fall back to a reminder/scheduled task in place of the calendar action.",
   ].join("\n");
 }

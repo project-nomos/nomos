@@ -21,17 +21,20 @@
 import { createLogger } from "../lib/logger.ts";
 import {
   runSession,
+  type Query,
   type RunSessionParams,
   type SDKMessage,
   type SDKUserMessage,
 } from "../sdk/session.ts";
 import type { AgentEvent } from "./types.ts";
+import { AssistantText } from "./assistant-text.ts";
 
 const log = createLogger("live-session");
 
 /** Accumulated result of one turn within a live session. */
 export interface LiveTurnState {
-  fullText: string;
+  /** Per-UUID assistant-text accumulator (supports refusal-fallback eviction). */
+  text: AssistantText;
   sessionId?: string;
   costUsd: number;
   inputTokens: number;
@@ -39,7 +42,13 @@ export interface LiveTurnState {
 }
 
 export function newTurnState(): LiveTurnState {
-  return { fullText: "", sessionId: undefined, costUsd: 0, inputTokens: 0, outputTokens: 0 };
+  return {
+    text: new AssistantText(),
+    sessionId: undefined,
+    costUsd: 0,
+    inputTokens: 0,
+    outputTokens: 0,
+  };
 }
 
 /** Handle one SDK message: mutate `state`, `emit` client events, return true on turn-over (`result`). */
@@ -93,6 +102,7 @@ class LiveSession {
   private currentReject: ((e: Error) => void) | null = null;
   private state = newTurnState();
   private closed = false;
+  private readonly query: Query;
   turns = 0;
   lastActive = Date.now();
 
@@ -102,8 +112,17 @@ class LiveSession {
     private readonly handle: SdkMessageHandler,
   ) {
     // Start the streaming query with our channel as the prompt; drain forever.
-    const query = runSession({ ...params, prompt: this.channel }) as AsyncIterable<SDKMessage>;
-    void this.consume(query);
+    this.query = runSession({ ...params, prompt: this.channel });
+    void this.consume(this.query as AsyncIterable<SDKMessage>);
+  }
+
+  /**
+   * D.2 — gracefully interrupt the turn currently in flight on this held-open
+   * session (the SDK ends it with a result; the session stays open for the next
+   * turn). No-op when idle.
+   */
+  interrupt(): void {
+    void this.query.interrupt?.();
   }
 
   private async consume(query: AsyncIterable<SDKMessage>): Promise<void> {
@@ -200,6 +219,13 @@ export class LiveSessionManager {
   hasLive(sessionKey: string): boolean {
     const s = this.sessions.get(sessionKey);
     return Boolean(s && !s.isClosed);
+  }
+  /** D.2 — interrupt the in-flight turn on a held-open session; true if one was live. */
+  interrupt(sessionKey: string): boolean {
+    const s = this.sessions.get(sessionKey);
+    if (!s || s.isClosed) return false;
+    s.interrupt();
+    return true;
   }
   turnCount(sessionKey: string): number {
     return this.sessions.get(sessionKey)?.turns ?? 0;

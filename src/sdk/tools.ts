@@ -7,7 +7,6 @@ import { z } from "zod/v4";
 import { traceMemory } from "../memory/trace.ts";
 import { handleBootstrapComplete } from "../ui/bootstrap.ts";
 import { createLogger } from "../lib/logger.ts";
-import { createAskUserTool, type AskUserToolOptions } from "./ask-user.ts";
 
 const log = createLogger("sdk-tools");
 import {
@@ -55,7 +54,6 @@ function formatSubgraph(sub: Subgraph): string {
 export function createMemoryMcpServer(
   userId: string = "local",
   opts: {
-    elicit?: AskUserToolOptions["elicit"];
     /** Current conversation context, so `background_register` can resume THIS thread. */
     session?: { sessionKey: string; platform: string; channelId: string; userId: string };
   } = {},
@@ -1415,10 +1413,6 @@ export function createMemoryMcpServer(
 
   // ── Plan Mode Tool ──
 
-  // Multi-choice user prompt that routes through MCP elicitation. The
-  // actual rendering happens host-side in `src/daemon/elicitation-manager.ts`.
-  const askUserTool = createAskUserTool({ elicit: opts.elicit });
-
   const proposePlanTool = tool(
     "propose_plan",
     "Propose an implementation plan for the user to review before execution. Use this for complex, multi-step tasks where you want to align with the user before making changes. The plan is stored and the user can approve, modify, or reject it. Only propose plans for significant changes — don't use this for simple tasks.",
@@ -1914,83 +1908,6 @@ export function createMemoryMcpServer(
     },
   );
 
-  // ── Inter-Agent Messaging Tool ──
-
-  const sendWorkerMessageTool = tool(
-    "send_worker_message",
-    "Send a message to another team worker or the coordinator during multi-agent team execution. Use this for inter-agent communication when workers need to share intermediate results, request information from siblings, or report blocking issues to the coordinator.",
-    {
-      to: z
-        .string()
-        .describe("Target agent: 'coordinator' for the lead agent, or a worker name/ID"),
-      message: z.string().describe("The message content to send"),
-      priority: z
-        .enum(["normal", "urgent", "blocking"])
-        .optional()
-        .describe(
-          "Message priority (default: normal). Use 'blocking' if you can't proceed without a response",
-        ),
-    },
-    async (args) => {
-      try {
-        const { getTeamMailbox } = await import("../daemon/team-mailbox.ts");
-        const mailbox = getTeamMailbox();
-        mailbox.send(args.to, args.message, args.priority ?? "normal");
-        return {
-          content: [
-            {
-              type: "text",
-              text: `Message sent to ${args.to}${args.priority === "blocking" ? " [BLOCKING]" : ""}`,
-            },
-          ],
-        };
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        return {
-          content: [{ type: "text", text: `Failed to send message: ${message}` }],
-          isError: true,
-        };
-      }
-    },
-  );
-
-  const checkWorkerMessagesTool = tool(
-    "check_worker_messages",
-    "Check for incoming messages from other team agents. Call this periodically during team execution to see if the coordinator or sibling workers have sent updates, requests, or instructions.",
-    {
-      from: z.string().optional().describe("Filter messages from a specific agent"),
-    },
-    async (args) => {
-      try {
-        const { getTeamMailbox } = await import("../daemon/team-mailbox.ts");
-        const mailbox = getTeamMailbox();
-        const messages = mailbox.receive(args.from);
-
-        if (messages.length === 0) {
-          return { content: [{ type: "text", text: "No new messages." }] };
-        }
-
-        const formatted = messages
-          .map(
-            (m) =>
-              `[${m.priority}] From ${m.from}: ${m.message}${m.timestamp ? ` (${new Date(m.timestamp).toISOString()})` : ""}`,
-          )
-          .join("\n\n");
-
-        return {
-          content: [{ type: "text", text: `${messages.length} message(s):\n\n${formatted}` }],
-        };
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        return {
-          content: [{ type: "text", text: `Failed to check messages: ${message}` }],
-          isError: true,
-        };
-      }
-    },
-    { annotations: { readOnlyHint: true } },
-  );
-
   const switchModeTool = tool(
     "switch_permission_mode",
     "Switch the agent's permission mode at runtime. Use 'plan' mode when you want to propose changes without executing them, 'acceptEdits' to auto-accept file edits, or 'bypassPermissions' to skip all checks. The mode change takes effect on the next tool call.",
@@ -2328,12 +2245,8 @@ export function createMemoryMcpServer(
       // Proactive messaging
       proactiveSendTool,
       // Inter-agent messaging
-      sendWorkerMessageTool,
-      checkWorkerMessagesTool,
       // Plan mode
       proposePlanTool,
-      // Multi-choice user prompt via MCP elicitation
-      askUserTool,
       // LSP code intelligence
       lspGoToDefinitionTool,
       lspFindReferencesTool,

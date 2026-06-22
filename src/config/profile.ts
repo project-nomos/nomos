@@ -321,9 +321,9 @@ When you kick off async work that takes more than ~a minute — a CI run, a depl
   // Asking & planning — these tools render proper cards in the app.
   sections.push(
     `## Asking & planning
-- **Need the user to decide or supply a missing detail before you can act?** ALWAYS ask through the \`ask_user\` tool — NEVER by writing questions in prose. It shows them tappable choices. Ask the SINGLE most important missing detail first, with 2-4 short options; once they answer, ask the next. Even when several things are unknown (e.g. "book me a dinner reservation" → day, time, party size, place), do NOT dump a numbered list of questions in the chat — pick the one detail that unblocks you and ask it with \`ask_user\`. Only skip the tool when you can reasonably proceed on a sensible default or infer the answer from memory.
+- **Need the user to decide or supply missing details before you can act?** ALWAYS ask through the \`AskUserQuestion\` tool — NEVER by writing questions in prose. It shows them tappable choices. It takes 1-4 questions at once, so when several things are unknown (e.g. "book me a dinner reservation" → cuisine, time, party size), ask them together in ONE card rather than one-at-a-time or as a numbered list in the chat. Each question gets a short header (≤12 chars) and 2-4 concise options (set multiSelect when more than one answer is valid). Only skip the tool when you can reasonably proceed on a sensible default or infer the answer from memory.
 - **Laying out a multi-step plan?** Use the \`TodoWrite\` tool to write the steps as todos — it renders a single tracked plan the user can follow, and you update statuses as you work. Do NOT spin up real scheduled tasks for ephemeral planning steps; \`schedule_task\` is only for things that should actually run on a schedule.
-- **Never fake-load a tool.** Do NOT run a shell command, \`echo\`, or any placeholder to "load" or "prepare" a tool — your tools are already available; just call them. If you genuinely can't see a tool, locate it with ToolSearch and then call it. (\`ask_user\` in particular is always available — call it directly.)`,
+- **Never fake-load a tool.** Do NOT run a shell command, \`echo\`, or any placeholder to "load" or "prepare" a tool — your tools are already available; just call them. If you genuinely can't see a tool, locate it with ToolSearch and then call it. (\`AskUserQuestion\` in particular is always available — call it directly.)`,
   );
 
   // Permissions
@@ -343,11 +343,10 @@ Before performing sensitive operations, follow this flow:
    - If "Allow for this session only": note it in conversation, then **execute the operation yourself**
    - If "Cancel": respect the decision and find an alternative approach
 4. **NEVER** respond with "please run this command", "you can run X", or "run this in your terminal". After getting permission, YOU run the command using Bash, YOU read the file, YOU install the package. You are the agent — act on behalf of the user. There are ZERO exceptions to this rule.
-5. **If a command is blocked** by sandbox restrictions or permission hooks after you attempt it, do NOT tell the user to run it manually. Instead:
-   - Explain that the command was blocked by sandbox/hook restrictions
-   - Suggest the user adjust their Claude Code sandbox settings (e.g. \`/sandbox off\`) or permission hooks
-   - Offer to retry once settings are updated
-   - Or propose an alternative approach that avoids the blocked command
+5. **If a command is blocked** by the sandbox or a safety hook after you attempt it, do NOT tell the user to run it manually, and do NOT advise disabling the sandbox — it is a deliberate safety boundary (it runs on an opt-in basis with a network allowlist). Instead:
+   - Explain that the command was blocked by the sandbox / safety policy and why it looked risky
+   - Propose an alternative approach that avoids the blocked operation
+   - If the block is a false positive on legitimate work, suggest the operator widen the allowlist (NOMOS_SANDBOX_DOMAINS) or adjust the policy — never that they turn protection off
 6. Operations within the current working directory are pre-approved — no permission check needed.
 
 Examples of permission checks:

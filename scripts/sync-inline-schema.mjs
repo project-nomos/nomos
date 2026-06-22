@@ -16,6 +16,21 @@ const repoRoot = path.resolve(__dirname, "..");
 const schemaPath = path.join(repoRoot, "src/db/schema.sql");
 const canonical = fs.readFileSync(schemaPath, "utf-8").trim();
 
+// The schema is embedded into a JS template literal below, so a backtick or a `${`
+// sequence in schema.sql (even inside a `-- comment`) silently produces invalid
+// TypeScript that only blows up later at build time with a cryptic parse error.
+// Fail fast here with a pointer to the offending line instead.
+for (const bad of ["`", "${"]) {
+  const idx = canonical.indexOf(bad);
+  if (idx !== -1) {
+    const line = canonical.slice(0, idx).split("\n").length;
+    throw new Error(
+      `[sync-inline-schema] schema.sql contains ${JSON.stringify(bad)} at line ${line}, ` +
+        `which breaks the inline template literal. Use plain quotes in SQL comments.`,
+    );
+  }
+}
+
 const targets = [
   path.join(repoRoot, "src/db/migrate.ts"),
   path.join(repoRoot, "settings/src/lib/schema.ts"),

@@ -4,9 +4,14 @@ import type { NomosConfig } from "../../config/env.ts";
 import type { AgentIdentity } from "../../config/profile.ts";
 import { appendTranscriptMessage } from "../../db/transcripts.ts";
 import { updateSessionUsage, updateSessionSdkId } from "../../db/sessions.ts";
-import { runSession, type McpServerConfig, type SDKMessage } from "../../sdk/session.ts";
+import {
+  runSession,
+  type McpServerConfig,
+  type SDKMessage,
+  type RunSessionParams,
+} from "../../sdk/session.ts";
 import { buildSdkHooks } from "../../hooks/sdk-adapter.ts";
-import { TeamRuntime, stripTeamPrefix } from "../../daemon/team-runtime.ts";
+import { stripTeamPrefix, buildNativeAgents } from "../../sdk/agents.ts";
 import { dispatchSlashCommand, type CommandContext, type CommandState } from "../slash-commands.ts";
 import { shouldBootstrap, getBootstrapPrompt } from "../bootstrap.ts";
 import { getHeartbeat, isHeartbeatEmpty } from "../../auto-reply/heartbeat.ts";
@@ -21,6 +26,7 @@ import { CostLine } from "./cost-line.tsx";
 import { SystemMessage } from "./system-message.tsx";
 import { StatusLine } from "./status-line.tsx";
 import { CommandInput } from "./command-input.tsx";
+import { AskPrompt, type AskQuestion } from "./ask-prompt.tsx";
 import { StalledSpinner } from "./stalled-spinner.tsx";
 import { CopyModeIndicator } from "./copy-mode-indicator.tsx";
 import { ScrollableView } from "./scrollable-view.tsx";
@@ -100,6 +106,11 @@ export function App({
   // Whether input is active
   const [isInputActive, setIsInputActive] = useState(true);
   const [inputValue, setInputValue] = useState("");
+  // Native AskUserQuestion: a pending interactive Ask card + its answer resolver.
+  const [pendingAsk, setPendingAsk] = useState<{
+    questions: AskQuestion[];
+    resolve: (answers: Record<string, string>) => void;
+  } | null>(null);
   // Live thinking/reasoning text (streamed then finalized)
   const [thinkingText, setThinkingText] = useState("");
   // Last completed thinking content (kept outside Static so it can be toggled)
@@ -397,69 +408,11 @@ export function App({
         return;
       }
 
-      // Team mode: handle /team prefix in CLI direct mode
+      // Team mode (Phase G): `/team` in CLI direct mode just strips the prefix; the
+      // native `Agent` tool (enabled on the runSession below when teamMode is on)
+      // handles parallel delegation inside the normal loop.
       const teamTask = config.teamMode ? stripTeamPrefix(input) : null;
-      if (teamTask) {
-        pushItem("system", "Running multi-agent team...");
-        try {
-          const teamRuntime = new TeamRuntime({
-            maxWorkers: config.maxTeamWorkers,
-            coordinatorModel: stateRef.current.model,
-            approvalPolicy: config.toolApprovalPolicy,
-          });
-          const allowedTools = ["Bash", ...Object.keys(mcpServers).map((name) => `mcp__${name}`)];
-          const result = await teamRuntime.runTeam(
-            {
-              prompt: teamTask,
-              systemPromptAppend: systemPromptAppendRef.current,
-              mcpServers,
-              permissionMode: stateRef.current.permissionMode ?? config.permissionMode,
-              allowedTools,
-            },
-            (event) => {
-              if (!parseWorkerToolUse(event.message)) {
-                clearWorkerStatus(event.message);
-                pushItem("system", event.message);
-              }
-            },
-          );
-
-          if (bufferRef.current || thinkingBufferRef.current) flushBuffer();
-          setIsThinking(false);
-          setTeamWorkerStatus(new Map());
-
-          const content = result || "_(no response)_";
-          appendDelta(content);
-          flushBuffer();
-
-          await appendTranscriptMessage({
-            sessionId: session.id,
-            role: "assistant",
-            content,
-          });
-          transcriptRef.current.push({ role: "assistant", content });
-
-          // Inject team result into system prompt so subsequent turns have context.
-          // Also clear SDK session — the old session doesn't know about the team result.
-          const teamSummary =
-            content.length > 4000 ? content.slice(0, 4000) + "\n...(truncated)" : content;
-          systemPromptAppendRef.current =
-            systemPromptAppendRef.current +
-            "\n\n## Previous Team Result\n" +
-            `The user asked: ${teamTask.slice(0, 500)}\n\n` +
-            `The multi-agent team produced this result:\n${teamSummary}`;
-          sdkSessionIdRef.current = null;
-
-          setIsInputActive(true);
-          return;
-        } catch (err) {
-          setIsThinking(false);
-          const message = err instanceof Error ? err.message : String(err);
-          pushItem("system", `Team error: ${message}`);
-          setIsInputActive(true);
-          return;
-        }
-      }
+      const prompt = teamTask ?? input;
 
       // Capture stderr for debug diagnostics on failure
       const stderrChunks: string[] = [];
@@ -500,6 +453,8 @@ export function App({
         // handles fine-grained command approval conversationally, so the SDK's built-in
         // permission layer should not block commands that the agent has already cleared.
         const allowedTools = ["Bash", ...Object.keys(mcpServers).map((name) => `mcp__${name}`)];
+        // Native team delegation in CLI direct mode: expose the Agent tool + agents.
+        if (config.teamMode) allowedTools.push("Agent");
 
         const stderrCallback = (data: string) => {
           stderrChunks.push(data);
@@ -507,8 +462,45 @@ export function App({
           if (stderrChunks.length > 50) stderrChunks.shift();
         };
 
+        // Native AskUserQuestion → the interactive Ink Ask card. The handler suspends
+        // the turn, renders the card, and resolves with the user's picks.
+        const canUseTool: NonNullable<RunSessionParams["canUseTool"]> = async (toolName, input) => {
+          if (toolName !== "AskUserQuestion") return { behavior: "allow", updatedInput: input };
+          const raw =
+            (input.questions as Array<{
+              question: string;
+              header?: string;
+              multiSelect?: boolean;
+              options?: { label: string; description?: string }[];
+            }>) ?? [];
+          const valid: AskQuestion[] = raw
+            .filter((q) => (q.options ?? []).some((o) => o.label))
+            .map((q) => ({
+              question: q.question,
+              header: q.header,
+              multiSelect: q.multiSelect,
+              options: (q.options ?? []).filter((o) => o.label),
+            }));
+          if (!valid.length) return { behavior: "allow", updatedInput: input };
+          const raw_answers = await new Promise<Record<string, string>>((resolve) => {
+            setIsInputActive(false);
+            setPendingAsk({ questions: valid, resolve });
+          });
+          setPendingAsk(null);
+          setIsInputActive(true);
+          // multiSelect answers must be a label[] array, else the model treats the
+          // joined string as no-valid-answer and re-asks (the mobile loop bug).
+          const answers: Record<string, string | string[]> = {};
+          for (const q of valid) {
+            const a = raw_answers[q.question];
+            if (a === undefined) continue;
+            answers[q.question] = q.multiSelect ? a.split(/\s*,\s*/).filter(Boolean) : a;
+          }
+          return { behavior: "allow", updatedInput: { ...input, answers } };
+        };
+
         let sdkQuery = runSession({
-          prompt: input,
+          prompt,
           model: stateRef.current.model,
           mcpServers,
           systemPromptAppend: systemPromptAppendRef.current,
@@ -516,6 +508,8 @@ export function App({
           resume: sdkSessionIdRef.current ?? undefined,
           thinking,
           allowedTools,
+          canUseTool,
+          ...(config.teamMode ? { agents: buildNativeAgents() } : {}),
           // PreToolUse blocking from hooks.json (matters most in CLI-direct mode,
           // which runs tools on the user's machine). No-op when no hooks registered.
           hooks: buildSdkHooks({ sessionKey: session.session_key }),
@@ -1037,8 +1031,13 @@ export function App({
             </Box>
           )}
 
+          {/* Native AskUserQuestion: the interactive Ask card (preempts the input). */}
+          {pendingAsk && (
+            <AskPrompt questions={pendingAsk.questions} onSubmit={pendingAsk.resolve} />
+          )}
+
           {/* Input area */}
-          {isInputActive && (
+          {isInputActive && !pendingAsk && (
             <CommandInput
               value={inputValue}
               onChange={setInputValue}

@@ -7,7 +7,6 @@ import {
   type SDKResultMessage,
   type SDKUserMessage,
   type SdkPluginConfig,
-  type OnElicitation,
   type HookCallbackMatcher,
 } from "@anthropic-ai/claude-agent-sdk";
 import { getPromptCacheTracker } from "./cache-break-detection.ts";
@@ -20,7 +19,6 @@ export type {
   SDKUserMessage,
   McpServerConfig,
   SdkPluginConfig,
-  OnElicitation,
 };
 
 export interface RunSessionParams {
@@ -36,7 +34,12 @@ export interface RunSessionParams {
   model?: string;
   /** Text appended to Claude Code's default system prompt */
   systemPromptAppend?: string;
-  /** Full system prompt override (takes precedence over systemPromptAppend) */
+  /**
+   * Text appended to the claude_code preset, taking precedence over
+   * systemPromptAppend. NOTE: still an `append` to the preset (the SDK builds
+   * `{ preset: "claude_code", append }`), NOT a full replacement — Nomos always
+   * keeps Claude Code's base prompt.
+   */
   systemPrompt?: string;
   /** Custom Anthropic API base URL (for Ollama, LiteLLM, etc.) */
   anthropicBaseUrl?: string;
@@ -52,16 +55,22 @@ export interface RunSessionParams {
   maxTurns?: number;
   /** Maximum budget in USD before stopping */
   maxBudgetUsd?: number;
-  /** Sandbox settings */
-  sandbox?: {
-    enabled: boolean;
-    autoAllowBashIfSandboxed?: boolean;
-    network?: { allowedDomains?: string[] };
-  };
+  /**
+   * OS-level sandbox settings (filesystem + network confinement via the SDK's
+   * SandboxSettings: enabled / failIfUnavailable / autoAllowBashIfSandboxed /
+   * network.allowedDomains / allowAppleEvents / …). Power-user opt-in (Phase E).
+   */
+  sandbox?: Options["sandbox"];
   /** SDK betas to enable */
   betas?: Options["betas"];
   /** Fallback models to try if primary model fails */
   fallbackModels?: string[];
+  /**
+   * Force structured JSON output. The SDK validates the model's output against
+   * this JSON Schema (with bounded retry) and returns it on
+   * `result.structured_output`. Use instead of regex + JSON.parse. (Phase C.)
+   */
+  outputFormat?: Options["outputFormat"];
   /** Tool names that are auto-allowed without prompting for permission */
   allowedTools?: string[];
   /** Tool names that are blocked entirely (removed from the agent's tool list) */
@@ -76,18 +85,42 @@ export interface RunSessionParams {
   plugins?: SdkPluginConfig[];
   /** Use Claude subscription (Max/Pro) instead of API key */
   useSubscription?: boolean;
-  /**
-   * Callback for MCP elicitation requests (e.g. our `ask_user` tool).
-   * The SDK calls this when an in-process MCP server invokes
-   * `extra.sendRequest({method: "elicitation/create", ...})`. Return an
-   * accept/decline/cancel response. If omitted, all elicitations are
-   * automatically declined.
-   */
-  onElicitation?: OnElicitation;
   /** SDK-native hook callbacks (PreToolUse blocking, PostToolUse context, etc.) */
   hooks?: Options["hooks"];
   /** Reasoning effort ('low'..'max'; 'xhigh' is the ultracode level). */
   effort?: Options["effort"];
+  /**
+   * Native subagent definitions (Phase G). When set, the model can delegate to
+   * these via the `Agent` tool; subagents auto-parallelize, get fresh isolated
+   * context, and INHERIT the parent's permission + hook config (so the
+   * block_critical gate covers them structurally). Add "Agent" to allowedTools.
+   */
+  agents?: Options["agents"];
+  /**
+   * Permission callback. The SDK invokes it for the native `AskUserQuestion` tool
+   * (verified to fire even under bypassPermissions), so Nomos can route model-driven
+   * clarifications through its own elicitation/Ask-card pipeline (Phase F).
+   */
+  canUseTool?: Options["canUseTool"];
+  /** Tool display config (e.g. AskUserQuestion preview format). */
+  toolConfig?: Options["toolConfig"];
+  /**
+   * AbortController whose `abort()` cancels the turn (kills the SDK subprocess,
+   * stops billing). Used by the one-shot path; the live path interrupts via
+   * `Query.interrupt()` instead so the held-open session survives (D.2).
+   */
+  abortController?: AbortController;
+  /**
+   * Persist the SDK session transcript to disk (default true). Set false for
+   * one-shot forks whose transcripts are never resumed (Appendix). Mutually
+   * exclusive with the SDK `sessionStore` option.
+   */
+  persistSession?: boolean;
+  /**
+   * Keep file-edit checkpoints for `Query.rewindFiles` (default true). Set false
+   * for forks (they never rewind) to drop the per-edit backup overhead (D.4).
+   */
+  enableFileCheckpointing?: boolean;
 }
 
 /**
@@ -155,22 +188,29 @@ function mergeHooks(a: Options["hooks"], b: Options["hooks"]): Options["hooks"] 
  * Returns the async generator of SDK messages.
  */
 export function runSession(params: RunSessionParams): Query {
-  // Build system prompt config
+  // Build system prompt config.
+  // B.4 — `excludeDynamicSections: true` drops the SDK's own per-environment
+  // sections (cwd/OS/git status/date) from the cached prefix. Those vary per env
+  // on a long-lived daemon and bust the prompt cache; Nomos injects the runtime
+  // context it actually needs via systemPromptAppend, so excluding the SDK's is a
+  // cache win with no behavior loss.
   let systemPrompt: Options["systemPrompt"];
   if (params.systemPrompt) {
     systemPrompt = {
       type: "preset",
       preset: "claude_code",
       append: params.systemPrompt,
+      excludeDynamicSections: true,
     };
   } else if (params.systemPromptAppend) {
     systemPrompt = {
       type: "preset",
       preset: "claude_code",
       append: params.systemPromptAppend,
+      excludeDynamicSections: true,
     };
   } else {
-    systemPrompt = { type: "preset", preset: "claude_code" };
+    systemPrompt = { type: "preset", preset: "claude_code", excludeDynamicSections: true };
   }
 
   // Build env, including custom base URL if provided.
@@ -181,6 +221,22 @@ export function runSession(params: RunSessionParams): Query {
     CLAUDE_AGENT_SDK_CLIENT_APP: "nomos/0.1.0",
   };
   delete env.CLAUDECODE;
+
+  // A.3 — Hermetic runtime. `settingSources: []` (in the options below) gates most
+  // filesystem `.claude/` config, but Claude Code's auto-memory loads into the system
+  // prompt UNCONDITIONALLY, so disable it explicitly. Nomos owns its own memory (the
+  // vault + digest), so this prevents stray `.claude/projects/*/memory` leakage. Opt
+  // back in with NOMOS_AUTO_MEMORY=1.
+  if (process.env.NOMOS_AUTO_MEMORY !== "1") {
+    env.CLAUDE_CODE_DISABLE_AUTO_MEMORY = "1";
+  }
+  // A.4 — Tool search: collapse 13+ MCP servers' tool schemas out of the per-turn
+  // context (defaults to "auto"). It self-disables on non-first-party / Vertex hosts,
+  // so when a custom base URL is set we do NOT force it on (the proxy would have to
+  // forward `tool_reference` blocks); honor only an explicit operator value there.
+  if (!params.anthropicBaseUrl && !env.ENABLE_TOOL_SEARCH) {
+    env.ENABLE_TOOL_SEARCH = "auto";
+  }
 
   // Subscription mode: remove API key so the SDK subprocess uses the
   // Claude subscription (Max/Pro) OAuth credentials from ~/.claude/.credentials.json.
@@ -215,8 +271,16 @@ export function runSession(params: RunSessionParams): Query {
     prompt: params.prompt,
     options: {
       model: params.model,
+      // A.2 — fallback model(s). The SDK option is a SINGLE comma-separated string
+      // (tried in order, primary re-tried each turn), not an array.
+      ...(params.fallbackModels?.length ? { fallbackModel: params.fallbackModels.join(",") } : {}),
       permissionMode: params.permissionMode ?? "acceptEdits",
       systemPrompt,
+      // A.3 — hermetic runtime: do not load filesystem `.claude/` settings (agents,
+      // hooks, skills, `.mcp.json`, memory). Nomos is DB-backed and self-reimplements
+      // its config, so cwd `.claude/` must not leak in. Re-opt into project settings
+      // only via NOMOS_SETTING_SOURCES=project.
+      settingSources: process.env.NOMOS_SETTING_SOURCES === "project" ? ["project"] : [],
       mcpServers: params.mcpServers,
       allowedTools: params.allowedTools,
       disallowedTools: params.disallowedTools,
@@ -224,8 +288,13 @@ export function runSession(params: RunSessionParams): Query {
       resume: params.resume,
       maxTurns: params.maxTurns ?? 50,
       maxBudgetUsd: params.maxBudgetUsd,
-      persistSession: true,
-      enableFileCheckpointing: true,
+      ...(params.outputFormat ? { outputFormat: params.outputFormat } : {}),
+      ...(params.agents ? { agents: params.agents } : {}),
+      ...(params.canUseTool ? { canUseTool: params.canUseTool } : {}),
+      ...(params.toolConfig ? { toolConfig: params.toolConfig } : {}),
+      persistSession: params.persistSession ?? true,
+      enableFileCheckpointing: params.enableFileCheckpointing ?? true,
+      ...(params.abortController ? { abortController: params.abortController } : {}),
       includePartialMessages: true,
       sandbox: params.sandbox,
       betas: params.betas,
@@ -234,141 +303,8 @@ export function runSession(params: RunSessionParams): Query {
       plugins: params.plugins,
       env,
       ...(params.cwd ? { cwd: params.cwd } : {}),
-      ...(params.onElicitation ? { onElicitation: params.onElicitation } : {}),
       ...(hooks ? { hooks } : {}),
       ...(params.effort ? { effort: params.effort } : {}),
     },
   });
-}
-
-/**
- * V2 SDK Session interface with typed methods.
- */
-export interface V2Session {
-  /** Send a prompt and get streaming response */
-  send(prompt: string): AsyncIterable<SDKMessage>;
-  /** Stream messages from the session */
-  stream(): AsyncIterable<SDKMessage>;
-  /** Close the session */
-  close(): Promise<void>;
-}
-
-/**
- * Check if V2 SDK session API is available.
- * Returns false if the SDK doesn't export all required V2 functions.
- */
-export function isV2Available(): boolean {
-  try {
-    // Dynamic check — V2 API may not exist in installed SDK version
-    const sdk = require("@anthropic-ai/claude-agent-sdk");
-    return (
-      typeof sdk.unstable_v2_createSession === "function" &&
-      typeof sdk.unstable_v2_resumeSession === "function" &&
-      typeof sdk.unstable_v2_prompt === "function"
-    );
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Create a V2 SDK session (if available).
- * Returns null if V2 is not available.
- *
- * Note: The following V1 options are not yet supported in V2:
- * - maxBudgetUsd
- * - enableFileCheckpointing
- * - env
- */
-export async function createV2Session(params: RunSessionParams): Promise<V2Session | null> {
-  if (!isV2Available()) return null;
-  // The experimental V2 prompt path is string-only; streaming-input sessions use
-  // the standard query() with an AsyncIterable prompt instead.
-  if (typeof params.prompt !== "string") return null;
-
-  try {
-    const sdk = await import("@anthropic-ai/claude-agent-sdk");
-    const createSession = (sdk as Record<string, unknown>).unstable_v2_createSession as (
-      opts: Record<string, unknown>,
-    ) => V2Session;
-    const resumeSession = (sdk as Record<string, unknown>).unstable_v2_resumeSession as (
-      sessionId: string,
-    ) => V2Session;
-
-    if (typeof createSession !== "function" || typeof resumeSession !== "function") {
-      return null;
-    }
-
-    // Handle resume case
-    if (params.resume) {
-      return resumeSession(params.resume);
-    }
-
-    // Create new session
-    return createSession({
-      model: params.model,
-      permissionMode: params.permissionMode ?? "acceptEdits",
-      systemPrompt: params.systemPromptAppend
-        ? {
-            type: "preset",
-            preset: "claude_code",
-            append: params.systemPromptAppend,
-          }
-        : { type: "preset", preset: "claude_code" },
-      mcpServers: params.mcpServers,
-      thinking: params.thinking ?? { type: "adaptive" },
-      maxTurns: params.maxTurns ?? 50,
-      sandbox: params.sandbox,
-      betas: params.betas,
-    });
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Run a one-shot V2 prompt without creating a session.
- * Returns null if V2 is not available.
- *
- * Note: The following V1 options are not yet supported in V2:
- * - maxBudgetUsd
- * - enableFileCheckpointing
- * - env
- */
-export async function runV2Prompt(
-  params: RunSessionParams,
-): Promise<AsyncIterable<SDKMessage> | null> {
-  if (!isV2Available()) return null;
-  // The experimental V2 prompt path is string-only; streaming-input sessions use
-  // the standard query() with an AsyncIterable prompt instead.
-  if (typeof params.prompt !== "string") return null;
-
-  try {
-    const sdk = await import("@anthropic-ai/claude-agent-sdk");
-    const prompt = (sdk as Record<string, unknown>).unstable_v2_prompt as (
-      promptText: string,
-      opts: Record<string, unknown>,
-    ) => AsyncIterable<SDKMessage>;
-
-    if (typeof prompt !== "function") return null;
-
-    return prompt(params.prompt, {
-      model: params.model,
-      permissionMode: params.permissionMode ?? "acceptEdits",
-      systemPrompt: params.systemPromptAppend
-        ? {
-            type: "preset",
-            preset: "claude_code",
-            append: params.systemPromptAppend,
-          }
-        : { type: "preset", preset: "claude_code" },
-      mcpServers: params.mcpServers,
-      thinking: params.thinking ?? { type: "adaptive" },
-      maxTurns: params.maxTurns ?? 50,
-      sandbox: params.sandbox,
-      betas: params.betas,
-    });
-  } catch {
-    return null;
-  }
 }

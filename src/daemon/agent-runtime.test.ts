@@ -1,5 +1,27 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { AgentRuntime, formatSystemMessage } from "./agent-runtime.ts";
+import { AgentRuntime, formatSystemMessage, isSilentTool } from "./agent-runtime.ts";
+
+describe("isSilentTool: tool-use activity suppression", () => {
+  it("hides plumbing / dedicated-card tools from the activity stream", () => {
+    // Skill (loads a playbook) + MCP resource discovery + ToolSearch are internal
+    // setup, not user actions; AskUserQuestion has its own Ask card.
+    for (const t of [
+      "Skill",
+      "ToolSearch",
+      "ListMcpResourcesTool",
+      "ReadMcpResourceTool",
+      "AskUserQuestion",
+    ]) {
+      expect(isSilentTool(t)).toBe(true);
+    }
+  });
+
+  it("still surfaces real, user-meaningful tools", () => {
+    for (const t of ["Bash", "WebSearch", "Edit", "mcp__google-calendar__calendar_create_event"]) {
+      expect(isSilentTool(t)).toBe(false);
+    }
+  });
+});
 
 // buildIntegrationsSummary is private; we exercise it directly to lock in the
 // mode-gated channel visibility (a hosted tenant must not be told it has BYO

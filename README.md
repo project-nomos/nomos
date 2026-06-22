@@ -510,6 +510,18 @@ See [docs/wait-and-resume.md](docs/wait-and-resume.md) for the tool, the watcher
 
 </details>
 
+<details>
+<summary><strong>Safety: critical-tool gating & the Bash sandbox</strong></summary>
+
+The daemon runs unattended in `bypassPermissions`, so safety is enforced in-loop rather than by per-call prompts:
+
+- **`block_critical` gate (always on)** — a `PreToolUse` deny hook blocks irrecoverable commands (`rm -rf`, `dd if=`, `mkfs`, `git push --force`, …) before they run, on every path: main turns, team workers, and background forks. Honored even under `bypassPermissions`.
+- **OS Bash sandbox (opt-in, power-user)** — `NOMOS_SANDBOX=true` confines `Bash` to a filesystem + network allowlist (`bubblewrap` / `sandbox-exec`), so injected code can't exfiltrate or touch files outside the allowed set. Off by default; hosted uses container isolation instead.
+
+See [docs/sandbox.md](docs/sandbox.md) for the two layers, the default allowlist, and tuning.
+
+</details>
+
 ---
 
 ## Features in Depth
@@ -556,7 +568,9 @@ Markdown files with a `<!-- MAGIC DOC: title -->` marker are automatically kept 
 
 ### Multi-Agent Teams
 
-A coordinator agent decomposes complex tasks, spawns parallel workers via independent `runSession()` calls, collects results with `Promise.allSettled()`, and synthesizes a final response. Workers share MCP servers and permissions but get scoped system prompts. Triggered by `/team` prefix.
+A coordinator agent decomposes complex tasks, spawns parallel workers via independent `runSession()` calls, collects results with `Promise.allSettled()`, and synthesizes a final response. Workers run with the same `block_critical` safety gate as the main agent and get the base MCP tool set (so they can't recurse into a nested team). Triggered by the in-loop `delegate_to_team` tool (just ask) or the `/team` prefix.
+
+See [docs/agent-teams.md](docs/agent-teams.md) for the decompose → execute → verify → synthesize flow, the safety model, and configuration.
 
 ### Smart Model Routing
 

@@ -540,6 +540,143 @@ export const FEATURES: FeatureSpec[] = [
     ],
   },
   {
+    id: "sdk-runtime-hardening",
+    summary:
+      "Phase A config wires on the central runSession options/env: A.2 fallbackModel (singular comma-joined string + refusal-fallback eviction via AssistantText), A.3 settingSources:[] + CLAUDE_CODE_DISABLE_AUTO_MEMORY (hermetic runtime, no stray .claude/ leakage), A.4 ENABLE_TOOL_SEARCH=auto (off on custom base URL). Applies to BOTH the one-shot and Layer-A live paths since both flow through runSession.",
+    trigger: { kind: "turn" },
+    entry: ["runSession", "AssistantText"],
+    effects: [
+      {
+        claim:
+          "refusal-fallback retracted/superseded message uuids are evicted from the final turn text (behavioral; unit-tested in assistant-text.test.ts)",
+        notExercised: true,
+      },
+    ],
+    invariants: [
+      "settingSources:[] unless NOMOS_SETTING_SOURCES=project (no filesystem .claude/ config loads)",
+      "CLAUDE_CODE_DISABLE_AUTO_MEMORY=1 unless NOMOS_AUTO_MEMORY=1 (auto-memory loads even with settingSources:[])",
+      "fallbackModel is a single comma-joined string, never an array",
+      "ENABLE_TOOL_SEARCH defaults to auto only when no custom anthropicBaseUrl is set",
+    ],
+  },
+  {
+    id: "session-resume-persistence",
+    summary:
+      "Phase B.2 — persist the SDK session id to sessions.metadata.sdkSessionId after each non-ephemeral daemon turn, so a conversation resumes across a daemon restart (the daemon already READS it on resume; this is the write-back). B.3 routes both drains' result.modelUsage through CostTracker; B.1 caps the main turn at NOMOS_TURN_BUDGET_USD.",
+    trigger: { kind: "turn" },
+    entry: ["updateSessionSdkId", "accrueModelUsage"],
+    effects: [
+      {
+        claim: "sessions.metadata.sdkSessionId is populated for resumed daemon sessions",
+        sql: {
+          query:
+            "SELECT count(*) FROM sessions WHERE metadata->>'sdkSessionId' IS NOT NULL AND session_key NOT LIKE '%ephemeral%'",
+          expect: "nonzero",
+        },
+        notExercised: true,
+      },
+    ],
+    invariants: [
+      "ephemeral sessions are NOT written back (off-the-record)",
+      "write-back is fire-and-forget; a DB failure never blocks the turn",
+    ],
+  },
+  {
+    id: "structured-outputs",
+    summary:
+      "Phase C — the three LLM-JSON forks (knowledge extractor, theory-of-mind, mood capture) pass a zod schema as the SDK `outputFormat` (JSON Schema) and consume `result.structured_output`, replacing the fragile regex + JSON.parse path. The SDK validates + bounded-retries; the existing parser still validates the shape, and the legacy text-parse remains a fallback.",
+    trigger: { kind: "turn" },
+    entry: ["runForkedAgent", "ExtractedKnowledgeSchema"],
+    effects: [
+      {
+        claim:
+          "knowledge extraction still populates memory_chunks (now via structured_output, no silent JSON.parse drop)",
+        sql: { query: "SELECT count(*) FROM memory_chunks", expect: "nonzero" },
+        notExercised: true,
+      },
+    ],
+    invariants: [
+      "outputSchema → JSON Schema via z.toJSONSchema; structured_output preferred, text-parse is the fallback",
+      "a malformed/absent structured output degrades to the legacy parse, never throws",
+    ],
+  },
+  {
+    id: "turn-safety-and-control",
+    summary:
+      "Phase D — D.1 scoped Bash(...) deny rules for irrecoverable criticals (defense-in-depth alongside the block_critical hook); D.2 cancellable turns (per-session AbortController for one-shot + Query.interrupt() for the live session, triggered by the gRPC `interrupt:<sessionKey>` command); D.4 forks skip persistSession + enableFileCheckpointing (pure overhead). D.3: PreCompact/PostCompact are real, wired observe-only; per-turn capture already flushes durable memory before compaction.",
+    trigger: { kind: "turn" },
+    entry: ["interruptSession", "CRITICAL_BASH_DENY"],
+    effects: [
+      {
+        claim:
+          "an in-flight turn can be cancelled (subprocess killed / Query.interrupt), and critical Bash patterns are denied declaratively (behavioral)",
+        notExercised: true,
+      },
+    ],
+    invariants: [
+      "live sessions interrupt via Query.interrupt (session survives); one-shot turns abort via AbortController",
+      "scoped Bash deny rules never block legitimate commands (criticals only)",
+      "forks run with persistSession:false + enableFileCheckpointing:false",
+    ],
+  },
+  {
+    id: "power-user-sandbox",
+    summary:
+      "Phase E — opt-in OS Bash sandbox (NOMOS_SANDBOX=true) on the main runParams for the power-user box (untrusted channel input + bypassPermissions + no container). Permissive network allowlist (NOMOS_SANDBOX_DOMAINS), failIfUnavailable:false, allowAppleEvents:true. Hosted is skipped (container isolation). The dead REPL /sandbox toggle is now informational; profile.ts no longer advises disabling protection.",
+    trigger: { kind: "turn", gate: "powerUser" },
+    entry: ["buildSandboxConfig"],
+    effects: [
+      {
+        claim:
+          "when NOMOS_SANDBOX=true (power-user), Bash runs under OS filesystem+network confinement (behavioral)",
+        notExercised: true,
+      },
+    ],
+    invariants: [
+      "off by default; opt-in via NOMOS_SANDBOX; never enabled in hosted mode",
+      "scoped permissively so legitimate file/network work still runs; degrades gracefully if unavailable",
+    ],
+  },
+  {
+    id: "native-subagents",
+    summary:
+      "Phase G — team mode uses the native SDK `agents` path EXCLUSIVELY (the ~1080-LOC hand-rolled TeamRuntime + team-mcp + team-mailbox were deleted). team-worker + read-only verifier AgentDefinitions; `Agent` in allowedTools. `/team` (prefix stripped) and natural-language delegation both route to the model's Agent tool inside the normal loop, so ToM + memory + cost tracking apply. Subagents inherit the parent's hooks → block_critical is structural. Verified live by eval/grpc-native-team-e2e.ts (agentToolUses>=1).",
+    trigger: { kind: "turn", gate: "teamMode" },
+    entry: ["buildNativeAgents", "useNativeTeam", "stripTeamPrefix"],
+    effects: [
+      {
+        claim:
+          "with team mode on, the model delegates via the Agent tool to inherited-permission subagents (behavioral; eval/grpc-native-team-e2e.ts proves agentToolUses>=1)",
+        notExercised: true,
+      },
+    ],
+    invariants: [
+      "team mode is native-only; the hand-rolled TeamRuntime/team-mcp/team-mailbox are deleted",
+      "the verifier subagent is read-only (no Write/Edit)",
+      "subagents inherit parent permission + hooks (block_critical is structural, not hand-threaded)",
+    ],
+  },
+  {
+    id: "native-ask-user-question",
+    summary:
+      "Phase F — the agent asks the user EXCLUSIVELY via the SDK-native AskUserQuestion tool (the hand-rolled MCP ask_user tool + handleElicitation/onElicitation were removed). §1.2 resolved (eval/canusetool-bypass-harness.ts proves canUseTool fires under bypassPermissions). AskUserQuestion is un-blocked on the daemon path and a canUseTool handler (buildAskCanUseTool) routes its questions through ElicitationManager.askQuestionSet → ONE multi-question Ask card (1-4 questions, each with id/header/multiSelect) on Slack/mobile/iOS, answered via the per-question AnswerQuestion RPC (no proto change). iOS renders the widened card (emulator-verified). CLI direct mode (no Ask-card surface) disallows AskUserQuestion so the model asks in prose.",
+    trigger: { kind: "turn" },
+    entry: ["buildAskCanUseTool", "askQuestionSet"],
+    effects: [
+      {
+        claim:
+          "the model's native AskUserQuestion calls render 1-4 questions on ONE Ask card and answers return via canUseTool (behavioral; unit-covered by ask-canusetool.test.ts + elicitation-manager.test.ts; live-verified E2E by eval/grpc-native-ask-e2e.ts — the model asks, the card reaches the client, the answer completes the turn)",
+        notExercised: true,
+      },
+    ],
+    invariants: [
+      "AskUserQuestion is the ONLY ask path (the MCP ask_user tool is deleted); it is NOT in disallowedTools on the daemon path",
+      "askQuestionSet emits ONE ask event with questions[]; the set resolves only when every sub-question is answered",
+      "CLI direct mode disallows AskUserQuestion (no canUseTool surface) → the model asks in prose there",
+      "a declined/timed-out question yields no synthetic answer",
+    ],
+  },
+  {
     id: "wiki-disk-reconcile",
     summary: "Reconcile the on-disk wiki cache with the DB at boot (power-user only).",
     trigger: { kind: "boot" },
@@ -875,24 +1012,8 @@ export const FEATURES: FeatureSpec[] = [
   },
 
   // ── Multi-agent teams ──
-  {
-    id: "multi-agent-teams",
-    summary:
-      "Coordinator/worker orchestration: a coordinator decomposes a task into parallel workers and synthesizes one result. Triggered EITHER by the `/team` prefix (fast path) OR by the in-loop `delegate_to_team` tool (buildTeamMcpServer) the agent calls when the user asks in natural language ('research X from three angles', 'spin up a team') — both work in hosted + power-user modes (both converge on AgentRuntime.runAgent). Gated on teamMode. Workers receive only the BASE mcp set (no nomos-team), so they can never recurse into delegation.",
-    trigger: { kind: "turn", gate: "teamMode" },
-    entry: ["stripTeamPrefix", "TeamRuntime", "buildTeamMcpServer"],
-    effects: [
-      {
-        claim: "spawns parallel workers + synthesizes (transient, no durable DB state)",
-        notExercised: true,
-      },
-    ],
-    invariants: [
-      "invokable without the /team prefix via delegate_to_team, in both hosted + power-user modes",
-      "workers get only the base mcp set, so a worker can never spawn a nested team",
-      "coordinator/worker/verifier runs inherit the block_critical PreToolUse gate (buildSdkHooks in runSingleAgent) — workers run bypassPermissions and must NOT be ungated",
-    ],
-  },
+  // (multi-agent teams: see `native-subagents` — the hand-rolled TeamRuntime was
+  // deleted in Phase G; team mode is native SDK `agents` only.)
 
   // ── Self-improvement (the learning loop) ──
   {
@@ -1081,15 +1202,15 @@ export const FEATURES: FeatureSpec[] = [
     ],
   },
   {
-    id: "ask-user-elicitation",
+    id: "ask-user-answer-roundtrip",
     summary:
-      "MCP-native ask_user round-trip: an in-process tool raises an elicitation/create request; the SDK relays it to AgentRuntime's onElicitation callback (handleElicitation), which renders the question on the user's active channel. Slack gets Block Kit buttons, any text channel matches a numbered/label reply, and channel-less clients (mobile/terminal) get an 'ask' AgentEvent over the open stream via a per-source registered emitter (registerEmitter/unregisterEmitter), with the answer returned OUT-OF-BAND through the AnswerQuestion RPC (NomosAgent + MobileApi) -> resolveById. Answering out-of-band (not as a new chat turn) avoids deadlocking the per-session FIFO queue behind the suspended turn. A pending entry is keyed by elicitation id with a TTL auto-decline.",
+      "Ask-card answer round-trip (shared by every surface): ElicitationManager.askQuestionSet renders the question(s) on the user's active channel — Slack gets Block Kit buttons (resolveByButton), any text channel matches a numbered/label reply (tryConsumeTextReply), and channel-less clients (mobile/terminal) get an 'ask' AgentEvent over the open stream via a per-source registered emitter (registerEmitter/unregisterEmitter). The answer returns OUT-OF-BAND through the AnswerQuestion RPC (NomosAgent + MobileApi) -> resolveById, never as a new chat turn, so the suspended turn never deadlocks the per-session FIFO queue. Each pending entry is keyed by id with a TTL auto-decline. (The producer is native AskUserQuestion via canUseTool — see native-ask-user-question; the hand-rolled MCP ask_user tool was removed.)",
     trigger: { kind: "turn" },
-    entry: ["handleElicitation", "registerEmitter", "unregisterEmitter", "resolveById"],
+    entry: ["askQuestionSet", "registerEmitter", "unregisterEmitter", "resolveById"],
     effects: [
       {
         claim:
-          "ask_user renders the question on the active channel / over the open stream and resolves the agent's suspended promise from the out-of-band answer (in-memory pending map + transient 'ask' stream event; no durable table)",
+          "the Ask card renders on the active channel / over the open stream and resolves the agent's suspended promise from the out-of-band answer (in-memory pending map + transient 'ask' stream event; no durable table)",
         notExercised: true,
       },
     ],
@@ -1234,6 +1355,46 @@ export const FEATURES: FeatureSpec[] = [
           expect: "nonzero",
         },
       },
+    ],
+  },
+  {
+    id: "hosted-google-oauth",
+    summary:
+      "Hosted Google connect: the central server's OAuth callback deposits the access+refresh token over mTLS to the customer instance, which stores it as a CANONICAL google:{userId}:{email} integrations row (config.account_email + token secrets) -- the exact shape the Google MCP read path looks up. The daemon then registers the official Gmail/Calendar/Drive MCP for connected accounts and refreshes the access token from the stored refresh token (no recurring re-auth). With nothing connected, the agent is told to reconnect in Settings rather than browser-driving Google. A migration drops any malformed pre-fix google:{userId} rows (no :email suffix) the read path can't see.",
+    trigger: { kind: "turn", gate: "isHosted + a connected Google account (official backend)" },
+    entry: [
+      "depositOAuthCredential",
+      "storeGoogleAccount",
+      "getValidAccessToken",
+      "buildGoogleMcpServers",
+      "buildGoogleIntegrationPrompt",
+    ],
+    effects: [
+      {
+        claim:
+          "a connected account is stored as the canonical google:{userId}:{email} row (the MCP read-path prefix) with config.account_email set",
+        sql: {
+          query:
+            "SELECT count(*) FROM integrations WHERE name LIKE 'google:%:%' AND config->>'account_email' IS NOT NULL",
+          expect: "nonzero",
+        },
+        noDoubleEncode: { table: "integrations", column: "config", where: "name LIKE 'google:%'" },
+      },
+      {
+        claim:
+          "no malformed google:{userId} rows (missing the :email suffix) survive -- the dedup migration removes them so the read path never misses a connected account",
+        sql: {
+          query:
+            "SELECT count(*) FROM integrations WHERE name LIKE 'google:%' AND name NOT LIKE 'google:%:%'",
+          expect: "zero",
+        },
+      },
+    ],
+    invariants: [
+      "hosted-only: the cli backend (power-user) registers nothing here and reaches Google via the gws CLI",
+      "user-scoped: listGoogleAccounts filters the google:{userId}: prefix, so a tenant never sees another's account",
+      "server and daemon must use the SAME OAuth client -- refresh tokens are client-bound",
+      "refresh token is persisted and reused (getValidAccessToken refreshes + writes the fresh token back) -- no recurring re-auth",
     ],
   },
 ];

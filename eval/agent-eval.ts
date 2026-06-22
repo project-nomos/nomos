@@ -586,6 +586,118 @@ async function mobileChatTurn(
   return finalText;
 }
 
+// Hosted Google OAuth: the deposit's canonical storage shape (the bug that made a
+// connected account invisible to the MCP read path), per-user isolation, refresh
+// reuse, official-MCP registration, connected vs not-connected guidance, and the
+// malformed-row dedup migration. Leaves the canonical row in place so the spec
+// audit's effect SQL can observe it; the throwaway DB is dropped afterward.
+async function runGoogleAuth(): Promise<void> {
+  const { storeGoogleAccount, listGoogleAccounts, getValidAccessToken } =
+    await import("../src/auth/google-integration.ts");
+  const { buildGoogleMcpServers, buildGoogleIntegrationPrompt } =
+    await import("../src/sdk/google-mcp.ts");
+  const { upsertIntegration } = await import("../src/db/integrations.ts");
+
+  // Force the official (hosted) backend with creds present so the registration path
+  // runs regardless of NOMOS_MODE. A non-expired token means getValidAccessToken
+  // never refreshes, so the dummy creds never hit Google.
+  const saved = {
+    backend: process.env.NOMOS_GOOGLE_BACKEND,
+    id: process.env.GOOGLE_CLIENT_ID,
+    secret: process.env.GOOGLE_CLIENT_SECRET,
+  };
+  process.env.NOMOS_GOOGLE_BACKEND = "official";
+  process.env.GOOGLE_CLIENT_ID ??= "eval-dummy-client-id";
+  process.env.GOOGLE_CLIENT_SECRET ??= "eval-dummy-secret";
+
+  const uA = "eval-gauth-a";
+  const uB = "eval-gauth-b";
+  const email = "alice@example.com";
+  const future = Math.floor(Date.now() / 1000) + 3600;
+  const db = getKysely();
+
+  try {
+    await storeGoogleAccount({
+      userId: uA,
+      email,
+      tokens: {
+        accessToken: "at-eval",
+        refreshToken: "rt-eval",
+        expiresAt: future,
+        scope: "calendar",
+      },
+      scopes: "calendar gmail drive",
+    });
+
+    const names = (
+      await db.selectFrom("integrations").select("name").where("name", "like", "google:%").execute()
+    ).map((r) => r.name);
+    check(
+      "[google] deposited as canonical google:{userId}:{email} (the MCP read-path prefix)",
+      names.includes(`google:${uA}:${email}`),
+    );
+
+    const accountsA = await listGoogleAccounts(uA);
+    check(
+      "[google] listGoogleAccounts returns the connected account as default",
+      accountsA.length === 1 && accountsA[0]!.email === email && accountsA[0]!.isDefault,
+    );
+    check(
+      "[google] account is user-scoped (B sees none of A's)",
+      (await listGoogleAccounts(uB)).length === 0,
+    );
+
+    check(
+      "[google] getValidAccessToken returns the stored token (refresh reuse, no re-auth)",
+      (await getValidAccessToken(uA, email)) === "at-eval",
+    );
+
+    const keys = Object.keys(await buildGoogleMcpServers(uA));
+    check(
+      "[google] connected → official MCP registers gmail+calendar+drive",
+      keys.includes("google-gmail") &&
+        keys.includes("google-calendar") &&
+        keys.includes("google-drive"),
+    );
+
+    const notConnected = await buildGoogleIntegrationPrompt(uB, false);
+    check(
+      "[google] not-connected prompt says reconnect in Settings (no browser/flailing)",
+      /not connected/i.test(notConnected) && /Settings/.test(notConnected),
+    );
+    check(
+      "[google] connected prompt asserts active access",
+      /Connected Google accounts/.test(await buildGoogleIntegrationPrompt(uA, true)),
+    );
+
+    // Malformed pre-fix row (google:{userId}, no :email) — invisible to listGoogleAccounts,
+    // showed as a phantom Settings duplicate. The dedup migration must drop it + keep canonical.
+    await upsertIntegration(`google:${uA}`, { enabled: true, config: { provider: "google" } });
+    await db
+      .deleteFrom("integrations")
+      .where("name", "like", "google:%")
+      .where("name", "not like", "google:%:%")
+      .execute();
+    const after = (
+      await db
+        .selectFrom("integrations")
+        .select("name")
+        .where("name", "like", `google:${uA}%`)
+        .execute()
+    ).map((r) => r.name);
+    check(
+      "[google] dedup drops malformed google:{userId}, keeps canonical",
+      after.length === 1 && after[0] === `google:${uA}:${email}`,
+    );
+  } finally {
+    process.env.NOMOS_GOOGLE_BACKEND = saved.backend;
+    if (saved.id === undefined) delete process.env.GOOGLE_CLIENT_ID;
+    else process.env.GOOGLE_CLIENT_ID = saved.id;
+    if (saved.secret === undefined) delete process.env.GOOGLE_CLIENT_SECRET;
+    else process.env.GOOGLE_CLIENT_SECRET = saved.secret;
+  }
+}
+
 async function runGraphBuild(): Promise<void> {
   // Derived store: kg_nodes / kg_edges are built FROM the vault by backfillGraph
   // (deterministic, no LLM). Asserts the derive-from-vault pipeline + closes the
@@ -3257,6 +3369,7 @@ async function runEval(): Promise<void> {
   await runMode("hosted");
   await runWire();
   await runHostedWire();
+  await runGoogleAuth();
 
   // Derived stores built from the vault (deterministic, no LLM): the knowledge
   // graph, auto-dream consolidation, and the wiki, each with per-user isolation.

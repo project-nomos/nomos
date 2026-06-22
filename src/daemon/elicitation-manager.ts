@@ -1,25 +1,26 @@
 /**
- * Elicitation manager — Nomos's host-side handler for MCP elicitation
- * requests (the SDK-native "tool needs to ask the user something" path).
+ * Elicitation manager — Nomos's host-side "the agent needs to ask the user
+ * something" handler. The producer is the SDK-native `AskUserQuestion` tool
+ * (delivered via `canUseTool`, see `AgentRuntime.buildAskCanUseTool`).
  *
  * Flow:
- *   1. An in-process MCP tool (e.g. `ask_user`) calls `extra.sendRequest`
- *      with an `elicitation/create` payload.
- *   2. The Claude Agent SDK relays the request to our `onElicitation`
- *      callback (see `src/sdk/session.ts`).
- *   3. `handleElicitation()` here renders the question on the channel
- *      where the user is currently talking to the agent, registers a
- *      pending entry keyed by elicitation id, and returns a promise that
- *      resolves when the user answers.
- *   4. Channel adapters call `resolveByButton()` (Slack action) or
- *      `tryConsumeTextReply()` (any channel) to dispatch the answer back.
+ *   1. The model calls `AskUserQuestion`; the `canUseTool` handler calls
+ *      `askQuestionSet()` here with its 1-4 questions.
+ *   2. `askQuestionSet()` renders the question(s) on the channel where the user
+ *      is currently talking to the agent (one combined card for stream clients;
+ *      one message per question for channel adapters), registers a pending entry
+ *      per question keyed by id, and returns a promise per question.
+ *   3. Channel adapters call `resolveByButton()` (Slack action) or
+ *      `tryConsumeTextReply()` (any channel); stream clients answer out-of-band
+ *      via the `AnswerQuestion` RPC → `resolveById()`. The set resolves once
+ *      every question is answered.
  *
- * Cleanup: every pending entry has a TTL; expired entries auto-decline so
- * the agent doesn't hang forever if the user walks away.
+ * Cleanup: every pending entry has a TTL; expired entries auto-decline so the
+ * agent doesn't hang forever if the user walks away.
  */
 
 import { randomUUID } from "node:crypto";
-import type { ElicitationRequest, ElicitationResult } from "@anthropic-ai/claude-agent-sdk";
+import type { ElicitationResult } from "@anthropic-ai/claude-agent-sdk";
 import type { ChannelManager } from "./channel-manager.ts";
 import type { AgentEvent, OutgoingMessage } from "./types.ts";
 import { createLogger } from "../lib/logger.ts";
@@ -96,93 +97,108 @@ export class ElicitationManager {
   }
 
   /**
-   * Handle an MCP elicitation request from the agent SDK. Resolves with
-   * the user's answer when they click a button or reply with a matching
-   * text. Auto-declines if no answer arrives within the TTL.
+   * F — ask 1-4 questions as ONE card (native AskUserQuestion → canUseTool). Each
+   * question gets its own pending entry + id, so the existing `AnswerQuestion`
+   * (resolveById) RPC answers them individually, and we resolve once all are in.
+   * Emitter clients (mobile/terminal) get ONE combined `ask` event with
+   * `questions[]`; channel adapters (Slack) fall back to one message per question.
+   * Returns the chosen label per question (aligned to `questions`; "" if declined).
    */
-  async handleElicitation(
-    request: ElicitationRequest,
+  async askQuestionSet(
+    questions: Array<{
+      prompt: string;
+      header?: string;
+      options: Array<{ label: string; description?: string }>;
+      multiSelect?: boolean;
+    }>,
     source: ElicitationSource,
     signal: AbortSignal,
-  ): Promise<ElicitationResult> {
-    // URL-mode elicitations (OAuth) aren't our use case — decline.
-    if (request.mode === "url") {
-      log.warn({ url: request.url }, "URL-mode elicitation not supported; declining");
-      return { action: "decline" };
-    }
-
-    const options = extractOptionsFromSchema(request.requestedSchema);
-    if (options.length === 0) {
-      log.warn(
-        { schema: request.requestedSchema },
-        "Elicitation has no enumerated options; declining (only single-select forms are supported)",
-      );
-      return { action: "decline" };
-    }
-
-    const id = randomUUID();
-
+  ): Promise<string[]> {
     const channelKey = channelKeyFor(source);
-    // If a previous pending question on this channel is unanswered, cancel it
-    // — the agent should never have two open questions in one channel.
+
+    // Honor the single-open-question-per-channel invariant: cancel any prior set.
     const prior = this.byChannel.get(channelKey);
     if (prior) {
       const p = this.pending.get(prior);
       if (p) {
-        log.warn({ priorId: prior, channelKey }, "Cancelling stale elicitation on same channel");
         clearTimeout(p.ttlTimer);
         p.resolve({ action: "cancel" });
         this.pending.delete(prior);
       }
+      this.byChannel.delete(channelKey);
     }
 
-    const promise = new Promise<ElicitationResult>((resolve) => {
-      const ttlTimer = setTimeout(() => {
-        const stale = this.pending.get(id);
-        if (!stale) return;
-        log.warn({ id, channelKey }, "Elicitation TTL expired; auto-declining");
-        this.pending.delete(id);
-        this.byChannel.delete(channelKey);
-        stale.resolve({ action: "decline" });
-      }, DEFAULT_TTL_MS);
+    const entries = questions.map((q) => ({ id: randomUUID(), q, options: q.options }));
+    const toEventOptions = (opts: Array<{ label: string; description?: string }>) =>
+      opts.map((o, i) => ({ label: o.label, desc: o.description, key: String(i + 1) }));
+    const labelOf = (q: { prompt: string; header?: string }) =>
+      q.header ? `${q.header}: ${q.prompt}` : q.prompt;
 
-      const entry: PendingElicitation = {
-        id,
-        source,
-        message: request.message,
-        options,
-        resolve,
-        createdAt: Date.now(),
-        ttlTimer,
-      };
-      this.pending.set(id, entry);
-      this.byChannel.set(channelKey, id);
+    const promises = entries.map(
+      (e) =>
+        new Promise<string>((resolve) => {
+          const ttlTimer = setTimeout(() => {
+            if (!this.pending.delete(e.id)) return;
+            resolve("");
+          }, DEFAULT_TTL_MS);
+          const entry: PendingElicitation = {
+            id: e.id,
+            source,
+            message: labelOf(e.q),
+            options: e.options,
+            resolve: (result) =>
+              resolve(
+                result.action === "accept" && result.content
+                  ? String((result.content as Record<string, unknown>)[ANSWER_PROPERTY] ?? "")
+                  : "",
+              ),
+            createdAt: Date.now(),
+            ttlTimer,
+          };
+          this.pending.set(e.id, entry);
+          signal.addEventListener(
+            "abort",
+            () => {
+              const en = this.pending.get(e.id);
+              if (!en) return;
+              clearTimeout(en.ttlTimer);
+              this.pending.delete(e.id);
+              resolve("");
+            },
+            { once: true },
+          );
+        }),
+    );
 
-      // If the agent aborts (timeout, user cancels), clean up.
-      signal.addEventListener(
-        "abort",
-        () => {
-          const e = this.pending.get(id);
-          if (!e) return;
-          clearTimeout(e.ttlTimer);
-          this.pending.delete(id);
-          this.byChannel.delete(channelKey);
-          e.resolve({ action: "cancel" });
-        },
-        { once: true },
-      );
-    });
+    const emit = this.emitters.get(channelKey);
+    if (emit) {
+      emit({
+        type: "ask",
+        id: entries[0]!.id,
+        prompt: labelOf(entries[0]!.q),
+        options: toEventOptions(entries[0]!.options),
+        multiSelect: entries[0]!.q.multiSelect ?? false,
+        questions: entries.map((e) => ({
+          id: e.id,
+          // Clean prompt — the header rides alongside, so clients render it as an
+          // eyebrow. (Prepending it here too would double it: "Days: Days: …".)
+          prompt: e.q.prompt,
+          header: e.q.header,
+          options: toEventOptions(e.options),
+          multiSelect: e.q.multiSelect ?? false,
+        })),
+      });
+      // Track the set on the first id so a stray text reply / cancellation finds it.
+      this.byChannel.set(channelKey, entries[0]!.id);
+    } else {
+      for (const e of entries) {
+        await this.renderQuestion(e.id, labelOf(e.q), e.options, source).catch((err) => {
+          log.error({ err: err instanceof Error ? err.message : err, id: e.id }, "render failed");
+        });
+      }
+    }
 
-    // Render the question. Slack gets Block Kit buttons; everything else
-    // gets a numbered text message and awaits a text reply.
-    await this.renderQuestion(id, request.message, options, source).catch((err) => {
-      log.error(
-        { err: err instanceof Error ? err.message : err, id, source },
-        "Failed to render elicitation on channel",
-      );
-    });
-
-    return promise;
+    return Promise.all(promises);
   }
 
   /**
@@ -320,35 +336,6 @@ export class ElicitationManager {
 
 function channelKeyFor(s: ElicitationSource): string {
   return s.threadId ? `${s.platform}|${s.channelId}|${s.threadId}` : `${s.platform}|${s.channelId}`;
-}
-
-/**
- * Pull the option labels out of an MCP elicitation form schema. We only
- * support the simple "one string property with an enum" shape that
- * `ask_user` produces — anything else falls through with no options.
- */
-function extractOptionsFromSchema(
-  schema: ElicitationRequest["requestedSchema"],
-): Array<{ label: string; description?: string }> {
-  if (!schema || typeof schema !== "object") return [];
-  const properties = (schema as { properties?: Record<string, unknown> }).properties;
-  if (!properties) return [];
-  const prop = properties[ANSWER_PROPERTY] as
-    | { enum?: unknown[]; enumNames?: string[]; oneOf?: Array<{ const: string; title?: string }> }
-    | undefined;
-  if (!prop) return [];
-
-  if (Array.isArray(prop.oneOf)) {
-    return prop.oneOf.map((o) => ({ label: o.title ?? o.const }));
-  }
-
-  if (Array.isArray(prop.enum)) {
-    const labels = prop.enum.filter((v): v is string => typeof v === "string");
-    const names = Array.isArray(prop.enumNames) ? prop.enumNames : [];
-    return labels.map((label, i) => ({ label: names[i] ?? label }));
-  }
-
-  return [];
 }
 
 function parseActionValue(value: string): { id: string; index: number } | null {

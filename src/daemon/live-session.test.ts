@@ -28,7 +28,7 @@ const handle: SdkMessageHandler = (msg, _emit, state) => {
   const m = msg as unknown as Record<string, unknown>;
   if (m.type === "assistant") {
     const blocks = (m.message as { content: { type: string; text: string }[] }).content;
-    for (const b of blocks) if (b.type === "text") state.fullText += b.text;
+    for (const b of blocks) if (b.type === "text") state.text.add((m.uuid as string) ?? "", b.text);
     return false;
   }
   if (m.type === "result") {
@@ -46,7 +46,7 @@ describe("LiveSessionManager (held-open streaming sessions)", () => {
   it("opens a session and resolves a turn with the accumulated result", async () => {
     const mgr = new LiveSessionManager(handle);
     const st: LiveTurnState = await mgr.runTurn("s1", params("hello"), noopEmit);
-    expect(st.fullText).toBe("echo:hello");
+    expect(st.text.toString()).toBe("echo:hello");
     expect(st.sessionId).toBe("sess-1");
     expect(mgr.hasLive("s1")).toBe(true);
     expect(mgr.turnCount("s1")).toBe(1);
@@ -57,7 +57,7 @@ describe("LiveSessionManager (held-open streaming sessions)", () => {
     const mgr = new LiveSessionManager(handle);
     await mgr.runTurn("s1", params("one"), noopEmit);
     const second = await mgr.runTurn("s1", params("two"), noopEmit);
-    expect(second.fullText).toBe("echo:two"); // fresh per-turn accumulator
+    expect(second.text.toString()).toBe("echo:two"); // fresh per-turn accumulator
     expect(mgr.turnCount("s1")).toBe(2); // both turns rode ONE held-open session
     expect(mgr.size).toBe(1);
     mgr.closeAll();
@@ -70,6 +70,14 @@ describe("LiveSessionManager (held-open streaming sessions)", () => {
     expect(mgr.turnCount("a")).toBe(1);
     expect(mgr.turnCount("b")).toBe(1);
     expect(mgr.size).toBe(2);
+    mgr.closeAll();
+  });
+
+  it("interrupt(): true for a live session, false for an unknown key (D.2)", async () => {
+    const mgr = new LiveSessionManager(handle);
+    await mgr.runTurn("s1", params("hi"), noopEmit);
+    expect(mgr.interrupt("s1")).toBe(true); // session is live
+    expect(mgr.interrupt("nope")).toBe(false); // no such session
     mgr.closeAll();
   });
 

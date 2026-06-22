@@ -15,10 +15,20 @@
  * its response style.
  */
 
+import { z } from "zod";
 import type { ForkedAgentResult } from "../sdk/forked-agent.ts";
 import { createLogger } from "../lib/logger.ts";
 
 const log = createLogger("theory-of-mind");
+
+/** Phase C — schema for SDK-validated structured output (parseLlmAssessment validates further). */
+const LlmAssessmentSchema = z.object({
+  inferredGoal: z.string(),
+  emotionalSubtext: z.string(),
+  conversationTrajectory: z.string(),
+  strategicGuidance: z.string().optional(),
+  confidence: z.string().optional(),
+});
 
 // ── Types ──
 
@@ -211,10 +221,16 @@ export class TheoryOfMindTracker {
           prompt,
           label: "tom-assessment",
           maxTurns: 1,
+          outputSchema: LlmAssessmentSchema,
         }),
       )
       .then((result: ForkedAgentResult) => {
-        const parsed = parseLlmAssessment(result.text, turnCount);
+        const parsed = parseLlmAssessment(
+          result.structuredOutput !== undefined
+            ? JSON.stringify(result.structuredOutput)
+            : result.text,
+          turnCount,
+        );
         if (parsed) {
           this.llmAssessment = parsed;
         }

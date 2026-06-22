@@ -9,6 +9,7 @@
  * Adapted from Claude Code's forkedAgent.ts.
  */
 
+import { z } from "zod";
 import { runSession, type RunSessionParams } from "./session.ts";
 import { buildSdkHooks } from "../hooks/sdk-adapter.ts";
 import type { ApprovalPolicy } from "../security/tool-approval.ts";
@@ -47,11 +48,20 @@ export interface ForkedAgentOptions {
    * thinking model may spend its turns investigating instead of answering.
    */
   allowedTools?: string[];
+  /**
+   * Force structured JSON output validated against this zod schema (Phase C).
+   * Converted to JSON Schema and passed as the SDK `outputFormat`; the validated
+   * object is returned on `ForkedAgentResult.structuredOutput`. Prefer this over
+   * regex + JSON.parse on `text` -- the SDK validates and bounded-retries.
+   */
+  outputSchema?: z.ZodType;
 }
 
 export interface ForkedAgentResult {
   /** The text output from the subagent. */
   text: string;
+  /** Validated structured output when `outputSchema` was supplied (Phase C). */
+  structuredOutput?: unknown;
   /** Cost of this fork in USD. */
   costUsd: number;
   /** Duration in milliseconds. */
@@ -91,10 +101,24 @@ export async function runForkedAgent(options: ForkedAgentOptions): Promise<Forke
     permissionMode: "bypassPermissions",
     maxTurns: options.maxTurns ?? DEFAULT_FORK_MAX_TURNS,
     useSubscription,
+    // Forks are one-shot: their transcripts are never resumed and they never
+    // rewind files, so skip session persistence + file checkpointing (D.4 +
+    // Appendix). Pure overhead reduction; no behavior change.
+    persistSession: false,
+    enableFileCheckpointing: false,
     hooks: buildSdkHooks({ sessionKey: `fork:${label}`, approvalPolicy }),
     ...(options.thinking ? { thinking: options.thinking } : {}),
     ...(options.effort ? { effort: options.effort } : {}),
     ...(options.allowedTools !== undefined ? { allowedTools: options.allowedTools } : {}),
+    // Phase C — when a schema is supplied, force SDK-validated structured output.
+    ...(options.outputSchema
+      ? {
+          outputFormat: {
+            type: "json_schema" as const,
+            schema: z.toJSONSchema(options.outputSchema) as Record<string, unknown>,
+          },
+        }
+      : {}),
     stderr: (data: string) => {
       const trimmed = data.trim();
       if (trimmed) log.error({ label, stream: "stderr" }, trimmed);
@@ -102,6 +126,7 @@ export async function runForkedAgent(options: ForkedAgentOptions): Promise<Forke
   };
 
   let fullText = "";
+  let structuredOutput: unknown;
   let totalCostUsd = 0;
   let inputTokens = 0;
   let outputTokens = 0;
@@ -114,6 +139,7 @@ export async function runForkedAgent(options: ForkedAgentOptions): Promise<Forke
   await withRetry(
     async () => {
       fullText = "";
+      structuredOutput = undefined;
       totalCostUsd = 0;
       inputTokens = 0;
       outputTokens = 0;
@@ -133,6 +159,8 @@ export async function runForkedAgent(options: ForkedAgentOptions): Promise<Forke
           inputTokens = msg.usage?.input_tokens ?? 0;
           outputTokens = msg.usage?.output_tokens ?? 0;
 
+          const so = (msg as { structured_output?: unknown }).structured_output;
+          if (so !== undefined) structuredOutput = so;
           if ("result" in msg) {
             fullText += msg.result;
           }
@@ -167,6 +195,7 @@ export async function runForkedAgent(options: ForkedAgentOptions): Promise<Forke
 
   return {
     text: fullText,
+    structuredOutput,
     costUsd: totalCostUsd,
     durationMs,
     usage: { inputTokens, outputTokens },
