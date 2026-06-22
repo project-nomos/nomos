@@ -98,16 +98,18 @@ describe("buildGoogleMcpServers — rest backup", () => {
 describe("buildGoogleIntegrationPrompt", () => {
   it("returns '' for the cli backend (power-user)", async () => {
     vi.stubEnv("NOMOS_GOOGLE_BACKEND", "cli");
-    listGoogleAccounts.mockResolvedValue([
-      { email: "me@x.com", isDefault: true, sendEnabled: false },
-    ]);
-    expect(await buildGoogleIntegrationPrompt("u1")).toBe("");
+    expect(await buildGoogleIntegrationPrompt("u1", false)).toBe("");
+    expect(await buildGoogleIntegrationPrompt("u1", true)).toBe("");
   });
 
-  it("returns '' when no accounts are connected", async () => {
+  it("emits explicit 'not connected' guidance when no Google MCP registered (hosted)", async () => {
     vi.stubEnv("NOMOS_GOOGLE_BACKEND", "official");
-    listGoogleAccounts.mockResolvedValue([]);
-    expect(await buildGoogleIntegrationPrompt("u1")).toBe("");
+    const p = await buildGoogleIntegrationPrompt("u1", false);
+    expect(p).toContain("not connected");
+    // The agent must be told NOT to flail (hunt for tools / browser / workaround).
+    expect(p).toContain("Browser");
+    expect(p).toContain("Settings");
+    expect(p).not.toContain("Connected Google accounts");
   });
 
   it("asserts active access and lists each account with its send state", async () => {
@@ -116,7 +118,7 @@ describe("buildGoogleIntegrationPrompt", () => {
       { email: "me@x.com", isDefault: true, sendEnabled: false },
       { email: "work@corp.com", isDefault: false, sendEnabled: true },
     ]);
-    const p = await buildGoogleIntegrationPrompt("u1");
+    const p = await buildGoogleIntegrationPrompt("u1", true);
     expect(p).toContain("Connected Google accounts");
     expect(p).toContain("Do NOT tell the user");
     expect(p).toContain("me@x.com (default)");

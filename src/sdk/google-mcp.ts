@@ -124,11 +124,26 @@ export async function buildGoogleMcpServers(
  * when the MCP tools are in fact registered. Empty for the "cli" backend, when
  * Google isn't configured, or when no accounts are connected.
  */
-export async function buildGoogleIntegrationPrompt(userId: string): Promise<string> {
+export async function buildGoogleIntegrationPrompt(
+  userId: string,
+  hasGoogleServers: boolean,
+): Promise<string> {
   const raw = process.env.NOMOS_GOOGLE_BACKEND?.trim().toLowerCase();
   const backend = raw || (isHosted() ? "official" : "cli");
   if (backend === "cli") return ""; // power-user advertises Google via the gws CLI summary
-  if (!isGoogleIntegrationConfigured()) return "";
+
+  // No usable Google MCP registered for this user (not configured, no connected
+  // account, or a dead token). Tell the agent the TRUTH so it stops hunting for
+  // tools, confabulating that they're "loading in the background", browser-driving
+  // Google, or inventing workarounds (the live focus-block flailing).
+  if (!hasGoogleServers) {
+    return [
+      "## Google Workspace: not connected",
+      "Gmail, Calendar, and Drive are **not connected** for this user — you currently have NO Google tools.",
+      "Do NOT 'check for', 'wait for', or say Google tools are still loading. Do NOT use the Browser tool to open or sign into Google. Do NOT invent a workaround (a reminder, a manual checklist, a calendar.google.com walkthrough) unless the user explicitly asks for one.",
+      "If the user asks for something that needs Google, tell them plainly it isn't connected and that they can connect it in Settings → Google, then stop and wait — don't keep trying.",
+    ].join("\n");
+  }
 
   let accounts: Awaited<ReturnType<typeof listGoogleAccounts>>;
   try {

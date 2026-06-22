@@ -1225,13 +1225,15 @@ export class AgentRuntime {
     if (isHosted() && userId) {
       try {
         const googleServers = await buildGoogleMcpServers(userId);
-        if (Object.keys(googleServers).length > 0) {
+        const hasGoogle = Object.keys(googleServers).length > 0;
+        if (hasGoogle) {
           mcpServers = { ...mcpServers, ...googleServers };
         }
-        // Tell the agent it actually HAS this access, otherwise it trusts the
-        // static integrations summary (which lists only power-user channels) and
-        // wrongly claims Gmail/Calendar/Drive aren't configured.
-        googlePrompt = await buildGoogleIntegrationPrompt(userId);
+        // State the truth either way: when connected, that it HAS access (so it
+        // stops claiming Google needs configuring); when NOT, that Google is
+        // disconnected (so it stops hunting for tools / browser-driving / faking a
+        // workaround and instead tells the user to reconnect in Settings).
+        googlePrompt = await buildGoogleIntegrationPrompt(userId, hasGoogle);
       } catch (err) {
         log.warn(
           { err: err instanceof Error ? err.message : err },
