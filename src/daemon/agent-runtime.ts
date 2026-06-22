@@ -123,6 +123,27 @@ function formatElapsedSince(date: Date): string {
   return `${months} month${months === 1 ? "" : "s"}`;
 }
 
+/**
+ * Tools that must NOT surface as a generic tool-use card. Either they have a
+ * dedicated card (AskUserQuestion → the Ask card) or they're internal plumbing
+ * the agent uses to set itself up, not an action taken for the user: ToolSearch
+ * loads tool schemas on demand, List/ReadMcpResource discover MCP resources, and
+ * Skill loads a playbook into context. Showing these as "tools" is just noise
+ * (and a Skill rendered with a wrench + DONE reads as if work was done).
+ */
+const SILENT_TOOLS = new Set<string>([
+  "AskUserQuestion",
+  "ToolSearch",
+  "ListMcpResourcesTool",
+  "ReadMcpResourceTool",
+  "Skill",
+]);
+
+/** Whether a tool call should be hidden from the tool-use activity stream. */
+export function isSilentTool(name: string): boolean {
+  return SILENT_TOOLS.has(name);
+}
+
 /** A short, human one-liner describing a tool call, derived from its input. */
 function summarizeToolInput(name: string, input: unknown): string {
   const o = (input ?? {}) as Record<string, unknown>;
@@ -1431,10 +1452,10 @@ export class AgentRuntime {
               // catch them (incl. server tools like web_search).
               const toolName = (block as { name?: string }).name ?? "unknown";
               const summary = summarizeToolInput(toolName, (block as { input?: unknown }).input);
-              // AskUserQuestion renders via its dedicated `ask` event (the Ask card);
-              // don't also emit a tool-use summary -- that would draw a redundant tool
-              // card duplicating the question.
-              if (toolName !== "AskUserQuestion") {
+              // Plumbing / dedicated-card tools don't render a generic tool card (see
+              // SILENT_TOOLS): AskUserQuestion has the Ask card; ToolSearch, the MCP
+              // resource tools, and Skill are internal setup, not user-meaningful work.
+              if (!isSilentTool(toolName)) {
                 emit({ type: "tool_use_summary", tool_name: toolName, summary });
               }
               // TodoWrite also drives a richer Plan card (clients suppress its tool card).
@@ -1564,7 +1585,7 @@ export class AgentRuntime {
           } else if (block.type === "tool_use" || block.type === "server_tool_use") {
             const toolName = (block as { name?: string }).name ?? "unknown";
             const summary = summarizeToolInput(toolName, (block as { input?: unknown }).input);
-            if (toolName !== "AskUserQuestion") {
+            if (!isSilentTool(toolName)) {
               emit({ type: "tool_use_summary", tool_name: toolName, summary });
             }
             if (toolName === "TodoWrite") {
