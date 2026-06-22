@@ -450,6 +450,15 @@ FROM wiki_articles WHERE category = 'memory'
 ON CONFLICT (user_id, path) DO NOTHING;
 DELETE FROM wiki_articles WHERE category = 'memory';
 
+-- One-time heal: the OAuth deposit handler used to write hosted Google accounts as a
+-- malformed 'google:USERID' integrations row (no email suffix, no account_email),
+-- which the Google MCP read path (prefix 'google:USERID:') can't see -- so it never
+-- produced a calendar tool AND showed as a phantom duplicate in Settings alongside the
+-- real account. The deposit now writes the canonical 'google:USERID:EMAIL' row, so
+-- drop any malformed ones. Idempotent + self-healing: matches only google rows lacking
+-- the email suffix, so canonical rows (two colons) are never touched.
+DELETE FROM integrations WHERE name LIKE 'google:%' AND name NOT LIKE 'google:%:%';
+
 -- Wiki config defaults (consumed by the knowledge compiler's config resolver).
 INSERT INTO config (key, value) VALUES
   ('app.wikiEnabled',           '"true"'),
