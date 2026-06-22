@@ -7,7 +7,6 @@ import { z } from "zod/v4";
 import { traceMemory } from "../memory/trace.ts";
 import { handleBootstrapComplete } from "../ui/bootstrap.ts";
 import { createLogger } from "../lib/logger.ts";
-import { createAskUserTool, type AskUserToolOptions } from "./ask-user.ts";
 
 const log = createLogger("sdk-tools");
 import {
@@ -55,7 +54,6 @@ function formatSubgraph(sub: Subgraph): string {
 export function createMemoryMcpServer(
   userId: string = "local",
   opts: {
-    elicit?: AskUserToolOptions["elicit"];
     /** Current conversation context, so `background_register` can resume THIS thread. */
     session?: { sessionKey: string; platform: string; channelId: string; userId: string };
   } = {},
@@ -1415,10 +1413,6 @@ export function createMemoryMcpServer(
 
   // ── Plan Mode Tool ──
 
-  // Multi-choice user prompt that routes through MCP elicitation. The
-  // actual rendering happens host-side in `src/daemon/elicitation-manager.ts`.
-  const askUserTool = createAskUserTool({ elicit: opts.elicit });
-
   const proposePlanTool = tool(
     "propose_plan",
     "Propose an implementation plan for the user to review before execution. Use this for complex, multi-step tasks where you want to align with the user before making changes. The plan is stored and the user can approve, modify, or reject it. Only propose plans for significant changes — don't use this for simple tasks.",
@@ -2253,8 +2247,6 @@ export function createMemoryMcpServer(
       // Inter-agent messaging
       // Plan mode
       proposePlanTool,
-      // Multi-choice user prompt via MCP elicitation
-      askUserTool,
       // LSP code intelligence
       lspGoToDefinitionTool,
       lspFindReferencesTool,

@@ -460,6 +460,9 @@ export function App({
           resume: sdkSessionIdRef.current ?? undefined,
           thinking,
           allowedTools,
+          // CLI direct mode has no Ask-card surface (no canUseTool wiring), so block
+          // the native AskUserQuestion tool — the model asks in prose in this REPL.
+          disallowedTools: ["AskUserQuestion"],
           ...(config.teamMode ? { agents: buildNativeAgents() } : {}),
           // PreToolUse blocking from hooks.json (matters most in CLI-direct mode,
           // which runs tools on the user's machine). No-op when no hooks registered.

@@ -70,8 +70,9 @@ function getDisallowedTools(): string[] {
   //    the daemon and never show in the user's settings). A prompt warning alone didn't
   //    stop the agent from reaching for them, so block them outright → the agent must use
   //    the `schedule_task` / `loop_create` MCP tools, which run locally in the daemon.
-  //  - `AskUserQuestion` is the SDK's native ask tool; it bypasses Nomos's
-  //    elicitation (so no Ask card renders in the app) → use the `ask_user` MCP tool.
+  // NOTE: `AskUserQuestion` (the SDK's native ask tool) is NOT blocked — it's the agent's
+  // ONLY way to ask the user, routed through the ElicitationManager → the Ask card by the
+  // `canUseTool` handler in runAgent (Phase F; the hand-rolled `ask_user` MCP tool is gone).
   const blocked: string[] = [
     "Workflow",
     "CronCreate",
@@ -86,10 +87,6 @@ function getDisallowedTools(): string[] {
     // remains the primary, more-precise gate; these never block legitimate work.
     ...CRITICAL_BASH_DENY,
   ];
-  // AskUserQuestion: the SDK's native ask tool. Blocked by default (so the model
-  // uses the `ask_user` MCP tool → the Nomos Ask card). When native-ask is opted
-  // in (NOMOS_NATIVE_ASK), allow it and route it through canUseTool → the SAME card.
-  if (!nativeAskEnabled()) blocked.push("AskUserQuestion");
   if (!FEATURES.bashTool()) {
     blocked.push("Bash", "BashOutput", "KillBash");
   }
@@ -212,11 +209,6 @@ import { ShadowObserver } from "../memory/shadow-observer.ts";
 import { createLogger } from "../lib/logger.ts";
 
 const log = createLogger("agent-runtime");
-
-/** F — native AskUserQuestion via canUseTool, routed through Nomos's elicitation card. Opt-in. */
-function nativeAskEnabled(): boolean {
-  return process.env.NOMOS_NATIVE_ASK === "true";
-}
 
 /**
  * F — build the `canUseTool` permission callback. The SDK invokes it for the
@@ -1163,27 +1155,15 @@ export class AgentRuntime {
     // channel sender id to the canonical local id (otherwise the vault fragments
     // per channel); in hosted mode this is the authenticated per-tenant user.
     const vaultUserId = resolveMemoryUserId(userId);
-    // Elicitation for the in-process `ask_user` tool. The SDK does NOT forward
-    // `elicitation/create` from in-process MCP servers (it answers -32601 Method
-    // not found), so hand the tool a direct callback into the ElicitationManager
-    // instead of relying on the SDK's `extra.sendRequest`.
+    // The agent asks the user via the native `AskUserQuestion` tool, routed through
+    // the ElicitationManager by the `canUseTool` handler below (see runParams).
     const mgr = this.elicitationManager;
-    const elicit =
-      mgr && source
-        ? (request: unknown, opts: { signal?: AbortSignal }) =>
-            mgr.handleElicitation(
-              request as Parameters<typeof mgr.handleElicitation>[0],
-              source,
-              opts.signal ?? new AbortController().signal,
-            )
-        : undefined;
     let mcpServers = {
       ...this.mcpServers,
       "nomos-vault": buildVaultMcpServer(vaultUserId),
       // Rebuild the memory tools per-turn so memory_search is scoped to this
       // owner (the cached one at init has no user). Overrides the cached entry.
       "nomos-memory": createMemoryMcpServer(vaultUserId, {
-        elicit,
         // Session context so `background_register` resumes THIS conversation when
         // its watched work (CI/deploy) settles. Absent for cron/internal runs.
         session:
@@ -1345,26 +1325,17 @@ export class AgentRuntime {
       }
     }
 
-    // Build the elicitation callback for this turn. The `ask_user` MCP
-    // tool calls `extra.sendRequest({method: "elicitation/create"})`; for external
-    // MCP servers the SDK forwards to `onElicitation` (in-process servers go through
-    // the `elicit` callback wired into nomos-memory above). We route to the channel
-    // the user is talking to us on and return their answer. `mgr` is declared above.
-    const onElicitation: import("../sdk/session.ts").RunSessionParams["onElicitation"] =
-      mgr && source
-        ? (request, opts) => mgr.handleElicitation(request, source, opts.signal)
-        : undefined;
-    // Mobile / local-terminal clients have no channel adapter, so render ask_user over
-    // THIS open chat stream via `emit` (the answer returns out-of-band via AnswerQuestion).
+    // Mobile / local-terminal clients have no channel adapter, so render the Ask card
+    // over THIS open chat stream via `emit` (the answer returns out-of-band via
+    // AnswerQuestion). Slack/other channels render via their adapter (Block Kit buttons).
     const elicitationOnStream = Boolean(
       mgr && source && (source.platform === "mobile" || source.platform === "terminal"),
     );
     if (elicitationOnStream && mgr && source) mgr.registerEmitter(source, emit);
 
-    // F — native AskUserQuestion via canUseTool (opt-in NOMOS_NATIVE_ASK), routed
-    // through the same elicitation card as the MCP ask_user tool.
-    const canUseTool =
-      nativeAskEnabled() && mgr && source ? buildAskCanUseTool(mgr, source) : undefined;
+    // The agent asks via the native `AskUserQuestion` tool; this canUseTool handler
+    // routes its questions through the ElicitationManager → the Ask card (Phase F).
+    const canUseTool = mgr && source ? buildAskCanUseTool(mgr, source) : undefined;
 
     const runParams: RunSessionParams = {
       prompt,
@@ -1390,7 +1361,6 @@ export class AgentRuntime {
       anthropicBaseUrl: this.config.anthropicBaseUrl,
       plugins: this.plugins,
       useSubscription: this.config.useSubscription,
-      onElicitation,
       // PreToolUse blocking from ~/.nomos/hooks.json (no-op when none registered)
       // PLUS the TOOL_APPROVAL_POLICY gate (block_critical by default). Honored
       // even in bypassPermissions mode -- the safety net for unattended runs.
@@ -1453,10 +1423,10 @@ export class AgentRuntime {
               // catch them (incl. server tools like web_search).
               const toolName = (block as { name?: string }).name ?? "unknown";
               const summary = summarizeToolInput(toolName, (block as { input?: unknown }).input);
-              // ask_user renders via its dedicated `ask` event (the Ask card); don't
-              // also emit a tool-use summary -- that drew a redundant "Ask user" tool
-              // card that duplicated whenever the agent retried the call.
-              if (toolName !== "ask_user" && !toolName.endsWith("__ask_user")) {
+              // AskUserQuestion renders via its dedicated `ask` event (the Ask card);
+              // don't also emit a tool-use summary -- that would draw a redundant tool
+              // card duplicating the question.
+              if (toolName !== "AskUserQuestion") {
                 emit({ type: "tool_use_summary", tool_name: toolName, summary });
               }
               // TodoWrite also drives a richer Plan card (clients suppress its tool card).
@@ -1586,7 +1556,7 @@ export class AgentRuntime {
           } else if (block.type === "tool_use" || block.type === "server_tool_use") {
             const toolName = (block as { name?: string }).name ?? "unknown";
             const summary = summarizeToolInput(toolName, (block as { input?: unknown }).input);
-            if (toolName !== "ask_user" && !toolName.endsWith("__ask_user")) {
+            if (toolName !== "AskUserQuestion") {
               emit({ type: "tool_use_summary", tool_name: toolName, summary });
             }
             if (toolName === "TodoWrite") {

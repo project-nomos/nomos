@@ -7,7 +7,6 @@ import {
   type SDKResultMessage,
   type SDKUserMessage,
   type SdkPluginConfig,
-  type OnElicitation,
   type HookCallbackMatcher,
 } from "@anthropic-ai/claude-agent-sdk";
 import { getPromptCacheTracker } from "./cache-break-detection.ts";
@@ -20,7 +19,6 @@ export type {
   SDKUserMessage,
   McpServerConfig,
   SdkPluginConfig,
-  OnElicitation,
 };
 
 export interface RunSessionParams {
@@ -87,14 +85,6 @@ export interface RunSessionParams {
   plugins?: SdkPluginConfig[];
   /** Use Claude subscription (Max/Pro) instead of API key */
   useSubscription?: boolean;
-  /**
-   * Callback for MCP elicitation requests (e.g. our `ask_user` tool).
-   * The SDK calls this when an in-process MCP server invokes
-   * `extra.sendRequest({method: "elicitation/create", ...})`. Return an
-   * accept/decline/cancel response. If omitted, all elicitations are
-   * automatically declined.
-   */
-  onElicitation?: OnElicitation;
   /** SDK-native hook callbacks (PreToolUse blocking, PostToolUse context, etc.) */
   hooks?: Options["hooks"];
   /** Reasoning effort ('low'..'max'; 'xhigh' is the ultracode level). */
@@ -313,7 +303,6 @@ export function runSession(params: RunSessionParams): Query {
       plugins: params.plugins,
       env,
       ...(params.cwd ? { cwd: params.cwd } : {}),
-      ...(params.onElicitation ? { onElicitation: params.onElicitation } : {}),
       ...(hooks ? { hooks } : {}),
       ...(params.effort ? { effort: params.effort } : {}),
     },

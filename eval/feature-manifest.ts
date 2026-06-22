@@ -659,20 +659,20 @@ export const FEATURES: FeatureSpec[] = [
   {
     id: "native-ask-user-question",
     summary:
-      "Phase F — native AskUserQuestion via canUseTool, opt-in NOMOS_NATIVE_ASK. §1.2 resolved (eval/canusetool-bypass-harness.ts proves canUseTool fires under bypassPermissions). When on, AskUserQuestion is un-blocked and a canUseTool handler routes the questions through ElicitationManager.askQuestionSet → ONE multi-question Ask card (1-4 questions, each with its own id/header/multiSelect) on Slack/mobile/iOS, answered via the existing per-question AnswerQuestion RPC (no proto change). iOS renders the widened card (emulator-verified). Same ElicitationManager as the MCP ask_user tool (one card, two producers).",
+      "Phase F — the agent asks the user EXCLUSIVELY via the SDK-native AskUserQuestion tool (the hand-rolled MCP ask_user tool + handleElicitation/onElicitation were removed). §1.2 resolved (eval/canusetool-bypass-harness.ts proves canUseTool fires under bypassPermissions). AskUserQuestion is un-blocked on the daemon path and a canUseTool handler (buildAskCanUseTool) routes its questions through ElicitationManager.askQuestionSet → ONE multi-question Ask card (1-4 questions, each with id/header/multiSelect) on Slack/mobile/iOS, answered via the per-question AnswerQuestion RPC (no proto change). iOS renders the widened card (emulator-verified). CLI direct mode (no Ask-card surface) disallows AskUserQuestion so the model asks in prose.",
     trigger: { kind: "turn" },
-    entry: ["buildAskCanUseTool", "nativeAskEnabled", "askQuestionSet"],
+    entry: ["buildAskCanUseTool", "askQuestionSet"],
     effects: [
       {
         claim:
-          "when NOMOS_NATIVE_ASK=true the model's native AskUserQuestion calls render 1-4 questions on ONE Ask card and answers return via canUseTool (behavioral; ask-canusetool.test.ts + elicitation-manager.test.ts cover the mapping + set resolution)",
+          "the model's native AskUserQuestion calls render 1-4 questions on ONE Ask card and answers return via canUseTool (behavioral; ask-canusetool.test.ts + elicitation-manager.test.ts cover the mapping + set resolution)",
         notExercised: true,
       },
     ],
     invariants: [
-      "off by default; opt-in via NOMOS_NATIVE_ASK; otherwise AskUserQuestion stays blocked (model uses MCP ask_user)",
+      "AskUserQuestion is the ONLY ask path (the MCP ask_user tool is deleted); it is NOT in disallowedTools on the daemon path",
       "askQuestionSet emits ONE ask event with questions[]; the set resolves only when every sub-question is answered",
-      "native asks route through the same ElicitationManager as ask_user (one card, two producers)",
+      "CLI direct mode disallows AskUserQuestion (no canUseTool surface) → the model asks in prose there",
       "a declined/timed-out question yields no synthetic answer",
     ],
   },
@@ -1202,15 +1202,15 @@ export const FEATURES: FeatureSpec[] = [
     ],
   },
   {
-    id: "ask-user-elicitation",
+    id: "ask-user-answer-roundtrip",
     summary:
-      "MCP-native ask_user round-trip: an in-process tool raises an elicitation/create request; the SDK relays it to AgentRuntime's onElicitation callback (handleElicitation), which renders the question on the user's active channel. Slack gets Block Kit buttons, any text channel matches a numbered/label reply, and channel-less clients (mobile/terminal) get an 'ask' AgentEvent over the open stream via a per-source registered emitter (registerEmitter/unregisterEmitter), with the answer returned OUT-OF-BAND through the AnswerQuestion RPC (NomosAgent + MobileApi) -> resolveById. Answering out-of-band (not as a new chat turn) avoids deadlocking the per-session FIFO queue behind the suspended turn. A pending entry is keyed by elicitation id with a TTL auto-decline.",
+      "Ask-card answer round-trip (shared by every surface): ElicitationManager.askQuestionSet renders the question(s) on the user's active channel — Slack gets Block Kit buttons (resolveByButton), any text channel matches a numbered/label reply (tryConsumeTextReply), and channel-less clients (mobile/terminal) get an 'ask' AgentEvent over the open stream via a per-source registered emitter (registerEmitter/unregisterEmitter). The answer returns OUT-OF-BAND through the AnswerQuestion RPC (NomosAgent + MobileApi) -> resolveById, never as a new chat turn, so the suspended turn never deadlocks the per-session FIFO queue. Each pending entry is keyed by id with a TTL auto-decline. (The producer is native AskUserQuestion via canUseTool — see native-ask-user-question; the hand-rolled MCP ask_user tool was removed.)",
     trigger: { kind: "turn" },
-    entry: ["handleElicitation", "registerEmitter", "unregisterEmitter", "resolveById"],
+    entry: ["askQuestionSet", "registerEmitter", "unregisterEmitter", "resolveById"],
     effects: [
       {
         claim:
-          "ask_user renders the question on the active channel / over the open stream and resolves the agent's suspended promise from the out-of-band answer (in-memory pending map + transient 'ask' stream event; no durable table)",
+          "the Ask card renders on the active channel / over the open stream and resolves the agent's suspended promise from the out-of-band answer (in-memory pending map + transient 'ask' stream event; no durable table)",
         notExercised: true,
       },
     ],
