@@ -162,5 +162,6 @@ export async function buildGoogleIntegrationPrompt(
     "You have **active, authenticated** Google Workspace access right now through the Google MCP: Gmail, Calendar, and Drive. Do NOT tell the user that Gmail, Calendar, or Drive needs to be connected or configured; you already have access for the accounts below.",
     ...lines,
     "Use the matching `mcp__google-gmail__*`, `mcp__google-calendar__*`, and `mcp__google-drive__*` tools (the default account uses the unsuffixed `google-*` servers; additional accounts are suffixed with an email slug). The `google-gmail`, `gmail-inbox-triage`, `google-calendar*`, and `google-drive` skills give workflow guidance. Gmail sending is opt-in per account; for draft-only accounts, create a draft and ask the user before sending.",
+    "If a Google call fails with an auth/permission error, the connection just needs reconnecting: tell the user to reconnect Google in the app's **Settings → Google**, and stop. NEVER suggest a terminal, `npx`, `gws`, or 'Claude Code' — those aren't part of this product. Don't silently fall back to a reminder/scheduled task in place of the calendar action.",
   ].join("\n");
 }
