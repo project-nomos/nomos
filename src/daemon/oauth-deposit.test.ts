@@ -4,7 +4,10 @@ vi.mock("../auth/google-integration.ts", () => ({
   fetchGoogleAccountEmail: vi.fn(),
   storeGoogleAccount: vi.fn(),
 }));
-vi.mock("../db/integrations.ts", () => ({ upsertIntegration: vi.fn() }));
+vi.mock("../db/integrations.ts", () => ({
+  upsertIntegration: vi.fn(),
+  removeIntegration: vi.fn().mockResolvedValue(null),
+}));
 
 import { depositOAuthCredential } from "./oauth-deposit.ts";
 import { fetchGoogleAccountEmail, storeGoogleAccount } from "../auth/google-integration.ts";

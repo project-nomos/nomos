@@ -3,7 +3,9 @@ import React from "react";
 import { render } from "ink-testing-library";
 import { AskPrompt, type AskQuestion } from "./ask-prompt.tsx";
 
-const tick = () => new Promise((r) => setTimeout(r, 15));
+// Give Ink time to process the synchronous keystroke + re-render. Generous so the
+// test doesn't flake when the full suite runs the machine hot.
+const tick = () => new Promise((r) => setTimeout(r, 60));
 
 const twoQuestions: AskQuestion[] = [
   {

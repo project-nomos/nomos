@@ -17,7 +17,7 @@
 
 import * as grpc from "@grpc/grpc-js";
 import { randomUUID } from "node:crypto";
-import { upsertIntegration } from "../db/integrations.ts";
+import { upsertIntegration, removeIntegration } from "../db/integrations.ts";
 import { fetchGoogleAccountEmail, storeGoogleAccount } from "../auth/google-integration.ts";
 import { createLogger } from "../lib/logger.ts";
 
@@ -89,6 +89,9 @@ export async function depositOAuthCredential(
         },
         scopes: req.scopes,
       });
+      // Self-heal: drop the malformed `google:{userId}` row a prior (pre-fix)
+      // deposit may have written, so it doesn't linger as a Settings duplicate.
+      await removeIntegration(`google:${req.userId}`).catch(() => {});
       log.info({ userId: req.userId, email }, "OAuth credential deposited (google, canonical)");
       callback(null, { success: true, message: "Deposited", integrationId: randomUUID() });
       return;
