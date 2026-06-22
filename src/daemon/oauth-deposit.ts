@@ -18,6 +18,7 @@
 import * as grpc from "@grpc/grpc-js";
 import { randomUUID } from "node:crypto";
 import { upsertIntegration } from "../db/integrations.ts";
+import { fetchGoogleAccountEmail, storeGoogleAccount } from "../auth/google-integration.ts";
 import { createLogger } from "../lib/logger.ts";
 
 const log = createLogger("oauth-deposit");
@@ -62,6 +63,37 @@ export async function depositOAuthCredential(
   }
 
   try {
+    // Google must be stored in the canonical per-account shape the Google MCP
+    // builder reads: name `google:{userId}:{email}` with config.account_email /
+    // is_default / send_enabled. The generic `provider:userId` row below is
+    // INVISIBLE to listGoogleAccounts (prefix `google:{userId}:`), which is why a
+    // connected account never produced a calendar tool. Resolve the email from the
+    // token and route through storeGoogleAccount.
+    if (req.provider === "google") {
+      const email = await fetchGoogleAccountEmail(req.accessToken);
+      if (!email) {
+        callback({
+          code: grpc.status.INTERNAL,
+          message: "could not resolve Google account email from token",
+        });
+        return;
+      }
+      await storeGoogleAccount({
+        userId: req.userId,
+        email,
+        tokens: {
+          accessToken: req.accessToken,
+          refreshToken: req.refreshToken || undefined,
+          expiresAt: req.expiresAt,
+          scope: req.scopes,
+        },
+        scopes: req.scopes,
+      });
+      log.info({ userId: req.userId, email }, "OAuth credential deposited (google, canonical)");
+      callback(null, { success: true, message: "Deposited", integrationId: randomUUID() });
+      return;
+    }
+
     // Compose the integration row. Each `provider` gets its own row,
     // scoped by user_id so family-plan members don't trample each other.
     const integrationId = randomUUID();
