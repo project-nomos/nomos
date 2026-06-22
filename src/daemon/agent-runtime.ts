@@ -215,9 +215,8 @@ const log = createLogger("agent-runtime");
  * native `AskUserQuestion` tool (which fires even under bypassPermissions, proven
  * by eval/canusetool-bypass-harness.ts). We route each question through the SAME
  * elicitation pipeline as the MCP `ask_user` tool, so model-driven asks render on
- * the existing Ask card across Slack / mobile / iOS. Questions are asked
- * sequentially (respecting the single-open-question-per-channel invariant);
- * multiSelect widening is the surface follow-on. All other tools pass through.
+ * the Ask card (one card with 1-4 questions) across Slack / mobile / iOS.
+ * multiSelect answers come back as a label[] array. All other tools pass through.
  */
 export function buildAskCanUseTool(
   mgr: ElicitationManager,
@@ -248,9 +247,18 @@ export function buildAskCanUseTool(
       opts.signal,
     );
 
-    const answers: Record<string, string> = {};
+    // multiSelect questions MUST return an array of labels (label[]); a single
+    // joined string reads as "no matching option" and the model re-asks forever.
+    const answers: Record<string, string | string[]> = {};
     valid.forEach((q, i) => {
-      if (picked[i]) answers[q.question] = picked[i]!;
+      const a = picked[i];
+      if (!a) return;
+      answers[q.question] = q.multiSelect
+        ? a
+            .split(/\s*,\s*/)
+            .map((s) => s.trim())
+            .filter(Boolean)
+        : a;
     });
     return { behavior: "allow", updatedInput: { ...input, answers } };
   };

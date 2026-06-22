@@ -180,7 +180,9 @@ export class ElicitationManager {
         multiSelect: entries[0]!.q.multiSelect ?? false,
         questions: entries.map((e) => ({
           id: e.id,
-          prompt: labelOf(e.q),
+          // Clean prompt — the header rides alongside, so clients render it as an
+          // eyebrow. (Prepending it here too would double it: "Days: Days: …".)
+          prompt: e.q.prompt,
           header: e.q.header,
           options: toEventOptions(e.options),
           multiSelect: e.q.multiSelect ?? false,

@@ -31,8 +31,12 @@ describe("ElicitationManager.askQuestionSet (Phase F multi-question card)", () =
     expect(asked).toBeDefined();
     expect(asked!.questions).toHaveLength(2);
     expect(asked!.questions![0]!.header).toBe("Timing");
-    expect(asked!.questions![0]!.prompt).toBe("Timing: Ship now or wait?");
-    // Top-level fields mirror questions[0] for single-question clients.
+    // questions[].prompt is CLEAN (header rides alongside as the eyebrow); prepending
+    // it here too would double-render as "Timing: Timing: …" on the card.
+    expect(asked!.questions![0]!.prompt).toBe("Ship now or wait?");
+    // Top-level prompt keeps the header prepend for single-question clients that
+    // don't render the eyebrow separately.
+    expect(asked!.prompt).toBe("Timing: Ship now or wait?");
     expect(asked!.id).toBe(asked!.questions![0]!.id);
 
     // Answer each via the existing per-question RPC; the set resolves when both land.

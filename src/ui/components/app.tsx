@@ -482,12 +482,20 @@ export function App({
               options: (q.options ?? []).filter((o) => o.label),
             }));
           if (!valid.length) return { behavior: "allow", updatedInput: input };
-          const answers = await new Promise<Record<string, string>>((resolve) => {
+          const raw_answers = await new Promise<Record<string, string>>((resolve) => {
             setIsInputActive(false);
             setPendingAsk({ questions: valid, resolve });
           });
           setPendingAsk(null);
           setIsInputActive(true);
+          // multiSelect answers must be a label[] array, else the model treats the
+          // joined string as no-valid-answer and re-asks (the mobile loop bug).
+          const answers: Record<string, string | string[]> = {};
+          for (const q of valid) {
+            const a = raw_answers[q.question];
+            if (a === undefined) continue;
+            answers[q.question] = q.multiSelect ? a.split(/\s*,\s*/).filter(Boolean) : a;
+          }
           return { behavior: "allow", updatedInput: { ...input, answers } };
         };
 
