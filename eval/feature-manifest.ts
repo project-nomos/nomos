@@ -665,7 +665,7 @@ export const FEATURES: FeatureSpec[] = [
     effects: [
       {
         claim:
-          "the model's native AskUserQuestion calls render 1-4 questions on ONE Ask card and answers return via canUseTool (behavioral; ask-canusetool.test.ts + elicitation-manager.test.ts cover the mapping + set resolution)",
+          "the model's native AskUserQuestion calls render 1-4 questions on ONE Ask card and answers return via canUseTool (behavioral; unit-covered by ask-canusetool.test.ts + elicitation-manager.test.ts; live-verified E2E by eval/grpc-native-ask-e2e.ts — the model asks, the card reaches the client, the answer completes the turn)",
         notExercised: true,
       },
     ],
