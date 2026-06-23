@@ -197,6 +197,37 @@ function errorResult(message: string) {
   return { content: [{ type: "text" as const, text: message }], isError: true };
 }
 
+interface CalendarTime {
+  dateTime?: string;
+  date?: string;
+  timeZone?: string;
+}
+
+/**
+ * Build the Google Calendar event resource for events.insert. `recurrence` (RRULE
+ * strings) makes it a REPEATING event — without it the agent would have to create
+ * one event per occurrence, which is the bug behind "it's only for today".
+ */
+export function buildCalendarEventBody(args: {
+  summary: string;
+  start: CalendarTime;
+  end: CalendarTime;
+  description?: string;
+  location?: string;
+  attendees?: string[];
+  recurrence?: string[];
+}): Record<string, unknown> {
+  return {
+    summary: args.summary,
+    start: args.start,
+    end: args.end,
+    ...(args.description ? { description: args.description } : {}),
+    ...(args.location ? { location: args.location } : {}),
+    ...(args.attendees ? { attendees: args.attendees.map((email) => ({ email })) } : {}),
+    ...(args.recurrence && args.recurrence.length ? { recurrence: args.recurrence } : {}),
+  };
+}
+
 /** Compose the in-process MCP server with Gmail + Calendar tools. */
 export function createGoogleWorkspaceMcpServer(): McpSdkServerConfigWithInstance {
   // ── Gmail ──
@@ -497,7 +528,7 @@ export function createGoogleWorkspaceMcpServer(): McpSdkServerConfigWithInstance
 
   const calendarCreateEventTool = tool(
     "calendar_create_event",
-    "Create a new calendar event. start/end can be either {dateTime, timeZone} for timed events or {date} for all-day events.",
+    "Create a calendar event, one-off OR recurring. start/end can be either {dateTime, timeZone} for timed events or {date} for all-day events. For a repeating event (e.g. a weekday focus block) pass `recurrence` with RRULE strings -- do NOT create one event per day.",
     {
       summary: z.string(),
       start: z.object({
@@ -513,6 +544,12 @@ export function createGoogleWorkspaceMcpServer(): McpSdkServerConfigWithInstance
       description: z.string().optional(),
       location: z.string().optional(),
       attendees: z.array(z.string()).optional().describe("Attendee emails."),
+      recurrence: z
+        .array(z.string())
+        .optional()
+        .describe(
+          'RFC-5545 recurrence rules for a repeating event, e.g. ["RRULE:FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR"] for every weekday, ["RRULE:FREQ=DAILY"] for every day, or ["RRULE:FREQ=WEEKLY;BYDAY=MO;COUNT=10"]. Omit for a one-off event.',
+        ),
       calendarId: z.string().optional(),
       sendUpdates: z.enum(["all", "externalOnly", "none"]).optional(),
       account: z.string().optional(),
@@ -520,14 +557,7 @@ export function createGoogleWorkspaceMcpServer(): McpSdkServerConfigWithInstance
     async (args) => {
       try {
         const acct = resolveAccount(args.account);
-        const body = {
-          summary: args.summary,
-          start: args.start,
-          end: args.end,
-          ...(args.description ? { description: args.description } : {}),
-          ...(args.location ? { location: args.location } : {}),
-          ...(args.attendees ? { attendees: args.attendees.map((email) => ({ email })) } : {}),
-        };
+        const body = buildCalendarEventBody(args);
         const event = await runGwsJson<unknown>(acct, [
           "calendar",
           "events",
@@ -551,12 +581,14 @@ export function createGoogleWorkspaceMcpServer(): McpSdkServerConfigWithInstance
 
   const calendarUpdateEventTool = tool(
     "calendar_update_event",
-    "Patch a calendar event. Only the fields you pass are updated; others are preserved.",
+    "Patch a calendar event. Only the fields you pass are updated; others are preserved. To make an existing event repeat, patch `recurrence` with RRULE strings.",
     {
       eventId: z.string(),
       patch: z
         .record(z.string(), z.unknown())
-        .describe("Partial event body (summary, start, end, etc.)."),
+        .describe(
+          'Partial event body (summary, start, end, recurrence, etc.). e.g. {"recurrence":["RRULE:FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR"]} to make it repeat on weekdays.',
+        ),
       calendarId: z.string().optional(),
       sendUpdates: z.enum(["all", "externalOnly", "none"]).optional(),
       account: z.string().optional(),

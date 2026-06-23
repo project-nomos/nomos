@@ -12,6 +12,8 @@ metadata:
 
 # calendar (v3)
 
+> **PREFER THE TYPED TOOLS.** When the in-process `calendar_*` MCP tools are available (`calendar_create_event`, `calendar_update_event`, `calendar_list_events`, `calendar_get_event`, `calendar_delete_event`), use them first — they're more reliable than the CLI. For a **recurring** event, call `calendar_create_event` with a `recurrence` arg (RRULE strings, e.g. `["RRULE:FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR"]`) — create ONE recurring event, never one per day. Pass an `account` arg to target a specific email. Use the CLI below only as a fallback for things the tools don't cover.
+
 > **PREREQUISITE:** Read `../gws-shared/SKILL.md` for auth, global flags, and security rules. If missing, run `gws generate-skills` to create it.
 
 ```bash

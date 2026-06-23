@@ -782,18 +782,11 @@ export class AgentRuntime {
         .join("\n");
       parts.push(
         [
-          `- **Google Workspace** (via \`gws\` CLI -- use Bash tool to run commands):`,
-          `  Authorized accounts:\n${accountList}`,
-          `  **Usage**: Run \`npx @googleworkspace/cli <service> <resource> <method> --params '<JSON>'\` via the Bash tool.`,
-          `  **Examples**:`,
-          `    - List emails: \`npx @googleworkspace/cli gmail users messages list --params '{"userId":"me","maxResults":5}'\``,
-          `    - Read email: \`npx @googleworkspace/cli gmail users messages get --params '{"userId":"me","id":"<msgId>","format":"full"}'\``,
-          `    - Send email: \`npx @googleworkspace/cli gmail users messages send --params '{"userId":"me"}' --json '{"raw":"<base64>"}'\``,
-          `    - List events: \`npx @googleworkspace/cli calendar events list --params '{"calendarId":"primary","maxResults":5}'\``,
-          `    - List files: \`npx @googleworkspace/cli drive files list --params '{"pageSize":10}'\``,
-          `    - Search: \`npx @googleworkspace/cli gmail users messages list --params '{"userId":"me","q":"from:someone subject:topic"}'\``,
-          `  **Multi-account**: The active account is the default. To switch, re-auth is needed.`,
-          `  **Tip**: Use \`npx @googleworkspace/cli schema <service.resource.method>\` to check available params.`,
+          `- **Google Workspace** (Gmail, Calendar, Drive) — authorized accounts:`,
+          accountList,
+          `  PREFER the typed in-process tools (more reliable than the CLI — use these first): \`gmail_search\`, \`gmail_get_message\`, \`gmail_get_thread\`, \`gmail_create_draft\`, \`gmail_send_draft\`, \`gmail_list_labels\`, \`calendar_list_events\`, \`calendar_get_event\`, \`calendar_create_event\`, \`calendar_update_event\`, \`calendar_delete_event\`, \`google_list_accounts\`. Pass an \`account\` arg to target a specific email — you do NOT need to "switch" accounts.`,
+          `  Recurring events: \`calendar_create_event\` takes a \`recurrence\` arg (RRULE), e.g. \`["RRULE:FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR"]\` for a weekday focus block — create ONE recurring event, never one per day.`,
+          `  Fallback only: for operations the typed tools don't cover, the \`gws\` CLI is on PATH via the Bash tool: \`npx @googleworkspace/cli <service> <resource> <method> --params '<JSON>'\` (\`npx @googleworkspace/cli schema <service.resource.method>\` shows params).`,
         ].join("\n"),
       );
     }
