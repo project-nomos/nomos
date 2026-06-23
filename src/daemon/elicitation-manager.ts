@@ -292,28 +292,38 @@ export class ElicitationManager {
       throw new Error(`No adapter for platform ${source.platform}`);
     }
 
-    // Slack: render Block Kit buttons via postMessage on the bot/user client.
-    // We piggy-back on the adapter's `postMessage` if it accepts blocks via a
-    // typed extension. Slack adapter exposes a `postBlocks` helper when present.
-    const slackPoster = (
-      adapter as unknown as {
-        postBlocks?: (
-          channelId: string,
-          text: string,
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          blocks: any[],
-          threadId?: string,
-        ) => Promise<string | undefined>;
-      }
-    ).postBlocks;
+    // Slack: render Block Kit buttons via the adapter's `postBlocks` helper when
+    // present. Call it as a METHOD on the adapter (NOT a detached reference): the
+    // adapter's `postBlocks` reads `this.defaultChannelId`, so an unbound call
+    // throws "Cannot read properties of undefined (reading 'defaultChannelId')".
+    const slackAdapter = adapter as unknown as {
+      postBlocks?: (
+        channelId: string,
+        text: string,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        blocks: any[],
+        threadId?: string,
+      ) => Promise<string | undefined>;
+    };
 
-    if (slackPoster) {
+    if (typeof slackAdapter.postBlocks === "function") {
       const blocks = buildSlackBlocks(id, message, options);
       const fallbackText = `${message}\n\n${options.map((o, i) => `${i + 1}. ${o.label}`).join("\n")}`;
-      const messageId = await slackPoster(source.channelId, fallbackText, blocks, source.threadId);
-      const entry = this.pending.get(id);
-      if (entry) entry.postedMessageId = messageId;
-      return;
+      const messageId = await slackAdapter.postBlocks(
+        source.channelId,
+        fallbackText,
+        blocks,
+        source.threadId,
+      );
+      // `postBlocks` returns undefined when it declines (non-default channel / no
+      // client). Only treat the question as rendered if it actually posted;
+      // otherwise fall through to the generic numbered-text fallback below so the
+      // question still reaches the user instead of silently vanishing.
+      if (messageId) {
+        const entry = this.pending.get(id);
+        if (entry) entry.postedMessageId = messageId;
+        return;
+      }
     }
 
     // Generic fallback: post numbered text and let the user reply with the

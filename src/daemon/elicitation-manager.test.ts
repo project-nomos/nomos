@@ -60,3 +60,63 @@ describe("ElicitationManager.askQuestionSet (Phase F multi-question card)", () =
     expect(await promise).toEqual([""]);
   });
 });
+
+describe("ElicitationManager renderQuestion (Slack adapter path)", () => {
+  const slackSource: ElicitationSource = { platform: "slack", channelId: "C-DEFAULT" };
+
+  // Fake Slack adapter whose postBlocks/send read `this`, reproducing the binding
+  // requirement that the detached (unbound) call broke at runtime.
+  function fakeSlackAdapter(defaultChannelId: string) {
+    return {
+      defaultChannelId,
+      postBlocksCalls: [] as Array<{ channelId: string }>,
+      sendCalls: [] as Array<{ channelId: string; content: string }>,
+      async postBlocks(channelId: string, _text: string, _blocks: unknown[], _threadId?: string) {
+        // Reading `this.defaultChannelId` throws if `this` is undefined — i.e. if
+        // postBlocks was called detached/unbound (the v0.1.59 regression).
+        if (channelId !== this.defaultChannelId) return undefined;
+        this.postBlocksCalls.push({ channelId });
+        return "posted-ts-1";
+      },
+      async send(msg: { channelId: string; content: string }) {
+        this.sendCalls.push({ channelId: msg.channelId, content: msg.content });
+      },
+    };
+  }
+
+  const flush = () => new Promise((r) => setTimeout(r, 0));
+
+  it("renders via the adapter's BOUND postBlocks (regression: no unbound-`this` crash)", async () => {
+    const adapter = fakeSlackAdapter("C-DEFAULT");
+    const mgr = new ElicitationManager({ getAdapter: () => adapter } as never);
+    const ac = new AbortController();
+    const promise = mgr.askQuestionSet(
+      [{ prompt: "Ship?", options: [{ label: "Yes" }, { label: "No" }] }],
+      slackSource,
+      ac.signal,
+    );
+    await flush();
+    // With the bug (detached call) `this.defaultChannelId` throws → "render failed"
+    // and the call never lands. Bound, it records exactly one post on the default channel.
+    expect(adapter.postBlocksCalls).toEqual([{ channelId: "C-DEFAULT" }]);
+    ac.abort();
+    expect(await promise).toEqual([""]);
+  });
+
+  it("falls back to a text message when postBlocks declines (non-default channel)", async () => {
+    const adapter = fakeSlackAdapter("C-DEFAULT");
+    const mgr = new ElicitationManager({ getAdapter: () => adapter } as never);
+    const ac = new AbortController();
+    const promise = mgr.askQuestionSet(
+      [{ prompt: "Ship?", options: [{ label: "Yes" }, { label: "No" }] }],
+      { platform: "slack", channelId: "C-OTHER" }, // not the watched default channel
+      ac.signal,
+    );
+    await flush();
+    expect(adapter.postBlocksCalls).toEqual([]); // declined → undefined
+    expect(adapter.sendCalls).toHaveLength(1); // so the question still renders as text
+    expect(adapter.sendCalls[0]!.channelId).toBe("C-OTHER");
+    ac.abort();
+    expect(await promise).toEqual([""]);
+  });
+});
