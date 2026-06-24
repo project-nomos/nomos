@@ -698,6 +698,10 @@ message MPermissionRequest {
 
 message MIntegrationsResponse {
   repeated MIntegration integrations = 1;
+  // Whether the Google Classroom capability is enabled on this deployment
+  // (FEATURES.classroom / NOMOS_CLASSROOM, off by default). Clients hide the
+  // Classroom connector entirely when false.
+  bool classroom_enabled = 2;
 }
 
 message MStartConnectRequest {

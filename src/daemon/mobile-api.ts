@@ -931,7 +931,10 @@ async function handleUpdatePermission(
 }
 
 async function handleListIntegrations(ctx: TenantContext) {
-  return { integrations: await listIntegrationsForUser(ctx.userId) };
+  return {
+    integrations: await listIntegrationsForUser(ctx.userId),
+    classroomEnabled: FEATURES.classroom(),
+  };
 }
 
 async function handleStartConnect(

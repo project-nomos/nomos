@@ -95,6 +95,45 @@ export function buildNativeDeviceMcpServer(userId: string): McpSdkServerConfigWi
     async (args) => present(await call("reminders_complete", args), "Reminder completed."),
   );
 
+  const contactsSearch = tool(
+    "contacts_search",
+    "Search the user's native iPhone Contacts (Address Book) by name. Returns matching contacts with phone numbers + emails. Runs on the user's connected phone.",
+    { query: z.string().describe("Name (or part of a name) to search for") },
+    async (args) => present(await call("contacts_search", args), "No matching contacts."),
+    { annotations: { readOnlyHint: true } },
+  );
+
+  const contactsCreate = tool(
+    "contacts_create",
+    "Add a new contact to the user's native iPhone Contacts. Confirm the details with the user first.",
+    {
+      givenName: z.string().describe("First name"),
+      familyName: z.string().optional().describe("Last name"),
+      phone: z.string().optional().describe("Phone number"),
+      email: z.string().optional().describe("Email address"),
+    },
+    async (args) => present(await call("contacts_create", args), "Contact added."),
+  );
+
+  const homeListAccessories = tool(
+    "home_list_accessories",
+    "List the HomeKit accessories in the user's home (lights, locks, thermostats, …) and their current on/off state. Runs on the user's connected phone.",
+    {},
+    async (args) =>
+      present(await call("home_list_accessories", args), "No HomeKit accessories found."),
+    { annotations: { readOnlyHint: true } },
+  );
+
+  const homeSetAccessory = tool(
+    "home_set_accessory",
+    "Turn a HomeKit accessory on or off by its name (from home_list_accessories). Runs on the user's connected phone.",
+    {
+      name: z.string().describe("The accessory name, e.g. 'Living Room Lamp'"),
+      on: z.boolean().describe("true to turn on, false to turn off"),
+    },
+    async (args) => present(await call("home_set_accessory", args), "Done."),
+  );
+
   return createSdkMcpServer({
     name: "nomos-native-device",
     version: "1.0.0",
@@ -104,6 +143,10 @@ export function buildNativeDeviceMcpServer(userId: string): McpSdkServerConfigWi
       remindersList,
       remindersCreate,
       remindersComplete,
+      contactsSearch,
+      contactsCreate,
+      homeListAccessories,
+      homeSetAccessory,
     ],
   });
 }
