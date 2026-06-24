@@ -41,13 +41,11 @@ import {
 import { isGoogleWorkspaceConfiguredAsync } from "../sdk/google-workspace-mcp.ts";
 import { buildGoogleMcpServers, buildGoogleIntegrationPrompt } from "../sdk/google-mcp.ts";
 import { buildClassroomMcpServer } from "../sdk/google-classroom-mcp.ts";
-import {
-  hasClassroomScope,
-  hasClassroomWriteScope,
-  listGoogleAccounts,
-} from "../auth/google-integration.ts";
+import { hasClassroomWriteScope, listGoogleAccounts } from "../auth/google-integration.ts";
 import { buildStudioMcpServer } from "../sdk/studio-mcp.ts";
 import { buildVaultMcpServer } from "../sdk/vault-mcp.ts";
+import { buildNativeDeviceMcpServer } from "../sdk/native-device-mcp.ts";
+import { getDeviceBridge } from "./device-bridge.ts";
 import { buildThinkMcpServer } from "../sdk/think-mcp.ts";
 import { buildLoopMcpServer } from "../sdk/loop-mcp.ts";
 import { buildMemoryDigest } from "../memory/digest.ts";
@@ -1284,7 +1282,11 @@ export class AgentRuntime {
     // classroom scopes (per-account consent), so non-students stay dark.
     if (FEATURES.classroom() && isHosted() && userId) {
       try {
-        const accts = (await listGoogleAccounts(userId)).filter((a) => hasClassroomScope(a.scopes));
+        // Classroom is INTENT-driven: only accounts connected through the Classroom flow
+        // (classroomConnected) get the tools. A Workspace reconnect that cumulatively
+        // carries classroom scopes does NOT enable it — there's no reliable domain signal
+        // (K-12 schools use custom domains; .edu is universities, which use Canvas).
+        const accts = (await listGoogleAccounts(userId)).filter((a) => a.classroomConnected);
         if (accts.length > 0) {
           // Write tools require BOTH the deployment off-switch (NOMOS_CLASSROOM_WRITE)
           // AND a connected account that actually granted the read-write scope. Either
@@ -1312,6 +1314,16 @@ export class AgentRuntime {
           "failed to register Google Classroom MCP",
         );
       }
+    }
+    // Native device tools (Calendar + Reminders) — HOSTED only, and ONLY while the
+    // user's phone holds the DeviceBridge stream open (else the tools would always
+    // fail). The tools route to that phone's EventKit via the bridge; the device
+    // enforces its own permission prompts, so consent stays on-device.
+    if (FEATURES.nativeDevice() && isHosted() && userId && getDeviceBridge().isConnected(userId)) {
+      const deviceServers: Record<string, ReturnType<typeof buildNativeDeviceMcpServer>> = {
+        "nomos-native-device": buildNativeDeviceMcpServer(userId),
+      };
+      mcpServers = { ...mcpServers, ...deviceServers };
     }
     let googlePrompt = "";
     if (isHosted() && userId) {

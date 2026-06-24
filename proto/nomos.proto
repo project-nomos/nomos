@@ -241,6 +241,14 @@ service MobileApi {
   rpc StudioSuggestEdits (MStudioAssetRef) returns (MStudioSuggestionsResponse);
   // The on-device identity check reports its score for an edit (0..1).
   rpc StudioReportIdentity (MStudioIdentityReport) returns (MAck);
+
+  // Device bridge — the phone exposes its native EventKit (Calendar + Reminders)
+  // as agent tools. The app opens DeviceBridge on launch and the daemon streams
+  // tool invocations down it; the app runs each via EventKit and returns the
+  // result through SubmitDeviceResult (correlated by id). The agent never touches
+  // the device directly — it calls the native-device MCP tools, which route here.
+  rpc DeviceBridge (MDeviceHello) returns (stream MDeviceInvocation);
+  rpc SubmitDeviceResult (MDeviceResult) returns (MAck);
 }
 
 // Loops (autonomous recurring jobs)
@@ -690,6 +698,10 @@ message MPermissionRequest {
 
 message MIntegrationsResponse {
   repeated MIntegration integrations = 1;
+  // Whether the Google Classroom capability is enabled on this deployment
+  // (FEATURES.classroom / NOMOS_CLASSROOM, off by default). Clients hide the
+  // Classroom connector entirely when false.
+  bool classroom_enabled = 2;
 }
 
 message MStartConnectRequest {
@@ -729,6 +741,27 @@ message MDeviceRegister {
 
 message MDeviceUnregister {
   string expo_push_token = 1;
+}
+
+// ── Device bridge (native EventKit tools) ──
+// The phone opens DeviceBridge with the capabilities it is offering this session.
+message MDeviceHello {
+  repeated string capabilities = 1; // e.g. "calendar", "reminders"
+}
+
+// A tool invocation the daemon pushes down to the phone.
+message MDeviceInvocation {
+  string id = 1;        // correlates with MDeviceResult.id
+  string tool = 2;      // e.g. "calendar_create_event", "reminders_list"
+  string args_json = 3; // JSON-encoded tool arguments
+}
+
+// The phone's result for one invocation, returned via SubmitDeviceResult.
+message MDeviceResult {
+  string id = 1;
+  bool ok = 2;
+  string result_json = 3; // JSON-encoded result payload (when ok)
+  string error = 4;       // human-readable error (when !ok)
 }
 
 // ── OAuth Deposit ──

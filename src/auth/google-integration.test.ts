@@ -8,6 +8,7 @@ import {
   googleRedirectUriForPlatform,
   hasClassroomScope,
   hasClassroomWriteScope,
+  oauthStateClassroom,
   isGoogleIntegrationConfigured,
   signOAuthState,
   verifyOAuthState,
@@ -150,6 +151,15 @@ describe("OAuth CSRF state", () => {
   it("round-trips for the same user", () => {
     const s = signOAuthState("user-A");
     expect(verifyOAuthState(s, "user-A")).toBe(true);
+  });
+
+  it("carries the connect kind (workspace vs classroom) and still verifies", () => {
+    const ws = signOAuthState("user-A", 600, false);
+    const cr = signOAuthState("user-A", 600, true);
+    expect(verifyOAuthState(ws, "user-A")).toBe(true);
+    expect(verifyOAuthState(cr, "user-A")).toBe(true);
+    expect(oauthStateClassroom(ws)).toBe(false);
+    expect(oauthStateClassroom(cr)).toBe(true);
   });
 
   it("rejects a different user", () => {
