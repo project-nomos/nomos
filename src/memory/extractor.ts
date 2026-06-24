@@ -9,6 +9,7 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import { runForkedAgent } from "../sdk/forked-agent.ts";
+import { coerceJson, extractFirstJson } from "../lib/json-extract.ts";
 import { storeMemoryChunk } from "../db/memory.ts";
 import { generateEmbedding, isEmbeddingAvailable } from "./embeddings.ts";
 import { loadEnvConfig } from "../config/env.ts";
@@ -184,20 +185,16 @@ export async function extractKnowledge(
     // Phase C — prefer the SDK-validated structured output; the schema defaults
     // fill any missing arrays. Fall back to the legacy regex + JSON.parse only
     // when structured output is unavailable (older CLI / non-structured path).
-    const direct = ExtractedKnowledgeSchema.safeParse(structuredOutput);
+    // Prefer the SDK-validated structured output when the CLI honors outputFormat
+    // (it may arrive parsed OR as a JSON string). It's commonly `undefined` on the
+    // subscription/fork path, so fall back to the text — which forked-agent returns
+    // DUPLICATED + ```json-fenced. extractFirstJson takes the first BALANCED object,
+    // not a greedy first-{…}-to-last-} match that splices the two copies into
+    // invalid JSON (the bug that made extraction silently store nothing in prod).
+    const direct = ExtractedKnowledgeSchema.safeParse(coerceJson(structuredOutput));
     if (direct.success) return direct.data;
 
-    const jsonMatch = fullText.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) return empty;
-    const fallback = ExtractedKnowledgeSchema.safeParse(
-      (() => {
-        try {
-          return JSON.parse(jsonMatch[0]);
-        } catch {
-          return null;
-        }
-      })(),
-    );
+    const fallback = ExtractedKnowledgeSchema.safeParse(extractFirstJson(fullText));
     return fallback.success ? fallback.data : empty;
   } catch (err) {
     log.debug({ err }, "Knowledge extraction failed");
