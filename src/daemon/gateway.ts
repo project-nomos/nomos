@@ -18,6 +18,7 @@ import { ConnectServer } from "./connect-server.ts";
 import { ChannelManager } from "./channel-manager.ts";
 import { CronEngine } from "./cron-engine.ts";
 import { DraftManager } from "./draft-manager.ts";
+import { handleClassroomSubmit } from "./classroom-submit.ts";
 import { ElicitationManager } from "./elicitation-manager.ts";
 import { writePidFile, installSignalHandlers } from "./lifecycle.ts";
 import { SlackAdapter } from "./channels/slack.ts";
@@ -107,6 +108,10 @@ export class Gateway {
         this.sendFyiNotificationToDefaultChannel(platform, channelId, content, context),
     });
 
+    // Classroom homework submissions are non-message drafts: on approval, attach the
+    // (possibly edited) work and turn it in, instead of a channel send.
+    this.draftManager.registerApproveAction("classroom_submission", handleClassroomSubmit);
+
     // 4. Create WebSocket server
     this.wsServer = new DaemonWebSocketServer(
       this.messageQueue,
@@ -138,6 +143,7 @@ export class Gateway {
     // its `onElicitation` callback can dispatch through here.
     this.elicitationManager = new ElicitationManager(this.channelManager);
     this.runtime.setElicitationManager(this.elicitationManager);
+    this.runtime.setDraftManager(this.draftManager);
     this.grpcServer.setElicitationManager(this.elicitationManager);
 
     // 6. Create cron engine with broadcast to connected clients

@@ -112,6 +112,22 @@ export interface NomosConfig {
   inboxScanInterval?: string;
   /** Interval for calendar scanning (default: "5m"). Used only when inboxAutonomy !== "off". */
   calendarScanInterval?: string;
+  /**
+   * Enable the Google Classroom student-assistant capability (default: false; opt-in).
+   * Mirrors `FEATURES.classroom()`; toggled via the Extensions page. When false, no
+   * Classroom MCP tools, scopes, or proactive scan are loaded.
+   */
+  classroomEnabled: boolean;
+  /**
+   * Allow turning in (submitting) approved Classroom homework drafts. Deployment
+   * off-switch on top of the per-account read-write scope (default: false). Mirrors
+   * `FEATURES.classroomWrite()`. When false, the Classroom write tools are withheld.
+   */
+  classroomWriteEnabled: boolean;
+  /** Run the proactive Classroom due-date / exam-prep scan (default: false; requires classroomEnabled). */
+  classroomScan: boolean;
+  /** Interval for the Classroom scan (default: "6h"). Used only when classroomScan is on. */
+  classroomScanInterval?: string;
 }
 
 export function loadEnvConfig(): NomosConfig {
@@ -200,6 +216,10 @@ export function loadEnvConfig(): NomosConfig {
     briefingCron: process.env.NOMOS_BRIEFING_CRON,
     inboxScanInterval: process.env.NOMOS_INBOX_SCAN_INTERVAL,
     calendarScanInterval: process.env.NOMOS_CALENDAR_SCAN_INTERVAL,
+    classroomEnabled: process.env.NOMOS_CLASSROOM === "true",
+    classroomWriteEnabled: process.env.NOMOS_CLASSROOM_WRITE === "true",
+    classroomScan: process.env.NOMOS_CLASSROOM_SCAN === "true",
+    classroomScanInterval: process.env.NOMOS_CLASSROOM_SCAN_INTERVAL,
   };
 }
 
@@ -269,6 +289,12 @@ export async function loadEnvConfigAsync(): Promise<NomosConfig> {
     } else if (provider === "vertex") {
       process.env.CLAUDE_CODE_USE_VERTEX = "1";
     }
+
+    // Mirror the Classroom capability toggle to the env var the sync FEATURES.classroom()
+    // gate reads, so the DB flag (set via the Extensions page) takes effect without
+    // editing .env. DB is the source of truth; env is the sync surface the gate reads.
+    if (merged.classroomEnabled) process.env.NOMOS_CLASSROOM = "true";
+    if (merged.classroomWriteEnabled) process.env.NOMOS_CLASSROOM_WRITE = "true";
 
     return merged;
   } catch {

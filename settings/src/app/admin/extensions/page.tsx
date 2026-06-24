@@ -185,6 +185,137 @@ function StatCard({
   );
 }
 
+function ToggleRow({
+  label,
+  description,
+  checked,
+  disabled,
+  onChange,
+}: {
+  label: string;
+  description: string;
+  checked: boolean;
+  disabled?: boolean;
+  onChange: (next: boolean) => void;
+}) {
+  return (
+    <div className="flex items-start justify-between gap-4 py-2">
+      <div className="min-w-0">
+        <p className="text-sm text-text">{label}</p>
+        <p className="text-xs text-overlay0">{description}</p>
+      </div>
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => onChange(!checked)}
+        className={`shrink-0 w-10 h-6 rounded-full transition-colors disabled:opacity-40 ${
+          checked ? "bg-mauve" : "bg-surface1"
+        }`}
+        aria-pressed={checked}
+      >
+        <span
+          className={`block w-4 h-4 bg-crust rounded-full transition-transform translate-y-1 ${
+            checked ? "translate-x-5" : "translate-x-1"
+          }`}
+        />
+      </button>
+    </div>
+  );
+}
+
+/**
+ * Optional, off-by-default capabilities gated by FEATURES.* on the daemon. Each
+ * persists an env flag via /api/env; the daemon reads it on (re)start.
+ */
+function OptionalCapabilities() {
+  const { addToast } = useToast();
+  const [classroom, setClassroom] = useState(false);
+  const [classroomWrite, setClassroomWrite] = useState(false);
+  const [classroomScan, setClassroomScan] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    fetch("/api/env")
+      .then((r) => r.json())
+      .then((env) => {
+        setClassroom(env.NOMOS_CLASSROOM === "true");
+        setClassroomWrite(env.NOMOS_CLASSROOM_WRITE === "true");
+        setClassroomScan(env.NOMOS_CLASSROOM_SCAN === "true");
+      })
+      .catch(() => {});
+  }, []);
+
+  const save = async (updates: Record<string, string>, apply: () => void) => {
+    setSaving(true);
+    try {
+      const res = await fetch("/api/env", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(updates),
+      });
+      if (!res.ok) {
+        addToast("Failed to save", "error");
+        return;
+      }
+      apply();
+      addToast("Saved — restart the daemon to apply", "success");
+    } catch {
+      addToast("Failed to save", "error");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <section className="mb-8 rounded-xl border border-surface0 bg-mantle p-5">
+      <h2 className="text-sm font-semibold text-subtext1 uppercase tracking-wider mb-1">
+        Optional capabilities
+      </h2>
+      <p className="text-xs text-overlay0 mb-4">
+        Off by default. After enabling Classroom, connect a Google account (with Classroom) in
+        Integrations → Google.
+      </p>
+      <ToggleRow
+        label="Google Classroom"
+        description="Track due work, draft + submit homework with your approval, and exam prep."
+        checked={classroom}
+        disabled={saving}
+        onChange={(next) =>
+          save({ NOMOS_CLASSROOM: String(next) }, () => {
+            setClassroom(next);
+            if (!next) {
+              setClassroomWrite(false);
+              setClassroomScan(false);
+            }
+          })
+        }
+      />
+      {classroom && (
+        <div className="pl-4 border-l border-surface0 mt-1">
+          <ToggleRow
+            label="Allow turn-in"
+            description="Let the agent submit your approved homework drafts to Classroom (read-write scope)."
+            checked={classroomWrite}
+            disabled={saving}
+            onChange={(next) =>
+              save({ NOMOS_CLASSROOM_WRITE: String(next) }, () => setClassroomWrite(next))
+            }
+          />
+          <ToggleRow
+            label="Proactive due-date / exam scan"
+            description="Periodically surface assignments due soon and upcoming exams."
+            checked={classroomScan}
+            disabled={saving}
+            onChange={(next) =>
+              save({ NOMOS_CLASSROOM_SCAN: String(next) }, () => setClassroomScan(next))
+            }
+          />
+        </div>
+      )}
+    </section>
+  );
+}
+
 export default function ExtensionsPage() {
   const { addToast } = useToast();
   const [data, setData] = useState<ExtensionsData | null>(null);
@@ -286,6 +417,9 @@ export default function ExtensionsPage() {
           <StatCard label="Community" value={communityPlugins.length} icon={Package} />
         </div>
       </section>
+
+      {/* Optional capabilities (off by default) */}
+      <OptionalCapabilities />
 
       {/* Skills */}
       <section className="mb-8 rounded-xl border border-surface0 bg-mantle p-5">

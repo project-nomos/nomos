@@ -58,6 +58,54 @@ export const GOOGLE_SCOPES = [
   "https://www.googleapis.com/auth/drive.file",
 ];
 
+/** Exact OAuth scope string for the read-WRITE coursework scope (enables turn-in). */
+const CLASSROOM_COURSEWORK_WRITE = "https://www.googleapis.com/auth/classroom.coursework.me";
+
+/**
+ * Google Classroom scopes — requested ONLY via incremental consent when the user
+ * connects Classroom (the opt-in FEATURES.classroom capability). Kept deliberately
+ * OUT of GOOGLE_SCOPES so non-students are never asked for them. All "sensitive"
+ * (not restricted → standard consent-screen verification, no CASA assessment).
+ * Submission documents reuse the drive.file scope already in GOOGLE_SCOPES.
+ */
+export const GOOGLE_CLASSROOM_SCOPES_READ = [
+  "https://www.googleapis.com/auth/classroom.courses.readonly",
+  "https://www.googleapis.com/auth/classroom.coursework.me.readonly",
+  "https://www.googleapis.com/auth/classroom.announcements.readonly",
+  "https://www.googleapis.com/auth/classroom.courseworkmaterials.readonly",
+];
+
+/** Read scopes with coursework.me.readonly upgraded to the read-WRITE scope (turn-in). */
+export const GOOGLE_CLASSROOM_SCOPES_WRITE = GOOGLE_CLASSROOM_SCOPES_READ.map((s) =>
+  s.endsWith("classroom.coursework.me.readonly") ? CLASSROOM_COURSEWORK_WRITE : s,
+);
+
+/** True if a granted-scopes string carries any Classroom scope (the per-account opt-in signal). */
+export function hasClassroomScope(scopes: string): boolean {
+  return /(^|\s|\/)classroom\./.test(scopes);
+}
+
+/** True if a granted-scopes string carries the read-WRITE coursework scope (turn-in allowed). */
+export function hasClassroomWriteScope(scopes: string): boolean {
+  return scopes.split(/\s+/).includes(CLASSROOM_COURSEWORK_WRITE);
+}
+
+/**
+ * The Google services a granted-scopes string actually covers, for client display —
+ * so a classroom-only school account isn't mislabeled "Gmail · Calendar · Drive".
+ * `drive.file` (app-created files only, used for classroom turn-in) does NOT count as
+ * full Drive access.
+ */
+export function grantedGoogleServices(scopes: string): string[] {
+  const s = scopes ?? "";
+  const out: string[] = [];
+  if (/\/gmail\./.test(s)) out.push("gmail");
+  if (/\/calendar/.test(s)) out.push("calendar");
+  if (/\/auth\/drive(\s|$)/.test(s)) out.push("drive"); // full drive, not drive.file
+  if (hasClassroomScope(s)) out.push("classroom");
+  return out;
+}
+
 export interface GoogleAccount {
   /** BA user this account belongs to. */
   userId: string;
@@ -110,10 +158,34 @@ export function googleRedirectUri(): string {
   return process.env.GOOGLE_OAUTH_REDIRECT_URI ?? "http://localhost:4100/oauth/google/callback";
 }
 
+/**
+ * Redirect URI for MOBILE connects. Google can only redirect to an http(s) URI, but
+ * the iOS app catches a custom `nomos://` scheme — so the mobile flow points at a
+ * nomos-server relay route (`/oauth/google/relay`) that bounces `code+state` to
+ * `nomos://google-connect`. The app then finishes via ConnectGoogleAccount. MUST be an
+ * authorized redirect URI on the OAuth client. Used for the connect AND the matching
+ * token exchange (Google requires the redirect_uri to match).
+ */
+export function googleMobileRedirectUri(): string {
+  return process.env.GOOGLE_OAUTH_MOBILE_REDIRECT_URI ?? "http://localhost:4000/oauth/google/relay";
+}
+
+/** Pick the redirect URI for a connect by client platform (mobile bounces via nomos://). */
+export function googleRedirectUriForPlatform(platform: string | undefined): string {
+  return platform === "mobile" ? googleMobileRedirectUri() : googleRedirectUri();
+}
+
 function oauthStateSecret(): string {
-  return (
-    process.env.ENCRYPTION_KEY ?? process.env.GOOGLE_CLIENT_SECRET ?? "nomos-google-oauth-state"
-  );
+  // Fail closed: never sign/verify OAuth state with a predictable constant. In prod
+  // the Google connect requires GOOGLE_CLIENT_SECRET and the daemon has ENCRYPTION_KEY,
+  // so this never throws on the real path; a missing secret is a misconfiguration.
+  const secret = process.env.ENCRYPTION_KEY ?? process.env.GOOGLE_CLIENT_SECRET;
+  if (!secret) {
+    throw new Error(
+      "OAuth state signing requires ENCRYPTION_KEY or GOOGLE_CLIENT_SECRET to be set",
+    );
+  }
+  return secret;
 }
 
 /**
@@ -160,16 +232,37 @@ export function buildAuthUrl(opts: {
   redirectUri: string;
   state: string;
   loginHint?: string;
+  /** Append Classroom scopes for an incremental connect: "read" or "write" (turn-in). */
+  classroom?: "read" | "write";
 }): string {
   const { clientId } = googleClientCreds();
+  // A Classroom connect is a SEPARATE, account-specific grant: it requests ONLY the
+  // classroom scopes (+ identity, + drive.file for turn-in's submission doc) — never
+  // the Gmail/Calendar/Drive base — so a student can use a SCHOOL account for
+  // Classroom while a personal account keeps Gmail/Cal/Drive. `select_account` forces
+  // the chooser so they can pick a different account; `include_granted_scopes` means
+  // re-connecting the SAME account just adds classroom on top of its existing grant.
+  const IDENTITY = ["openid", "email", "profile"];
+  const DRIVE_FILE = "https://www.googleapis.com/auth/drive.file";
+  let scopeList: string[];
+  let prompt = "consent";
+  if (opts.classroom === "write") {
+    scopeList = [...IDENTITY, DRIVE_FILE, ...GOOGLE_CLASSROOM_SCOPES_WRITE];
+    prompt = "select_account consent";
+  } else if (opts.classroom === "read") {
+    scopeList = [...IDENTITY, ...GOOGLE_CLASSROOM_SCOPES_READ];
+    prompt = "select_account consent";
+  } else {
+    scopeList = GOOGLE_SCOPES;
+  }
   const params = new URLSearchParams({
     client_id: clientId,
     redirect_uri: opts.redirectUri,
     response_type: "code",
-    scope: GOOGLE_SCOPES.join(" "),
+    scope: scopeList.join(" "),
     // offline + consent → Google returns a refresh token even on re-connect.
     access_type: "offline",
-    prompt: "consent",
+    prompt,
     include_granted_scopes: "true",
     state: opts.state,
   });

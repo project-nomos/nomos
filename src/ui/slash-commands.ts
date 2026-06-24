@@ -9,6 +9,8 @@ import { loadAgentConfigs, getActiveAgent } from "../config/agents.ts";
 import type { NomosConfig } from "../config/env.ts";
 import type { McpServerConfig } from "../sdk/session.ts";
 import { resolveMemoryUserId } from "../auth/tenant-context.ts";
+import { FEATURES } from "../config/mode.ts";
+import { buildHomeworkPrompt } from "../sdk/homework-prompt.ts";
 
 /** Static registry of slash commands for autocomplete and dispatch. */
 export const SLASH_COMMANDS = [
@@ -41,6 +43,10 @@ export const SLASH_COMMANDS = [
   { name: "permissions", desc: "Manage agent permissions" },
   { name: "integrations", desc: "Setup channel integrations" },
   { name: "team", desc: "Run a task with parallel agent workers" },
+  {
+    name: "homework",
+    desc: "Draft my Google Classroom homework for approval (accept/edit/decline)",
+  },
   { name: "calibrate", desc: "Start a calibration session to teach the agent how you think" },
   { name: "reflect", desc: "Agent self-assessment -- how well does it know you?" },
   { name: "twin-test", desc: "Adversarial test -- can the agent write like you?" },
@@ -180,6 +186,8 @@ export async function dispatchSlashCommand(
       return { output: await cmdIntegrations(ctx, args) };
     case "team":
       return cmdTeam(args, input);
+    case "homework":
+      return cmdHomework(args);
     case "calibrate":
       return { output: "", passthrough: "Start a calibration session. Use the /calibrate skill." };
     case "reflect":
@@ -1362,6 +1370,22 @@ function cmdTeam(args: string[], rawInput: string): CommandResult {
   }
   // Pass the full /team message through to the agent
   return { output: "", passthrough: rawInput };
+}
+
+function cmdHomework(args: string[]): CommandResult {
+  if (!FEATURES.classroom()) {
+    return {
+      output: [
+        chalk.bold("Google Classroom is off"),
+        chalk.dim(
+          "  Enable it in Settings → Extensions → Optional capabilities, then connect your Google account (with Classroom) in Integrations → Google.",
+        ),
+      ].join("\n"),
+    };
+  }
+  // Expand client-side and pass through, so it works whether the CLI runs in-process
+  // or against the daemon (the daemon receives the already-expanded instruction).
+  return { output: "", passthrough: buildHomeworkPrompt(args.join(" ")) };
 }
 
 function cmdUndoFiles(): string {

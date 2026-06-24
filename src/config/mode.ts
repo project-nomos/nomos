@@ -91,6 +91,24 @@ export const FEATURES = {
    */
   studio: (): boolean => isHosted(),
 
+  /**
+   * Google Classroom (student assistant: read coursework/grades, draft + submit
+   * homework via the approval flow, exam prep). Opt-in capability, OFF by default
+   * in BOTH modes — not every user is a student. Toggled via the Extensions page
+   * (persists `app.classroomEnabled`, mirrored to `NOMOS_CLASSROOM` so this sync
+   * gate honors the DB flag — see loadEnvConfigAsync).
+   */
+  classroom: (): boolean => process.env.NOMOS_CLASSROOM === "true",
+
+  /**
+   * Allow turning in (submitting) approved Classroom homework drafts. A deployment
+   * off-switch ON TOP of the per-account read-write scope: even if a connected
+   * account granted `classroom.coursework.me`, the write tools (draft-submit/reclaim)
+   * are withheld unless this is on. Default OFF — turn-in is the highest-trust action.
+   * Mirrored from `app.classroomWriteEnabled` via loadEnvConfigAsync.
+   */
+  classroomWrite: (): boolean => process.env.NOMOS_CLASSROOM_WRITE === "true",
+
   // Features that stay ON in both modes (declared explicitly so the contract is documented):
   autoDream: (): boolean => true,
   magicDocs: (): boolean => true,

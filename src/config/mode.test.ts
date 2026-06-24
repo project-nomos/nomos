@@ -99,3 +99,26 @@ describe("FEATURES gates in power-user mode", () => {
     expect(FEATURES.autoDream()).toBe(true);
   });
 });
+
+describe("FEATURES.classroom (opt-in, off by default in both modes)", () => {
+  const original = process.env.NOMOS_CLASSROOM;
+  afterEach(() => {
+    if (original === undefined) delete process.env.NOMOS_CLASSROOM;
+    else process.env.NOMOS_CLASSROOM = original;
+  });
+
+  it("is off by default", () => {
+    delete process.env.NOMOS_CLASSROOM;
+    expect(FEATURES.classroom()).toBe(false);
+  });
+
+  it("is on when NOMOS_CLASSROOM=true", () => {
+    process.env.NOMOS_CLASSROOM = "true";
+    expect(FEATURES.classroom()).toBe(true);
+  });
+
+  it("treats any other value as off", () => {
+    process.env.NOMOS_CLASSROOM = "1";
+    expect(FEATURES.classroom()).toBe(false);
+  });
+});

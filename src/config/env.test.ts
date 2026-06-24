@@ -131,6 +131,9 @@ describe("validateConfig", () => {
       videoGeneration: false,
       useSubscription: false,
       inboxAutonomy: "off",
+      classroomEnabled: false,
+      classroomWriteEnabled: false,
+      classroomScan: false,
     };
 
     const errors = validateConfig(config);
@@ -171,6 +174,9 @@ describe("validateConfig", () => {
       videoGeneration: false,
       useSubscription: false,
       inboxAutonomy: "off",
+      classroomEnabled: false,
+      classroomWriteEnabled: false,
+      classroomScan: false,
     };
 
     const errors = validateConfig(config);

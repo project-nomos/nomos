@@ -21,10 +21,11 @@ import {
 import { generateTriage, type TriageSummary } from "./priority-triage.ts";
 import { inboxScanJobSpec, type ProactiveJobSpec } from "./inbox-watcher.ts";
 import { calendarScanJobSpec } from "./calendar-watcher.ts";
+import { classroomDueDateJobSpec } from "./classroom-watcher.ts";
 import { morningBriefingJobSpec, DEFAULT_BRIEFING_CRON } from "./morning-briefing.ts";
 import { loadEnvConfigAsync } from "../config/env.ts";
 import { getNotificationDefault } from "../db/notification-defaults.ts";
-import { isHosted } from "../config/mode.ts";
+import { isHosted, FEATURES } from "../config/mode.ts";
 import { createLogger } from "../lib/logger.ts";
 
 const log = createLogger("proactive-scheduler");
@@ -34,6 +35,7 @@ const CALENDAR_JOB_NAME = "proactive:calendar-watcher";
 const BRIEFING_JOB_NAME = "proactive:morning-briefing";
 const COMMITMENT_JOB_NAME = "proactive:commitment-reminders";
 const TRIAGE_JOB_NAME = "proactive:triage-digest";
+const CLASSROOM_JOB_NAME = "proactive:classroom-watcher";
 
 /**
  * Register (or update, or remove) the proactive cron jobs based on current
@@ -64,6 +66,28 @@ export async function registerProactiveJobs(): Promise<void> {
       scheduleType: "every",
       enabled: Boolean(config.commitmentTracking && (target || isHosted())),
     })) || changed;
+
+  // Classroom due-date / exam-prep scan — its OWN opt-in (FEATURES.classroom +
+  // classroomScan), independent of inbox autonomy. Agent-routed announce, so it
+  // needs a notification target; disabled when off or no target.
+  {
+    const wantClassroom = FEATURES.classroom() && config.classroomScan && Boolean(target);
+    if (wantClassroom && target) {
+      changed =
+        (await upsertJob(
+          store,
+          classroomDueDateJobSpec(config.classroomScanInterval ?? "6h"),
+          target,
+        )) || changed;
+    } else {
+      const existing = await store.getJobByName(CLASSROOM_JOB_NAME);
+      if (existing?.enabled) {
+        await store.updateJob(existing.id, { enabled: false });
+        changed = true;
+        log.info({ name: CLASSROOM_JOB_NAME }, "Disabled job (classroom scan off / no target)");
+      }
+    }
+  }
 
   if (autonomy === "off") {
     // Disable the autonomy-gated jobs (don't delete — preserve run history).

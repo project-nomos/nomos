@@ -1,8 +1,13 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   buildAuthUrl,
   GOOGLE_SCOPES,
+  GOOGLE_CLASSROOM_SCOPES_READ,
+  GOOGLE_CLASSROOM_SCOPES_WRITE,
   googleClientCreds,
+  googleRedirectUriForPlatform,
+  hasClassroomScope,
+  hasClassroomWriteScope,
   isGoogleIntegrationConfigured,
   signOAuthState,
   verifyOAuthState,
@@ -64,7 +69,84 @@ describe("buildAuthUrl", () => {
   });
 });
 
+describe("Classroom scopes", () => {
+  it("keeps Classroom scopes OUT of the base scope set (non-students never asked)", () => {
+    expect(GOOGLE_SCOPES.some((s) => s.includes("classroom"))).toBe(false);
+  });
+
+  it("buildAuthUrl omits Classroom scopes by default", () => {
+    vi.stubEnv("GOOGLE_CLIENT_ID", "cid.apps.googleusercontent.com");
+    vi.stubEnv("GOOGLE_CLIENT_SECRET", "secret");
+    const url = new URL(buildAuthUrl({ redirectUri: "http://x/cb", state: "s" }));
+    expect(url.searchParams.get("scope") ?? "").not.toContain("classroom");
+  });
+
+  it("buildAuthUrl appends read scopes for classroom='read'", () => {
+    vi.stubEnv("GOOGLE_CLIENT_ID", "cid.apps.googleusercontent.com");
+    vi.stubEnv("GOOGLE_CLIENT_SECRET", "secret");
+    const scope =
+      new URL(
+        buildAuthUrl({ redirectUri: "http://x/cb", state: "s", classroom: "read" }),
+      ).searchParams.get("scope") ?? "";
+    expect(scope).toContain("classroom.courses.readonly");
+    expect(scope).toContain("classroom.coursework.me.readonly");
+    expect(scope).not.toContain("auth/classroom.coursework.me ");
+  });
+
+  it("buildAuthUrl appends the read-write coursework scope for classroom='write'", () => {
+    vi.stubEnv("GOOGLE_CLIENT_ID", "cid.apps.googleusercontent.com");
+    vi.stubEnv("GOOGLE_CLIENT_SECRET", "secret");
+    const scope =
+      new URL(
+        buildAuthUrl({ redirectUri: "http://x/cb", state: "s", classroom: "write" }),
+      ).searchParams.get("scope") ?? "";
+    expect(scope).toContain("https://www.googleapis.com/auth/classroom.coursework.me");
+    expect(scope).not.toContain("classroom.coursework.me.readonly");
+    // Turn-in needs drive.file (submission Doc).
+    expect(scope).toContain("https://www.googleapis.com/auth/drive.file");
+  });
+
+  it("a Classroom connect is classroom-ONLY (no Gmail/Calendar) so it can target a separate account", () => {
+    vi.stubEnv("GOOGLE_CLIENT_ID", "cid.apps.googleusercontent.com");
+    vi.stubEnv("GOOGLE_CLIENT_SECRET", "secret");
+    for (const classroom of ["read", "write"] as const) {
+      const url = new URL(buildAuthUrl({ redirectUri: "http://x/cb", state: "s", classroom }));
+      const scope = url.searchParams.get("scope") ?? "";
+      // No Gmail/Calendar on the classroom grant — keeps the school account separate.
+      expect(scope).not.toContain("gmail");
+      expect(scope).not.toContain("calendar");
+      // Force the account chooser so the student can pick a different (school) account.
+      expect(url.searchParams.get("prompt")).toBe("select_account consent");
+      // Still carries identity so the daemon can resolve the account email.
+      expect(scope).toContain("openid");
+    }
+  });
+
+  it("detects classroom + write scopes in a granted-scopes string", () => {
+    const read = GOOGLE_CLASSROOM_SCOPES_READ.join(" ");
+    const write = GOOGLE_CLASSROOM_SCOPES_WRITE.join(" ");
+    expect(hasClassroomScope(read)).toBe(true);
+    expect(hasClassroomScope("openid email")).toBe(false);
+    expect(hasClassroomWriteScope(read)).toBe(false); // read-only coursework scope
+    expect(hasClassroomWriteScope(write)).toBe(true);
+  });
+});
+
+describe("googleRedirectUriForPlatform", () => {
+  it("mobile gets the nomos:// relay redirect; web gets the default", () => {
+    vi.stubEnv("GOOGLE_OAUTH_REDIRECT_URI", "https://web/oauth/google/callback");
+    vi.stubEnv("GOOGLE_OAUTH_MOBILE_REDIRECT_URI", "https://auth/oauth/google/relay");
+    expect(googleRedirectUriForPlatform("mobile")).toBe("https://auth/oauth/google/relay");
+    expect(googleRedirectUriForPlatform("")).toBe("https://web/oauth/google/callback");
+    expect(googleRedirectUriForPlatform(undefined)).toBe("https://web/oauth/google/callback");
+  });
+});
+
 describe("OAuth CSRF state", () => {
+  // State signing fails closed without a secret (no hardcoded fallback), so provide one.
+  beforeEach(() => vi.stubEnv("ENCRYPTION_KEY", "test-encryption-key-0123456789abcdef"));
+  afterEach(() => vi.unstubAllEnvs());
+
   it("round-trips for the same user", () => {
     const s = signOAuthState("user-A");
     expect(verifyOAuthState(s, "user-A")).toBe(true);
