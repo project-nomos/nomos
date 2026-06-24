@@ -48,6 +48,8 @@ import {
 } from "../auth/google-integration.ts";
 import { buildStudioMcpServer } from "../sdk/studio-mcp.ts";
 import { buildVaultMcpServer } from "../sdk/vault-mcp.ts";
+import { buildNativeDeviceMcpServer } from "../sdk/native-device-mcp.ts";
+import { getDeviceBridge } from "./device-bridge.ts";
 import { buildThinkMcpServer } from "../sdk/think-mcp.ts";
 import { buildLoopMcpServer } from "../sdk/loop-mcp.ts";
 import { buildMemoryDigest } from "../memory/digest.ts";
@@ -1312,6 +1314,16 @@ export class AgentRuntime {
           "failed to register Google Classroom MCP",
         );
       }
+    }
+    // Native device tools (Calendar + Reminders) — HOSTED only, and ONLY while the
+    // user's phone holds the DeviceBridge stream open (else the tools would always
+    // fail). The tools route to that phone's EventKit via the bridge; the device
+    // enforces its own permission prompts, so consent stays on-device.
+    if (FEATURES.nativeDevice() && isHosted() && userId && getDeviceBridge().isConnected(userId)) {
+      const deviceServers: Record<string, ReturnType<typeof buildNativeDeviceMcpServer>> = {
+        "nomos-native-device": buildNativeDeviceMcpServer(userId),
+      };
+      mcpServers = { ...mcpServers, ...deviceServers };
     }
     let googlePrompt = "";
     if (isHosted() && userId) {

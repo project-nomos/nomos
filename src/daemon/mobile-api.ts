@@ -66,6 +66,7 @@ import { getInboxOverview } from "./inbox.ts";
 import { getTodayOverview } from "./today.ts";
 import { createLogger } from "../lib/logger.ts";
 import type { TenantContext } from "../auth/tenant-context.ts";
+import { getDeviceBridge, type DeviceInvocation } from "./device-bridge.ts";
 import { resolveMemoryUserId, systemTenant } from "../auth/tenant-context.ts";
 import { buildStudioEngine } from "../sdk/studio-mcp.ts";
 import {
@@ -225,7 +226,58 @@ export function buildMobileApiHandlers(deps: MobileApiDeps) {
     StudioReportIdentity: withAuthUnary("/nomos.MobileApi/StudioReportIdentity", (call, ctx) =>
       handleStudioReportIdentity(call, ctx),
     ),
+    DeviceBridge: withAuthStream("/nomos.MobileApi/DeviceBridge", (call, ctx) =>
+      handleDeviceBridge(call, ctx),
+    ),
+    SubmitDeviceResult: withAuthUnary("/nomos.MobileApi/SubmitDeviceResult", (call, ctx) =>
+      handleSubmitDeviceResult(call, ctx),
+    ),
   };
+}
+
+// ──────────── Device bridge (native EventKit tools) ────────────
+
+/**
+ * The phone holds this server-stream open for its whole session. We register its
+ * invocation sink under the tenant's userId; the native-device MCP tools push
+ * MDeviceInvocations down it. We never call end() — the stream lives until the phone
+ * disconnects, at which point we unregister so pending invocations fail cleanly.
+ */
+function handleDeviceBridge(
+  call: grpc.ServerWritableStream<unknown, { id: string; tool: string; argsJson: string }>,
+  ctx: TenantContext,
+): void {
+  const req = (call.request ?? {}) as { capabilities?: string[] };
+  const send = (inv: DeviceInvocation) => {
+    try {
+      call.write({ id: inv.id, tool: inv.tool, argsJson: inv.argsJson });
+    } catch {
+      // stream cancelled — unregister fires via the close/cancel listeners below.
+    }
+  };
+  const unregister = getDeviceBridge().register(ctx.userId, req.capabilities ?? [], send);
+  call.on("cancelled", unregister);
+  call.on("close", unregister);
+  call.on("error", unregister);
+}
+
+/** The phone returns one tool result here; resolve the matching pending invocation. */
+async function handleSubmitDeviceResult(
+  call: grpc.ServerUnaryCall<unknown, unknown>,
+  ctx: TenantContext,
+): Promise<{ success: boolean; message: string }> {
+  const req = (call.request ?? {}) as {
+    id?: string;
+    ok?: boolean;
+    resultJson?: string;
+    error?: string;
+  };
+  getDeviceBridge().resolveResult(ctx.userId, req.id ?? "", {
+    ok: req.ok ?? false,
+    resultJson: req.resultJson,
+    error: req.error,
+  });
+  return { success: true, message: "" };
 }
 
 // ──────────── Chat ────────────
@@ -660,12 +712,12 @@ async function handleGetEarnings(): Promise<{
 // UpdatePermission / UpdateTrustTier handlers persist them), so settings
 // round-trip instead of returning literals.
 const PERMISSION_DEFS = [
-  { id: "p1", label: "Read emails", def: true },
-  { id: "p2", label: "Draft replies", def: true },
-  { id: "p3", label: "Send (with approval)", def: true },
-  { id: "p4", label: "Send (auto)", def: false },
+  { id: "p1", label: "Read my email", def: true },
+  { id: "p2", label: "Draft replies for me", def: true },
+  { id: "p3", label: "Send email with my approval", def: true },
+  { id: "p4", label: "Send email automatically", def: false },
   { id: "p5", label: "Schedule meetings", def: true },
-  { id: "p6", label: "Make purchases", def: false },
+  { id: "p6", label: "Make purchases for me", def: false },
 ] as const;
 
 const TRUST_TIER_DEFS = [

@@ -109,6 +109,15 @@ export const FEATURES = {
    */
   classroomWrite: (): boolean => process.env.NOMOS_CLASSROOM_WRITE === "true",
 
+  /**
+   * Native device tools — let the agent act on the user's iPhone Calendar + Reminders
+   * via the DeviceBridge (the phone exposes its EventKit; the daemon calls back into
+   * it). Opt-in, off by default; hosted-only and additionally gated on a device being
+   * connected. The device enforces its own permission prompts, so consent stays
+   * on-device. Set NOMOS_NATIVE_DEVICE=true to enable.
+   */
+  nativeDevice: (): boolean => process.env.NOMOS_NATIVE_DEVICE === "true",
+
   // Features that stay ON in both modes (declared explicitly so the contract is documented):
   autoDream: (): boolean => true,
   magicDocs: (): boolean => true,
