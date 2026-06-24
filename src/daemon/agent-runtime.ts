@@ -40,6 +40,12 @@ import {
 } from "../sdk/telegram-mcp.ts";
 import { isGoogleWorkspaceConfiguredAsync } from "../sdk/google-workspace-mcp.ts";
 import { buildGoogleMcpServers, buildGoogleIntegrationPrompt } from "../sdk/google-mcp.ts";
+import { buildClassroomMcpServer } from "../sdk/google-classroom-mcp.ts";
+import {
+  hasClassroomScope,
+  hasClassroomWriteScope,
+  listGoogleAccounts,
+} from "../auth/google-integration.ts";
 import { buildStudioMcpServer } from "../sdk/studio-mcp.ts";
 import { buildVaultMcpServer } from "../sdk/vault-mcp.ts";
 import { buildThinkMcpServer } from "../sdk/think-mcp.ts";
@@ -393,11 +399,63 @@ export class AgentRuntime {
   // `onElicitation` callback routes ask_user requests through it.
   private elicitationManager?: import("./elicitation-manager.ts").ElicitationManager;
 
+  // Optional draft manager (set by gateway). Used by the Classroom tools to stage
+  // homework submissions as accept/edit/decline drafts.
+  private draftManager?: import("./draft-manager.ts").DraftManager;
+
   private initialized = false;
 
   /** Wire in the elicitation manager. Called by the gateway after construction. */
   setElicitationManager(mgr: import("./elicitation-manager.ts").ElicitationManager): void {
     this.elicitationManager = mgr;
+  }
+
+  /** Wire in the draft manager. Called by the gateway after construction. */
+  setDraftManager(mgr: import("./draft-manager.ts").DraftManager): void {
+    this.draftManager = mgr;
+  }
+
+  /**
+   * Stage a Classroom homework submission as a DraftManager draft (accept / edit /
+   * decline). The actual attach + turn-in runs in the approve handler on approval.
+   * Returns null when no draft manager is wired (e.g. CLI in-process mode).
+   */
+  private async createClassroomDraft(args: {
+    userId: string;
+    courseId: string;
+    courseWorkId: string;
+    submissionId: string;
+    title: string;
+    body: string;
+    attachAs: "doc" | "link";
+    link?: string;
+    account?: string;
+    courseName?: string;
+    assignmentTitle?: string;
+  }): Promise<{ draftId: string } | null> {
+    if (!this.draftManager) return null;
+    const draft = await this.draftManager.createDraft(
+      {
+        platform: "classroom",
+        channelId: args.courseId,
+        inReplyTo: args.courseWorkId,
+        content: args.body,
+      },
+      args.userId,
+      {
+        kind: "classroom_submission",
+        courseId: args.courseId,
+        courseWorkId: args.courseWorkId,
+        submissionId: args.submissionId,
+        attachAs: args.attachAs,
+        title: args.title,
+        link: args.link,
+        account: args.account,
+        courseName: args.courseName,
+        assignmentTitle: args.assignmentTitle,
+      },
+    );
+    return draft ? { draftId: draft.id } : null;
   }
 
   /** Expose the elicitation manager so channel adapters can resolve answers. */
@@ -1213,6 +1271,41 @@ export class AgentRuntime {
         "nomos-studio": buildStudioMcpServer(vaultUserId),
       };
       mcpServers = { ...mcpServers, ...studioServers };
+    }
+    // Google Classroom (opt-in student-assistant capability) — HOSTED only: no Bash
+    // in hosted, so the agent reaches Classroom through this REST MCP. Power-user uses
+    // the gws CLI via the gws-classroom skill. Registers only for accounts that granted
+    // classroom scopes (per-account consent), so non-students stay dark.
+    if (FEATURES.classroom() && isHosted() && userId) {
+      try {
+        const accts = (await listGoogleAccounts(userId)).filter((a) => hasClassroomScope(a.scopes));
+        if (accts.length > 0) {
+          // Write tools require BOTH the deployment off-switch (NOMOS_CLASSROOM_WRITE)
+          // AND a connected account that actually granted the read-write scope. Either
+          // off → read-only (no draft-submit/reclaim). Turn-in stays consent-gated too.
+          const writeEnabled =
+            FEATURES.classroomWrite() && accts.some((a) => hasClassroomWriteScope(a.scopes));
+          // Bind tools to the classroom account (the school account that granted the
+          // scopes), preferring one that has write — so Classroom uses the right
+          // account even when the user's DEFAULT Google account is a different one.
+          const classroomAccount =
+            accts.find((a) => hasClassroomWriteScope(a.scopes))?.email ?? accts[0].email;
+          const classroomServers: Record<string, ReturnType<typeof buildClassroomMcpServer>> = {
+            "nomos-google-classroom": buildClassroomMcpServer({
+              userId,
+              writeEnabled,
+              defaultAccount: classroomAccount,
+              createDraft: (a) => this.createClassroomDraft(a),
+            }),
+          };
+          mcpServers = { ...mcpServers, ...classroomServers };
+        }
+      } catch (err) {
+        log.warn(
+          { err: err instanceof Error ? err.message : err },
+          "failed to register Google Classroom MCP",
+        );
+      }
     }
     let googlePrompt = "";
     if (isHosted() && userId) {

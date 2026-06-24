@@ -615,6 +615,10 @@ message MIntegration {
   string account_email = 5;
   bool send_enabled = 6;    // google: whether the agent may send email
   string provider = 7;      // google | slack | ...
+  // google: the services this account actually granted, derived from its scopes —
+  // gmail | calendar | drive | classroom. Lets the client label a classroom-only
+  // school account correctly (not "Gmail · Calendar · Drive") and hide the send toggle.
+  repeated string services = 8;
 }
 
 message MProfile {
@@ -689,7 +693,7 @@ message MIntegrationsResponse {
 }
 
 message MStartConnectRequest {
-  string provider = 1;      // gmail | calendar | slack | notion | linkedin
+  string provider = 1;      // gmail | calendar | slack | notion | linkedin | classroom | classroom_write
 }
 
 message MStartConnectResponse {

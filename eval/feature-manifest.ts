@@ -350,6 +350,49 @@ export const FEATURES: FeatureSpec[] = [
     ],
   },
   {
+    id: "google-classroom",
+    summary:
+      "Opt-in student assistant (FEATURES.classroom, off by default in both modes). HOSTED: in-process REST MCP (classroom_* read tools + classroom_draft_submission + classroom_reclaim) over classroom.googleapis.com via the per-account OAuth token; registers only for accounts that granted a classroom scope, write tools only with the read-WRITE coursework scope. POWER-USER: the gws CLI via the gws-classroom skill (no MCP). Homework is consent-first: the agent has NO direct turn-in tool — classroom_draft_submission stages the work as a DraftManager draft (kind classroom_submission) and the approve action (handleClassroomSubmit) creates a Google Doc, attaches it, and turns it in only on approval. Also: exam prep from materials + past grades, and a proactive due-date/exam scan (classroomDueDateJobSpec).",
+    trigger: { kind: "turn", gate: "classroom" },
+    entry: ["buildClassroomMcpServer", "buildClassroomApi", "handleClassroomSubmit"],
+    effects: [
+      {
+        claim: "staged homework is a draft_messages row of kind classroom_submission",
+        sql: {
+          query:
+            "SELECT count(*) FROM draft_messages WHERE context->>'kind' = 'classroom_submission'",
+          expect: "nonzero",
+        },
+        notExercised: true,
+      },
+      {
+        claim: "an APPROVED (turned-in) submission is the audit record: a sent draft of that kind",
+        sql: {
+          query:
+            "SELECT count(*) FROM draft_messages WHERE context->>'kind' = 'classroom_submission' AND status = 'sent'",
+          expect: "nonzero",
+        },
+        notExercised: true,
+      },
+      {
+        claim: "the submission context is stored as a jsonb object, never double-encoded",
+        noDoubleEncode: {
+          table: "draft_messages",
+          column: "context",
+          where: "context->>'kind' = 'classroom_submission'",
+        },
+        notExercised: true,
+      },
+    ],
+    invariants: [
+      "the capability is OFF by default in both modes (FEATURES.classroom / NOMOS_CLASSROOM)",
+      "the agent has NO direct turn-in tool; a submission is turned in only by the approve action (handleClassroomSubmit) after the student accepts the draft",
+      "hosted registers the MCP only for accounts whose granted scopes include a classroom scope; write tools only when the read-WRITE coursework scope is present",
+      "power-user reaches Classroom via the gws CLI, never this REST MCP",
+      "every classroom read/draft is scoped to the connected account's per-user OAuth token",
+    ],
+  },
+  {
     id: "mood-episodes",
     summary:
       "On a turn where the live theory-of-mind flags strain, the agent captures a mood EPISODE (its cause, not a standing state) into an editable mood-log.md vault note; episodes decay (30d/20) and the live read always wins. Open episodes are surfaced so the agent follows up on the CAUSE, never asserts a mood. Forked-Haiku cause-naming, NOMOS_ADAPTIVE_MEMORY-gated, per-user.",
@@ -695,6 +738,7 @@ export const FEATURES: FeatureSpec[] = [
       "inboxScanJobSpec",
       "calendarScanJobSpec",
       "morningBriefingJobSpec",
+      "classroomDueDateJobSpec",
     ],
     effects: [
       {

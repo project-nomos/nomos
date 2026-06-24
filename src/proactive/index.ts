@@ -20,6 +20,7 @@ export {
   type ProactiveJobSpec,
 } from "./inbox-watcher.ts";
 export { buildCalendarScanPrompt, calendarScanJobSpec } from "./calendar-watcher.ts";
+export { buildClassroomScanPrompt, classroomDueDateJobSpec } from "./classroom-watcher.ts";
 export {
   buildMorningBriefingPrompt,
   morningBriefingJobSpec,

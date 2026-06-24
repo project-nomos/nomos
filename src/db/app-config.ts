@@ -43,6 +43,10 @@ const CONFIG_KEY_MAP: Record<string, keyof NomosConfig> = {
   "app.briefingCron": "briefingCron",
   "app.inboxScanInterval": "inboxScanInterval",
   "app.calendarScanInterval": "calendarScanInterval",
+  "app.classroomEnabled": "classroomEnabled",
+  "app.classroomWriteEnabled": "classroomWriteEnabled",
+  "app.classroomScan": "classroomScan",
+  "app.classroomScanInterval": "classroomScanInterval",
   "app.betas": "betas",
 };
 

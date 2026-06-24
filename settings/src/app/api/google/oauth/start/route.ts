@@ -42,7 +42,13 @@ export async function POST() {
     // DB not available
   }
   const env = await readConfig(
-    ["GOOGLE_OAUTH_CLIENT_ID", "GOOGLE_OAUTH_CLIENT_SECRET", "GOOGLE_CLOUD_PROJECT"],
+    [
+      "GOOGLE_OAUTH_CLIENT_ID",
+      "GOOGLE_OAUTH_CLIENT_SECRET",
+      "GOOGLE_CLOUD_PROJECT",
+      "NOMOS_CLASSROOM",
+      "NOMOS_CLASSROOM_WRITE",
+    ],
     sql,
   );
 
@@ -76,7 +82,7 @@ export async function POST() {
   // Build args for `gws auth login`. We pass all scopes we'll ever need
   // — the OAuth consent screen in GCP must already include them; otherwise
   // Google silently drops the un-registered ones at request time.
-  const ALL_SCOPES = [
+  const scopes = [
     "https://www.googleapis.com/auth/gmail.readonly",
     "https://www.googleapis.com/auth/gmail.send",
     "https://www.googleapis.com/auth/calendar",
@@ -89,7 +95,21 @@ export async function POST() {
     "https://www.googleapis.com/auth/tasks",
     "https://www.googleapis.com/auth/contacts",
     "https://www.googleapis.com/auth/contacts.readonly",
-  ].join(",");
+  ];
+  // Google Classroom (opt-in capability, FEATURES.classroom). Requested only when
+  // enabled, so non-students are never asked. Turn-in needs the read-WRITE coursework
+  // scope; otherwise read-only. All "sensitive" (no CASA assessment).
+  if (env.NOMOS_CLASSROOM === "true") {
+    scopes.push(
+      "https://www.googleapis.com/auth/classroom.courses.readonly",
+      "https://www.googleapis.com/auth/classroom.announcements.readonly",
+      "https://www.googleapis.com/auth/classroom.courseworkmaterials.readonly",
+      env.NOMOS_CLASSROOM_WRITE === "true"
+        ? "https://www.googleapis.com/auth/classroom.coursework.me"
+        : "https://www.googleapis.com/auth/classroom.coursework.me.readonly",
+    );
+  }
+  const ALL_SCOPES = scopes.join(",");
   const args = ["@googleworkspace/cli", "auth", "login", "--scopes", ALL_SCOPES];
 
   try {

@@ -149,6 +149,43 @@ To limit which services are exposed:
 GWS_SERVICES=gmail,calendar,drive
 ```
 
+## Google Classroom (opt-in)
+
+Classroom is a separate **off-by-default capability** (`FEATURES.classroom`) — not every
+user is a student, so its scopes are never requested unless you enable it. Turn it on in
+**Settings → Extensions → Optional capabilities**, then connect a Google account (with
+Classroom) in **Integrations → Google**.
+
+Access differs by mode (like the rest of Google): **power-user** drives the `gws` CLI
+directly (guided by the bundled `gws-classroom` skill); **hosted** has no shell, so it uses
+an in-process REST MCP (`mcp__nomos-google-classroom__*`) plus the `google-classroom` skill
+in the hosted skills repo. The `/homework` shortcut is a power-user CLI command only (hosted
+has no slash commands; there, just ask naturally — the proactive scan also nudges you).
+
+What the agent can do once enabled and connected:
+
+- **Track due work** — list courses, coursework (by due date), announcements, and your own
+  submissions; find what hasn't been turned in.
+- **Draft + submit homework (with approval)** — it drafts your work; in hosted it stages an
+  accept / edit / decline draft (same flow as email/message drafts) and **approving the
+  draft is what attaches the work and turns it in**; in power-user it shows you the draft and
+  turns it in only after you confirm. Either way the agent never submits on its own.
+- **Exam prep** — build a targeted study plan from posted materials and your past grades,
+  and (with the proactive scan) get nudged about upcoming exams.
+
+Levels (each a toggle in the Extensions page):
+
+| Flag                    | Scopes requested                                                                                                                               | Effect                                   |
+| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------- |
+| `NOMOS_CLASSROOM`       | `classroom.courses.readonly`, `classroom.coursework.me.readonly`, `classroom.announcements.readonly`, `classroom.courseworkmaterials.readonly` | Read-only: due work, materials, grades   |
+| `NOMOS_CLASSROOM_WRITE` | upgrades to `classroom.coursework.me`                                                                                                          | Submit approved homework drafts; reclaim |
+| `NOMOS_CLASSROOM_SCAN`  | —                                                                                                                                              | Proactive due-date / exam-prep nudges    |
+
+All Classroom scopes are "sensitive" (not restricted), so hosted production needs standard
+OAuth consent-screen verification but no CASA assessment; a power-user with their own GCP
+project + themselves as a test user needs neither. Submission documents reuse the
+`drive.file` scope.
+
 ## Troubleshooting
 
 ### "Access blocked: This app's request is invalid"

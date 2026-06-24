@@ -42,8 +42,17 @@ export interface DraftManagerOptions {
 
 type SendFn = (channelId: string, text: string, threadId?: string) => Promise<void>;
 
+/**
+ * A custom approve action for a non-message draft "kind" (e.g. a Google Classroom
+ * submission). Keyed by `draft.context.kind`. Receives the full draft (with its
+ * context payload) and the edited content when approved-with-edit. Performs the
+ * side effect (e.g. attach + turn in) instead of the per-platform channel send.
+ */
+export type ApproveActionFn = (draft: DraftRow, editedContent?: string) => Promise<void>;
+
 export class DraftManager {
   private sendFns = new Map<string, SendFn>();
+  private approveActions = new Map<string, ApproveActionFn>();
   private notifyWs?: (event: AgentEvent) => void;
   private notifyDefaultChannel?: (
     draft: DraftRow,
@@ -70,6 +79,22 @@ export class DraftManager {
    */
   registerSendFn(platform: string, fn: SendFn): void {
     this.sendFns.set(platform, fn);
+  }
+
+  /**
+   * Register a custom approve action for a draft "kind" (matched on
+   * `draft.context.kind`). When set, approve/approveWithEdit run this instead of
+   * the per-platform channel send — used for non-message drafts like Classroom
+   * homework submissions (attach + turn in on approval).
+   */
+  registerApproveAction(kind: string, fn: ApproveActionFn): void {
+    this.approveActions.set(kind, fn);
+  }
+
+  /** Resolve a custom approve action for a draft, by its `context.kind`. */
+  private approveActionFor(draft: DraftRow): ApproveActionFn | undefined {
+    const kind = typeof draft.context?.kind === "string" ? draft.context.kind : "";
+    return kind ? this.approveActions.get(kind) : undefined;
   }
 
   /**
@@ -177,6 +202,28 @@ export class DraftManager {
       return { success: false, error: "Draft not found or already processed" };
     }
 
+    // Custom-kind drafts (e.g. Classroom submissions) run their registered action
+    // instead of a channel send.
+    const action = this.approveActionFor(draft);
+    if (action) {
+      try {
+        await action(draft);
+        await markDraftSent(draft.id);
+        this.notifyWs?.({
+          type: "system",
+          subtype: "draft_approved",
+          message: `Draft ${draft.id.slice(0, 8)} approved`,
+          data: { draftId: draft.id, kind: draft.context?.kind },
+        });
+        log.info(`Draft approved (action ${String(draft.context?.kind)}): ${draft.id.slice(0, 8)}`);
+        return { success: true };
+      } catch (err) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        log.error({ err: errMsg }, `Approve action failed for draft ${draft.id.slice(0, 8)}`);
+        return { success: false, error: `Action failed: ${errMsg}` };
+      }
+    }
+
     const sendFn = this.sendFns.get(draft.platform);
     if (!sendFn) {
       return { success: false, error: `No send function registered for ${draft.platform}` };
@@ -212,6 +259,38 @@ export class DraftManager {
     const draft = await dbApproveDraft(draftId);
     if (!draft) {
       return { success: false, error: "Draft not found or already processed" };
+    }
+
+    // Custom-kind drafts (e.g. Classroom submissions): run the action with the
+    // EDITED content, then capture the edit as a learning signal.
+    const action = this.approveActionFor(draft);
+    if (action) {
+      try {
+        await action(draft, editedContent);
+        await markDraftSent(draft.id);
+        if (editedContent !== draft.content) {
+          this.captureDraftEdit(
+            draft.content,
+            editedContent,
+            resolveMemoryUserId(draft.user_id),
+          ).catch(() => {});
+        }
+        this.notifyWs?.({
+          type: "system",
+          subtype: "draft_approved",
+          message: `Draft ${draft.id.slice(0, 8)} approved (edited)`,
+          data: { draftId: draft.id, edited: true, kind: draft.context?.kind },
+        });
+        log.info(`Draft approved (edited action): ${draft.id.slice(0, 8)}`);
+        return { success: true };
+      } catch (err) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        log.error(
+          { err: errMsg },
+          `Approve action (edit) failed for draft ${draft.id.slice(0, 8)}`,
+        );
+        return { success: false, error: `Action failed: ${errMsg}` };
+      }
     }
 
     const sendFn = this.sendFns.get(draft.platform);

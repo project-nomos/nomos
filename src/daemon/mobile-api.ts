@@ -27,8 +27,8 @@ import { setConsentMode, listConsentModes, type ConsentMode } from "../db/consen
 import {
   buildAuthUrl,
   exchangeCode,
-  googleRedirectUri,
-  GOOGLE_SCOPES,
+  googleRedirectUriForPlatform,
+  grantedGoogleServices,
   isGoogleIntegrationConfigured,
   removeGoogleAccount,
   setSendEnabled,
@@ -36,6 +36,7 @@ import {
   storeGoogleAccount,
   verifyOAuthState,
 } from "../auth/google-integration.ts";
+import { FEATURES } from "../config/mode.ts";
 import { loadSkills } from "../skills/loader.ts";
 import {
   curateConsumerSkills,
@@ -888,15 +889,27 @@ async function handleStartConnect(
   // Google (gmail/calendar/drive are aliases of one grant): the daemon owns the
   // OAuth — build the consent URL with a signed CSRF state; the callback relays
   // the code back via ConnectGoogleAccount.
-  if (["google", "gmail", "calendar", "drive"].includes(provider)) {
+  // Classroom is an incremental, opt-in grant on top of the base Google connect:
+  // "classroom" (read) / "classroom_write" (read + turn-in). Only offered when the
+  // capability is enabled, so non-students are never asked for Classroom scopes.
+  const classroom =
+    provider === "classroom" ? "read" : provider === "classroom_write" ? "write" : undefined;
+  if (classroom && !FEATURES.classroom()) {
+    throw new Error("Google Classroom is not enabled on this deployment");
+  }
+  if (["google", "gmail", "calendar", "drive"].includes(provider) || classroom) {
     if (!isGoogleIntegrationConfigured()) {
       throw new Error(
         "Google integration not configured (set GOOGLE_CLIENT_ID/GOOGLE_CLIENT_SECRET)",
       );
     }
+    // Mobile clients (x-nomos-platform: mobile) get the nomos-server relay redirect
+    // that bounces code+state to nomos://; web clients keep the server-relay redirect.
+    const platform = (call.metadata.get("x-nomos-platform")?.[0] as string | undefined) ?? "";
     const url = buildAuthUrl({
-      redirectUri: googleRedirectUri(),
+      redirectUri: googleRedirectUriForPlatform(platform),
       state: signOAuthState(ctx.userId),
+      ...(classroom ? { classroom } : {}),
     });
     return { oauthUrl: url };
   }
@@ -915,12 +928,21 @@ async function handleConnectGoogleAccount(
     return { success: false, message: "invalid_state" };
   }
   try {
-    const tokens = await exchangeCode({ code: req.code, redirectUri: googleRedirectUri() });
+    // Exchange with the SAME redirect the connect used (Google requires a match):
+    // mobile used the relay redirect, web used the default.
+    const platform = (call.metadata.get("x-nomos-platform")?.[0] as string | undefined) ?? "";
+    const tokens = await exchangeCode({
+      code: req.code,
+      redirectUri: googleRedirectUriForPlatform(platform),
+    });
     await storeGoogleAccount({
       userId: ctx.userId,
       email: tokens.email,
       tokens,
-      scopes: tokens.scope ?? GOOGLE_SCOPES.join(" "),
+      // Use the ACTUAL granted scopes Google returns (always present for auth-code
+      // grants). Never fall back to the full Gmail/Cal/Drive set — that would mislabel
+      // a classroom-only school account and wrongly flip the classroom/send gates.
+      scopes: tokens.scope ?? "",
     });
     return { success: true, message: tokens.email };
   } catch (err) {
@@ -1525,6 +1547,9 @@ async function listIntegrationsForUser(userId: string) {
       const provider = String(i.config.provider ?? i.name);
       const accountEmail = String(i.config.account_email ?? "");
       const isGoogle = provider === "google";
+      // Granted services (gmail/calendar/drive/classroom) so the client labels a
+      // classroom-only account correctly and hides the send toggle when there's no Gmail.
+      const services = isGoogle ? grantedGoogleServices(String(i.config.scopes ?? "")) : [];
       return {
         // Google: key by account email so the client disconnects/toggles by account.
         id: isGoogle && accountEmail ? accountEmail : String(i.metadata.integration_id ?? i.id),
@@ -1534,6 +1559,7 @@ async function listIntegrationsForUser(userId: string) {
         accountEmail,
         sendEnabled: Boolean(i.config.send_enabled),
         provider,
+        services,
       };
     });
 }
