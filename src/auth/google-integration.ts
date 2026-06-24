@@ -91,14 +91,28 @@ export function hasClassroomWriteScope(scopes: string): boolean {
 }
 
 /**
- * True if `email` is a school / Workspace-org account (anything not on a personal
- * Google consumer domain). Classroom is a student feature, so a personal gmail.com
- * account that carries classroom scopes (Google's OAuth is cumulative) should NOT get
- * the classroom tools — only a school account should.
+ * True if `email` is on an EDUCATIONAL domain (a school/university). Classroom is a
+ * student feature, so a personal (gmail.com) OR business (company.com) account that
+ * carries classroom scopes — Google's OAuth is cumulative — should NOT get the classroom
+ * tools; only a school account should. We match the common education domain patterns:
+ *   - `.edu`            (Harvard, MIT, most US universities)
+ *   - `.edu.<cc>`       (edu.au, edu.sg, edu.cn, …)
+ *   - `.ac.<cc>`        (ac.uk, ac.jp, ac.il, … — "academic")
+ *   - `.k12.<…>.us`     (US K-12)
+ *   - `.sch.<cc>`       (schools in some countries)
+ * A private school on a custom `.org`/`.com` domain won't auto-match (rare); it can
+ * still connect Classroom explicitly.
  */
 export function isSchoolAccount(email: string): boolean {
   const domain = email.split("@").pop()?.toLowerCase() ?? "";
-  return domain.length > 0 && !["gmail.com", "googlemail.com"].includes(domain);
+  if (!domain) return false;
+  return (
+    domain.endsWith(".edu") ||
+    /\.edu\.[a-z]{2}$/.test(domain) ||
+    /\.ac\.[a-z]{2}$/.test(domain) ||
+    domain.includes(".k12.") ||
+    /\.sch\.[a-z]{2}$/.test(domain)
+  );
 }
 
 /**

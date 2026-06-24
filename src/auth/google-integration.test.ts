@@ -123,11 +123,17 @@ describe("Classroom scopes", () => {
     }
   });
 
-  it("treats only non-consumer domains as school accounts (Classroom gate)", () => {
+  it("treats only EDUCATIONAL domains as school accounts (Classroom gate)", () => {
+    // Schools / universities — yes.
+    expect(isSchoolAccount("kid@mit.edu")).toBe(true);
     expect(isSchoolAccount("student@lincoln.k12.ca.us")).toBe(true);
-    expect(isSchoolAccount("kid@university.edu")).toBe(true);
+    expect(isSchoolAccount("s@school.edu.au")).toBe(true);
+    expect(isSchoolAccount("s@oxford.ac.uk")).toBe(true);
+    // Personal AND business accounts — no (a business is not a school).
     expect(isSchoolAccount("me@gmail.com")).toBe(false);
     expect(isSchoolAccount("me@googlemail.com")).toBe(false);
+    expect(isSchoolAccount("worker@acme.com")).toBe(false);
+    expect(isSchoolAccount("worker@bigco.org")).toBe(false);
     expect(isSchoolAccount("")).toBe(false);
   });
 
