@@ -44,6 +44,7 @@ import { buildClassroomMcpServer } from "../sdk/google-classroom-mcp.ts";
 import {
   hasClassroomScope,
   hasClassroomWriteScope,
+  isSchoolAccount,
   listGoogleAccounts,
 } from "../auth/google-integration.ts";
 import { buildStudioMcpServer } from "../sdk/studio-mcp.ts";
@@ -1286,7 +1287,11 @@ export class AgentRuntime {
     // classroom scopes (per-account consent), so non-students stay dark.
     if (FEATURES.classroom() && isHosted() && userId) {
       try {
-        const accts = (await listGoogleAccounts(userId)).filter((a) => hasClassroomScope(a.scopes));
+        // Classroom is a student feature → school accounts only. A personal gmail.com
+        // account that carries classroom scopes (Google's OAuth is cumulative) is skipped.
+        const accts = (await listGoogleAccounts(userId)).filter(
+          (a) => hasClassroomScope(a.scopes) && isSchoolAccount(a.email),
+        );
         if (accts.length > 0) {
           // Write tools require BOTH the deployment off-switch (NOMOS_CLASSROOM_WRITE)
           // AND a connected account that actually granted the read-write scope. Either

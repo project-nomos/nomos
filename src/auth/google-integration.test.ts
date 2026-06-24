@@ -8,6 +8,7 @@ import {
   googleRedirectUriForPlatform,
   hasClassroomScope,
   hasClassroomWriteScope,
+  isSchoolAccount,
   isGoogleIntegrationConfigured,
   signOAuthState,
   verifyOAuthState,
@@ -120,6 +121,14 @@ describe("Classroom scopes", () => {
       // Still carries identity so the daemon can resolve the account email.
       expect(scope).toContain("openid");
     }
+  });
+
+  it("treats only non-consumer domains as school accounts (Classroom gate)", () => {
+    expect(isSchoolAccount("student@lincoln.k12.ca.us")).toBe(true);
+    expect(isSchoolAccount("kid@university.edu")).toBe(true);
+    expect(isSchoolAccount("me@gmail.com")).toBe(false);
+    expect(isSchoolAccount("me@googlemail.com")).toBe(false);
+    expect(isSchoolAccount("")).toBe(false);
   });
 
   it("detects classroom + write scopes in a granted-scopes string", () => {

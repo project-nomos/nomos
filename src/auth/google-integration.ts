@@ -91,6 +91,17 @@ export function hasClassroomWriteScope(scopes: string): boolean {
 }
 
 /**
+ * True if `email` is a school / Workspace-org account (anything not on a personal
+ * Google consumer domain). Classroom is a student feature, so a personal gmail.com
+ * account that carries classroom scopes (Google's OAuth is cumulative) should NOT get
+ * the classroom tools — only a school account should.
+ */
+export function isSchoolAccount(email: string): boolean {
+  const domain = email.split("@").pop()?.toLowerCase() ?? "";
+  return domain.length > 0 && !["gmail.com", "googlemail.com"].includes(domain);
+}
+
+/**
  * The Google services a granted-scopes string actually covers, for client display —
  * so a classroom-only school account isn't mislabeled "Gmail · Calendar · Drive".
  * `drive.file` (app-created files only, used for classroom turn-in) does NOT count as
