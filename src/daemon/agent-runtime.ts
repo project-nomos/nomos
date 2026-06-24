@@ -224,6 +224,7 @@ import { createSession as createDbSession, getSessionByKey } from "../db/session
 import { appendTranscriptMessage } from "../db/transcripts.ts";
 import { isEphemeralSession } from "./memory-indexer.ts";
 import { runMigrations } from "../db/migrate.ts";
+import { hydrateApiKeysFromIntegrations } from "../config/api-keys.ts";
 import type { IncomingMessage, OutgoingMessage, AgentEvent } from "./types.ts";
 import { TheoryOfMindTracker } from "../memory/theory-of-mind.ts";
 import {
@@ -514,6 +515,11 @@ export class AgentRuntime {
         `DB migrations skipped (${msg}). Continuing without DB so the setup wizard can configure it.`,
       );
     }
+
+    // Bridge the Settings-UI Google AI key (stored encrypted in the `google-ai`
+    // integration) into process.env so embeddings + Studio gen can read
+    // GOOGLE_API_KEY. Runs after migrations (DB ready), before any embedding use.
+    await hydrateApiKeysFromIntegrations();
 
     // Load config
     this.config = loadEnvConfig();
