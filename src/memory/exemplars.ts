@@ -10,6 +10,7 @@ import { createHash } from "node:crypto";
 import { storeMemoryChunk, searchMemoryByVector, searchMemoryByText } from "../db/memory.ts";
 import { generateEmbedding, isEmbeddingAvailable } from "./embeddings.ts";
 import { runForkedAgent } from "../sdk/forked-agent.ts";
+import { extractFirstJson } from "../lib/json-extract.ts";
 import { loadEnvConfig } from "../config/env.ts";
 import { createLogger } from "../lib/logger.ts";
 
@@ -97,14 +98,14 @@ export async function scoreExemplar(
       allowedTools: [],
     });
 
-    const jsonMatch = fullText.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) return null;
-
-    const parsed = JSON.parse(jsonMatch[0]) as {
+    // First BALANCED JSON object — forked-agent returns the answer DUPLICATED +
+    // ```json-fenced, so a greedy first-{…}-to-last-} match yields invalid JSON.
+    const parsed = extractFirstJson(fullText) as {
       score: number;
       context: ExemplarContext;
       reasoning: string;
-    };
+    } | null;
+    if (!parsed) return null;
 
     if (typeof parsed.score !== "number" || parsed.score < 0 || parsed.score > 1) return null;
 

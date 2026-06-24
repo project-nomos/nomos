@@ -14,6 +14,7 @@ import { sql, type SqlBool } from "kysely";
 import { getKysely } from "../db/client.ts";
 import { loadEnvConfig } from "../config/env.ts";
 import { createLogger } from "../lib/logger.ts";
+import { extractFirstJson } from "../lib/json-extract.ts";
 
 const log = createLogger("consolidator");
 
@@ -246,16 +247,15 @@ async function llmConsolidate(userId: string): Promise<number> {
       allowedTools: [],
     });
 
-    // Parse LLM decisions
-    const jsonMatch = fullText.match(/\[[\s\S]*\]/);
-    if (!jsonMatch) return 0;
-
-    const decisions = JSON.parse(jsonMatch[0]) as Array<{
+    // Parse LLM decisions — first BALANCED JSON array (forked-agent returns the
+    // answer DUPLICATED + fenced, so a greedy first-[…]-to-last-] is invalid JSON).
+    const decisions = extractFirstJson(fullText) as Array<{
       id: string;
       action: string;
       rewrite?: string;
       merge_with?: string;
-    }>;
+    }> | null;
+    if (!Array.isArray(decisions)) return 0;
 
     let changeCount = 0;
     const validIds = new Set(candidates.map((c) => c.id));
@@ -413,9 +413,7 @@ export async function reflectOnValues(userId: string): Promise<ValueReflection |
       label: "value-reflection",
       maxTurns: 1,
     });
-    const m = text.match(/\{[\s\S]*\}/);
-    if (!m) return null;
-    return JSON.parse(m[0]) as ValueReflection;
+    return (extractFirstJson(text) as ValueReflection | null) ?? null;
   } catch (err) {
     log.debug({ err, userId }, "reflectOnValues failed");
     return null;
