@@ -17,6 +17,9 @@ export class CronScheduler {
   constructor(
     private jobs: CronJob[],
     private callback: CronCallback,
+    /** Reconcile-poll interval (ms). Lowered in tests so interval jobs can be
+     *  exercised in seconds instead of waiting the 60s production cadence. */
+    private pollMs: number = 60_000,
   ) {}
 
   start(): void {
@@ -27,10 +30,10 @@ export class CronScheduler {
     this.running = true;
     this.scheduleJobs();
 
-    // Poll every minute to pick up new jobs or reschedule
+    // Poll to pick up new/changed jobs and re-arm fired ones.
     this.pollInterval = setInterval(() => {
       this.scheduleJobs();
-    }, 60000);
+    }, this.pollMs);
   }
 
   stop(): void {
