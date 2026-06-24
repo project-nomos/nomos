@@ -91,6 +91,7 @@ import {
 } from "../src/memory/magic-docs.ts";
 import { SessionStore } from "../src/sessions/store.ts";
 import { CronStore } from "../src/cron/store.ts";
+import { CronScheduler } from "../src/cron/scheduler.ts";
 import { curateConsumerTasks } from "../src/cron/task-view.ts";
 import {
   createDraft,
@@ -1197,6 +1198,56 @@ async function runCron(): Promise<void> {
   const stats = await store.getRunStats(jobId);
   check("[cron] run stats reflect the run", stats.totalRuns === 1 && stats.successCount === 1);
   if (!KEEP) await store.deleteJob(jobId); // cron_runs cascade via FK
+
+  // ── Actually DRIVE the scheduler ────────────────────────────────────────────
+  // The static sentinel meta-check confirms a cron feature is wired + seeded but
+  // never RUNS it. This drives the real CronScheduler against the real store: an
+  // `every` job whose interval EXCEEDS the reconcile poll must still fire — and keep
+  // firing — across many polls. That is the exact class of bug the static check
+  // missed (interval jobs whose timer the 60s poll perpetually reset, so NONE ever
+  // ran — only `cron`-typed loops did). A fast injected poll (100ms) << the job
+  // interval (1s) makes the regression observable in seconds.
+  const fired: string[] = [];
+  const everyId = await store.createJob({
+    userId: "eval-cron-a",
+    name: "eval-cron-every",
+    schedule: "1s",
+    scheduleType: "every",
+    sessionTarget: "isolated",
+    deliveryMode: "none",
+    prompt: "noop",
+    enabled: true,
+    errorCount: 0,
+  });
+  const everyJob = await store.getJob(everyId);
+  const scheduler = new CronScheduler(
+    everyJob ? [everyJob] : [],
+    async (j) => {
+      fired.push(j.name);
+      const rid = await store.recordRunStart(j.id, j.name, `cron:${j.id}`);
+      await store.markRun(j.id, true);
+      await store.recordRunEnd(rid, true, 1);
+    },
+    100, // 100ms reconcile poll, 10x faster than the 1s job interval
+  );
+  scheduler.start();
+  await new Promise((r) => setTimeout(r, 3200)); // ~32 polls, ~3 interval boundaries
+  scheduler.stop();
+
+  const everyFires = fired.filter((n) => n === "eval-cron-every").length;
+  check(
+    "[cron] an `every` job whose interval exceeds the poll fires AND keeps firing",
+    everyFires >= 2,
+    `fired ${everyFires}x (>=2 expected; 0 means the poll is resetting the timer)`,
+  );
+  const everyRuns = await store.listRuns({ jobId: everyId });
+  const everyAfter = await store.getJob(everyId);
+  check(
+    "[cron] firing persists cron_runs and advances last_run",
+    everyRuns.length >= 2 && everyAfter?.lastRun != null,
+    `${everyRuns.length} runs; last_run=${everyAfter?.lastRun ? "set" : "null"}`,
+  );
+  if (!KEEP) await store.deleteJob(everyId);
 }
 
 async function runTasks(): Promise<void> {

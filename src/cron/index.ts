@@ -17,10 +17,10 @@ export interface CronSystem {
 /**
  * Create a complete cron system with store and scheduler
  */
-export function createCronSystem(onTrigger: CronCallback): CronSystem {
+export function createCronSystem(onTrigger: CronCallback, pollMs?: number): CronSystem {
   const store = new CronStore();
   let jobs: CronJob[] = [];
-  const scheduler = new CronScheduler(jobs, onTrigger);
+  const scheduler = new CronScheduler(jobs, onTrigger, pollMs);
 
   return {
     store,

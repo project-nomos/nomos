@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest";
-import { parseInterval, nextCronRun } from "./scheduler.ts";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { CronScheduler, parseInterval, nextCronRun } from "./scheduler.ts";
+import type { CronJob } from "./types.ts";
 
 describe("parseInterval", () => {
   it("parses seconds", () => {
@@ -50,5 +51,52 @@ describe("nextCronRun", () => {
     const result = nextCronRun("0 9 * * 1"); // 9 AM every Monday
     expect(result).toBeInstanceOf(Date);
     expect(result.getTime()).toBeGreaterThan(Date.now());
+  });
+});
+
+describe("CronScheduler 'every' jobs survive the 60s reschedule poll", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  function everyJob(schedule: string): CronJob {
+    return {
+      id: "j1",
+      userId: "local",
+      name: "interval-job",
+      schedule,
+      scheduleType: "every",
+      sessionTarget: "isolated",
+      deliveryMode: "none",
+      prompt: "x",
+      enabled: true,
+      errorCount: 0,
+      createdAt: new Date(), // fake-clock base, since useFakeTimers ran first
+    };
+  }
+
+  // Regression: `scheduleJobs()` re-runs every 60s. Previously `every` returned
+  // `now + interval`, so any interval >= 60s had its timer reset before it could
+  // elapse and the job NEVER fired (only `cron` jobs ran in prod).
+  it("fires a 5m interval job despite the timer being rescheduled each minute", async () => {
+    const fired: string[] = [];
+    const sched = new CronScheduler([everyJob("5m")], async (j) => {
+      fired.push(j.id);
+    });
+    sched.start();
+    // Advance 6 minutes one minute at a time (the poll fires every minute).
+    for (let i = 0; i < 6; i++) await vi.advanceTimersByTimeAsync(60_000);
+    sched.stop();
+    expect(fired.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("keeps firing on each interval (not just once)", async () => {
+    const fired: string[] = [];
+    const sched = new CronScheduler([everyJob("5m")], async (j) => {
+      fired.push(j.id);
+    });
+    sched.start();
+    for (let i = 0; i < 16; i++) await vi.advanceTimersByTimeAsync(60_000); // ~16 min
+    sched.stop();
+    expect(fired.length).toBeGreaterThanOrEqual(2);
   });
 });
