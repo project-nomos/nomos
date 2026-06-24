@@ -8,6 +8,9 @@ export type CronCallback = (job: CronJob) => Promise<void>;
 
 export class CronScheduler {
   private timers: Map<string, NodeJS.Timeout> = new Map();
+  // job.id -> schedule signature of the currently-armed timer, so the 60s poll
+  // can tell an unchanged job (leave its timer) from a changed one (reschedule).
+  private scheduled: Map<string, string> = new Map();
   private running: boolean = false;
   private pollInterval: NodeJS.Timeout | null = null;
 
@@ -42,6 +45,7 @@ export class CronScheduler {
       clearTimeout(timer);
     }
     this.timers.clear();
+    this.scheduled.clear();
   }
 
   updateJobs(jobs: CronJob[]): void {
@@ -52,25 +56,33 @@ export class CronScheduler {
   private scheduleJobs(): void {
     const enabledJobs = this.jobs.filter((job) => job.enabled);
 
-    // Remove timers for jobs that are no longer enabled or don't exist
+    // Drop timers for jobs that are gone, disabled, OR whose schedule changed —
+    // those need (re)scheduling. Unchanged jobs keep their pending timer; the poll
+    // blindly re-creating it every 60s is exactly what reset `every` jobs so they
+    // never fired.
     for (const [id, timer] of this.timers.entries()) {
-      if (!enabledJobs.some((job) => job.id === id)) {
+      const job = enabledJobs.find((j) => j.id === id);
+      if (!job || this.scheduled.get(id) !== signatureOf(job)) {
         clearTimeout(timer);
         this.timers.delete(id);
+        this.scheduled.delete(id);
       }
     }
 
-    // Schedule each enabled job
+    // Schedule each enabled job that isn't already armed (scheduleJob skips jobs
+    // that still hold a live timer).
     for (const job of enabledJobs) {
       this.scheduleJob(job);
     }
   }
 
   private scheduleJob(job: CronJob): void {
-    // Clear existing timer if any
-    const existingTimer = this.timers.get(job.id);
-    if (existingTimer) {
-      clearTimeout(existingTimer);
+    // Already armed — leave the pending timer alone. scheduleJobs() drops the timer
+    // first when a job is removed/disabled/changed, so reaching here with a live
+    // timer means it's unchanged. (Re-creating it on every 60s poll reset `every`
+    // jobs' delay before it could elapse, so they never fired.)
+    if (this.timers.has(job.id)) {
+      return;
     }
 
     try {
@@ -81,7 +93,7 @@ export class CronScheduler {
 
       const delay = nextRun.getTime() - Date.now();
       if (delay < 0) {
-        // If we're past the scheduled time, run immediately for "at" jobs
+        // Past the scheduled time: one-shot "at" jobs run immediately.
         if (job.scheduleType === "at") {
           this.triggerJob(job);
         }
@@ -89,17 +101,22 @@ export class CronScheduler {
       }
 
       const timer = setTimeout(() => {
+        // Free the slot BEFORE triggering so the post-run reschedule below isn't
+        // skipped by the already-armed guard above.
+        this.timers.delete(job.id);
+        this.scheduled.delete(job.id);
         this.triggerJob(job);
 
-        // For "every" and "cron" jobs, reschedule after execution
+        // Recurring jobs reschedule from the LATEST definition (picks up edits);
+        // "at" jobs are one-shot.
         if (job.scheduleType !== "at") {
-          this.scheduleJob(job);
-        } else {
-          this.timers.delete(job.id);
+          const current = this.jobs.find((j) => j.id === job.id);
+          if (current?.enabled) this.scheduleJob(current);
         }
       }, delay);
 
       this.timers.set(job.id, timer);
+      this.scheduled.set(job.id, signatureOf(job));
     } catch (error) {
       log.error({ err: error, jobId: job.id }, "Failed to schedule job");
     }
@@ -117,7 +134,16 @@ export class CronScheduler {
 
       case "every": {
         const interval = parseInterval(job.schedule);
-        return new Date(Date.now() + interval);
+        // Anchor on a STABLE point (last run, else creation) and step to the next
+        // interval boundary after now. `scheduleJobs()` re-runs every 60s and
+        // clears+recreates each timer; returning `now + interval` here meant every
+        // poll pushed a fresh full interval into the future, so any `every` job
+        // with an interval >= the poll period had its timer perpetually reset and
+        // NEVER fired. Anchoring yields the same absolute target on every poll (the
+        // delay just shrinks toward it), the way `cron` jobs already survive.
+        const anchor = (job.lastRun ?? job.createdAt).getTime();
+        const periods = Math.max(1, Math.floor((Date.now() - anchor) / interval) + 1);
+        return new Date(anchor + periods * interval);
       }
 
       case "cron": {
@@ -136,6 +162,11 @@ export class CronScheduler {
       log.error({ err: error, jobId: job.id }, "Error executing cron job");
     }
   }
+}
+
+/** Identity of a job's SCHEDULE — changing it forces a reschedule on the next poll. */
+function signatureOf(job: CronJob): string {
+  return `${job.scheduleType}:${job.schedule}`;
 }
 
 /**
