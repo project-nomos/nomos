@@ -24,7 +24,7 @@
   <a href="https://github.com/project-nomos/nomos/actions/workflows/ci.yml"><img src="https://github.com/project-nomos/nomos/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License" /></a>
   <img src="https://img.shields.io/badge/Claude_Agent_SDK-powered-6B4FBB?logo=anthropic" alt="Claude Agent SDK" />
-  <img src="https://img.shields.io/badge/skills-60+-10b981" alt="60+ Skills" />
+  <img src="https://img.shields.io/badge/skills-44-10b981" alt="44 Skills" />
   <img src="https://img.shields.io/badge/MCP-compatible-10b981?logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxNiIgaGVpZ2h0PSIxNiIgZmlsbD0id2hpdGUiIHZpZXdCb3g9IjAgMCAxNiAxNiI+PGNpcmNsZSBjeD0iOCIgY3k9IjgiIHI9IjMiLz48L3N2Zz4=" alt="MCP Compatible" />
   <a href="https://github.com/project-nomos/nomos/stargazers"><img src="https://img.shields.io/github/stars/project-nomos/nomos?style=flat" alt="Stars" /></a>
 </p>
@@ -55,7 +55,9 @@ Most AI assistants are stateless chatbots that forget you the moment a conversat
 - **Represents you everywhere** — Slack, Discord, Telegram, WhatsApp, Messages.app, Email, terminal, web. Slack User Mode lets it draft and send messages as you. It's not a bot in your channel — it's you, augmented.
 - **Agent-to-agent trust** — CATE protocol (Consumer Agent Trust Envelope) enables secure communication between your clone and other agents with DID-based identity, verifiable credentials, policy enforcement, and anti-spam stamps.
 - **Multi-provider** — Anthropic, Vertex AI, OpenRouter, Ollama, or any compatible endpoint. Smart routing sends simple queries to fast models and complex ones to capable models — cutting costs 5-10x automatically.
-- **60+ built-in skills** — Gmail, Calendar, Drive, Docs, Sheets, document generation, image/video creation, browser automation, and more.
+- **44 built-in skills** — Gmail, Calendar, Drive, Docs, Sheets, Google Classroom, document generation, image/video creation, browser automation, and more.
+- **Native device tools** — iPhone Calendar and Reminders access via EventKit bridge (hosted-only, opt-in, requires device connection).
+- **Google Classroom integration** — Student assistant: read coursework and grades, draft and submit homework with approval, exam prep (opt-in, educational domains only).
 - **Always on** — Runs as a background daemon with scheduled tasks, proactive notifications, and a web management dashboard.
 - **Multi-agent teams** — A coordinator decomposes complex tasks, spawns parallel workers, and synthesizes results.
 - **Encrypted & self-hosted** — AES-256-GCM for all secrets. Your clone stays on your infrastructure. Built on Anthropic's [Claude Agent SDK](https://docs.anthropic.com/en/docs/claude-code/sdk).
@@ -187,29 +189,31 @@ The setup wizard handles this automatically when you run `nomos chat` for the fi
 
 ## What You Get
 
-|                           | Feature                                     | What it does                                                                                                                       |
-| ------------------------- | ------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| :dna:                     | [**Data Ingestion**](#digital-clone)        | Import years of Slack, Gmail, Messages.app, Discord, Telegram, and WhatsApp history. Auto-sync on connect + continuous delta sync. |
-| :pen:                     | [**Voice Modeling**](#digital-clone)        | Per-contact style analysis — formality, length, emoji, greetings. Drafts in your voice.                                            |
-| :books:                   | [**Knowledge Wiki**](#digital-clone)        | LLM-compiled articles about your contacts, projects, and topics. Structured knowledge.                                             |
-| :link:                    | [**Identity Graph**](#digital-clone)        | Unified contacts across all platforms. One person, one profile.                                                                    |
-| :shield:                  | [**CATE Protocol**](#digital-clone)         | Agent-to-agent trust with DIDs, verifiable credentials, policy, and anti-spam stamps.                                              |
-| :brain:                   | [**Persistent Memory**](#features-in-depth) | Every conversation auto-indexed into pgvector. Recall anything from any session or channel.                                        |
-| :crystal_ball:            | [**Theory of Mind**](#features-in-depth)    | Hybrid rule + LLM per-session mental state tracking. Detects frustration, urgency, goal shifts, stuck patterns.                    |
-| :speech_balloon:          | [**7 Channels**](#channel-integrations)     | Slack, Discord, Telegram, WhatsApp, Messages.app, Email — thin adapters, one agent runtime.                                        |
-| :busts_in_silhouette:     | [**Multi-Agent Teams**](#features-in-depth) | Coordinator + parallel workers. Hand off complex tasks, get synthesized results.                                                   |
-| :zap:                     | [**Smart Routing**](#features-in-depth)     | Route by complexity across any provider — cloud, local, or hybrid.                                                                 |
-| :art:                     | [**Image & Video Gen**](#features-in-depth) | Gemini image + Veo video generation, conversational — just ask.                                                                    |
-| :desktop_computer:        | [**Web Dashboard**](#features-in-depth)     | Next.js settings UI with setup wizard. No YAML editing.                                                                            |
-| :jigsaw:                  | [**60+ Skills**](#skills-system)            | Three-tier loading: bundled, personal, project. Create your own in minutes.                                                        |
-| :lock:                    | [**Encrypted Secrets**](#features-in-depth) | AES-256-GCM for all API keys and tokens. Auto-key on first run.                                                                    |
-| :globe_with_meridians:    | [**5 API Providers**](#features-in-depth)   | Anthropic, Vertex AI, OpenRouter, Ollama, or any compatible endpoint.                                                              |
-| :arrows_counterclockwise: | [**Self-Improvement**](#features-in-depth)  | Nomos can analyze its own code, implement fixes, and open PRs to itself.                                                           |
-| :sleeping:                | [**Sleep & Resume**](#features-in-depth)    | Agents pause and wake with a prompt — for polling, monitoring, and async waits.                                                    |
-| :anchor:                  | [**Event Hooks**](#features-in-depth)       | Command, HTTP, or prompt hooks on tool use, lifecycle, and compaction.                                                             |
-| :crescent_moon:           | [**Auto-Dream**](#features-in-depth)        | Background memory consolidation with 4-phase cleanup.                                                                              |
-| :package:                 | [**Plugins**](#plugins)                     | 21 pre-installed plugins from the Claude marketplace — PR review, code review, GitHub, Linear, Playwright, and more.               |
-| :moneybag:                | [**Cost Tracking**](#features-in-depth)     | Per-model pricing, session costs, usage breakdown in CLI and web dashboard.                                                        |
+|                           | Feature                                       | What it does                                                                                                                       |
+| ------------------------- | --------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| :dna:                     | [**Data Ingestion**](#digital-clone)          | Import years of Slack, Gmail, Messages.app, Discord, Telegram, and WhatsApp history. Auto-sync on connect + continuous delta sync. |
+| :pen:                     | [**Voice Modeling**](#digital-clone)          | Per-contact style analysis — formality, length, emoji, greetings. Drafts in your voice.                                            |
+| :books:                   | [**Knowledge Wiki**](#digital-clone)          | LLM-compiled articles about your contacts, projects, and topics. Structured knowledge.                                             |
+| :link:                    | [**Identity Graph**](#digital-clone)          | Unified contacts across all platforms. One person, one profile.                                                                    |
+| :shield:                  | [**CATE Protocol**](#digital-clone)           | Agent-to-agent trust with DIDs, verifiable credentials, policy, and anti-spam stamps.                                              |
+| :brain:                   | [**Persistent Memory**](#features-in-depth)   | Every conversation auto-indexed into pgvector. Recall anything from any session or channel.                                        |
+| :crystal_ball:            | [**Theory of Mind**](#features-in-depth)      | Hybrid rule + LLM per-session mental state tracking. Detects frustration, urgency, goal shifts, stuck patterns.                    |
+| :iphone:                  | [**Native Device Tools**](#features-in-depth) | iPhone Calendar + Reminders via EventKit bridge (hosted-only, opt-in)                                                              |
+| :school:                  | [**Google Classroom**](#features-in-depth)    | Student assistant: coursework, grades, homework drafting + submission, exam prep (opt-in, educational domains only)                |
+| :speech_balloon:          | [**7 Channels**](#channel-integrations)       | Slack, Discord, Telegram, WhatsApp, Messages.app, Email — thin adapters, one agent runtime.                                        |
+| :busts_in_silhouette:     | [**Multi-Agent Teams**](#features-in-depth)   | Coordinator + parallel workers. Hand off complex tasks, get synthesized results.                                                   |
+| :zap:                     | [**Smart Routing**](#features-in-depth)       | Route by complexity across any provider — cloud, local, or hybrid.                                                                 |
+| :art:                     | [**Image & Video Gen**](#features-in-depth)   | Gemini image + Veo video generation, conversational — just ask.                                                                    |
+| :desktop_computer:        | [**Web Dashboard**](#features-in-depth)       | Next.js settings UI with setup wizard. No YAML editing.                                                                            |
+| :jigsaw:                  | [**44 Skills**](#skills-system)               | Three-tier loading: bundled, personal, project. Create your own in minutes.                                                        |
+| :lock:                    | [**Encrypted Secrets**](#features-in-depth)   | AES-256-GCM for all API keys and tokens. Auto-key on first run.                                                                    |
+| :globe_with_meridians:    | [**5 API Providers**](#features-in-depth)     | Anthropic, Vertex AI, OpenRouter, Ollama, or any compatible endpoint.                                                              |
+| :arrows_counterclockwise: | [**Self-Improvement**](#features-in-depth)    | Nomos can analyze its own code, implement fixes, and open PRs to itself.                                                           |
+| :sleeping:                | [**Sleep & Resume**](#features-in-depth)      | Agents pause and wake with a prompt — for polling, monitoring, and async waits.                                                    |
+| :anchor:                  | [**Event Hooks**](#features-in-depth)         | Command, HTTP, or prompt hooks on tool use, lifecycle, and compaction.                                                             |
+| :crescent_moon:           | [**Auto-Dream**](#features-in-depth)          | Background memory consolidation with 4-phase cleanup.                                                                              |
+| :package:                 | [**Plugins**](#plugins)                       | 21 pre-installed plugins from the Claude marketplace — PR review, code review, GitHub, Linear, Playwright, and more.               |
+| :moneybag:                | [**Cost Tracking**](#features-in-depth)       | Per-model pricing, session costs, usage breakdown in CLI and web dashboard.                                                        |
 
 ---
 
@@ -234,7 +238,7 @@ Each adapter is ~50-100 LOC. All agent logic is centralized in `AgentRuntime`. S
 Skills are markdown files (`SKILL.md`) with YAML frontmatter that provide domain-specific instructions to the agent. Loaded from three tiers: **bundled** (`skills/`) → **personal** (`~/.nomos/skills/`) → **project** (`./skills/`).
 
 <details>
-<summary><strong>All 60+ bundled skills</strong></summary>
+<summary><strong>All 44 bundled skills</strong></summary>
 
 | Skill                   | Description                                                    |
 | ----------------------- | -------------------------------------------------------------- |
@@ -253,6 +257,7 @@ Skills are markdown files (`SKILL.md`) with YAML frontmatter that provide domain
 | `gws-gmail`             | Gmail API (messages, drafts, labels)                           |
 | `gws-drive`             | Google Drive (files, folders, permissions)                     |
 | `gws-calendar`          | Google Calendar (events, scheduling)                           |
+| `gws-classroom`         | Google Classroom (coursework, grades, homework submission)     |
 | `gws-sheets`            | Google Sheets (read, write, append)                            |
 | `gws-docs`              | Google Docs (create, read, edit)                               |
 | `gws-slides`            | Google Slides (presentations)                                  |
@@ -547,7 +552,7 @@ Under the hood: **pgvector** with hybrid retrieval (vector cosine similarity + f
 
 ### Adaptive Memory & User Model
 
-When enabled (`NOMOS_ADAPTIVE_MEMORY=true`), the agent extracts structured knowledge from every conversation — facts, preferences, and corrections — using a lightweight LLM call (Haiku by default). Extracted knowledge accumulates into a persistent **user model** that personalizes responses across sessions.
+By default, the agent extracts structured knowledge from every conversation — facts, preferences, and corrections — using a lightweight LLM call (Haiku by default). Extracted knowledge accumulates into a persistent **user model** that personalizes responses across sessions. Disable with `NOMOS_ADAPTIVE_MEMORY=false`.
 
 - **Knowledge extraction** — facts about you, your projects, tech stack; preferences for coding style, communication, tools
 - **Confidence-weighted** — repeated confirmations increase confidence; contradictions decrease it
@@ -701,6 +706,9 @@ Configuration is loaded with the following precedence: **Database > environment 
 | `NOMOS_IMAGE_GENERATION` | Enable image generation via Gemini                                            | `false`             |
 | `GEMINI_API_KEY`         | Gemini API key (shared by image and video generation)                         | --                  |
 | `NOMOS_VIDEO_GENERATION` | Enable video generation via Veo                                               | `false`             |
+| `NOMOS_CLASSROOM`        | Enable Google Classroom student assistant (opt-in)                            | `false`             |
+| `NOMOS_CLASSROOM_WRITE`  | Allow submitting (turning in) approved Classroom homework drafts              | `false`             |
+| `NOMOS_NATIVE_DEVICE`    | Enable iPhone Calendar + Reminders via EventKit bridge (hosted-only)          | `false`             |
 | `ANTHROPIC_BASE_URL`     | Custom Anthropic API base URL (Ollama, LiteLLM, etc.)                         | --                  |
 
 ### Channel integrations
