@@ -91,43 +91,21 @@ export function hasClassroomWriteScope(scopes: string): boolean {
 }
 
 /**
- * True if `email` is on an EDUCATIONAL domain (a school/university). Classroom is a
- * student feature, so a personal (gmail.com) OR business (company.com) account that
- * carries classroom scopes — Google's OAuth is cumulative — should NOT get the classroom
- * tools; only a school account should. We match the common education domain patterns:
- *   - `.edu`            (Harvard, MIT, most US universities)
- *   - `.edu.<cc>`       (edu.au, edu.sg, edu.cn, …)
- *   - `.ac.<cc>`        (ac.uk, ac.jp, ac.il, … — "academic")
- *   - `.k12.<…>.us`     (US K-12)
- *   - `.sch.<cc>`       (schools in some countries)
- * A private school on a custom `.org`/`.com` domain won't auto-match (rare); it can
- * still connect Classroom explicitly.
- */
-export function isSchoolAccount(email: string): boolean {
-  const domain = email.split("@").pop()?.toLowerCase() ?? "";
-  if (!domain) return false;
-  return (
-    domain.endsWith(".edu") ||
-    /\.edu\.[a-z]{2}$/.test(domain) ||
-    /\.ac\.[a-z]{2}$/.test(domain) ||
-    domain.includes(".k12.") ||
-    /\.sch\.[a-z]{2}$/.test(domain)
-  );
-}
-
-/**
  * The Google services a granted-scopes string actually covers, for client display —
  * so a classroom-only school account isn't mislabeled "Gmail · Calendar · Drive".
  * `drive.file` (app-created files only, used for classroom turn-in) does NOT count as
  * full Drive access.
  */
-export function grantedGoogleServices(scopes: string): string[] {
+export function grantedGoogleServices(scopes: string, classroomConnected = false): string[] {
   const s = scopes ?? "";
   const out: string[] = [];
   if (/\/gmail\./.test(s)) out.push("gmail");
   if (/\/calendar/.test(s)) out.push("calendar");
   if (/\/auth\/drive(\s|$)/.test(s)) out.push("drive"); // full drive, not drive.file
-  if (hasClassroomScope(s)) out.push("classroom");
+  // Classroom is INTENT-driven, not scope-driven: a Workspace reconnect can carry
+  // cumulative classroom scopes the user never meant to surface here. Only an account
+  // connected through the Classroom flow counts.
+  if (classroomConnected) out.push("classroom");
   return out;
 }
 
@@ -147,6 +125,12 @@ export interface GoogleAccount {
   sendEnabled: boolean;
   /** Unix seconds when the current access token expires. */
   expiresAt: number;
+  /**
+   * Whether this account was connected through the CLASSROOM flow (intent). Classroom is
+   * a K-12 student feature with no reliable domain signal, so it is on ONLY when the user
+   * explicitly connected it — never inferred from cumulative scopes or email domain.
+   */
+  classroomConnected: boolean;
 }
 
 interface GoogleTokens {
@@ -218,10 +202,25 @@ function oauthStateSecret(): string {
  * so it survives across stateless pods — the callback verifies it before
  * exchanging the code, and the user identity still comes from the JWT.
  */
-export function signOAuthState(userId: string, ttlSeconds = 600): string {
-  const payload = `${userId}.${Math.floor(Date.now() / 1000) + ttlSeconds}`;
+export function signOAuthState(userId: string, ttlSeconds = 600, classroom = false): string {
+  // The connect kind (workspace `w` / classroom `c`) rides INSIDE the signed payload so
+  // ConnectGoogleAccount can record intent — Classroom is "on" only when connected via
+  // the Classroom flow, never inferred from cumulative scopes a Workspace reconnect drags
+  // in. verifyOAuthState ignores the kind segment, so old 2-segment states still verify.
+  const payload = `${userId}.${Math.floor(Date.now() / 1000) + ttlSeconds}.${classroom ? "c" : "w"}`;
   const sig = createHmac("sha256", oauthStateSecret()).update(payload).digest("base64url");
   return `${Buffer.from(payload).toString("base64url")}.${sig}`;
+}
+
+/** Read the connect kind from an (already-verified) OAuth state: was it a Classroom connect? */
+export function oauthStateClassroom(state: string): boolean {
+  const dot = state.lastIndexOf(".");
+  if (dot < 0) return false;
+  try {
+    return Buffer.from(state.slice(0, dot), "base64url").toString("utf8").split(".")[2] === "c";
+  } catch {
+    return false;
+  }
 }
 
 /** Verify a signed state belongs to `userId` and hasn't expired. */
@@ -413,6 +412,8 @@ export async function storeGoogleAccount(opts: {
   email: string;
   tokens: GoogleTokens;
   scopes: string;
+  /** True when this came through the Classroom flow — turns Classroom on (sticky). */
+  classroomConnect?: boolean;
 }): Promise<void> {
   const existing = await listGoogleAccounts(opts.userId);
   const prev = existing.find((a) => a.email.toLowerCase() === opts.email.toLowerCase());
@@ -427,6 +428,9 @@ export async function storeGoogleAccount(opts: {
       is_default: isDefault,
       // Preserve the send toggle across re-connects (default off).
       send_enabled: prev?.sendEnabled ?? false,
+      // Sticky: a Classroom connect turns it on; a later Workspace reconnect of the SAME
+      // account keeps it on (don't silently drop a real Classroom connection).
+      classroom_connected: Boolean(opts.classroomConnect) || Boolean(prev?.classroomConnected),
     },
     secrets: {
       access_token: opts.tokens.accessToken,
@@ -446,6 +450,9 @@ function rowToAccount(i: Integration): GoogleAccount {
     isDefault: Boolean(i.config.is_default),
     sendEnabled: Boolean(i.config.send_enabled),
     expiresAt: Number(i.secrets.expires_at ?? 0),
+    // Absent on accounts connected before this flag existed → false (Classroom off until
+    // explicitly reconnected through the Classroom flow).
+    classroomConnected: Boolean(i.config.classroom_connected),
   };
 }
 

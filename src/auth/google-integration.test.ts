@@ -8,7 +8,7 @@ import {
   googleRedirectUriForPlatform,
   hasClassroomScope,
   hasClassroomWriteScope,
-  isSchoolAccount,
+  oauthStateClassroom,
   isGoogleIntegrationConfigured,
   signOAuthState,
   verifyOAuthState,
@@ -123,20 +123,6 @@ describe("Classroom scopes", () => {
     }
   });
 
-  it("treats only EDUCATIONAL domains as school accounts (Classroom gate)", () => {
-    // Schools / universities — yes.
-    expect(isSchoolAccount("kid@mit.edu")).toBe(true);
-    expect(isSchoolAccount("student@lincoln.k12.ca.us")).toBe(true);
-    expect(isSchoolAccount("s@school.edu.au")).toBe(true);
-    expect(isSchoolAccount("s@oxford.ac.uk")).toBe(true);
-    // Personal AND business accounts — no (a business is not a school).
-    expect(isSchoolAccount("me@gmail.com")).toBe(false);
-    expect(isSchoolAccount("me@googlemail.com")).toBe(false);
-    expect(isSchoolAccount("worker@acme.com")).toBe(false);
-    expect(isSchoolAccount("worker@bigco.org")).toBe(false);
-    expect(isSchoolAccount("")).toBe(false);
-  });
-
   it("detects classroom + write scopes in a granted-scopes string", () => {
     const read = GOOGLE_CLASSROOM_SCOPES_READ.join(" ");
     const write = GOOGLE_CLASSROOM_SCOPES_WRITE.join(" ");
@@ -165,6 +151,15 @@ describe("OAuth CSRF state", () => {
   it("round-trips for the same user", () => {
     const s = signOAuthState("user-A");
     expect(verifyOAuthState(s, "user-A")).toBe(true);
+  });
+
+  it("carries the connect kind (workspace vs classroom) and still verifies", () => {
+    const ws = signOAuthState("user-A", 600, false);
+    const cr = signOAuthState("user-A", 600, true);
+    expect(verifyOAuthState(ws, "user-A")).toBe(true);
+    expect(verifyOAuthState(cr, "user-A")).toBe(true);
+    expect(oauthStateClassroom(ws)).toBe(false);
+    expect(oauthStateClassroom(cr)).toBe(true);
   });
 
   it("rejects a different user", () => {

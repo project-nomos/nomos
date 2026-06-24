@@ -41,12 +41,7 @@ import {
 import { isGoogleWorkspaceConfiguredAsync } from "../sdk/google-workspace-mcp.ts";
 import { buildGoogleMcpServers, buildGoogleIntegrationPrompt } from "../sdk/google-mcp.ts";
 import { buildClassroomMcpServer } from "../sdk/google-classroom-mcp.ts";
-import {
-  hasClassroomScope,
-  hasClassroomWriteScope,
-  isSchoolAccount,
-  listGoogleAccounts,
-} from "../auth/google-integration.ts";
+import { hasClassroomWriteScope, listGoogleAccounts } from "../auth/google-integration.ts";
 import { buildStudioMcpServer } from "../sdk/studio-mcp.ts";
 import { buildVaultMcpServer } from "../sdk/vault-mcp.ts";
 import { buildNativeDeviceMcpServer } from "../sdk/native-device-mcp.ts";
@@ -1287,11 +1282,11 @@ export class AgentRuntime {
     // classroom scopes (per-account consent), so non-students stay dark.
     if (FEATURES.classroom() && isHosted() && userId) {
       try {
-        // Classroom is a student feature → school accounts only. A personal gmail.com
-        // account that carries classroom scopes (Google's OAuth is cumulative) is skipped.
-        const accts = (await listGoogleAccounts(userId)).filter(
-          (a) => hasClassroomScope(a.scopes) && isSchoolAccount(a.email),
-        );
+        // Classroom is INTENT-driven: only accounts connected through the Classroom flow
+        // (classroomConnected) get the tools. A Workspace reconnect that cumulatively
+        // carries classroom scopes does NOT enable it — there's no reliable domain signal
+        // (K-12 schools use custom domains; .edu is universities, which use Canvas).
+        const accts = (await listGoogleAccounts(userId)).filter((a) => a.classroomConnected);
         if (accts.length > 0) {
           // Write tools require BOTH the deployment off-switch (NOMOS_CLASSROOM_WRITE)
           // AND a connected account that actually granted the read-write scope. Either

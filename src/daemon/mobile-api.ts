@@ -32,6 +32,7 @@ import {
   isGoogleIntegrationConfigured,
   removeGoogleAccount,
   setSendEnabled,
+  oauthStateClassroom,
   signOAuthState,
   storeGoogleAccount,
   verifyOAuthState,
@@ -960,7 +961,7 @@ async function handleStartConnect(
     const platform = (call.metadata.get("x-nomos-platform")?.[0] as string | undefined) ?? "";
     const url = buildAuthUrl({
       redirectUri: googleRedirectUriForPlatform(platform),
-      state: signOAuthState(ctx.userId),
+      state: signOAuthState(ctx.userId, 600, Boolean(classroom)),
       ...(classroom ? { classroom } : {}),
     });
     return { oauthUrl: url };
@@ -995,6 +996,9 @@ async function handleConnectGoogleAccount(
       // grants). Never fall back to the full Gmail/Cal/Drive set — that would mislabel
       // a classroom-only school account and wrongly flip the classroom/send gates.
       scopes: tokens.scope ?? "",
+      // Intent from the signed state: was this the Classroom flow? Only then is Classroom
+      // turned on for the account (cumulative scopes alone never enable it).
+      classroomConnect: oauthStateClassroom(req.state),
     });
     return { success: true, message: tokens.email };
   } catch (err) {
@@ -1601,7 +1605,12 @@ async function listIntegrationsForUser(userId: string) {
       const isGoogle = provider === "google";
       // Granted services (gmail/calendar/drive/classroom) so the client labels a
       // classroom-only account correctly and hides the send toggle when there's no Gmail.
-      const services = isGoogle ? grantedGoogleServices(String(i.config.scopes ?? "")) : [];
+      const services = isGoogle
+        ? grantedGoogleServices(
+            String(i.config.scopes ?? ""),
+            Boolean(i.config.classroom_connected),
+          )
+        : [];
       return {
         // Google: key by account email so the client disconnects/toggles by account.
         id: isGoogle && accountEmail ? accountEmail : String(i.metadata.integration_id ?? i.id),
