@@ -108,7 +108,7 @@ describe("verifyJwt", () => {
       payload: {
         sub: "user-abc",
         org_id: "org123",
-        exp: Math.floor(Date.now() / 1000) - 60,
+        exp: Math.floor(Date.now() / 1000) - 3600, // an hour ago — past the 60s clock-skew leeway
       },
     });
     await expect(verifyJwt(token)).rejects.toThrow(JwtValidationError);
