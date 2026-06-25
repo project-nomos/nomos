@@ -54,8 +54,10 @@ TASK:
 2. For each, decide: urgent / needs-reply / FYI / junk.
 3. Skip junk and FYI silently.
 4. ${autonomyLine}
+5. Before staging a draft, check existing drafts for that thread FIRST (list drafts). NEVER create a second draft for a message you have already drafted — if a draft already exists for the thread, skip it. Do not re-draft the same email on later scans.
 
 REPLY FORMAT:
+- If the Gmail tool is unavailable or errors this run so you cannot ACTUALLY scan, respond with exactly: ${NOACTION_PREFIX} gmail unavailable — and NOTHING else. Do not announce that a tool is disconnected or that you will retry; the next run retries automatically.
 - If nothing urgent or actionable was found, respond with exactly: ${NOACTION_PREFIX} inbox clean
 - Otherwise respond with a terse summary (no preamble), grouped:
   *Urgent* — sender · subject · 1-line why

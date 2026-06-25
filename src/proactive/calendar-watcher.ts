@@ -28,6 +28,7 @@ TASK:
    - Include the meeting title, time, attendees (with relationships), 2-3 sentences of context, and 2-3 suggested talking points or questions.
 
 REPLY FORMAT:
+- If the Calendar tool is unavailable or errors this run so you cannot ACTUALLY scan, respond with exactly: ${NOACTION_PREFIX} calendar unavailable — and NOTHING else. Do not announce that a tool is disconnected or that you will retry; the next run retries automatically.
 - If no eligible meetings, respond with exactly: ${NOACTION_PREFIX} no upcoming meetings
 - Otherwise, one brief per meeting using Slack mrkdwn:
   *<title>* — <local time>
