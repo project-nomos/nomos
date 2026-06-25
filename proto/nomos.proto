@@ -249,6 +249,11 @@ service MobileApi {
   // the device directly — it calls the native-device MCP tools, which route here.
   rpc DeviceBridge (MDeviceHello) returns (stream MDeviceInvocation);
   rpc SubmitDeviceResult (MDeviceResult) returns (MAck);
+
+  // Compose tab — used by the iMessage app extension. A one-shot, non-streaming draft:
+  // the user gives an instruction ("tell my mom I'll be late"), the agent returns a few
+  // ready-to-send message drafts; the user picks one and Messages sends it.
+  rpc ComposeReply (MComposeRequest) returns (MComposeResponse);
 }
 
 // Loops (autonomous recurring jobs)
@@ -762,6 +767,15 @@ message MDeviceResult {
   bool ok = 2;
   string result_json = 3; // JSON-encoded result payload (when ok)
   string error = 4;       // human-readable error (when !ok)
+}
+
+// ── Compose (iMessage extension) ──
+message MComposeRequest {
+  string instruction = 1;  // what the user wants to say, in their words
+  string context_hint = 2; // optional: the message being replied to (if the user pasted it)
+}
+message MComposeResponse {
+  repeated string drafts = 1; // a few ready-to-send drafts; the user picks one
 }
 
 // ── OAuth Deposit ──

@@ -70,6 +70,7 @@ import type { TenantContext } from "../auth/tenant-context.ts";
 import { getDeviceBridge, type DeviceInvocation } from "./device-bridge.ts";
 import { resolveMemoryUserId, systemTenant } from "../auth/tenant-context.ts";
 import { buildStudioEngine } from "../sdk/studio-mcp.ts";
+import { runForkedAgent } from "../sdk/forked-agent.ts";
 import {
   confirmAsset,
   createAsset,
@@ -233,7 +234,58 @@ export function buildMobileApiHandlers(deps: MobileApiDeps) {
     SubmitDeviceResult: withAuthUnary("/nomos.MobileApi/SubmitDeviceResult", (call, ctx) =>
       handleSubmitDeviceResult(call, ctx),
     ),
+    ComposeReply: withAuthUnary("/nomos.MobileApi/ComposeReply", (call, ctx) =>
+      handleComposeReply(call, ctx),
+    ),
   };
+}
+
+// ──────────── Compose (iMessage extension) ────────────
+
+/** One-shot draft generation for the iMessage extension (instruction → a few drafts). */
+async function handleComposeReply(
+  call: grpc.ServerUnaryCall<unknown, unknown>,
+  _ctx: TenantContext,
+): Promise<{ drafts: string[] }> {
+  const req = (call.request ?? {}) as { instruction?: string; contextHint?: string };
+  const instruction = (req.instruction ?? "").trim();
+  if (!instruction) return { drafts: [] };
+  const ctxLine = req.contextHint?.trim()
+    ? `\n\nThe message being replied to:\n"${req.contextHint.trim()}"`
+    : "";
+  const prompt =
+    `You are drafting text messages for the user to send from iMessage. Write THREE short, ` +
+    `natural, ready-to-send replies for the instruction below, in a casual texting tone. ` +
+    `Return ONLY a JSON array of 3 strings, nothing else.\n\nInstruction: ${instruction}${ctxLine}`;
+  try {
+    const result = await runForkedAgent({ label: "imessage-compose", allowedTools: [], prompt });
+    return { drafts: parseDrafts(result.text).slice(0, 3) };
+  } catch (err) {
+    log.warn({ err: err instanceof Error ? err.message : err }, "compose failed");
+    return { drafts: [] };
+  }
+}
+
+/** Pull the drafts out of the model output: a JSON array if present, else cleaned lines. */
+function parseDrafts(text: string): string[] {
+  const json = text.match(/\[[\s\S]*\]/);
+  if (json) {
+    try {
+      const arr = JSON.parse(json[0]) as unknown[];
+      if (Array.isArray(arr)) return arr.map((s) => String(s).trim()).filter(Boolean);
+    } catch {
+      // fall through to line parsing
+    }
+  }
+  return text
+    .split("\n")
+    .map((l) =>
+      l
+        .replace(/^[-*\d.)\s"]+/, "")
+        .replace(/"$/, "")
+        .trim(),
+    )
+    .filter(Boolean);
 }
 
 // ──────────── Device bridge (native EventKit tools) ────────────

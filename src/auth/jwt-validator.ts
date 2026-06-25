@@ -177,7 +177,10 @@ export async function verifyJwt(token: string): Promise<TenantContext> {
   if (!ok) throw new JwtValidationError("bad_signature");
 
   const now = Math.floor(Date.now() / 1000);
-  if (typeof payload.exp !== "number" || payload.exp < now) {
+  // Tolerate small clock drift between the phone and the server so a device whose clock
+  // runs slightly ahead doesn't get a spurious "expired" on an otherwise-valid token.
+  const CLOCK_SKEW_SEC = 60;
+  if (typeof payload.exp !== "number" || payload.exp < now - CLOCK_SKEW_SEC) {
     throw new JwtValidationError("expired");
   }
   if (!payload.sub) throw new JwtValidationError("missing_sub");
