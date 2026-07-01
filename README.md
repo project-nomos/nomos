@@ -420,13 +420,9 @@ A Karpathy-style compiled knowledge base with four passes: **planner** (decide w
 
 **Planner** decides which articles to create/update based on your vault (source of truth), knowledge graph, and recent conversations.
 
-**Curator** compiles articles organized by contact, topic, and timeline, fed from three sources:
+**Curator** compiles articles organized by contact, topic, and timeline. The compiler reads vault notes first as the source of truth for article bodies, then enriches them with knowledge graph facts and conversation context. Articles follow your **WIKI.md conventions** (Karpathy's "schema" layer) — editable in Settings or `~/.nomos/WIKI.md` — so the compiler respects how you organize your knowledge.
 
-- Your authored vault notes (highest priority)
-- Knowledge graph facts (entity relationships, validated edges)
-- Relevant conversations (context)
-
-Articles follow your **WIKI.md conventions** (Karpathy's "schema" layer) — editable in Settings or `~/.nomos/WIKI.md` — so the compiler respects how you organize your knowledge.
+Articles also surface **superseded facts** from the knowledge graph — when something changes, the old claim is marked invalid but not deleted, so articles state "Previously X, now Y" instead of silently dropping old information.
 
 ```
 ~/.nomos/wiki/
@@ -440,11 +436,11 @@ Articles follow your **WIKI.md conventions** (Karpathy's "schema" layer) — edi
 
 - **Orphan articles** — no inbound `[[links]]` from any other article
 - **Dangling links** — `[[Target]]` mentioned but no article exists
-- **Superseded facts** — older claims invalidated by newer information (`kg_edges.invalid_at`), surfaced so you can state "Previously X, now Y" instead of silently dropping old facts
+- **Superseded facts** — older claims invalidated by newer information, surfaced so you can review and update them
 
-The linter report is written back into the wiki as `_lint.md` (category `lint`), so it lives in the DB and works identically in hosted and power-user modes.
+The linter report is written back into the wiki as `_lint.md`, so it lives in the DB and works identically in hosted and power-user modes.
 
-**Sync** mirrors the wiki to disk (`~/.nomos/wiki/`) as a browsable cache; in power-user mode, edits to `WIKI.md` sync back to the DB automatically.
+**Sync** mirrors the wiki to disk (`~/.nomos/wiki/`) as a browsable cache; in power-user mode, edits sync back to the DB automatically.
 
 Articles stored in PostgreSQL (source of truth). Configure cadence, model, and max-articles-per-run in Settings (`app.wiki*` and `app.wikiLint*` config).
 
@@ -480,7 +476,7 @@ A hybrid per-session engine that models the user's mental state in real time so 
 
 The combined state appears in the system prompt as "Current User State" with response guidance (e.g., "Be concise and action-oriented" when urgency is high, "Acknowledge the difficulty" when frustration is detected).
 
-Theory of Mind is one of 8 interconnected subsystems that make Nomos think like you, not just sound like you. See [docs/think-like-you.md](docs/think-like-you.md) for the full architecture: knowledge extraction, decision pattern learning, exemplar curation, shadow observation, calibration, personality DNA, and more.
+Theory of Mind is one of 8 interconnected subsystems that make Nomos think like you, not just sound like you. See [docs/think-like-you.md](docs/think-like-you.md) for the full architecture: knowledge extraction, communication style modeling, decision pattern learning, exemplar curation, shadow observation, calibration, personality DNA, and more.
 
 </details>
 
