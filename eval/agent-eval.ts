@@ -101,7 +101,7 @@ import {
   rejectDraft,
   markDraftSent,
 } from "../src/db/drafts.ts";
-import { syncFileToDb } from "../src/config/file-sync.ts";
+import { syncFileToDb, readManagedFile } from "../src/config/file-sync.ts";
 import {
   countTranscriptMessages,
   appendTranscriptMessage,
@@ -116,7 +116,9 @@ import {
   upsertEdge,
   mergeNodeAttrs,
   getNode,
+  invalidateEdge,
 } from "../src/memory/graph.ts";
+import { getSupersededFacts } from "../src/memory/graph-contradictions.ts";
 import { consolidateMemory } from "../src/memory/consolidator.ts";
 import {
   autoDream,
@@ -131,6 +133,7 @@ import {
   getCommitmentsForReminder,
 } from "../src/proactive/commitment-tracker.ts";
 import { compileKnowledge } from "../src/memory/knowledge-compiler.ts";
+import { lintWiki } from "../src/memory/wiki-lint.ts";
 import { listArticles, upsertArticle, searchArticles, getArticle } from "../src/db/wiki.ts";
 import { getRelevantArticles } from "../src/memory/wiki-reader.ts";
 import { runForkedAgent } from "../src/sdk/forked-agent.ts";
@@ -1882,6 +1885,86 @@ async function runWikiArticles(): Promise<void> {
     check(
       "[wiki] hosted compile keeps the wiki in the DB, not on disk (multi-node safe)",
       !existsSync(target),
+    );
+
+    // #1 The vault (source of truth) must feed the article BODY, not just the
+    // planner. Assert some compiled article carries a detail that lives ONLY in the
+    // seeded vault notes (never in user_model/contacts) -- proof searchVaultNotes
+    // threads authored content into compileArticle.
+    const allBodies = (await listArticles(A)).map((a) => a.content.toLowerCase()).join("\n");
+    const vaultOnlyDetails = ["peanut", "vegetarian", "offsite", "on-call", "stripe webhook"];
+    const vaultMatched = vaultOnlyDetails.filter((d) => allBodies.includes(d));
+    check(
+      "[wiki] compiled article bodies are fed by the vault (source of truth), not just user_model",
+      vaultMatched.length > 0,
+      vaultMatched.length > 0
+        ? `vault-only details present in bodies: ${vaultMatched.join(", ")}`
+        : `none of [${vaultOnlyDetails.join(", ")}] found in compiled bodies`,
+    );
+
+    // #3 Contradiction plumbing: seed a superseded fact (kg_edges.invalid_at) and
+    // assert getSupersededFacts surfaces it so the compiler can annotate the change.
+    const kgCtx = { orgId: "eval-org", userId: A };
+    const rajId = await upsertNode(kgCtx, { kind: "person", name: "Raj Patel", confidence: 0.9 });
+    const oldCoId = await upsertNode(kgCtx, { kind: "org", name: "OldCo", confidence: 0.8 });
+    const newCoId = await upsertNode(kgCtx, { kind: "org", name: "NewCo", confidence: 0.8 });
+    const oldEdgeId = await upsertEdge(kgCtx, {
+      srcId: rajId,
+      dstId: oldCoId,
+      relType: "works_at",
+      fact: "Raj Patel works at OldCo",
+      confidence: 0.9,
+    });
+    await upsertEdge(kgCtx, {
+      srcId: rajId,
+      dstId: newCoId,
+      relType: "works_at",
+      fact: "Raj Patel works at NewCo",
+      confidence: 0.9,
+    });
+    await invalidateEdge(kgCtx, oldEdgeId, new Date());
+    const superseded = await getSupersededFacts(A, "Raj Patel");
+    check(
+      "[wiki] superseded facts (kg_edges.invalid_at) are queryable for annotation",
+      superseded.some((s) => s.fact.includes("OldCo")),
+      `superseded=[${superseded.map((s) => s.fact).join("; ") || "none"}]`,
+    );
+
+    // #2 Lint pass: health-check the wiki and write _lint.md. Runs in hosted here,
+    // so the report must land in the DB (wiki_articles), never on disk.
+    const lint = await lintWiki({ userId: A, force: true });
+    const lintArticle = await getArticle(A, "_lint.md");
+    check(
+      "[wiki-lint] lint pass writes the _lint.md report article (category 'lint')",
+      lint.wrote && lintArticle?.category === "lint",
+      `wrote=${lint.wrote} orphans=${lint.orphans} dangling=${lint.dangling} superseded=${lint.superseded}`,
+    );
+    check("[wiki-lint] hosted lint keeps the report in the DB, not on disk", !existsSync(target));
+    check(
+      "[wiki-lint] the _lint.md report is excluded from the agent's wiki context (meta, not knowledge)",
+      !(await getRelevantArticles(A, "orphan dangling superseded lint report")).includes(
+        "Wiki Lint Report",
+      ),
+    );
+
+    // #4 The WIKI.md schema doc is seeded so the compiler reads conventions in BOTH
+    // modes (hosted has no disk, so it must come from managed_files in the DB).
+    const wikiMd = await readManagedFile("WIKI.md");
+    check(
+      "[wiki] WIKI.md conventions doc is seeded in managed_files (read in both modes)",
+      Boolean(wikiMd && wikiMd.toLowerCase().includes("conventions")),
+    );
+
+    // Lint config wiring: the two app.wikiLint* settings resolveWikiLint reads.
+    const lintCfgRows = await getKysely()
+      .selectFrom("config")
+      .select(["key"])
+      .where("key", "in", ["app.wikiLintEnabled", "app.wikiLintInterval"])
+      .execute();
+    check(
+      "[wiki-lint] both app.wikiLint* settings are seeded in the config table",
+      lintCfgRows.length === 2,
+      `found ${lintCfgRows.length}/2: ${lintCfgRows.map((r) => r.key).join(", ")}`,
     );
   } finally {
     delete process.env.NOMOS_WIKI_DIR;

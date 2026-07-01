@@ -457,7 +457,10 @@ INSERT INTO config (key, value) VALUES
   ('app.wikiEnabled',           '"true"'),
   ('app.wikiCompileInterval',   '"1h"'),
   ('app.wikiCompileModel',      '"claude-sonnet-4-6"'),
-  ('app.wikiMaxArticlesPerRun', '20')
+  ('app.wikiMaxArticlesPerRun', '20'),
+  -- Wiki lint (health-check) pass: orphans, dangling links, superseded facts.
+  ('app.wikiLintEnabled',       '"true"'),
+  ('app.wikiLintInterval',      '"24h"')
 ON CONFLICT (key) DO NOTHING;
 
 -- Unified contacts (cross-platform identity graph)
@@ -558,6 +561,43 @@ CREATE TABLE IF NOT EXISTS managed_files (
   hash        TEXT NOT NULL,               -- SHA-256 of content (for change detection)
   updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Default WIKI.md: the wiki "schema" doc (conventions the compiler reads every
+-- run). Seeded so BOTH modes have a baseline with no user action -- power-user
+-- restores it to ~/.nomos/WIKI.md at boot (syncAllFiles), hosted edits it via the
+-- Settings UI. Idempotent: never overwrites a user's edited copy. The hash is only
+-- used for disk change-detection (self-heals on the next disk->DB sync).
+-- NOTE: keep this block free of backtick and dollar-brace characters -- schema.sql
+-- is inlined into a JS template literal at build (scripts/sync-inline-schema.mjs),
+-- and those two sequences break it (guarded, so the build fails fast otherwise).
+INSERT INTO managed_files (path, content, hash) VALUES (
+  'WIKI.md',
+  $wiki$# Wiki conventions
+
+How the knowledge wiki is structured. The agent maintains the wiki; you read and
+edit these conventions. Power-user: edit this file (~/.nomos/WIKI.md). Hosted:
+edit it in Settings. The compiler reads it every run.
+
+## Layout
+
+- Group articles by category, as category/title.md (for example, contacts/jane.md).
+- Common categories: contacts (people), projects, topics, orgs, procedures.
+- One entity per article. Prefer updating an existing article over creating a near-duplicate.
+
+## Writing
+
+- Concise and factual. Under 500 words. Structure with clear headings.
+- Include concrete details: roles, relationships, emails, phone numbers, preferences, dates.
+- The vault is the source of truth: prefer authored vault notes over inferred facts.
+
+## Links and freshness
+
+- Cross-link entities with [[Name]] so the wiki forms a graph. Only bracket distinct proper nouns.
+- When newer information supersedes an older claim, state the change (for example,
+  "Previously at X; now at Y") instead of silently dropping the old fact.
+$wiki$,
+  '05f4e3a3c43fceacfc465a5308d3f60766bb07521ec3ebb124cc9b7bbf203f39'
+) ON CONFLICT (path) DO NOTHING;
 
 -- Per-instance org membership cache (replicated from BA's organization
 -- plugin via webhook). The gRPC interceptor checks this on every call to

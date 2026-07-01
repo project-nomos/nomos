@@ -32,6 +32,8 @@ const CONFIG_KEY_MAP: Record<string, keyof NomosConfig> = {
   "app.wikiCompileInterval": "wikiCompileInterval",
   "app.wikiCompileModel": "wikiCompileModel",
   "app.wikiMaxArticlesPerRun": "wikiMaxArticlesPerRun",
+  "app.wikiLintEnabled": "wikiLintEnabled",
+  "app.wikiLintInterval": "wikiLintInterval",
   "app.shadowMode": "shadowMode",
   "app.imageGeneration": "imageGeneration",
   "app.imageGenerationModel": "imageGenerationModel",

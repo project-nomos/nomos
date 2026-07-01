@@ -30,8 +30,15 @@ function contentHash(content: string): string {
   return createHash("sha256").update(content, "utf-8").digest("hex");
 }
 
-/** Marker regex to detect magic doc files. */
-const MAGIC_DOC_MARKER = /<!--\s*MAGIC DOC:\s*(.+?)\s*-->/;
+/**
+ * Marker regex to detect magic doc files. The marker must be ALONE on its own
+ * line (only surrounding whitespace) to count -- otherwise a doc that merely
+ * *documents* the syntax (e.g. README/CLAUDE.md describing Magic Docs with an
+ * inline `<!-- MAGIC DOC: title -->` in a sentence or code span) would be
+ * detected as a magic doc and auto-rewritten in place. Anchored + multiline so
+ * only a real, standalone marker line matches.
+ */
+const MAGIC_DOC_MARKER = /^[ \t]*<!--[ \t]*MAGIC DOC:[ \t]*(.+?)[ \t]*-->[ \t]*$/m;
 
 /** Minimum time between updates for the same doc (1 hour). */
 const MIN_UPDATE_INTERVAL_MS = 60 * 60 * 1000;
@@ -203,8 +210,16 @@ function defaultMagicDocRoots(): string[] {
 }
 
 /**
+ * Canonical, hand-maintained docs that must NEVER be auto-rewritten, even if a
+ * standalone marker slips in (e.g. a fenced code example). Defense-in-depth on top
+ * of the own-line marker rule: these files are the project's source of truth.
+ */
+const NEVER_MAGIC = new Set(["CLAUDE.md", "README.md", "AGENTS.md"]);
+
+/**
  * Find magic-doc files under the given roots (non-recursive scan of each root,
- * cheap + bounded). A file qualifies if it ends in `.md` and contains the marker.
+ * cheap + bounded). A file qualifies if it ends in `.md`, is not a canonical
+ * hand-maintained doc, and contains a standalone marker line.
  */
 async function findMagicDocs(roots: string[]): Promise<string[]> {
   const found: string[] = [];
@@ -218,6 +233,7 @@ async function findMagicDocs(roots: string[]): Promise<string[]> {
     }
     for (const name of entries) {
       if (!name.endsWith(".md")) continue;
+      if (NEVER_MAGIC.has(name)) continue; // never auto-rewrite canonical docs
       const full = path.join(root, name);
       if (seen.has(full)) continue;
       seen.add(full);

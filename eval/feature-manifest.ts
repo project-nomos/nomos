@@ -57,7 +57,14 @@ export const FEATURES: FeatureSpec[] = [
     summary:
       "Compile the per-owner knowledge wiki from the vault on a schedule. Cadence, cooldown, model, max-articles and an on/off gate are read from app.wiki* config (resolveWiki), not hardcoded.",
     trigger: { kind: "cron", sentinel: "__wiki_compile__", schedule: "1h", fanOut: true },
-    entry: ["compileKnowledge", "resolveWiki"],
+    entry: [
+      "compileKnowledge",
+      "resolveWiki",
+      "buildArticlePrompt",
+      "searchVaultNotes",
+      "getSupersededFacts",
+      "readManagedFile",
+    ],
     effects: [
       {
         claim: "wiki_articles are produced with content + a compile_model for content articles",
@@ -75,6 +82,23 @@ export const FEATURES: FeatureSpec[] = [
       },
       {
         claim:
+          "article BODIES are fed by the vault (source of truth) via searchVaultNotes, not just substring-matched user_model -- a compiled article's title overlaps an authored vault note",
+        sql: {
+          query:
+            "SELECT count(*) FROM wiki_articles w WHERE w.compile_model IS NOT NULL AND EXISTS (SELECT 1 FROM vault_notes v WHERE v.user_id = w.user_id AND (lower(w.title) LIKE '%'||lower(v.title)||'%' OR lower(v.title) LIKE '%'||lower(w.title)||'%'))",
+          expect: "nonzero",
+        },
+      },
+      {
+        claim:
+          "the WIKI.md conventions doc (Karpathy's schema layer) is seeded into managed_files so the compiler reads it in BOTH modes (hosted has no disk)",
+        sql: {
+          query: "SELECT count(*) FROM managed_files WHERE path = 'WIKI.md'",
+          expect: "nonzero",
+        },
+      },
+      {
+        claim:
           "the wiki compile settings are present in the config table (so resolveWiki reads them, not constants)",
         sql: {
           query:
@@ -87,6 +111,48 @@ export const FEATURES: FeatureSpec[] = [
       "per-owner scoped (user_id)",
       "interval/model/maxArticles/enabled resolved from app.wiki* config via resolveWiki (constants are fallback defaults only)",
       "app.wikiEnabled=false makes compileKnowledge a no-op (hard off-switch)",
+      "article bodies are fed by the vault via searchVaultNotes (source of truth), not only substring-matched user_model",
+      "superseded facts (kg_edges.invalid_at) are threaded in so the article states the change instead of silently dropping the old claim",
+      "WIKI.md conventions are read from managed_files (DB) so it works identically in power-user and hosted",
+    ],
+  },
+  {
+    id: "wiki-lint",
+    summary:
+      "Health-check each owner's compiled wiki on a schedule (Karpathy's lint pass): detect orphan articles (no inbound links), dangling links (mentioned but no article -> missing page), and superseded facts (kg_edges.invalid_at), then write the report back into the wiki as `_lint.md` (category 'lint'). Cadence/off-switch from app.wikiLint* config (resolveWikiLint). Cooldown shares the compiler's Redis/lockfile slot under the 'wiki-lint' namespace, so it is correct across nodes (hosted) and single-node (power-user).",
+    trigger: { kind: "cron", sentinel: "__wiki_lint__", schedule: "24h", fanOut: true },
+    entry: ["lintWiki", "resolveWikiLint", "findOrphans", "findDanglingLinks"],
+    effects: [
+      {
+        claim: "a _lint.md health-check report article is produced (category 'lint')",
+        sql: {
+          query: "SELECT count(*) FROM wiki_articles WHERE category = 'lint' AND path = '_lint.md'",
+          expect: "nonzero",
+        },
+      },
+      {
+        claim:
+          "superseded facts are recorded (kg_edges.invalid_at) for the lint report + compiler annotation to surface",
+        sql: {
+          query: "SELECT count(*) FROM kg_edges WHERE invalid_at IS NOT NULL",
+          expect: "nonzero",
+        },
+      },
+      {
+        claim:
+          "the wiki lint settings are present in the config table (so resolveWikiLint reads them)",
+        sql: {
+          query:
+            "SELECT count(*) FROM config WHERE key IN ('app.wikiLintEnabled','app.wikiLintInterval')",
+          expect: "nonzero",
+        },
+      },
+    ],
+    invariants: [
+      "per-owner scoped (user_id)",
+      "app.wikiLintEnabled=false makes lintWiki a no-op (hard off-switch)",
+      "cooldown/cross-node mutex via acquireCompileSlot under the 'wiki-lint' namespace (Redis in hosted, lock file in power-user)",
+      "the _lint.md report lives in the DB (wiki_articles); disk mirror is power-user-only",
     ],
   },
   {

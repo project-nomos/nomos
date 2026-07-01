@@ -25,7 +25,10 @@ import { homedir } from "node:os";
 import { getDb } from "../db/client.ts";
 import { runForkedAgent } from "../sdk/forked-agent.ts";
 import { upsertArticle, getArticle, listArticles } from "../db/wiki.ts";
+import { searchVaultNotes } from "../db/vault.ts";
 import { parseWikiLinks } from "./graph-writer.ts";
+import { getSupersededFacts, type SupersededFact } from "./graph-contradictions.ts";
+import { readManagedFile } from "../config/file-sync.ts";
 import { syncToDisk } from "./wiki-sync.ts";
 import { syncFileToDb } from "../config/file-sync.ts";
 import { isHosted } from "../config/mode.ts";
@@ -43,38 +46,44 @@ function wikiBaseDir(): string {
 }
 
 /** Per-owner lock path (power-user fallback when Redis is unavailable). Kept beside
- * the wiki dir so it follows NOMOS_WIKI_DIR. */
-function lockFileFor(userId: string): string {
+ * the wiki dir so it follows NOMOS_WIKI_DIR. `feature` namespaces the lock so the
+ * wiki compiler and the wiki linter get independent cooldowns. */
+function lockFileFor(feature: string, userId: string): string {
   return path.join(
     path.dirname(wikiBaseDir()),
-    userId === "local" ? "wiki-compiler.lock" : `wiki-compiler.${userId}.lock`,
+    userId === "local" ? `${feature}.lock` : `${feature}.${userId}.lock`,
   );
 }
 
 /**
  * Acquire the per-owner compile slot. This is one guard doing two jobs, like the
- * old file lock: a cross-node MUTEX (two pods of one customer must not compile
- * concurrently) AND a cooldown (do not recompile within intervalMs). In
+ * old file lock: a cross-node MUTEX (two pods of one customer must not run
+ * concurrently) AND a cooldown (do not re-run within intervalMs). In
  * hosted (multi-node) it is a Redis key shared across the customer's pods; in
  * power-user it falls back to the local lock file. Returns false to skip.
+ *
+ * `feature` (default "wiki-compile") namespaces the Redis key + lock file so the
+ * linter (`wiki-lint`) shares the exact same cross-node/cooldown mechanism on an
+ * independent schedule — correct in both power-user and hosted.
  */
-async function acquireCompileSlot(
+export async function acquireCompileSlot(
   userId: string,
   force: boolean,
   intervalMs: number,
+  feature = "wiki-compile",
 ): Promise<boolean> {
   const cooldownSec = Math.floor(intervalMs / 1000);
   const stamp = new Date().toISOString();
   if (isRedisConfigured()) {
     const redis = getRedis();
-    const key = keyFor("wiki-compile", userId);
+    const key = keyFor(feature, userId);
     if (force) {
       await redis.set(key, stamp, "EX", cooldownSec);
       return true;
     }
     return (await redis.set(key, stamp, "EX", cooldownSec, "NX")) === "OK";
   }
-  const lockFile = lockFileFor(userId);
+  const lockFile = lockFileFor(feature, userId);
   if (
     !force &&
     fs.existsSync(lockFile) &&
@@ -87,17 +96,21 @@ async function acquireCompileSlot(
   return true;
 }
 
-/** Re-anchor the cooldown to compile completion (mirrors the old end-of-run lock refresh). */
-async function refreshCompileSlot(userId: string, intervalMs: number): Promise<void> {
+/** Re-anchor the cooldown to run completion (mirrors the old end-of-run lock refresh). */
+export async function refreshCompileSlot(
+  userId: string,
+  intervalMs: number,
+  feature = "wiki-compile",
+): Promise<void> {
   const cooldownSec = Math.floor(intervalMs / 1000);
   const stamp = new Date().toISOString();
   if (isRedisConfigured()) {
     await getRedis()
-      .set(keyFor("wiki-compile", userId), stamp, "EX", cooldownSec)
+      .set(keyFor(feature, userId), stamp, "EX", cooldownSec)
       .catch(() => undefined);
     return;
   }
-  const lockFile = lockFileFor(userId);
+  const lockFile = lockFileFor(feature, userId);
   if (fs.existsSync(lockFile)) fs.writeFileSync(lockFile, stamp);
 }
 
@@ -282,10 +295,19 @@ export async function compileKnowledge(options?: {
 
     const knowledgeSummary = buildKnowledgeSummary(entries, contactRows, vaultRows);
 
+    // Karpathy's "schema" layer: user-editable conventions the curator must follow.
+    // Read from the DB (managed_files) so it works identically in power-user (file
+    // synced to DB at boot) and hosted (DB-only). Absent -> compiler uses its
+    // built-in conventions unchanged.
+    const schemaDoc = await readManagedFile("WIKI.md");
+    const schemaSection = schemaDoc
+      ? `WIKI CONVENTIONS (follow these when choosing paths, categories, and titles):\n${schemaDoc.trim()}\n\n`
+      : "";
+
     const planResult = await runForkedAgent({
       prompt: `You are a knowledge wiki curator. Based on the user's accumulated knowledge, decide which wiki articles to create or update.
 
-${knowledgeSummary}
+${schemaSection}${knowledgeSummary}
 
 EXISTING ARTICLES: ${existingArticles.map((a) => a.path).join(", ") || "none"}
 
@@ -349,12 +371,28 @@ Maximum ${wiki.maxArticles} articles. Return [] if nothing is worth compiling.`,
           (c) => c.name.toLowerCase() === plan.title.toLowerCase(),
         );
 
+        // The vault is the source of truth, so its notes must feed the article
+        // BODY (not just the planner). FTS over the owner's vault by title +
+        // description; falls back to empty on FTS-syntax errors.
+        const relevantVault = await searchVaultNotes(
+          userId,
+          `${plan.title} ${plan.description ?? ""}`.trim(),
+          5,
+        ).catch(() => []);
+
+        // Older facts a newer one already superseded (kg_edges.invalid_at), so the
+        // article can say "previously X, now Y" instead of silently dropping X.
+        const superseded = await getSupersededFacts(userId, plan.title).catch(() => []);
+
         const article = await compileArticle(
           plan,
           relevantFacts,
           relevantConvos,
           relevantContact,
           existing?.content ?? null,
+          relevantVault,
+          superseded,
+          schemaDoc,
           wiki.model,
         );
 
@@ -406,33 +444,67 @@ Maximum ${wiki.maxArticles} articles. Return [] if nothing is worth compiling.`,
   return result;
 }
 
-async function compileArticle(
+export interface ArticleSources {
+  facts: Array<{ category: string; key: string; value: string; confidence: number }>;
+  conversations: Array<{ text: string; path: string }>;
+  contact: { name: string; identities: unknown[] } | undefined;
+  existingContent: string | null;
+  /** The user's authored vault notes on this topic -- the SOURCE OF TRUTH for the body. */
+  vaultNotes: Array<{ path: string; title: string; content: string }>;
+  /** Older facts a newer one already superseded (kg_edges.invalid_at). */
+  superseded: SupersededFact[];
+  /** WIKI.md conventions (managed_files), or null to use built-in conventions. */
+  schemaDoc: string | null;
+}
+
+/**
+ * Build the article-compilation prompt. Pure + exported so a unit test can assert
+ * the vault notes, the supersession instruction, and the schema doc all land in
+ * the prompt without spending an LLM call.
+ */
+export function buildArticlePrompt(
   plan: { path: string; title: string; category: string },
-  facts: Array<{ category: string; key: string; value: string; confidence: number }>,
-  conversations: Array<{ text: string; path: string }>,
-  contact: { name: string; identities: unknown[] } | undefined,
-  existingContent: string | null,
-  model: string,
-): Promise<string> {
-  const factsText = facts
+  src: ArticleSources,
+): string {
+  const factsText = src.facts
     .map((f) => `[${f.category}] ${f.key}: ${f.value} (confidence: ${f.confidence})`)
     .join("\n");
 
-  const convoText = conversations
+  const convoText = src.conversations
     .map((c) => c.text.slice(0, 300))
     .join("\n---\n")
     .slice(0, 4000);
 
-  const contactText = contact
-    ? `Contact identities: ${JSON.stringify(contact.identities, null, 2)}`
+  const contactText = src.contact
+    ? `Contact identities: ${JSON.stringify(src.contact.identities, null, 2)}`
     : "";
 
-  const existingSection = existingContent
-    ? `\nEXISTING ARTICLE (update and merge, don't discard existing info):\n${existingContent.slice(0, 2000)}`
+  // The vault is the source of truth: put it first and mark it authoritative.
+  const vaultText = src.vaultNotes
+    .map((n) => `[${n.path}] ${n.title}\n${n.content}`)
+    .join("\n---\n")
+    .slice(0, 4000);
+
+  const supersededText = src.superseded
+    .map(
+      (s) =>
+        `- ${s.fact} (no longer current as of ${new Date(s.invalidAt).toISOString().slice(0, 10)})`,
+    )
+    .join("\n");
+
+  const existingSection = src.existingContent
+    ? `\nEXISTING ARTICLE (update and merge, don't discard existing info):\n${src.existingContent.slice(0, 2000)}`
     : "";
 
-  const prompt = `Compile a wiki article about "${plan.title}" (category: ${plan.category}).
+  const schemaSection = src.schemaDoc
+    ? `WIKI CONVENTIONS (follow these for structure, headings, and links):\n${src.schemaDoc.trim()}\n\n`
+    : "";
+
+  return `${schemaSection}Compile a wiki article about "${plan.title}" (category: ${plan.category}).
 ${existingSection}
+
+VAULT NOTES (the user's authored memory — the SOURCE OF TRUTH; prefer this over everything below):
+${vaultText || "No authored notes on this topic"}
 
 ACCUMULATED FACTS:
 ${factsText || "No specific facts found"}
@@ -442,12 +514,37 @@ ${contactText || "No contact record"}
 
 RELEVANT CONVERSATIONS:
 ${convoText || "No recent conversations"}
+${supersededText ? `\nSUPERSEDED / OUTDATED (newer information has replaced these — do NOT present them as current):\n${supersededText}` : ""}
 
 Write a concise, factual markdown article. Include ALL concrete details found (phone numbers, emails, relationships, roles, preferences). Structure with clear headings. Under 500 words.
+
+When newer information supersedes an older claim, state the change explicitly rather than silently dropping the old one (e.g. "Previously at X; now at Y (as of <date>)")${supersededText ? ", using the SUPERSEDED list above" : ""}.
 
 When you mention another person, project, company, or topic that likely has its own wiki entry, wrap that name in double brackets like [[Name]] so the wiki cross-links. Only bracket proper nouns that are distinct entities, not generic words.
 
 Return ONLY the markdown article content.`;
+}
+
+async function compileArticle(
+  plan: { path: string; title: string; category: string },
+  facts: Array<{ category: string; key: string; value: string; confidence: number }>,
+  conversations: Array<{ text: string; path: string }>,
+  contact: { name: string; identities: unknown[] } | undefined,
+  existingContent: string | null,
+  vaultNotes: Array<{ path: string; title: string; content: string }>,
+  superseded: SupersededFact[],
+  schemaDoc: string | null,
+  model: string,
+): Promise<string> {
+  const prompt = buildArticlePrompt(plan, {
+    facts,
+    conversations,
+    contact,
+    existingContent,
+    vaultNotes,
+    superseded,
+    schemaDoc,
+  });
 
   const compiled = await runForkedAgent({
     prompt,

@@ -21,8 +21,12 @@ const MAX_CONTEXT_CHARS = 4000;
 export async function getRelevantArticles(userId: string, query: string): Promise<string> {
   if (!query) return "";
 
-  // Search wiki articles
-  const matches = await searchArticles(userId, query, MAX_CONTEXT_ARTICLES);
+  // Search wiki articles, then exclude meta articles (_index.md, _lint.md) -- they
+  // are navigation/health-check surfaces for the human, not knowledge to feed the
+  // turn. Filtered post-fetch to keep the search contract (limit) unchanged.
+  const matches = (await searchArticles(userId, query, MAX_CONTEXT_ARTICLES)).filter(
+    (a) => a.category !== "index" && a.category !== "lint",
+  );
   if (matches.length === 0) return "";
 
   return formatArticlesForContext(matches);

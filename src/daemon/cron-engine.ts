@@ -114,6 +114,36 @@ export class CronEngine {
       return;
     }
 
+    // Intercept wiki-lint sentinel -- health-check each owner's wiki (orphans,
+    // dangling links, superseded facts) and write the _lint.md report. Per owner,
+    // off/cooldown-gated inside lintWiki.
+    if (job.prompt === "__wiki_lint__") {
+      log.info("Firing wiki lint");
+      (async () => {
+        const { lintWiki } = await import("../memory/wiki-lint.ts");
+        const { listMemoryOwners } = await import("../auth/org-members.ts");
+        for (const userId of await listMemoryOwners()) {
+          try {
+            const r = await lintWiki({ userId });
+            if (r.wrote) {
+              log.info(
+                { userId, orphans: r.orphans, dangling: r.dangling, superseded: r.superseded },
+                "Wiki lint report written",
+              );
+            }
+          } catch (err) {
+            log.warn(
+              { err: err instanceof Error ? err.message : err, userId },
+              "Wiki lint failed for owner",
+            );
+          }
+        }
+      })().catch((err) => {
+        log.error({ err: err instanceof Error ? err.message : err }, "Wiki lint failed");
+      });
+      return;
+    }
+
     // Intercept auto-dream sentinel -- run background memory consolidation
     // directly (singleton-gated + leased + fans out per owner internally).
     if (job.prompt === "__auto_dream__") {

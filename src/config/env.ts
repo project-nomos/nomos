@@ -82,6 +82,10 @@ export interface NomosConfig {
   wikiCompileModel?: string;
   /** Cap on articles touched per wiki compilation run (default: 20). */
   wikiMaxArticlesPerRun?: number;
+  /** Enable the wiki lint (health-check) pass (default: true). When false the linter does no work. */
+  wikiLintEnabled?: boolean;
+  /** How often the wiki linter runs / its cooldown, as a duration string (default: "24h"). */
+  wikiLintInterval?: string;
   /** Enable passive behavioral observation (shadow mode) (default: false) */
   shadowMode: boolean;
   /** Enable alternate screen buffer for full-screen TUI experience (default: false) */
@@ -204,6 +208,8 @@ export function loadEnvConfig(): NomosConfig {
     wikiMaxArticlesPerRun: process.env.NOMOS_WIKI_MAX_ARTICLES_PER_RUN
       ? parseInt(process.env.NOMOS_WIKI_MAX_ARTICLES_PER_RUN, 10)
       : 20,
+    wikiLintEnabled: process.env.NOMOS_WIKI_LINT_ENABLED !== "false",
+    wikiLintInterval: process.env.NOMOS_WIKI_LINT_INTERVAL ?? "24h",
     shadowMode: process.env.NOMOS_SHADOW_MODE === "true",
     alternateBuffer: process.env.NOMOS_ALTERNATE_BUFFER === "true",
     imageGeneration: process.env.NOMOS_IMAGE_GENERATION === "true",

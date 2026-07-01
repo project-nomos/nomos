@@ -9,6 +9,7 @@
  * Cost-bounded: only same-pair candidates, one LLM call, off the hot path.
  */
 
+import { sql } from "kysely";
 import { getKysely } from "../db/client.ts";
 import type { TenantContext } from "../auth/tenant-context.ts";
 import { invalidateEdge } from "./graph.ts";
@@ -88,4 +89,44 @@ Which existing facts are NO LONGER TRUE because the new fact supersedes them? Re
     log.info({ invalidated, rel: edge.relType }, "Superseded contradicting edges");
   }
   return { invalidated };
+}
+
+export interface SupersededFact {
+  fact: string;
+  invalidAt: Date;
+}
+
+/**
+ * Fetch facts that a NEWER fact has already superseded (edges with `invalid_at`
+ * set) touching a given subject, so the wiki compiler can annotate "previously X,
+ * now Y" instead of silently dropping the old claim. Matches the subject against
+ * either endpoint's node name or the fact text. Owner-scoped. Zero LLM.
+ */
+export async function getSupersededFacts(
+  userId: string,
+  subject: string,
+  limit = 5,
+): Promise<SupersededFact[]> {
+  const like = `%${subject.toLowerCase().trim()}%`;
+  if (like === "%%") return [];
+  try {
+    const db = getKysely();
+    const res = await sql<{ fact: string | null; invalid_at: Date }>`
+      SELECT e.fact, e.invalid_at
+      FROM kg_edges e
+      JOIN kg_nodes s ON s.id = e.src_id
+      JOIN kg_nodes d ON d.id = e.dst_id
+      WHERE e.user_id = ${userId}
+        AND e.invalid_at IS NOT NULL
+        AND e.fact IS NOT NULL
+        AND (lower(s.name) LIKE ${like} OR lower(d.name) LIKE ${like} OR lower(e.fact) LIKE ${like})
+      ORDER BY e.invalid_at DESC
+      LIMIT ${limit}
+    `.execute(db);
+    return res.rows
+      .filter((r): r is { fact: string; invalid_at: Date } => Boolean(r.fact))
+      .map((r) => ({ fact: r.fact, invalidAt: r.invalid_at }));
+  } catch {
+    return [];
+  }
 }
