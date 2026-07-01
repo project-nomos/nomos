@@ -416,16 +416,37 @@ See [docs/style-model.md](docs/style-model.md) for full details.
 <details>
 <summary><strong>Knowledge Wiki</strong></summary>
 
-A Karpathy-style compiled knowledge base. An LLM periodically compiles raw ingested messages into structured markdown articles organized by contact, topic, and timeline. The agent reads compiled wiki articles first (cheap, structured), falls back to vector search for details.
+A Karpathy-style compiled knowledge base with four passes: **planner** (decide what to compile), **curator** (write articles), **linter** (health checks), and **sync** (to disk).
+
+**Planner** decides which articles to create/update based on your vault (source of truth), knowledge graph, and recent conversations.
+
+**Curator** compiles articles organized by contact, topic, and timeline, fed from three sources:
+
+- Your authored vault notes (highest priority)
+- Knowledge graph facts (entity relationships, validated edges)
+- Relevant conversations (context)
+
+Articles follow your **WIKI.md conventions** (Karpathy's "schema" layer) — editable in Settings or `~/.nomos/WIKI.md` — so the compiler respects how you organize your knowledge.
 
 ```
 ~/.nomos/wiki/
-  contacts/sarah-chen.md     # Everything about Sarah
+  contacts/sarah-chen.md     # Everything about Sarah (vault + graph)
   topics/kubernetes.md        # Cross-contact topic synthesis
   timeline/2026-04.md         # Monthly activity digest
+  _lint.md                     # Health-check report (daily)
 ```
 
-Articles stored in PostgreSQL (source of truth) and synced to disk as a browsable cache.
+**Linter** runs daily (configurable) to detect and report wiki health issues:
+
+- **Orphan articles** — no inbound `[[links]]` from any other article
+- **Dangling links** — `[[Target]]` mentioned but no article exists
+- **Superseded facts** — older claims invalidated by newer information (`kg_edges.invalid_at`), surfaced so you can state "Previously X, now Y" instead of silently dropping old facts
+
+The linter report is written back into the wiki as `_lint.md` (category `lint`), so it lives in the DB and works identically in hosted and power-user modes.
+
+**Sync** mirrors the wiki to disk (`~/.nomos/wiki/`) as a browsable cache; in power-user mode, edits to `WIKI.md` sync back to the DB automatically.
+
+Articles stored in PostgreSQL (source of truth). Configure cadence, model, and max-articles-per-run in Settings (`app.wiki*` and `app.wikiLint*` config).
 
 See [docs/knowledge-wiki.md](docs/knowledge-wiki.md) for full details.
 
