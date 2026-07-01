@@ -371,6 +371,39 @@ export class Gateway {
         );
         process.emit("cron:refresh" as never);
       }
+
+      // Wiki lint (health-check) cron. Cadence from app.wikiLintInterval (default
+      // 24h); the linter self-gates on app.wikiLintEnabled at fire time. Same
+      // register/reconcile pattern as wiki-compile.
+      let lintSchedule = cfg.wikiLintInterval ?? "24h";
+      try {
+        parseInterval(lintSchedule);
+      } catch {
+        lintSchedule = "24h";
+      }
+      const existingLintJob = await cronStore.getJobByName("wiki-lint");
+      if (!existingLintJob) {
+        await cronStore.createJob({
+          userId: systemTenant().userId,
+          name: "wiki-lint",
+          schedule: lintSchedule,
+          scheduleType: "every",
+          sessionTarget: "isolated",
+          deliveryMode: "none",
+          prompt: "__wiki_lint__",
+          enabled: true,
+          errorCount: 0,
+        });
+        log.info({ schedule: lintSchedule }, "Registered wiki lint cron job");
+        process.emit("cron:refresh" as never);
+      } else if (existingLintJob.schedule !== lintSchedule) {
+        await cronStore.updateJob(existingLintJob.id, { schedule: lintSchedule });
+        log.info(
+          { from: existingLintJob.schedule, to: lintSchedule },
+          "Reconciled wiki lint cron cadence",
+        );
+        process.emit("cron:refresh" as never);
+      }
     } catch (err) {
       log.warn({ err }, "Wiki cron registration failed");
     }

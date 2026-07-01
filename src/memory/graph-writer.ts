@@ -310,7 +310,7 @@ export async function syncWikiBodyLinks(ctx: TenantContext): Promise<{ edges: nu
 export async function syncWikiMOCs(ctx: TenantContext): Promise<{ mocs: number; edges: number }> {
   const db = getKysely();
   const rows = await sql<{ path: string; title: string; category: string }>`
-    SELECT path, title, category FROM wiki_articles WHERE user_id = ${ctx.userId} AND category IS NOT NULL AND category <> 'index'
+    SELECT path, title, category FROM wiki_articles WHERE user_id = ${ctx.userId} AND category IS NOT NULL AND category NOT IN ('index', 'lint')
   `.execute(db);
 
   const categories = new Set<string>();

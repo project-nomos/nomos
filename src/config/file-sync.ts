@@ -94,6 +94,27 @@ async function syncOne(file: ManagedFile): Promise<string | null> {
 }
 
 /**
+ * Read a managed file's content straight from the DB (the source of truth in
+ * BOTH modes). Power-user boot syncs disk -> DB, so this is current as of boot;
+ * hosted has no disk at all, so the DB is the only copy. Callers that must work
+ * identically in both modes (e.g. the wiki compiler reading WIKI.md conventions)
+ * should read here rather than the filesystem.
+ */
+export async function readManagedFile(dbPath: string): Promise<string | null> {
+  try {
+    const db = getKysely();
+    const row = await db
+      .selectFrom("managed_files")
+      .select(["content"])
+      .where("path", "=", dbPath)
+      .executeTakeFirst();
+    return row?.content ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Sync a single file from disk to DB (after a change).
  * Fire-and-forget safe.
  */
@@ -201,6 +222,14 @@ export async function syncAllFiles(): Promise<void> {
     {
       dbPath: "IDENTITY.md",
       diskPaths: [path.join(projectDir, "IDENTITY.md"), path.join(HOME_NOMOS, "IDENTITY.md")],
+    },
+    {
+      // Wiki conventions doc (Karpathy's "schema" layer): how the compiler should
+      // structure/path/link articles. A default is seeded into managed_files by the
+      // migration so both modes have a baseline; power-user users can edit the file,
+      // hosted users edit it via the Settings UI. The compiler reads it from the DB.
+      dbPath: "WIKI.md",
+      diskPaths: [path.join(projectDir, "WIKI.md"), path.join(HOME_NOMOS, "WIKI.md")],
     },
     {
       dbPath: "agents.json",

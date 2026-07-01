@@ -23,6 +23,8 @@ import {
   deleteContact,
 } from "../src/identity/contacts.ts";
 import { upsertArticle, searchArticles, listArticles, deleteArticle } from "../src/db/wiki.ts";
+import { upsertNode, upsertEdge, invalidateEdge } from "../src/memory/graph.ts";
+import { getSupersededFacts } from "../src/memory/graph-contradictions.ts";
 import type { TenantContext } from "../src/auth/tenant-context.ts";
 import { appendEdit, createAsset, getAsset, listEdits } from "../src/studio/assets.ts";
 import { validateOp } from "../src/studio/ops.ts";
@@ -82,6 +84,36 @@ async function main(): Promise<void> {
 
   await upsertArticle(A, "contacts/sam.md", "Sam", "alice notes on Sam", "contacts");
   await upsertArticle(B, "contacts/sam.md", "Sam", "bob notes on Sam", "contacts");
+
+  // Wiki lint report (category 'lint') — same store, must stay owner-scoped.
+  await upsertArticle(A, "_lint.md", "Wiki Lint Report", "alice orphan APOLLO", "lint");
+  await upsertArticle(B, "_lint.md", "Wiki Lint Report", "bob orphan ZEUS", "lint");
+
+  // Superseded facts (kg_edges.invalid_at) — getSupersededFacts is the new query
+  // the compiler + linter rely on; prove it is user-scoped. Seed one invalidated
+  // works_at edge for each user with the SAME subject name but distinct employers.
+  const tgA: TenantContext = { orgId: "local", userId: A };
+  const tgB: TenantContext = { orgId: "local", userId: B };
+  const subjA = await upsertNode(tgA, { kind: "person", name: "Shared Subject", confidence: 0.9 });
+  const subjB = await upsertNode(tgB, { kind: "person", name: "Shared Subject", confidence: 0.9 });
+  const oldA = await upsertNode(tgA, { kind: "org", name: "ACME-ALICE", confidence: 0.8 });
+  const oldB = await upsertNode(tgB, { kind: "org", name: "ZEUS-BOB", confidence: 0.8 });
+  const eA = await upsertEdge(tgA, {
+    srcId: subjA,
+    dstId: oldA,
+    relType: "works_at",
+    fact: "Shared Subject worked at ACME-ALICE",
+    confidence: 0.9,
+  });
+  const eB = await upsertEdge(tgB, {
+    srcId: subjB,
+    dstId: oldB,
+    relType: "works_at",
+    fact: "Shared Subject worked at ZEUS-BOB",
+    confidence: 0.9,
+  });
+  await invalidateEdge(tgA, eA, new Date());
+  await invalidateEdge(tgB, eB, new Date());
 
   // ── Vault ──
   check(
@@ -147,6 +179,27 @@ async function main(): Promise<void> {
     "wiki: A lists only its own",
     (await listArticles(A)).every((a) => a.user_id === A),
   );
+  check(
+    "wiki-lint: A's _lint.md report never leaks B's content",
+    !JSON.stringify(await listArticles(A)).includes("ZEUS") &&
+      (await searchArticles(A, "orphan")).every((a) => a.user_id === A),
+  );
+
+  // ── superseded facts (kg_edges) via getSupersededFacts ──
+  const supA = await getSupersededFacts(A, "Shared Subject");
+  const supB = await getSupersededFacts(B, "Shared Subject");
+  check(
+    "superseded: A sees its own superseded fact",
+    supA.some((s) => s.fact.includes("ACME-ALICE")),
+  );
+  check(
+    "superseded: A's superseded facts never contain B's",
+    supA.every((s) => !s.fact.includes("ZEUS-BOB")),
+  );
+  check(
+    "superseded: B's superseded facts never contain A's",
+    supB.every((s) => !s.fact.includes("ACME-ALICE")),
+  );
 
   // ── studio (assets + edits) ──
   const tA: TenantContext = { orgId: "local", userId: A };
@@ -205,6 +258,8 @@ async function main(): Promise<void> {
     await db.deleteFrom("user_model").where("user_id", "=", uid).execute();
     await db.deleteFrom("contacts").where("user_id", "=", uid).execute();
     await db.deleteFrom("wiki_articles").where("user_id", "=", uid).execute();
+    await db.deleteFrom("kg_edges").where("user_id", "=", uid).execute();
+    await db.deleteFrom("kg_nodes").where("user_id", "=", uid).execute();
     await db.deleteFrom("studio_edits").where("user_id", "=", uid).execute();
     await db.deleteFrom("studio_assets").where("user_id", "=", uid).execute();
   }
