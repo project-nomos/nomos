@@ -11,10 +11,11 @@
  */
 
 import { sql, type SqlBool } from "kysely";
+import { z } from "zod";
 import { getKysely } from "../db/client.ts";
 import { loadEnvConfig } from "../config/env.ts";
 import { createLogger } from "../lib/logger.ts";
-import { extractFirstJson } from "../lib/json-extract.ts";
+import { runReasoningFork } from "../sdk/reasoning-fork.ts";
 
 const log = createLogger("consolidator");
 
@@ -175,10 +176,7 @@ async function mergeNearDuplicates(userId: string): Promise<number> {
   return mergeCount;
 }
 
-const LLM_CONSOLIDATION_PROMPT = `You are a memory consolidation system. Review these memory chunks and decide what to do with each.
-
-Memory chunks to review:
-{chunks}
+const LLM_CONSOLIDATION_PROMPT = `You are a memory consolidation system and a JSON decision system. Review the provided memory chunks and decide what to do with each. Output only valid JSON. No explanations.
 
 For each chunk, decide ONE action:
 - KEEP: Important, unique information — leave as-is
@@ -195,6 +193,15 @@ Guidelines:
 - Drop chunks that state the obvious or repeat common knowledge
 - Keep corrections, user preferences, and unique project-specific facts
 - When rewriting, preserve the core information but make it concise`;
+
+/** Zod schema for the LLM consolidation decision array. Mirrors the decision shape below. */
+const ConsolidationDecisionSchema = z.object({
+  id: z.string(),
+  action: z.string(),
+  rewrite: z.string().optional(),
+  merge_with: z.string().optional(),
+});
+const ConsolidationDecisionsSchema = z.array(ConsolidationDecisionSchema).default([]);
 
 /** Maximum chunks to review per LLM consolidation pass. */
 const LLM_BATCH_SIZE = 20;
@@ -229,33 +236,18 @@ async function llmConsolidate(userId: string): Promise<number> {
     })
     .join("\n\n");
 
-  const prompt = LLM_CONSOLIDATION_PROMPT.replace("{chunks}", chunksText);
-
   try {
-    const { runForkedAgent } = await import("../sdk/forked-agent.ts");
-
-    // runForkedAgent (not a bare runSession): carries useSubscription so it
-    // authenticates on subscription-only installs, and uses bypassPermissions +
-    // allowedTools:[] so the fork emits JSON rather than entering plan mode.
-    const { text: fullText } = await runForkedAgent({
-      prompt,
+    // Reasoning fork: stable rubric caches in the system-prompt prefix; only the
+    // dynamic chunk batch is billed uncached. allowedTools:[] keeps the fork from
+    // spending its turn on tools; the zod schema replaces the ad-hoc regex parse.
+    const { data: decisions } = await runReasoningFork({
+      instructions: LLM_CONSOLIDATION_PROMPT,
+      input: `Memory chunks to review:\n${chunksText}`,
+      schema: ConsolidationDecisionsSchema,
       model,
-      systemPromptAppend:
-        "You are a JSON decision system. Output only valid JSON arrays. No explanations.",
-      maxTurns: 2,
       label: "memory-consolidation",
-      allowedTools: [],
     });
-
-    // Parse LLM decisions — first BALANCED JSON array (forked-agent returns the
-    // answer DUPLICATED + fenced, so a greedy first-[…]-to-last-] is invalid JSON).
-    const decisions = extractFirstJson(fullText) as Array<{
-      id: string;
-      action: string;
-      rewrite?: string;
-      merge_with?: string;
-    }> | null;
-    if (!Array.isArray(decisions)) return 0;
+    if (!decisions || decisions.length === 0) return 0;
 
     let changeCount = 0;
     const validIds = new Set(candidates.map((c) => c.id));
@@ -375,6 +367,26 @@ export interface ValueReflection {
   pattern_refinements?: { key: string; refinement: string }[];
 }
 
+/**
+ * Zod schema for {@link ValueReflection}. Every array defaults to [] so a partial
+ * emit still validates. Field names/optionality mirror the interface exactly.
+ */
+const ValueReflectionSchema = z.object({
+  values_to_boost: z.array(z.object({ key: z.string(), reason: z.string() })).default([]),
+  values_to_decrease: z.array(z.object({ key: z.string(), reason: z.string() })).default([]),
+  new_values: z
+    .array(
+      z.object({
+        value: z.string(),
+        description: z.string(),
+        context: z.string(),
+        evidence: z.array(z.string()).default([]),
+      }),
+    )
+    .default([]),
+  pattern_refinements: z.array(z.object({ key: z.string(), refinement: z.string() })).default([]),
+});
+
 const REFLECTION_PROMPT = `You are a value re-evaluation system. Given a user's known values and decision patterns, decide what to adjust based on confidence and coherence. Output ONLY one JSON object:
 {
   "values_to_boost": [{"key":"","reason":""}],
@@ -406,14 +418,18 @@ export async function reflectOnValues(userId: string): Promise<ValueReflection |
   ].join("\n");
 
   try {
-    const { runForkedAgent } = await import("../sdk/forked-agent.ts");
-    const { text } = await runForkedAgent({
-      prompt: `${REFLECTION_PROMPT}\n\n${ctx}`,
+    // Reasoning fork: the stable REFLECTION_PROMPT caches as the system-prompt
+    // prefix; only the per-owner values/patterns context is billed. allowedTools:[]
+    // (forced by the helper) prevents a tool detour from dropping the reflection
+    // under the single turn. The zod schema replaces the ad-hoc regex parse.
+    const { data } = await runReasoningFork({
+      instructions: REFLECTION_PROMPT,
+      input: ctx,
+      schema: ValueReflectionSchema,
       model,
       label: "value-reflection",
-      maxTurns: 1,
     });
-    return (extractFirstJson(text) as ValueReflection | null) ?? null;
+    return data;
   } catch (err) {
     log.debug({ err, userId }, "reflectOnValues failed");
     return null;

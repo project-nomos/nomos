@@ -16,6 +16,14 @@ import { isLoopUserDisabled } from "../cron/loop-overrides.ts";
 
 const log = createLogger("cron-engine");
 
+/**
+ * Cron jobs whose `prompt` is a FIXED procedure (byte-identical every fire).
+ * These are delivered as the cached system-prompt prefix + a trivial trigger
+ * (see triggerJob) so consecutive fires within the cache TTL reuse the prefix.
+ * Keep this to jobs verified to carry no per-fire dynamic data in their prompt.
+ */
+const STABLE_PROCEDURE_JOBS = new Set(["proactive:inbox-watcher", "proactive:calendar-watcher"]);
+
 export class CronEngine {
   private cronSystem: CronSystem | null = null;
   private messageQueue: MessageQueue;
@@ -389,12 +397,19 @@ export class CronEngine {
     const sessionKey =
       job.sessionTarget === "isolated" ? `cron:${job.id}:${Date.now()}` : `cron:${job.id}`;
 
+    // Proactive watcher jobs carry a FIXED procedure (stable per job — the
+    // lookback/window is baked in at seed time). Deliver it as the cached
+    // system-prompt prefix with a trivial trigger, so within the ~5min cache TTL
+    // consecutive fires reuse the prefix instead of re-billing the ~1KB procedure
+    // as a fresh user message every scan (calendar fires every ~5m).
+    const stableProcedure = STABLE_PROCEDURE_JOBS.has(job.name);
     const incoming = {
       id: randomUUID(),
       platform: job.platform ?? "cron",
       channelId: job.channelId ?? sessionKey,
       userId: job.userId ?? "local",
-      content: job.prompt,
+      content: stableProcedure ? "Run this scan now." : job.prompt,
+      ...(stableProcedure ? { systemPromptAppend: job.prompt } : {}),
       timestamp: new Date(),
     };
 

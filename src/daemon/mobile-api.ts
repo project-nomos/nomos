@@ -15,6 +15,7 @@
  */
 
 import { randomUUID } from "node:crypto";
+import { z } from "zod";
 import { sql } from "kysely";
 import * as grpc from "@grpc/grpc-js";
 import type { MessageQueue } from "./message-queue.ts";
@@ -70,7 +71,7 @@ import type { TenantContext } from "../auth/tenant-context.ts";
 import { getDeviceBridge, type DeviceInvocation } from "./device-bridge.ts";
 import { resolveMemoryUserId, systemTenant } from "../auth/tenant-context.ts";
 import { buildStudioEngine } from "../sdk/studio-mcp.ts";
-import { runForkedAgent } from "../sdk/forked-agent.ts";
+import { runReasoningFork } from "../sdk/reasoning-fork.ts";
 import {
   confirmAsset,
   createAsset,
@@ -242,6 +243,32 @@ export function buildMobileApiHandlers(deps: MobileApiDeps) {
 
 // ──────────── Compose (iMessage extension) ────────────
 
+/** STABLE rubric for compose — byte-identical every call so the SDK caches it. */
+const COMPOSE_INSTRUCTIONS =
+  `You are drafting text messages for the user to send from iMessage. Write THREE short, ` +
+  `natural, ready-to-send replies for the instruction below, in a casual texting tone. ` +
+  `Return ONLY a JSON array of 3 strings, nothing else.`;
+
+/** Validated shape: a JSON array of draft strings. */
+const composeSchema = z.array(z.string());
+
+/**
+ * Fallback for a non-JSON compose emit: Haiku sometimes ignores "JSON array" and
+ * returns one draft per line. Recover them by stripping bullet/number/quote markers.
+ * The `.slice(0, 3)` at the call site drops the duplicated copy forked-agent appends.
+ */
+function parseDraftLines(text: string): string[] {
+  return text
+    .split("\n")
+    .map((l) =>
+      l
+        .replace(/^\s*(?:[-*•]|\d+[.)])\s*/, "")
+        .replace(/^["']|["']$/g, "")
+        .trim(),
+    )
+    .filter(Boolean);
+}
+
 /** One-shot draft generation for the iMessage extension (instruction → a few drafts). */
 async function handleComposeReply(
   call: grpc.ServerUnaryCall<unknown, unknown>,
@@ -253,39 +280,27 @@ async function handleComposeReply(
   const ctxLine = req.contextHint?.trim()
     ? `\n\nThe message being replied to:\n"${req.contextHint.trim()}"`
     : "";
-  const prompt =
-    `You are drafting text messages for the user to send from iMessage. Write THREE short, ` +
-    `natural, ready-to-send replies for the instruction below, in a casual texting tone. ` +
-    `Return ONLY a JSON array of 3 strings, nothing else.\n\nInstruction: ${instruction}${ctxLine}`;
+  const input = `Instruction: ${instruction}${ctxLine}`;
   try {
-    const result = await runForkedAgent({ label: "imessage-compose", allowedTools: [], prompt });
-    return { drafts: parseDrafts(result.text).slice(0, 3) };
+    const { data, raw } = await runReasoningFork({
+      instructions: COMPOSE_INSTRUCTIONS,
+      input,
+      schema: composeSchema,
+      label: "imessage-compose",
+    });
+    // On a non-JSON emit (Haiku sometimes returns one draft per line despite the
+    // instruction) `data` is null — recover the drafts by line rather than show none.
+    const candidates = data ?? parseDraftLines(raw.text);
+    return {
+      drafts: candidates
+        .map((s) => s.trim())
+        .filter(Boolean)
+        .slice(0, 3),
+    };
   } catch (err) {
     log.warn({ err: err instanceof Error ? err.message : err }, "compose failed");
     return { drafts: [] };
   }
-}
-
-/** Pull the drafts out of the model output: a JSON array if present, else cleaned lines. */
-function parseDrafts(text: string): string[] {
-  const json = text.match(/\[[\s\S]*\]/);
-  if (json) {
-    try {
-      const arr = JSON.parse(json[0]) as unknown[];
-      if (Array.isArray(arr)) return arr.map((s) => String(s).trim()).filter(Boolean);
-    } catch {
-      // fall through to line parsing
-    }
-  }
-  return text
-    .split("\n")
-    .map((l) =>
-      l
-        .replace(/^[-*\d.)\s"]+/, "")
-        .replace(/"$/, "")
-        .trim(),
-    )
-    .filter(Boolean);
 }
 
 // ──────────── Device bridge (native EventKit tools) ────────────

@@ -7,8 +7,9 @@
  */
 
 import { sql } from "kysely";
+import { z } from "zod";
 import { getKysely } from "../db/client.ts";
-import { runForkedAgent } from "../sdk/forked-agent.ts";
+import { runReasoningFork } from "../sdk/reasoning-fork.ts";
 import { searchContacts } from "../identity/contacts.ts";
 
 export interface CommitmentRow {
@@ -30,6 +31,32 @@ interface ExtractedCommitment {
   contact: string | null;
 }
 
+const ExtractedCommitmentsSchema = z.object({
+  commitments: z
+    .array(
+      z.object({
+        description: z.string(),
+        // nullable + default(null) yields `string | null` WITHOUT a .transform()
+        // (transforms can't be represented as JSON Schema for the SDK outputFormat).
+        deadline: z.string().nullable().default(null),
+        contact: z.string().nullable().default(null),
+      }),
+    )
+    .default([]),
+});
+
+const COMMITMENT_EXTRACTION_INSTRUCTIONS = `Analyze the conversation and extract any commitments, promises, or follow-up items.
+
+A commitment is something the user promised to do, needs to follow up on, or was asked to do.
+Examples: "I'll send that report by Friday", "Let me check and get back to you", "I need to review the PR"
+
+Return a JSON object with a "commitments" array. Each commitment has:
+- "description": what needs to be done
+- "deadline": ISO date string if mentioned, null otherwise
+- "contact": who it's for, null if unclear
+
+Return an empty "commitments" array if no commitments found. Return ONLY the JSON object.`;
+
 /**
  * Extract commitments from a conversation exchange.
  */
@@ -37,33 +64,18 @@ export async function extractCommitments(
   userMessage: string,
   agentResponse: string,
 ): Promise<ExtractedCommitment[]> {
-  const prompt = `Analyze this conversation and extract any commitments, promises, or follow-up items.
+  const input = `USER: ${userMessage}
+RESPONSE: ${agentResponse}`;
 
-USER: ${userMessage}
-RESPONSE: ${agentResponse}
-
-A commitment is something the user promised to do, needs to follow up on, or was asked to do.
-Examples: "I'll send that report by Friday", "Let me check and get back to you", "I need to review the PR"
-
-Return a JSON array of commitments. Each has:
-- "description": what needs to be done
-- "deadline": ISO date string if mentioned, null otherwise
-- "contact": who it's for, null if unclear
-
-Return [] if no commitments found. Return ONLY the JSON array.`;
-
-  const result = await runForkedAgent({
-    prompt,
+  const { data } = await runReasoningFork({
+    instructions: COMMITMENT_EXTRACTION_INSTRUCTIONS,
+    input,
+    schema: ExtractedCommitmentsSchema,
+    maxTurns: 1,
     label: "commitment-extraction",
   });
 
-  try {
-    const jsonMatch = result.text.match(/\[[\s\S]*\]/);
-    if (!jsonMatch) return [];
-    return JSON.parse(jsonMatch[0]) as ExtractedCommitment[];
-  } catch {
-    return [];
-  }
+  return data?.commitments ?? [];
 }
 
 /**

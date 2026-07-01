@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { resolveWiki, buildArticlePrompt, type ArticleSources } from "./knowledge-compiler.ts";
+import {
+  resolveWiki,
+  buildArticlePrompt,
+  ARTICLE_INSTRUCTIONS,
+  type ArticleSources,
+} from "./knowledge-compiler.ts";
 
 const HOUR_MS = 60 * 60 * 1000;
 
@@ -99,7 +104,7 @@ describe("buildArticlePrompt", () => {
     expect(prompt).toContain("No authored notes on this topic");
   });
 
-  it("threads superseded facts + instructs the model to state the change (#3)", () => {
+  it("threads superseded facts into the dynamic prompt (#3)", () => {
     const prompt = buildArticlePrompt(
       plan,
       emptySources({
@@ -109,7 +114,6 @@ describe("buildArticlePrompt", () => {
     expect(prompt).toContain("SUPERSEDED / OUTDATED");
     expect(prompt).toContain("Raj works at OldCo");
     expect(prompt).toContain("2026-02-03");
-    expect(prompt).toContain("state the change explicitly");
   });
 
   it("injects the WIKI.md schema conventions when present (#4)", () => {
@@ -125,7 +129,29 @@ describe("buildArticlePrompt", () => {
     const prompt = buildArticlePrompt(plan, emptySources());
     expect(prompt).not.toContain("WIKI CONVENTIONS");
     expect(prompt).not.toContain("SUPERSEDED / OUTDATED");
-    // still always asks for the article + wikilinks
-    expect(prompt).toContain("wrap that name in double brackets like [[Name]]");
+  });
+});
+
+describe("ARTICLE_INSTRUCTIONS (stable rubric hoisted to the cached prefix)", () => {
+  it("carries the stable writing rubric so buildArticlePrompt stays per-article", () => {
+    // These instructions are byte-identical every run and go to systemPromptAppend
+    // (the cached prefix), NOT into the dynamic per-article prompt.
+    expect(ARTICLE_INSTRUCTIONS).toContain("state the change explicitly");
+    expect(ARTICLE_INSTRUCTIONS).toContain("wrap that name in double brackets like [[Name]]");
+    expect(ARTICLE_INSTRUCTIONS).toContain("Under 500 words");
+    expect(ARTICLE_INSTRUCTIONS).toContain("Return ONLY the markdown");
+  });
+
+  it("holds no per-article dynamic data", () => {
+    // Nothing item-specific may leak into the cached prefix.
+    const perArticlePrompt = buildArticlePrompt(
+      { path: "people/raj.md", title: "Raj Patel", category: "contacts" },
+      emptySources({
+        vaultNotes: [{ path: "people/raj.md", title: "Raj Patel", content: "unique-marker-xyz" }],
+      }),
+    );
+    expect(perArticlePrompt).toContain("unique-marker-xyz");
+    expect(ARTICLE_INSTRUCTIONS).not.toContain("Raj Patel");
+    expect(ARTICLE_INSTRUCTIONS).not.toContain("unique-marker-xyz");
   });
 });

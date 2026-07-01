@@ -1,53 +1,23 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { runForkedAgent } = vi.hoisted(() => ({ runForkedAgent: vi.fn() }));
+const { runReasoningFork } = vi.hoisted(() => ({ runReasoningFork: vi.fn() }));
 const { vaultRead, vaultWrite } = vi.hoisted(() => ({ vaultRead: vi.fn(), vaultWrite: vi.fn() }));
 const { upsertUserModel } = vi.hoisted(() => ({ upsertUserModel: vi.fn() }));
 const { loadEnvConfig } = vi.hoisted(() => ({ loadEnvConfig: vi.fn() }));
 
-vi.mock("../sdk/forked-agent.ts", () => ({ runForkedAgent }));
+vi.mock("../sdk/reasoning-fork.ts", () => ({ runReasoningFork }));
 vi.mock("../memory/vault.ts", () => ({ vaultRead, vaultWrite }));
 vi.mock("../db/user-model.ts", () => ({ upsertUserModel }));
 vi.mock("../config/env.ts", () => ({ loadEnvConfig }));
 
-import { flushPhotoStyle, parseStyle, readPhotoStyle, recordEditSignal } from "./learn.ts";
+import { flushPhotoStyle, readPhotoStyle, recordEditSignal } from "./learn.ts";
 
-describe("parseStyle", () => {
-  it("parses the profile + prefs", () => {
-    const s = parseStyle('{"profile":"Warm, soft skin.","prefs":{"tone":"warm","skin":"smooth"}}');
-    expect(s?.profile).toBe("Warm, soft skin.");
-    expect(s?.prefs.tone).toBe("warm");
-    expect(s?.prefs.skin).toBe("smooth");
-  });
-
-  it("strips code fences", () => {
-    expect(parseStyle('```json\n{"profile":"x"}\n```')?.profile).toBe("x");
-  });
-
-  it("recovers JSON wrapped in prose", () => {
-    expect(parseStyle('Here is the profile:\n{"profile":"warm"}\nThanks!')?.profile).toBe("warm");
-  });
-
-  it("recovers the first object when the model emits the fenced block twice", () => {
-    // Real Haiku failure mode: the same fenced object repeated back-to-back.
-    const dup =
-      '```json\n{"profile":"warm","prefs":{"tone":"warm"}}\n``````json\n{"profile":"warm"}\n```';
-    const s = parseStyle(dup);
-    expect(s?.profile).toBe("warm");
-    expect(s?.prefs.tone).toBe("warm");
-  });
-
-  it("ignores braces inside string values when balancing", () => {
-    expect(parseStyle('{"profile":"a {nested} brace","prefs":{}}')?.profile).toBe(
-      "a {nested} brace",
-    );
-  });
-
-  it("returns null without a usable profile", () => {
-    expect(parseStyle('{"prefs":{}}')).toBeNull();
-    expect(parseStyle("sorry, not JSON")).toBeNull();
-  });
-});
+// runReasoningFork now owns parsing/validation (SDK structured output + one balanced-JSON
+// fallback), so these tests mock its {data, raw} contract directly: `data` is the
+// already-validated DistilledStyle (or null on parse failure), `raw` carries text for logging.
+function fork(data: unknown, text = "") {
+  return { data, raw: { text } };
+}
 
 describe("flushPhotoStyle", () => {
   beforeEach(() => {
@@ -57,9 +27,9 @@ describe("flushPhotoStyle", () => {
   });
 
   it("distills the batch into the vault note + photo_style user_model entries", async () => {
-    runForkedAgent.mockResolvedValue({
-      text: '{"profile":"Warm and punchy.","prefs":{"tone":"warm","color":"punchy"}}',
-    });
+    runReasoningFork.mockResolvedValue(
+      fork({ profile: "Warm and punchy.", prefs: { tone: "warm", color: "punchy" } }),
+    );
     await flushPhotoStyle("u1", [{ op: "editSemantic", instruction: "warm it up" }]);
 
     expect(vaultWrite).toHaveBeenCalledWith(
@@ -76,11 +46,27 @@ describe("flushPhotoStyle", () => {
     );
   });
 
+  it("passes the stable rubric as instructions and only dynamic data as input", async () => {
+    vaultRead.mockResolvedValue({ content: "existing profile" });
+    runReasoningFork.mockResolvedValue(fork({ profile: "p", prefs: {} }));
+    await flushPhotoStyle("u1", [{ op: "editSemantic", instruction: "warm it up" }]);
+
+    const call = runReasoningFork.mock.calls[0][0];
+    // Rubric is cached (stable) — no per-flush data leaks into it.
+    expect(call.instructions).toContain("PHOTO-EDITING taste");
+    expect(call.instructions).not.toContain("existing profile");
+    expect(call.instructions).not.toContain("warm it up");
+    // Dynamic data goes in the (uncached) input, sent last.
+    expect(call.input).toContain("existing profile");
+    expect(call.input).toContain("warm it up");
+  });
+
   it("no-ops on an empty batch or an unparseable distillation", async () => {
     await flushPhotoStyle("u1", []);
-    expect(runForkedAgent).not.toHaveBeenCalled();
+    expect(runReasoningFork).not.toHaveBeenCalled();
 
-    runForkedAgent.mockResolvedValue({ text: "i couldn't" });
+    // Parse/validation failure → runReasoningFork returns data: null → skip the write.
+    runReasoningFork.mockResolvedValue(fork(null, "i couldn't"));
     await flushPhotoStyle("u1", [{ op: "editSemantic", instruction: "x" }]);
     expect(vaultWrite).not.toHaveBeenCalled();
   });
@@ -90,19 +76,19 @@ describe("recordEditSignal", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vaultRead.mockResolvedValue(null);
-    runForkedAgent.mockResolvedValue({ text: '{"profile":"p","prefs":{}}' });
+    runReasoningFork.mockResolvedValue(fork({ profile: "p", prefs: {} }));
   });
 
   it("never learns when adaptive memory is off", async () => {
     loadEnvConfig.mockReturnValue({ adaptiveMemory: false });
     for (let i = 0; i < 6; i++) await recordEditSignal("off-user", "editSemantic", `edit ${i}`);
-    expect(runForkedAgent).not.toHaveBeenCalled();
+    expect(runReasoningFork).not.toHaveBeenCalled();
   });
 
   it("distills once it has buffered the threshold of edits", async () => {
     loadEnvConfig.mockReturnValue({ adaptiveMemory: true });
     for (let i = 0; i < 4; i++) await recordEditSignal("on-user", "editSemantic", `edit ${i}`);
-    expect(runForkedAgent).toHaveBeenCalledTimes(1);
+    expect(runReasoningFork).toHaveBeenCalledTimes(1);
     expect(vaultWrite).toHaveBeenCalledTimes(1);
   });
 });

@@ -87,28 +87,17 @@ export async function isMagicDocStale(filePath: string): Promise<boolean> {
 }
 
 /**
- * Build the prompt for updating a magic doc.
+ * STABLE step text for the magic-doc update fork. Byte-identical across every
+ * doc so the SDK caches it in the system-prompt prefix (via `systemPromptAppend`).
+ * The per-doc title/path/content and the marker-preservation line stay in the
+ * dynamic prompt (see `buildMagicDocUpdatePrompt`) — they cannot cache.
  */
-export function buildMagicDocUpdatePrompt(
-  title: string,
-  currentContent: string,
-  filePath: string,
-): string {
-  return `You are updating a self-maintaining documentation file.
-
-## Document Info
-- Title: ${title}
-- Path: ${filePath}
-
-## Current Content
-\`\`\`markdown
-${currentContent}
-\`\`\`
+const MAGIC_DOC_UPDATE_INSTRUCTIONS = `You are updating a self-maintaining documentation file.
 
 ## Instructions
 1. Read the codebase to understand what this document should cover
 2. Update the content to reflect the current state of the code
-3. Preserve the \`<!-- MAGIC DOC: ${title} -->\` marker at the top
+3. Preserve the magic-doc marker at the top (the caller's prompt names the exact marker)
 4. Keep the same general structure and sections
 5. Update code examples, API signatures, and descriptions as needed
 6. Remove references to deleted code; add references to new code
@@ -116,6 +105,28 @@ ${currentContent}
 
 Output ONLY the updated markdown content (including the marker).
 Do not wrap in code fences or add explanations.`;
+
+/**
+ * Build the DYNAMIC prompt for updating a magic doc. Only the per-doc data
+ * (title, path, current content, and the exact marker to preserve) lives here;
+ * the stable step text is `MAGIC_DOC_UPDATE_INSTRUCTIONS`, passed as
+ * `systemPromptAppend` so it caches in the prefix.
+ */
+export function buildMagicDocUpdatePrompt(
+  title: string,
+  currentContent: string,
+  filePath: string,
+): string {
+  return `## Document Info
+- Title: ${title}
+- Path: ${filePath}
+
+Preserve this marker at the top: \`<!-- MAGIC DOC: ${title} -->\`
+
+## Current Content
+\`\`\`markdown
+${currentContent}
+\`\`\``;
 }
 
 /**
@@ -277,6 +288,12 @@ export async function refreshMagicDocs(
       }
       const result = await runForkedAgent({
         prompt: buildMagicDocUpdatePrompt(title, current, filePath),
+        systemPromptAppend: MAGIC_DOC_UPDATE_INSTRUCTIONS,
+        // Genuinely tool-using: reads several source files, then rewrites one doc.
+        // Opt into the full toolset (forks now default to no tools). maxTurns is a
+        // CEILING, not a per-call cost — keep ample headroom so a doc referencing many
+        // files still lands its rewrite instead of dying at "max turns" (→ silent staleness).
+        fullTools: true,
         maxTurns: 15,
         label: "magic-doc",
       });

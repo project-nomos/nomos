@@ -1,56 +1,42 @@
 import { describe, expect, it } from "vitest";
-import { aliasChunkId, parseAliases } from "./enrichment.ts";
+import { aliasChunkId, normalizeAliases } from "./enrichment.ts";
 
-describe("parseAliases", () => {
-  it("parses a JSON array of phrases", () => {
-    expect(parseAliases('["which carrier do I fly", "my airline"]')).toEqual([
+// normalizeAliases takes an ALREADY-PARSED value (the fork's structured/validated
+// output). Fenced/duplicated/malformed JSON extraction is covered by the shared
+// coerceStructuredOutput / extractFirstJson tests (reasoning-fork, json-extract).
+describe("normalizeAliases", () => {
+  it("keeps a clean array of phrases", () => {
+    expect(normalizeAliases(["which carrier do I fly", "my airline"])).toEqual([
       "which carrier do I fly",
       "my airline",
     ]);
   });
 
-  it("extracts the array from surrounding prose / code fences", () => {
-    const raw = 'Here you go:\n```json\n["how I take my coffee", "cafe order"]\n```';
-    expect(parseAliases(raw)).toEqual(["how I take my coffee", "cafe order"]);
-  });
-
-  it("handles a fenced array repeated twice (takes the first, not the greedy span)", () => {
-    const dup = '["which airline do I prefer", "aisle seat"]';
-    const raw = "```json\n" + dup + "\n``````json\n" + dup + "\n```";
-    expect(parseAliases(raw)).toEqual(["which airline do I prefer", "aisle seat"]);
-  });
-
-  it("returns [] on non-JSON, non-array, or empty", () => {
-    expect(parseAliases("sorry, I cannot help")).toEqual([]);
-    expect(parseAliases('{"not":"an array"}')).toEqual([]);
-    expect(parseAliases("[]")).toEqual([]);
-    expect(parseAliases('["valid but unterminated')).toEqual([]);
+  it("returns [] for non-arrays (null / object / string / empty)", () => {
+    expect(normalizeAliases(null)).toEqual([]);
+    expect(normalizeAliases({ not: "an array" })).toEqual([]);
+    expect(normalizeAliases("sorry, I cannot help")).toEqual([]);
+    expect(normalizeAliases([])).toEqual([]);
   });
 
   it("drops non-strings, trims, de-dupes case-insensitively, and bounds length", () => {
-    const raw = JSON.stringify([
-      "  spaced  ",
-      "Spaced",
-      42,
-      null,
-      "okay",
-      "x", // too short (<3)
-      "a".repeat(300), // too long (>200)
-    ]);
-    expect(parseAliases(raw)).toEqual(["spaced", "okay"]);
+    expect(
+      normalizeAliases([
+        "  spaced  ",
+        "Spaced",
+        42,
+        null,
+        "okay",
+        "x", // too short (<3)
+        "a".repeat(300), // too long (>200)
+      ]),
+    ).toEqual(["spaced", "okay"]);
   });
 
   it("caps at the max alias count", () => {
-    const raw = JSON.stringify([
-      "alias1",
-      "alias2",
-      "alias3",
-      "alias4",
-      "alias5",
-      "alias6",
-      "alias7",
-    ]);
-    expect(parseAliases(raw)).toHaveLength(5);
+    expect(
+      normalizeAliases(["alias1", "alias2", "alias3", "alias4", "alias5", "alias6", "alias7"]),
+    ).toHaveLength(5);
   });
 });
 

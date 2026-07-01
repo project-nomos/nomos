@@ -6,8 +6,9 @@
  * a periodic summary for the user.
  */
 
+import { z } from "zod";
 import { getDb } from "../db/client.ts";
-import { runForkedAgent } from "../sdk/forked-agent.ts";
+import { runReasoningFork } from "../sdk/reasoning-fork.ts";
 
 export interface TriageItem {
   platform: string;
@@ -25,6 +26,23 @@ export interface TriageSummary {
   generatedAt: string;
   totalUnprocessed: number;
 }
+
+/** STABLE rubric — byte-identical every call; only itemSummaries is dynamic. */
+const TRIAGE_INSTRUCTIONS = `Classify urgency for a list of recent messages. Return a JSON array with one object per item:
+[{"contact": "<contact>", "urgency": "high|medium|low", "reason": "<why>"}]
+
+Consider: time-sensitive requests = high, questions/follow-ups = medium, FYI/social = low.
+Return ONLY the JSON array.`;
+
+const TriageClassificationSchema = z.array(
+  z.object({
+    contact: z.string(),
+    // `.catch`: one off-list urgency coerces to "medium" instead of failing the whole
+    // array (which would zero the entire batch's classification).
+    urgency: z.enum(["high", "medium", "low"]).catch("medium"),
+    reason: z.string().default(""),
+  }),
+);
 
 /**
  * Generate a priority triage of recent unprocessed messages.
@@ -91,32 +109,16 @@ export async function generateTriage(
     )
     .join("\n");
 
-  const result = await runForkedAgent({
-    prompt: `Classify urgency for these recent messages. Return a JSON array with one object per item:
-[{"contact": "<contact>", "urgency": "high|medium|low", "reason": "<why>"}]
-
-MESSAGES:
-${itemSummaries}
-
-Consider: time-sensitive requests = high, questions/follow-ups = medium, FYI/social = low.
-Return ONLY the JSON array.`,
+  const { data: classified } = await runReasoningFork({
+    instructions: TRIAGE_INSTRUCTIONS,
+    input: `MESSAGES:\n${itemSummaries}`,
+    schema: TriageClassificationSchema,
     label: "priority-triage",
   });
 
-  let urgencyMap = new Map<string, { urgency: string; reason: string }>();
-  try {
-    const jsonMatch = result.text.match(/\[[\s\S]*\]/);
-    if (jsonMatch) {
-      const parsed = JSON.parse(jsonMatch[0]) as Array<{
-        contact: string;
-        urgency: string;
-        reason: string;
-      }>;
-      urgencyMap = new Map(parsed.map((p) => [p.contact, p]));
-    }
-  } catch {
-    // Use defaults
-  }
+  const urgencyMap = new Map<string, { urgency: string; reason: string }>(
+    (classified ?? []).map((p) => [p.contact, p]),
+  );
 
   const items: TriageItem[] = groups.map((g) => {
     const rel = relMap.get(g.contact);

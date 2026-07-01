@@ -13,6 +13,8 @@ import {
   type SDKMessage,
   type SdkPluginConfig,
 } from "../sdk/session.ts";
+import { createHash } from "node:crypto";
+import { buildTurnContext } from "./turn-context.ts";
 import { LiveSessionManager, type LiveTurnState } from "./live-session.ts";
 import { AssistantText } from "./assistant-text.ts";
 import type { ElicitationManager, ElicitationSource } from "./elicitation-manager.ts";
@@ -382,6 +384,13 @@ export class AgentRuntime {
 
   // Per-session Theory of Mind trackers (transient, session-scoped)
   private tomTrackers = new Map<string, TheoryOfMindTracker>();
+
+  // Cache-stability guard: fingerprint of the STABLE system-prompt prefix per
+  // session. When the cache-stable prefix is on, the prefix must be byte-identical
+  // across turns of a session (else the SDK re-bills the system block + tools +
+  // whole history). We warn ONCE per session if it changes, so a future edit that
+  // reintroduces a per-turn value into systemPromptAppend is caught early.
+  private lastPrefix = new Map<string, { hash: string; warned: boolean }>();
 
   // Cached personas for contextual identity switching
   private personas: Persona[] = [];
@@ -1027,6 +1036,7 @@ export class AgentRuntime {
           threadId: message.threadId,
         },
         message.userId,
+        message.systemPromptAppend,
       );
 
       // Cache the new SDK session ID, and persist it so the conversation resumes
@@ -1223,6 +1233,11 @@ export class AgentRuntime {
     source?: { platform: string; channelId: string; threadId?: string },
     /** BA user making this request — scopes per-user integrations (hosted). */
     userId?: string,
+    /**
+     * Stable per-job system-prompt append (e.g. a proactive watcher's fixed
+     * procedure). Byte-identical per job, so it rides in the cached prefix.
+     */
+    jobSystemPromptAppend?: string,
   ): Promise<{
     text: string;
     sessionId?: string;
@@ -1412,44 +1427,39 @@ export class AgentRuntime {
         "\n\n## Working as a team\nWhen a request is genuinely parallelizable — research from several angles at once, audit multiple things, draft separate sections, compare options — delegate with the `Agent` tool: spawn a `team-worker` subagent per independent piece (they run in parallel, each with its own fresh context), then synthesize their results into one reply. Use the read-only `verifier` subagent to adversarially check important results before you trust them. Reserve delegation for multi-angle or heavy work; do the simple single-step tasks yourself. (Power users can also start a message with `/team`.)";
     }
 
-    // Inject transient Theory of Mind state (per-message, not persisted)
-    if (userState) {
-      systemPromptAppend = systemPromptAppend + "\n\n" + userState;
+    // Cache-stable prefix (default on; set NOMOS_CACHE_STABLE_PREFIX=false to revert).
+    // The SDK caches the request PREFIX in the order tools → system → messages, and
+    // the whole system block is ONE atomic cache unit. So anything that changes
+    // turn-to-turn must NOT live in the system prompt: mutating a single byte of the
+    // append invalidates the tool schemas AND the entire resumed conversation history
+    // every turn (the dominant cost on the main agent). We keep only SESSION-STABLE
+    // context in the append (persona, per-user Google accounts, style voice) and route
+    // PER-TURN-VOLATILE context (Theory-of-Mind read, memory digest, elapsed anchor,
+    // mood, query-specific wiki) into the TURN instead (see effectivePrompt below),
+    // where it is billed once and then becomes cached history. The digest is still
+    // present on every turn, so clone continuity is unchanged — only its placement.
+    const cacheStablePrefix = process.env.NOMOS_CACHE_STABLE_PREFIX !== "false";
+
+    // Stable per-job procedure (proactive watchers): byte-identical per job →
+    // stays in the cached prefix so consecutive fires within the TTL reuse it.
+    if (jobSystemPromptAppend) {
+      systemPromptAppend = systemPromptAppend + "\n\n" + jobSystemPromptAppend;
     }
 
-    // Inject active persona overrides (per-message, context-dependent)
+    // Inject active persona overrides (stable within a session → cached prefix).
     if (personaPrompt) {
       systemPromptAppend = systemPromptAppend + "\n\n" + personaPrompt;
     }
 
-    // Inject the requesting user's connected Google accounts (hosted, per-user)
+    // Inject the requesting user's connected Google accounts (hosted, per-user →
+    // stable within a session → cached prefix).
     if (googlePrompt) {
       systemPromptAppend = systemPromptAppend + "\n\n" + googlePrompt;
     }
 
-    // Inject the reasoning-first memory digest (what the agent knows about the user)
-    if (memoryDigest) {
-      systemPromptAppend = systemPromptAppend + "\n\n" + memoryDigest;
-    }
-
-    // Inject the elapsed-time anchor (how long since the last conversation)
-    if (elapsedAnchor) {
-      systemPromptAppend = systemPromptAppend + "\n\n" + elapsedAnchor;
-    }
-
-    // Inject open mood episodes (gentle follow-up on the cause, never assert a mood)
-    if (moodContext) {
-      systemPromptAppend = systemPromptAppend + "\n\n" + moodContext;
-    }
-
-    // Inject query-relevant wiki articles LAST so the stable prefix (system
-    // prompt, tools, digest) stays prompt-cacheable up to this point.
-    if (wikiContext) {
-      systemPromptAppend = systemPromptAppend + "\n\n" + wikiContext;
-    }
-
-    // Writing-voice guidance (opt-in styleMatching): make the agent write in the
-    // owner's style, derived from their sent messages by the daily analysis job.
+    // Writing-voice guidance (opt-in styleMatching): the agent writes in the owner's
+    // style, derived from their sent messages by the daily analysis job. Stable per
+    // user within a session, so it also stays in the cached prefix.
     if (this.config.styleMatching) {
       try {
         const { buildStyleGuidance } = await import("../memory/style-prompt.ts");
@@ -1459,6 +1469,43 @@ export class AgentRuntime {
         log.debug({ err }, "Style guidance injection failed");
       }
     }
+
+    // Cache-stability guard: at this point systemPromptAppend holds ONLY the stable
+    // prefix (base + job procedure + persona + google + style). With the cache-stable
+    // prefix on it must be byte-identical across a session's turns; warn once if not.
+    if (cacheStablePrefix && sessionKey) {
+      const hash = createHash("sha256").update(systemPromptAppend).digest("hex").slice(0, 16);
+      const prev = this.lastPrefix.get(sessionKey);
+      if (prev && prev.hash !== hash) {
+        if (!prev.warned) {
+          log.warn(
+            { sessionKey },
+            "System-prompt prefix changed between turns — breaks the prompt cache (system block + tools + history re-billed). Expected only on persona/style/config change; investigate if sustained.",
+          );
+        }
+        this.lastPrefix.set(sessionKey, { hash, warned: true });
+      } else if (!prev) {
+        // Bound the map: isolated cron sessions use a fresh `cron:<id>:<ts>` key every
+        // fire, so this would otherwise grow unbounded. Drop stale baselines past a cap
+        // — a best-effort warn heuristic; losing a baseline only skips one comparison.
+        if (this.lastPrefix.size >= 512) this.lastPrefix.clear();
+        this.lastPrefix.set(sessionKey, { hash, warned: false });
+      }
+    }
+
+    // Per-turn-volatile context split, in stable order: ToM read → memory digest →
+    // elapsed anchor → mood → query-relevant wiki (last). With the cache-stable
+    // prefix on (default) it rides in the TURN so the cached system block + tools +
+    // history survive; otherwise it falls back to the legacy in-system-prompt append.
+    // buildTurnContext is the pure, unit-tested core of this feature.
+    const turnCtx = buildTurnContext({
+      stableSystemPromptAppend: systemPromptAppend,
+      volatile: [userState, memoryDigest, elapsedAnchor, moodContext, wikiContext],
+      prompt,
+      cacheStablePrefix,
+    });
+    systemPromptAppend = turnCtx.systemPromptAppend;
+    const effectivePrompt = turnCtx.effectivePrompt;
 
     // Mobile / local-terminal clients have no channel adapter, so render the Ask card
     // over THIS open chat stream via `emit` (the answer returns out-of-band via
@@ -1473,7 +1520,7 @@ export class AgentRuntime {
     const canUseTool = mgr && source ? buildAskCanUseTool(mgr, source) : undefined;
 
     const runParams: RunSessionParams = {
-      prompt,
+      prompt: effectivePrompt,
       model: model ?? this.config.model,
       systemPromptAppend,
       mcpServers,

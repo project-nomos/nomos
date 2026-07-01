@@ -17,10 +17,11 @@
  */
 
 import { createHash } from "node:crypto";
+import { z } from "zod";
 import { loadEnvConfig } from "../config/env.ts";
 import { storeMemoryChunk } from "../db/memory.ts";
 import { createLogger } from "../lib/logger.ts";
-import { runForkedAgent } from "../sdk/forked-agent.ts";
+import { runReasoningFork } from "../sdk/reasoning-fork.ts";
 import { generateEmbeddings, isEmbeddingAvailable } from "./embeddings.ts";
 
 const log = createLogger("enrichment");
@@ -29,18 +30,21 @@ const MAX_ALIASES = 5;
 const MIN_CONTENT_LEN = 40; // not worth a fork for a tiny note
 const ALIAS_MODEL = "claude-haiku-4-5";
 
-const ALIAS_PROMPT = `You expand a stored memory into the SEARCH QUERIES a user would later type to find it. Given the note below, list the distinct natural-language questions or search phrases this note answers -- especially ones that use DIFFERENT words than the note (synonyms, the category, the underlying intent), since exact-word queries already match.
+/**
+ * STABLE rubric — the fixed instruction / JSON-shape spec. Byte-identical every
+ * call so the SDK caches it in the system-prompt prefix; only the dynamic note
+ * text is billed uncached. NEVER interpolate per-note data here.
+ */
+const ALIAS_INSTRUCTIONS = `You expand a stored memory into the SEARCH QUERIES a user would later type to find it. Given the note in the user message, list the distinct natural-language questions or search phrases this note answers -- especially ones that use DIFFERENT words than the note (synonyms, the category, the underlying intent), since exact-word queries already match.
 
 Rules:
 - Output ONLY a JSON array of strings, at most ${MAX_ALIASES}, no prose.
 - Each phrase is something a user would actually type ("which carrier do I fly", not "the user's airline preference").
 - Vary the vocabulary; do not just echo the note's wording.
-- If the note holds no durable, recallable fact, output [].
+- If the note holds no durable, recallable fact, output [].`;
 
-Note:
-"""
-{content}
-"""`;
+/** SDK-validated shape: a bare array of alias strings. */
+const AliasesSchema = z.array(z.string()).default([]);
 
 /** Deterministic doc hash for a note, matching vault chunk id namespacing. */
 function noteHash(userId: string, path: string): string {
@@ -53,24 +57,12 @@ export function aliasChunkId(userId: string, path: string, i: number): string {
 }
 
 /**
- * Parse the forked model's output into a clean, bounded, de-duplicated alias
- * list. Never throws -- enrichment is best-effort.
+ * Normalize a raw alias list into a clean, bounded, de-duplicated one: trims,
+ * drops non-strings and out-of-bounds lengths, de-dupes case-insensitively, and
+ * caps at MAX_ALIASES. Never throws -- enrichment is best-effort.
  */
-export function parseAliases(raw: string): string[] {
-  // Models often fence the JSON in ```json ... ``` and sometimes repeat the whole
-  // array; strip fences and take the FIRST array (non-greedy) so a duplicated or
-  // fenced answer still parses.
-  const cleaned = raw.replace(/```(?:json)?/gi, " ");
-  const match = cleaned.match(/\[[\s\S]*?\]/);
-  if (!match) return [];
-  let arr: unknown;
-  try {
-    arr = JSON.parse(match[0]);
-  } catch {
-    return [];
-  }
+export function normalizeAliases(arr: unknown): string[] {
   if (!Array.isArray(arr)) return [];
-
   const seen = new Set<string>();
   const out: string[] = [];
   for (const item of arr) {
@@ -93,15 +85,15 @@ export function parseAliases(raw: string): string[] {
 export async function generateRetrievalAliases(content: string): Promise<string[]> {
   if (content.trim().length < MIN_CONTENT_LEN) return [];
   try {
-    const { text } = await runForkedAgent({
-      prompt: ALIAS_PROMPT.replace("{content}", content.slice(0, 2000)),
+    const { data } = await runReasoningFork({
+      instructions: ALIAS_INSTRUCTIONS,
+      input: `Note:\n"""\n${content.slice(0, 2000)}\n"""`,
+      schema: AliasesSchema,
       model: ALIAS_MODEL,
-      systemPromptAppend: "You output only a JSON array of strings. No explanations.",
       maxTurns: 1,
       label: "retrieval-enrichment",
-      allowedTools: [],
     });
-    return parseAliases(text);
+    return normalizeAliases(data ?? []);
   } catch (err) {
     log.debug({ err }, "alias generation failed");
     return [];

@@ -22,8 +22,10 @@
 import fs from "node:fs";
 import path from "node:path";
 import { homedir } from "node:os";
+import { z } from "zod";
 import { getDb } from "../db/client.ts";
 import { runForkedAgent } from "../sdk/forked-agent.ts";
+import { runReasoningFork } from "../sdk/reasoning-fork.ts";
 import { upsertArticle, getArticle, listArticles } from "../db/wiki.ts";
 import { searchVaultNotes } from "../db/vault.ts";
 import { parseWikiLinks } from "./graph-writer.ts";
@@ -157,30 +159,41 @@ export function resolveWiki(config: Partial<NomosConfig>): ResolvedWikiConfig {
 }
 
 /**
- * Extract the first balanced JSON array from model text, ignoring brackets inside
- * strings. Robust to code fences and surrounding prose, where a greedy
- * `/\[[\s\S]*\]/` (first `[` to LAST `]`) captures junk and fails to parse.
+ * One planned wiki article. Mirrors the `plans` element type below exactly; the
+ * `.default("")` on description lets a partial emit still validate (the compiler
+ * treats a missing description as empty when gathering vault context).
  */
-function extractJsonArray(text: string): string | null {
-  const start = text.indexOf("[");
-  if (start === -1) return null;
-  let depth = 0;
-  let inString = false;
-  let escaped = false;
-  for (let i = start; i < text.length; i++) {
-    const ch = text[i];
-    if (inString) {
-      if (escaped) escaped = false;
-      else if (ch === "\\") escaped = true;
-      else if (ch === '"') inString = false;
-      continue;
-    }
-    if (ch === '"') inString = true;
-    else if (ch === "[") depth++;
-    else if (ch === "]" && --depth === 0) return text.slice(start, i + 1);
-  }
-  return null;
-}
+const articlePlanSchema = z.object({
+  path: z.string(),
+  title: z.string(),
+  category: z.string(),
+  description: z.string().default(""),
+});
+/** The planner returns a JSON array of article plans (or [] for nothing to do). */
+const articlePlanArraySchema = z.array(articlePlanSchema).default([]);
+
+/**
+ * STABLE planner rubric — the fixed procedure + JSON-shape spec. Byte-identical
+ * across runs so it caches in the fork's system-prompt prefix (systemPromptAppend).
+ * The per-run knowledge summary + existing-article list + the max-article cap are
+ * dynamic and stay in the prompt (`input`).
+ */
+const PLANNER_INSTRUCTIONS = `You are a knowledge wiki curator. Based on the user's accumulated knowledge, decide which wiki articles to create or update.
+
+Decide which articles are worth creating. Prioritize:
+1. People the user interacts with regularly (contacts with details)
+2. Projects or topics with substantial accumulated knowledge
+3. Key relationships and organizational context
+
+Skip:
+- Generic/obvious facts ("user is testing", "system is working")
+- Temporary state ("on branch X", "file Y modified")
+- Single-fact entries that don't warrant a full article
+
+Return ONLY a JSON array of article plans:
+[{"path": "contacts/suren.md", "title": "Suren", "category": "contacts", "description": "compile contact card"}, ...]
+
+Return [] if nothing is worth compiling.`;
 
 interface CompilationResult {
   articlesCreated: number;
@@ -304,40 +317,26 @@ export async function compileKnowledge(options?: {
       ? `WIKI CONVENTIONS (follow these when choosing paths, categories, and titles):\n${schemaDoc.trim()}\n\n`
       : "";
 
-    const planResult = await runForkedAgent({
-      prompt: `You are a knowledge wiki curator. Based on the user's accumulated knowledge, decide which wiki articles to create or update.
-
-${schemaSection}${knowledgeSummary}
+    // Pure-reasoning fork: STABLE rubric caches in the prefix; only the per-run
+    // knowledge (schema conventions, summary, existing articles, cap) is billed
+    // uncached as the prompt. Schema-validated structured output replaces the old
+    // balanced-array extractor.
+    const { data: plans } = await runReasoningFork({
+      instructions: PLANNER_INSTRUCTIONS,
+      input: `${schemaSection}${knowledgeSummary}
 
 EXISTING ARTICLES: ${existingArticles.map((a) => a.path).join(", ") || "none"}
 
-Decide which articles are worth creating. Prioritize:
-1. People the user interacts with regularly (contacts with details)
-2. Projects or topics with substantial accumulated knowledge
-3. Key relationships and organizational context
-
-Skip:
-- Generic/obvious facts ("user is testing", "system is working")
-- Temporary state ("on branch X", "file Y modified")
-- Single-fact entries that don't warrant a full article
-
-Return ONLY a JSON array of article plans:
-[{"path": "contacts/suren.md", "title": "Suren", "category": "contacts", "description": "compile contact card"}, ...]
-
-Maximum ${wiki.maxArticles} articles. Return [] if nothing is worth compiling.`,
+Maximum ${wiki.maxArticles} articles.`,
+      schema: articlePlanArraySchema,
       model: wiki.model,
+      // Reasoning fork forces allowedTools:[], so no tool detour can eat the turn;
+      // give 2 turns of headroom for the array emit.
+      maxTurns: 2,
       label: "wiki-plan",
-      // Forks run with the full toolset, so a generation task can spend a turn on
-      // a tool detour before answering; maxTurns:1 then dies with "Reached maximum
-      // number of turns". Give the fork default (5) of headroom.
-      maxTurns: 5,
     });
 
-    let plans: Array<{ path: string; title: string; category: string; description: string }>;
-    try {
-      const jsonText = extractJsonArray(planResult.text);
-      plans = jsonText ? JSON.parse(jsonText) : [];
-    } catch {
+    if (plans === null) {
       result.errors.push("Failed to parse article plan");
       return result;
     }
@@ -458,9 +457,30 @@ export interface ArticleSources {
 }
 
 /**
- * Build the article-compilation prompt. Pure + exported so a unit test can assert
- * the vault notes, the supersession instruction, and the schema doc all land in
- * the prompt without spending an LLM call.
+ * STABLE article-writing rubric — the fixed instructions the curator must follow
+ * for EVERY article. Byte-identical across runs so it caches in the fork's
+ * system-prompt prefix (`systemPromptAppend`). Only the per-article data (title,
+ * vault notes, facts, conversations, schema doc, superseded list) is dynamic and
+ * lives in `buildArticlePrompt`'s returned prompt.
+ */
+export const ARTICLE_INSTRUCTIONS = `You are a knowledge wiki curator compiling a single markdown wiki article.
+
+Write a concise, factual markdown article. Include ALL concrete details found (phone numbers, emails, relationships, roles, preferences). Structure with clear headings. Under 500 words.
+
+The VAULT NOTES in the prompt are the user's authored memory and the SOURCE OF TRUTH — prefer them over every other section.
+
+When newer information supersedes an older claim, state the change explicitly rather than silently dropping the old one (e.g. "Previously at X; now at Y (as of <date>)"). If a SUPERSEDED / OUTDATED list is present, use it and do NOT present those facts as current.
+
+When you mention another person, project, company, or topic that likely has its own wiki entry, wrap that name in double brackets like [[Name]] so the wiki cross-links. Only bracket proper nouns that are distinct entities, not generic words.
+
+Return ONLY the markdown article content.`;
+
+/**
+ * Build the DYNAMIC article-compilation prompt (per-article data only; the stable
+ * writing rubric lives in ARTICLE_INSTRUCTIONS and is passed as systemPromptAppend
+ * so it caches in the prefix). Pure + exported so a unit test can assert the vault
+ * notes, the superseded data, and the schema doc all land in the prompt without
+ * spending an LLM call.
  */
 export function buildArticlePrompt(
   plan: { path: string; title: string; category: string },
@@ -514,15 +534,7 @@ ${contactText || "No contact record"}
 
 RELEVANT CONVERSATIONS:
 ${convoText || "No recent conversations"}
-${supersededText ? `\nSUPERSEDED / OUTDATED (newer information has replaced these — do NOT present them as current):\n${supersededText}` : ""}
-
-Write a concise, factual markdown article. Include ALL concrete details found (phone numbers, emails, relationships, roles, preferences). Structure with clear headings. Under 500 words.
-
-When newer information supersedes an older claim, state the change explicitly rather than silently dropping the old one (e.g. "Previously at X; now at Y (as of <date>)")${supersededText ? ", using the SUPERSEDED list above" : ""}.
-
-When you mention another person, project, company, or topic that likely has its own wiki entry, wrap that name in double brackets like [[Name]] so the wiki cross-links. Only bracket proper nouns that are distinct entities, not generic words.
-
-Return ONLY the markdown article content.`;
+${supersededText ? `\nSUPERSEDED / OUTDATED (newer information has replaced these — do NOT present them as current):\n${supersededText}` : ""}`;
 }
 
 async function compileArticle(
@@ -548,11 +560,13 @@ async function compileArticle(
 
   const compiled = await runForkedAgent({
     prompt,
+    systemPromptAppend: ARTICLE_INSTRUCTIONS,
     model,
     label: `wiki-compile:${plan.title}`,
-    // 5 turns of headroom so an article body that takes a tool detour still lands
-    // its final answer (maxTurns:1 was dropping ~1 in 6 articles).
-    maxTurns: 5,
+    // Pure prose generation from the prompt — no tools, so a tool detour can't eat
+    // a turn. 2 turns of headroom for the markdown body (was 5 with the toolset).
+    allowedTools: [],
+    maxTurns: 2,
   });
 
   return compiled.text.trim();
