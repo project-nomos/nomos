@@ -80,7 +80,9 @@ const ExemplarScoreSchema = z.object({
       "planning",
       "general",
     ])
-    .default("general"),
+    // `.catch` (not `.default`): an off-list context the model invents coerces to
+    // "general" instead of failing the whole object (which would drop a valid score).
+    .catch("general"),
   reasoning: z.string().default(""),
 });
 

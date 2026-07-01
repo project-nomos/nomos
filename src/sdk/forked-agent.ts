@@ -33,7 +33,7 @@ export interface ForkedAgentOptions {
   model?: string;
   /** System prompt append. */
   systemPromptAppend?: string;
-  /** Maximum turns (default: 5). */
+  /** Maximum turns (default: 2). */
   maxTurns?: number;
   /** Label for tracking (e.g., "summary", "classifier"). */
   label?: string;

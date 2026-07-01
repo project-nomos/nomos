@@ -20,7 +20,6 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 import { loadEnvConfig } from "../config/env.ts";
 import { storeMemoryChunk } from "../db/memory.ts";
-import { extractFirstJson } from "../lib/json-extract.ts";
 import { createLogger } from "../lib/logger.ts";
 import { runReasoningFork } from "../sdk/reasoning-fork.ts";
 import { generateEmbeddings, isEmbeddingAvailable } from "./embeddings.ts";
@@ -62,7 +61,7 @@ export function aliasChunkId(userId: string, path: string, i: number): string {
  * drops non-strings and out-of-bounds lengths, de-dupes case-insensitively, and
  * caps at MAX_ALIASES. Never throws -- enrichment is best-effort.
  */
-function normalizeAliases(arr: unknown): string[] {
+export function normalizeAliases(arr: unknown): string[] {
   if (!Array.isArray(arr)) return [];
   const seen = new Set<string>();
   const out: string[] = [];
@@ -77,15 +76,6 @@ function normalizeAliases(arr: unknown): string[] {
     if (out.length >= MAX_ALIASES) break;
   }
   return out;
-}
-
-/**
- * Parse the forked model's raw text into a clean, bounded, de-duplicated alias
- * list. Uses the shared balanced-JSON extractor (no ad-hoc regex) so a fenced or
- * duplicated answer still parses. Never throws -- enrichment is best-effort.
- */
-export function parseAliases(raw: string): string[] {
-  return normalizeAliases(extractFirstJson(raw));
 }
 
 /**

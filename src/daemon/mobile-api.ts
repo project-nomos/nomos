@@ -252,6 +252,23 @@ const COMPOSE_INSTRUCTIONS =
 /** Validated shape: a JSON array of draft strings. */
 const composeSchema = z.array(z.string());
 
+/**
+ * Fallback for a non-JSON compose emit: Haiku sometimes ignores "JSON array" and
+ * returns one draft per line. Recover them by stripping bullet/number/quote markers.
+ * The `.slice(0, 3)` at the call site drops the duplicated copy forked-agent appends.
+ */
+function parseDraftLines(text: string): string[] {
+  return text
+    .split("\n")
+    .map((l) =>
+      l
+        .replace(/^\s*(?:[-*•]|\d+[.)])\s*/, "")
+        .replace(/^["']|["']$/g, "")
+        .trim(),
+    )
+    .filter(Boolean);
+}
+
 /** One-shot draft generation for the iMessage extension (instruction → a few drafts). */
 async function handleComposeReply(
   call: grpc.ServerUnaryCall<unknown, unknown>,
@@ -265,15 +282,17 @@ async function handleComposeReply(
     : "";
   const input = `Instruction: ${instruction}${ctxLine}`;
   try {
-    const { data } = await runReasoningFork({
+    const { data, raw } = await runReasoningFork({
       instructions: COMPOSE_INSTRUCTIONS,
       input,
       schema: composeSchema,
       label: "imessage-compose",
     });
-    if (!data) return { drafts: [] };
+    // On a non-JSON emit (Haiku sometimes returns one draft per line despite the
+    // instruction) `data` is null — recover the drafts by line rather than show none.
+    const candidates = data ?? parseDraftLines(raw.text);
     return {
-      drafts: data
+      drafts: candidates
         .map((s) => s.trim())
         .filter(Boolean)
         .slice(0, 3),

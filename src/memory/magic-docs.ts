@@ -289,10 +289,12 @@ export async function refreshMagicDocs(
       const result = await runForkedAgent({
         prompt: buildMagicDocUpdatePrompt(title, current, filePath),
         systemPromptAppend: MAGIC_DOC_UPDATE_INSTRUCTIONS,
-        // Genuinely tool-using: reads a few source files, then rewrites one doc.
-        // Opt into the full toolset (forks now default to no tools).
+        // Genuinely tool-using: reads several source files, then rewrites one doc.
+        // Opt into the full toolset (forks now default to no tools). maxTurns is a
+        // CEILING, not a per-call cost — keep ample headroom so a doc referencing many
+        // files still lands its rewrite instead of dying at "max turns" (→ silent staleness).
         fullTools: true,
-        maxTurns: 7,
+        maxTurns: 15,
         label: "magic-doc",
       });
       const next = result.text.trim();

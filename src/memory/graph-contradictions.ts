@@ -33,7 +33,9 @@ You are given a new fact and a numbered list of existing facts about the same su
 
 Reply with ONLY a JSON object of the form {"superseded":[1,3]} listing the numbers of the superseded facts; reply {"superseded":[]} if none are contradicted.`;
 
-const supersededSchema = z.object({ superseded: z.array(z.number()).default([]) });
+// `z.coerce.number()` salvages string-numbered ids ("1" → 1); `.catch([])` yields
+// [] on a truly-malformed / missing array instead of failing the whole parse.
+const supersededSchema = z.object({ superseded: z.array(z.coerce.number()).catch([]) });
 
 export interface ContradictionInput {
   srcId: string;

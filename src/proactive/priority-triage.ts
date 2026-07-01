@@ -37,7 +37,9 @@ Return ONLY the JSON array.`;
 const TriageClassificationSchema = z.array(
   z.object({
     contact: z.string(),
-    urgency: z.enum(["high", "medium", "low"]),
+    // `.catch`: one off-list urgency coerces to "medium" instead of failing the whole
+    // array (which would zero the entire batch's classification).
+    urgency: z.enum(["high", "medium", "low"]).catch("medium"),
     reason: z.string().default(""),
   }),
 );

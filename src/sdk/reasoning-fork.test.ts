@@ -1,7 +1,11 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { z } from "zod";
-import { coerceStructuredOutput } from "./reasoning-fork.ts";
+import { coerceStructuredOutput, runReasoningFork } from "./reasoning-fork.ts";
 import type { ForkedAgentResult } from "./forked-agent.ts";
+import { runForkedAgent } from "./forked-agent.ts";
+
+vi.mock("./forked-agent.ts", () => ({ runForkedAgent: vi.fn() }));
+const mockFork = vi.mocked(runForkedAgent);
 
 const schema = z.object({
   items: z.array(z.string()).default([]),
@@ -83,5 +87,45 @@ describe("coerceStructuredOutput", () => {
     });
     const out = coerceStructuredOutput(transformSchema, raw({ text: '{"name":"  ada  "}' }));
     expect(out).toEqual({ name: "ADA" });
+  });
+});
+
+describe("runReasoningFork forwarding", () => {
+  it("maps instructions→systemPromptAppend, input→prompt, forces allowedTools:[], defaults maxTurns:1", async () => {
+    mockFork.mockResolvedValue(raw({ structuredOutput: { items: ["a"], score: 1 } }));
+    const { data } = await runReasoningFork({
+      instructions: "RUBRIC",
+      input: "DATA",
+      schema,
+      label: "t",
+    });
+    expect(mockFork).toHaveBeenCalledWith(
+      expect.objectContaining({
+        systemPromptAppend: "RUBRIC",
+        prompt: "DATA",
+        allowedTools: [],
+        maxTurns: 1,
+        label: "t",
+        outputSchema: schema,
+      }),
+    );
+    expect(data).toEqual({ items: ["a"], score: 1 });
+  });
+
+  it("passes maxTurns and model overrides through", async () => {
+    mockFork.mockResolvedValue(raw({ text: "no json" }));
+    const { data } = await runReasoningFork({
+      instructions: "i",
+      input: "x",
+      schema,
+      label: "t",
+      maxTurns: 2,
+      model: "claude-sonnet-4-6",
+    });
+    expect(mockFork).toHaveBeenCalledWith(
+      expect.objectContaining({ maxTurns: 2, model: "claude-sonnet-4-6" }),
+    );
+    // unparseable output → coercion returns null
+    expect(data).toBeNull();
   });
 });

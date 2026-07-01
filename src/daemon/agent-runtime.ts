@@ -1476,16 +1476,20 @@ export class AgentRuntime {
     if (cacheStablePrefix && sessionKey) {
       const hash = createHash("sha256").update(systemPromptAppend).digest("hex").slice(0, 16);
       const prev = this.lastPrefix.get(sessionKey);
-      if (prev && prev.hash !== hash && !prev.warned) {
-        log.warn(
-          { sessionKey },
-          "System-prompt prefix changed between turns — breaks the prompt cache (system block + tools + history re-billed). Expected only on persona/style/config change; investigate if sustained.",
-        );
+      if (prev && prev.hash !== hash) {
+        if (!prev.warned) {
+          log.warn(
+            { sessionKey },
+            "System-prompt prefix changed between turns — breaks the prompt cache (system block + tools + history re-billed). Expected only on persona/style/config change; investigate if sustained.",
+          );
+        }
         this.lastPrefix.set(sessionKey, { hash, warned: true });
       } else if (!prev) {
+        // Bound the map: isolated cron sessions use a fresh `cron:<id>:<ts>` key every
+        // fire, so this would otherwise grow unbounded. Drop stale baselines past a cap
+        // — a best-effort warn heuristic; losing a baseline only skips one comparison.
+        if (this.lastPrefix.size >= 512) this.lastPrefix.clear();
         this.lastPrefix.set(sessionKey, { hash, warned: false });
-      } else if (prev.hash !== hash) {
-        this.lastPrefix.set(sessionKey, { hash, warned: prev.warned });
       }
     }
 
