@@ -567,6 +567,9 @@ CREATE TABLE IF NOT EXISTS managed_files (
 -- restores it to ~/.nomos/WIKI.md at boot (syncAllFiles), hosted edits it via the
 -- Settings UI. Idempotent: never overwrites a user's edited copy. The hash is only
 -- used for disk change-detection (self-heals on the next disk->DB sync).
+-- NOTE: keep this block free of backtick and dollar-brace characters -- schema.sql
+-- is inlined into a JS template literal at build (scripts/sync-inline-schema.mjs),
+-- and those two sequences break it (guarded, so the build fails fast otherwise).
 INSERT INTO managed_files (path, content, hash) VALUES (
   'WIKI.md',
   $wiki$# Wiki conventions
@@ -577,8 +580,8 @@ edit it in Settings. The compiler reads it every run.
 
 ## Layout
 
-- Group articles by category as `category/title.md`.
-- Common categories: `contacts` (people), `projects`, `topics`, `orgs`, `procedures`.
+- Group articles by category, as category/title.md (for example, contacts/jane.md).
+- Common categories: contacts (people), projects, topics, orgs, procedures.
 - One entity per article. Prefer updating an existing article over creating a near-duplicate.
 
 ## Writing
@@ -589,11 +592,11 @@ edit it in Settings. The compiler reads it every run.
 
 ## Links and freshness
 
-- Cross-link entities with `[[Name]]` so the wiki forms a graph. Only bracket distinct proper nouns.
+- Cross-link entities with [[Name]] so the wiki forms a graph. Only bracket distinct proper nouns.
 - When newer information supersedes an older claim, state the change (for example,
   "Previously at X; now at Y") instead of silently dropping the old fact.
 $wiki$,
-  '37aac7229df35a15111d25223e914ae10664a0d793f8d2b2cd43f3af099239b9'
+  '05f4e3a3c43fceacfc465a5308d3f60766bb07521ec3ebb124cc9b7bbf203f39'
 ) ON CONFLICT (path) DO NOTHING;
 
 -- Per-instance org membership cache (replicated from BA's organization
