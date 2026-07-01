@@ -20,7 +20,9 @@ const log = createLogger("relationship-narrative");
 const NOTE = "relationship.md";
 const MIN_ENTRIES = 5; // not worth narrating below this much learned
 
-const PROMPT = `You are an AI companion reflecting, in YOUR OWN VOICE (first person), on how you've come to understand and work with this specific person. Ground EVERY claim in the learned facts below — do not invent. Write 4-8 sentences covering: who they are to you, the patterns you've learned in how they work and decide, what you've adjusted as a result, and where you can be most useful. Warm but honest — no flattery, no "as an AI", no disclaimers. Output ONLY the prose.`;
+// STABLE rubric — byte-identical every call so the SDK caches it in the
+// system-prompt prefix. Only the dynamic learned-facts block goes in the prompt.
+const INSTRUCTIONS = `You are an AI companion reflecting, in YOUR OWN VOICE (first person), on how you've come to understand and work with this specific person. Ground EVERY claim in the learned facts provided — do not invent. Write 4-8 sentences covering: who they are to you, the patterns you've learned in how they work and decide, what you've adjusted as a result, and where you can be most useful. Warm but honest — no flattery, no "as an AI", no disclaimers. Output ONLY the prose.`;
 
 function formatValue(v: unknown): string {
   if (typeof v === "string") return v;
@@ -60,7 +62,9 @@ export async function writeRelationshipNarrative(userId: string): Promise<Narrat
     label: "relationship-narrative",
     model: config.extractionModel ?? "claude-haiku-4-5",
     allowedTools: [],
-    prompt: `${PROMPT}\n\nWHAT YOU'VE LEARNED ABOUT THEM:\n${facts}`,
+    maxTurns: 1,
+    systemPromptAppend: INSTRUCTIONS,
+    prompt: `WHAT YOU'VE LEARNED ABOUT THEM:\n${facts}`,
   });
 
   const narrative = result.text.trim();

@@ -8,8 +8,7 @@
 
 import { createHash } from "node:crypto";
 import { z } from "zod";
-import { runForkedAgent } from "../sdk/forked-agent.ts";
-import { coerceJson, extractFirstJson } from "../lib/json-extract.ts";
+import { runReasoningFork } from "../sdk/reasoning-fork.ts";
 import { storeMemoryChunk } from "../db/memory.ts";
 import { generateEmbedding, isEmbeddingAvailable } from "./embeddings.ts";
 import { loadEnvConfig } from "../config/env.ts";
@@ -116,10 +115,10 @@ const ExtractedKnowledgeSchema = z.object({
     .default([]),
 });
 
-const EXTRACTION_PROMPT = `You are a knowledge extraction system. Extract structured knowledge from this conversation exchange. Return ONLY valid JSON, no other text.
-
-User: {userMessage}
-Assistant: {agentResponse}
+// STABLE instructions — the fixed rubric + JSON-shape spec, byte-identical every
+// call so the SDK caches it in the system-prompt prefix. The per-turn User/Assistant
+// pair is the ONLY dynamic data and is sent LAST as the fork `input`.
+const EXTRACTION_INSTRUCTIONS = `You are a knowledge extraction system. Extract structured knowledge from the conversation exchange in the user message. Return ONLY valid JSON, no other text.
 
 Extract:
 - facts: things the user stated about themselves, their projects, tech stack, environment, PEOPLE (names, relationships, phone numbers, emails, roles), addresses, schedules, or any concrete personal information. ALWAYS extract contact details (phone numbers, email addresses) as separate facts with the person's name as an entity.
@@ -160,42 +159,27 @@ export async function extractKnowledge(
   const config = loadEnvConfig();
   const model = config.extractionModel ?? "claude-haiku-4-5";
 
-  const prompt = EXTRACTION_PROMPT.replace("{userMessage}", userMessage).replace(
-    "{agentResponse}",
-    agentResponse.slice(0, 2000),
-  ); // Truncate long responses
+  // Only the dynamic per-turn pair goes in the fork input (sent LAST, uncached).
+  // The rubric + JSON-shape spec lives in EXTRACTION_INSTRUCTIONS (cached prefix).
+  const input = `User: ${userMessage}\nAssistant: ${agentResponse.slice(0, 2000)}`; // Truncate long responses
 
   try {
-    // Route through runForkedAgent (not a bare runSession): it carries
-    // useSubscription so the call authenticates on subscription-only installs,
-    // runs with bypassPermissions + allowedTools:[] so a pure-reasoning fork
-    // actually emits the JSON (plan mode suppressed it), and retries transient
-    // 429/529s. A bare runSession here silently produced nothing in prod.
-    const { text: fullText, structuredOutput } = await runForkedAgent({
-      prompt,
+    // runReasoningFork carries useSubscription (authenticates on subscription-only
+    // installs), forces allowedTools:[] so a pure-reasoning fork actually emits the
+    // JSON, retries transient 429/529s, and reads the SDK-validated structured
+    // output with one balanced-JSON fallback. maxTurns:2 for the multi-step
+    // extraction. On parse failure, `data` is null → return the caller's empty
+    // default (extraction stores nothing rather than a synthetic row).
+    const { data } = await runReasoningFork({
+      instructions: EXTRACTION_INSTRUCTIONS,
+      input,
+      schema: ExtractedKnowledgeSchema,
       model,
-      systemPromptAppend:
-        "You are a JSON extraction system. Output only valid JSON. No explanations.",
       maxTurns: 2,
       label: "knowledge-extraction",
-      allowedTools: [],
-      outputSchema: ExtractedKnowledgeSchema,
     });
 
-    // Phase C — prefer the SDK-validated structured output; the schema defaults
-    // fill any missing arrays. Fall back to the legacy regex + JSON.parse only
-    // when structured output is unavailable (older CLI / non-structured path).
-    // Prefer the SDK-validated structured output when the CLI honors outputFormat
-    // (it may arrive parsed OR as a JSON string). It's commonly `undefined` on the
-    // subscription/fork path, so fall back to the text — which forked-agent returns
-    // DUPLICATED + ```json-fenced. extractFirstJson takes the first BALANCED object,
-    // not a greedy first-{…}-to-last-} match that splices the two copies into
-    // invalid JSON (the bug that made extraction silently store nothing in prod).
-    const direct = ExtractedKnowledgeSchema.safeParse(coerceJson(structuredOutput));
-    if (direct.success) return direct.data;
-
-    const fallback = ExtractedKnowledgeSchema.safeParse(extractFirstJson(fullText));
-    return fallback.success ? fallback.data : empty;
+    return data ?? empty;
   } catch (err) {
     log.debug({ err }, "Knowledge extraction failed");
     return empty;

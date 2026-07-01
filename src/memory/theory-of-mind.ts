@@ -5,7 +5,7 @@
  *   1. Rule-based classifier runs synchronously on every turn (zero latency).
  *      Detects surface signals: urgency markers, explicit emotion, message
  *      patterns, time of day, session duration.
- *   2. LLM assessment runs in the background every N turns via runForkedAgent.
+ *   2. LLM assessment runs in the background every N turns via runReasoningFork.
  *      Analyzes the conversation trajectory for nuanced signals: sarcasm,
  *      implicit frustration, goal shifts, confusion patterns, unstated needs.
  *      Results merge into the state on the NEXT turn (no added latency).
@@ -16,19 +16,21 @@
  */
 
 import { z } from "zod";
-import type { ForkedAgentResult } from "../sdk/forked-agent.ts";
 import { createLogger } from "../lib/logger.ts";
+import { runReasoningFork } from "../sdk/reasoning-fork.ts";
 
 const log = createLogger("theory-of-mind");
 
-/** Phase C — schema for SDK-validated structured output (parseLlmAssessment validates further). */
+/** Schema for SDK-validated structured output (parseLlmAssessment normalizes enums further). */
 const LlmAssessmentSchema = z.object({
-  inferredGoal: z.string(),
-  emotionalSubtext: z.string(),
-  conversationTrajectory: z.string(),
+  inferredGoal: z.string().default(""),
+  emotionalSubtext: z.string().default(""),
+  conversationTrajectory: z.string().default(""),
   strategicGuidance: z.string().optional(),
   confidence: z.string().optional(),
 });
+
+type LlmAssessmentRaw = z.infer<typeof LlmAssessmentSchema>;
 
 // ── Types ──
 
@@ -212,25 +214,16 @@ export class TheoryOfMindTracker {
     const recentMessages = this.messageHistory.slice(-LLM_CONTEXT_WINDOW);
     const ruleState = this.computeState();
 
-    const prompt = buildLlmAssessmentPrompt(recentMessages, ruleState, turnCount);
+    const input = buildLlmAssessmentInput(recentMessages, ruleState, turnCount);
 
-    // Dynamic import to avoid circular deps at module load time
-    import("../sdk/forked-agent.ts")
-      .then(({ runForkedAgent }) =>
-        runForkedAgent({
-          prompt,
-          label: "tom-assessment",
-          maxTurns: 1,
-          outputSchema: LlmAssessmentSchema,
-        }),
-      )
-      .then((result: ForkedAgentResult) => {
-        const parsed = parseLlmAssessment(
-          result.structuredOutput !== undefined
-            ? JSON.stringify(result.structuredOutput)
-            : result.text,
-          turnCount,
-        );
+    runReasoningFork({
+      instructions: LLM_ASSESSMENT_INSTRUCTIONS,
+      input,
+      schema: LlmAssessmentSchema,
+      label: "tom-assessment",
+    })
+      .then(({ data }) => {
+        const parsed = data ? parseLlmAssessment(data, turnCount) : null;
         if (parsed) {
           this.llmAssessment = parsed;
         }
@@ -457,23 +450,11 @@ export function resetTheoryOfMindTracker(): void {
 
 // ── LLM Prompt & Parsing ──
 
-function buildLlmAssessmentPrompt(
-  recentMessages: string[],
-  ruleState: UserMentalState,
-  turnCount: number,
-): string {
-  const transcript = recentMessages
-    .map((msg, i) => `[Turn ${turnCount - recentMessages.length + i + 1}] User: ${msg}`)
-    .join("\n\n");
-
-  return `You are an expert at reading between the lines of human communication. Analyze this conversation excerpt and assess the user's mental state -- what they're REALLY thinking and feeling, beyond what they explicitly say.
-
-## Current rule-based assessment (may be incomplete or wrong)
-Focus: ${ruleState.focus} | Emotion: ${ruleState.emotion} | Load: ${ruleState.cognitiveLoad} | Urgency: ${ruleState.urgency}
-${ruleState.summary}
-
-## Recent messages (user only, most recent last)
-${transcript}
+/**
+ * STABLE rubric — byte-identical every call so it caches in the system-prompt
+ * prefix. Only the per-turn transcript + rule-state (the dynamic input) varies.
+ */
+const LLM_ASSESSMENT_INSTRUCTIONS = `You are an expert at reading between the lines of human communication. Analyze the conversation excerpt provided and assess the user's mental state -- what they're REALLY thinking and feeling, beyond what they explicitly say.
 
 ## Your task
 Provide a deeper assessment. The rule-based system catches explicit signals but misses:
@@ -483,44 +464,55 @@ Provide a deeper assessment. The rule-based system catches explicit signals but 
 - Whether the conversation is productive or going in circles
 - Unstated needs or assumptions
 
-Respond in EXACTLY this JSON format (no markdown, no explanation):
-{"inferredGoal":"what the user is actually trying to accomplish right now","emotionalSubtext":"the emotional undercurrent beyond surface signals","conversationTrajectory":"progressing|stuck|diverging|wrapping_up","strategicGuidance":"one sentence: what the agent should do differently","confidence":"low|medium|high"}`;
+Fields:
+- inferredGoal: what the user is actually trying to accomplish right now
+- emotionalSubtext: the emotional undercurrent beyond surface signals
+- conversationTrajectory: one of progressing | stuck | diverging | wrapping_up
+- strategicGuidance: one sentence -- what the agent should do differently
+- confidence: one of low | medium | high`;
+
+function buildLlmAssessmentInput(
+  recentMessages: string[],
+  ruleState: UserMentalState,
+  turnCount: number,
+): string {
+  const transcript = recentMessages
+    .map((msg, i) => `[Turn ${turnCount - recentMessages.length + i + 1}] User: ${msg}`)
+    .join("\n\n");
+
+  return `## Current rule-based assessment (may be incomplete or wrong)
+Focus: ${ruleState.focus} | Emotion: ${ruleState.emotion} | Load: ${ruleState.cognitiveLoad} | Urgency: ${ruleState.urgency}
+${ruleState.summary}
+
+## Recent messages (user only, most recent last)
+${transcript}`;
 }
 
-function parseLlmAssessment(text: string, turnCount: number): LlmAssessment | null {
-  try {
-    // Extract JSON from the response (may have surrounding text)
-    const jsonMatch = text.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) return null;
+function parseLlmAssessment(raw: LlmAssessmentRaw, turnCount: number): LlmAssessment | null {
+  // Require the core narrative fields; a partial emit is not a usable assessment.
+  if (!raw.inferredGoal || !raw.emotionalSubtext || !raw.conversationTrajectory) {
+    return null;
+  }
 
-    const raw = JSON.parse(jsonMatch[0]);
+  const validTrajectories = ["progressing", "stuck", "diverging", "wrapping_up"] as const;
+  const trajectory = (validTrajectories as readonly string[]).includes(raw.conversationTrajectory)
+    ? (raw.conversationTrajectory as LlmAssessment["conversationTrajectory"])
+    : "progressing";
 
-    // Validate required fields
-    if (!raw.inferredGoal || !raw.emotionalSubtext || !raw.conversationTrajectory) {
-      return null;
-    }
-
-    const validTrajectories = ["progressing", "stuck", "diverging", "wrapping_up"] as const;
-    const trajectory = validTrajectories.includes(raw.conversationTrajectory)
-      ? (raw.conversationTrajectory as LlmAssessment["conversationTrajectory"])
-      : "progressing";
-
-    const validConfidence = ["low", "medium", "high"] as const;
-    const confidence = validConfidence.includes(raw.confidence)
+  const validConfidence = ["low", "medium", "high"] as const;
+  const confidence =
+    raw.confidence && (validConfidence as readonly string[]).includes(raw.confidence)
       ? (raw.confidence as LlmAssessment["confidence"])
       : "medium";
 
-    return {
-      inferredGoal: String(raw.inferredGoal),
-      emotionalSubtext: String(raw.emotionalSubtext),
-      conversationTrajectory: trajectory,
-      strategicGuidance: String(raw.strategicGuidance ?? "No specific guidance"),
-      confidence,
-      assessedAtTurn: turnCount,
-    };
-  } catch {
-    return null;
-  }
+  return {
+    inferredGoal: raw.inferredGoal,
+    emotionalSubtext: raw.emotionalSubtext,
+    conversationTrajectory: trajectory,
+    strategicGuidance: raw.strategicGuidance ?? "No specific guidance",
+    confidence,
+    assessedAtTurn: turnCount,
+  };
 }
 
 // ── Pattern Libraries ──

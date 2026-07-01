@@ -14,7 +14,7 @@
 import { z } from "zod";
 import { loadEnvConfig } from "../config/env.ts";
 import { createLogger } from "../lib/logger.ts";
-import { runForkedAgent } from "../sdk/forked-agent.ts";
+import { runReasoningFork } from "../sdk/reasoning-fork.ts";
 import { vaultRead, vaultWrite } from "./vault.ts";
 
 /** Phase C — schema for SDK-validated structured output (parseMoodCapture validates further). */
@@ -177,18 +177,17 @@ export async function captureMoodFromTurn(
   if (!enabled()) return;
   const config = loadEnvConfig();
   try {
-    const result = await runForkedAgent({
+    const { data } = await runReasoningFork({
       label: "mood-capture",
       model: config.extractionModel ?? "claude-haiku-4-5",
-      allowedTools: [],
-      prompt: `${CAPTURE_PROMPT}\n\nEMOTION SIGNAL: ${tomSummary}\n\nUSER MESSAGE:\n${userMessage.slice(0, 1200)}`,
-      outputSchema: MoodCaptureSchema,
+      instructions: CAPTURE_PROMPT,
+      input: `EMOTION SIGNAL: ${tomSummary}\n\nUSER MESSAGE:\n${userMessage.slice(0, 1200)}`,
+      schema: MoodCaptureSchema,
     });
-    // Prefer the SDK-validated structured output; parseMoodCapture validates the
-    // strain/emotion/cause shape either way (it accepts the stringified object).
-    const parsed = parseMoodCapture(
-      result.structuredOutput !== undefined ? JSON.stringify(result.structuredOutput) : result.text,
-    );
+    // Re-run parseMoodCapture on the validated object so the same strain/emotion/
+    // cause shape check applies (it accepts the stringified object). Null on no
+    // real strain / parse failure → skip the write rather than persist anything.
+    const parsed = data ? parseMoodCapture(JSON.stringify(data)) : null;
     if (parsed) await recordMoodEpisode(userId, parsed.emotion, parsed.cause);
   } catch (err) {
     log.debug({ err: err instanceof Error ? err.message : String(err) }, "mood capture failed");

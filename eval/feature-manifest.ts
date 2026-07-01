@@ -879,7 +879,8 @@ export const FEATURES: FeatureSpec[] = [
     entry: ["buildMemoryDigest"],
     effects: [
       {
-        claim: "the digest is appended to systemPromptAppend each turn (behavioral)",
+        claim:
+          "the digest is injected into every turn — in the turn prompt under the cache-stable prefix, else systemPromptAppend (behavioral). See cache-stable-prefix.",
         notExercised: true,
       },
     ],
@@ -906,6 +907,25 @@ export const FEATURES: FeatureSpec[] = [
         claim: "transient 429/529 forks retry; opt-in dedup + cache-break logging (behavioral)",
         notExercised: true,
       },
+    ],
+  },
+  {
+    id: "cache-stable-prefix",
+    summary:
+      "Keep the main agent's cached system prefix byte-stable across a session's turns: per-turn-volatile context (ToM read, memory digest, elapsed anchor, mood, wiki) rides in the TURN via buildTurnContext, not systemPromptAppend, so the SDK-cached system block + tools + resumed history survive every turn instead of being re-billed. Gated by NOMOS_CACHE_STABLE_PREFIX (default on); a per-session guard warns if the stable prefix churns between turns.",
+    trigger: { kind: "turn" },
+    entry: ["buildTurnContext"],
+    effects: [
+      {
+        claim:
+          "with the flag on, systemPromptAppend is byte-identical across turns whose volatile context differs, and the volatile context is delivered in the turn prompt instead (behavioral — asserted deterministically in src/daemon/turn-context.test.ts)",
+        notExercised: true,
+      },
+    ],
+    invariants: [
+      "cacheStablePrefix on → systemPromptAppend excludes the per-turn-volatile blocks (cached prefix preserved)",
+      "digest still injected every turn (continuity unchanged) — only its placement moved from system prompt to turn",
+      "flag off → legacy assembly (volatile context appended back into systemPromptAppend)",
     ],
   },
 

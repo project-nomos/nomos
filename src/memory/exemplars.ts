@@ -7,10 +7,10 @@
  */
 
 import { createHash } from "node:crypto";
+import { z } from "zod";
 import { storeMemoryChunk, searchMemoryByVector, searchMemoryByText } from "../db/memory.ts";
 import { generateEmbedding, isEmbeddingAvailable } from "./embeddings.ts";
-import { runForkedAgent } from "../sdk/forked-agent.ts";
-import { extractFirstJson } from "../lib/json-extract.ts";
+import { runReasoningFork } from "../sdk/reasoning-fork.ts";
 import { loadEnvConfig } from "../config/env.ts";
 import { createLogger } from "../lib/logger.ts";
 
@@ -44,11 +44,9 @@ export interface StoredExemplar {
   platform: string;
 }
 
+// STABLE rubric -- byte-identical every call so it caches in the system-prompt
+// prefix. Per-item data (message/platform/context) goes in the dynamic input.
 const SCORING_PROMPT = `You are an exemplar scoring system. Rate this message from the user on how "representative" it is of their personal communication style. High-scoring messages should be distinctive, show personality, and be useful as few-shot examples for mimicking this person's style.
-
-Message: {message}
-Platform: {platform}
-Context: {contextHint}
 
 Return ONLY valid JSON:
 {
@@ -66,6 +64,26 @@ Scoring guide:
 
 Be selective -- most messages score 0.3-0.5. Only truly distinctive messages score above 0.7.`;
 
+/** Fixed shape the scoring fork emits. Mirrors the parsed object exactly. */
+const ExemplarScoreSchema = z.object({
+  score: z.number().min(0).max(1),
+  context: z
+    .enum([
+      "email_formal",
+      "email_casual",
+      "slack_casual",
+      "slack_work",
+      "code_review",
+      "technical_discussion",
+      "personal",
+      "conflict_resolution",
+      "planning",
+      "general",
+    ])
+    .default("general"),
+  reasoning: z.string().default(""),
+});
+
 /**
  * Score a user message for exemplar quality.
  * Returns null if the message is too short or scoring fails.
@@ -81,39 +99,25 @@ export async function scoreExemplar(
   const config = loadEnvConfig();
   const model = config.extractionModel ?? "claude-haiku-4-5";
 
-  const prompt = SCORING_PROMPT.replace("{message}", message)
-    .replace("{platform}", platform)
-    .replace("{contextHint}", contextHint ?? "unknown");
+  // Only the per-item data is dynamic; the rubric lives in the cached prefix.
+  const input = `Message: ${message}\nPlatform: ${platform}\nContext: ${contextHint ?? "unknown"}`;
 
   try {
-    // runForkedAgent (not a bare runSession): carries useSubscription so it
-    // authenticates on subscription-only installs, and uses bypassPermissions +
-    // allowedTools:[] so the fork emits JSON rather than entering plan mode.
-    const { text: fullText } = await runForkedAgent({
-      prompt,
+    const { data } = await runReasoningFork({
+      instructions: SCORING_PROMPT,
+      input,
+      schema: ExemplarScoreSchema,
       model,
-      systemPromptAppend: "You are a JSON scoring system. Output only valid JSON. No explanations.",
       maxTurns: 2,
       label: "exemplar-scoring",
-      allowedTools: [],
     });
-
-    // First BALANCED JSON object — forked-agent returns the answer DUPLICATED +
-    // ```json-fenced, so a greedy first-{…}-to-last-} match yields invalid JSON.
-    const parsed = extractFirstJson(fullText) as {
-      score: number;
-      context: ExemplarContext;
-      reasoning: string;
-    } | null;
-    if (!parsed) return null;
-
-    if (typeof parsed.score !== "number" || parsed.score < 0 || parsed.score > 1) return null;
+    if (!data) return null;
 
     return {
       text: message,
-      score: parsed.score,
-      context: parsed.context ?? "general",
-      reasoning: parsed.reasoning ?? "",
+      score: data.score,
+      context: data.context,
+      reasoning: data.reasoning,
     };
   } catch {
     return null;

@@ -9,10 +9,11 @@
  * entries. Gated behind NOMOS_ADAPTIVE_MEMORY (same flag as all other learning).
  */
 
+import { z } from "zod";
 import { loadEnvConfig } from "../config/env.ts";
 import { upsertUserModel } from "../db/user-model.ts";
 import { createLogger } from "../lib/logger.ts";
-import { runForkedAgent } from "../sdk/forked-agent.ts";
+import { runReasoningFork } from "../sdk/reasoning-fork.ts";
 import { vaultRead, vaultWrite } from "../memory/vault.ts";
 
 const log = createLogger("studio-learn");
@@ -34,79 +35,27 @@ function enabled(): boolean {
   return loadEnvConfig().adaptiveMemory;
 }
 
-const DISTILL_PROMPT = `You maintain a short profile of a user's PHOTO-EDITING taste, learned from the edits they actually apply. Update the CURRENT PROFILE given the NEW EDITS.
+// STABLE rubric + JSON-shape spec — byte-identical every call so it caches in the
+// system-prompt prefix. Only the current-profile + new-edits pair (dynamic) is billed
+// uncached, sent LAST as the fork input.
+const DISTILL_INSTRUCTIONS = `You maintain a short profile of a user's PHOTO-EDITING taste, learned from the edits they actually apply. Update the CURRENT PROFILE given the NEW EDITS.
 
 Capture only well-supported tendencies: tone (warm / cool / neutral), brightness and contrast, color (punchy / muted / natural), skin (smooth vs keep natural texture), what they tend to REMOVE (busy backgrounds, objects, blemishes) and KEEP (freckles, texture, grain), and any recurring style. Do not speculate from a single weak signal; keep the profile to 4-6 concise sentences.
 
 Output ONLY JSON: {"profile": "<the full updated profile prose>", "prefs": {"tone": "...", "color": "...", "skin": "...", "contrast": "...", "removes": "...", "keeps": "..."}}. Use "" for any pref you cannot support yet.`;
 
-interface DistilledStyle {
-  profile: string;
-  prefs: Record<string, string>;
-}
-
 /**
- * Scan out the first brace-balanced {...} object (string-aware), so we recover the
- * JSON even when the model wraps it in prose or — as Haiku sometimes does — emits the
- * same fenced object twice back-to-back (which defeats a naive first-{ ... last-}).
+ * SDK-validated RAW shape of the distiller output. Kept transform-free so it can
+ * be represented as JSON Schema for the SDK outputFormat (z.toJSONSchema throws on
+ * .transform()). Normalization — trim/cap the profile, drop blank/non-string prefs,
+ * skip when the profile is empty — happens in flushPhotoStyle after parsing, so a
+ * blank profile there means "skip the write" rather than persisting a default.
+ * Structured output makes the old double-emit workaround unnecessary.
  */
-function firstJsonObject(s: string): string | null {
-  const start = s.indexOf("{");
-  if (start < 0) return null;
-  let depth = 0;
-  let inStr = false;
-  let esc = false;
-  for (let i = start; i < s.length; i++) {
-    const ch = s[i];
-    if (inStr) {
-      if (esc) esc = false;
-      else if (ch === "\\") esc = true;
-      else if (ch === '"') inStr = false;
-    } else if (ch === '"') {
-      inStr = true;
-    } else if (ch === "{") {
-      depth++;
-    } else if (ch === "}") {
-      depth--;
-      if (depth === 0) return s.slice(start, i + 1);
-    }
-  }
-  return null;
-}
-
-/**
- * Tolerant parse of the distiller's JSON. Tries the whole (de-fenced) string first,
- * then the first brace-balanced object — covering fenced, prose-wrapped, and
- * duplicated-block outputs.
- */
-export function parseStyle(text: string): DistilledStyle | null {
-  const cleaned = text
-    .trim()
-    .replace(/^```(?:json)?/i, "")
-    .replace(/```$/i, "")
-    .trim();
-  const candidates = [cleaned];
-  const obj = firstJsonObject(cleaned);
-  if (obj) candidates.push(obj);
-
-  for (const candidate of candidates) {
-    let raw: { profile?: unknown; prefs?: unknown };
-    try {
-      raw = JSON.parse(candidate) as { profile?: unknown; prefs?: unknown };
-    } catch {
-      continue;
-    }
-    if (typeof raw.profile !== "string" || !raw.profile.trim()) continue;
-    const prefs: Record<string, string> = {};
-    if (raw.prefs && typeof raw.prefs === "object") {
-      for (const [k, v] of Object.entries(raw.prefs as Record<string, unknown>)) {
-        if (typeof v === "string" && v.trim()) prefs[k] = v.trim().slice(0, 80);
-      }
-    }
-    return { profile: raw.profile.trim().slice(0, 1200), prefs };
-  }
-  return null;
-}
+const DistilledStyleSchema = z.object({
+  profile: z.string(),
+  prefs: z.record(z.string(), z.unknown()).default({}),
+});
 
 /** Record one applied edit as a learning signal; distills in the background every few. */
 export async function recordEditSignal(
@@ -139,21 +88,38 @@ export async function flushPhotoStyle(userId: string, signals: EditSignal[]): Pr
   const config = loadEnvConfig();
   const current = (await vaultRead(userId, STYLE_NOTE))?.content ?? "";
   const recent = signals.map((s) => `- ${s.op}: ${s.instruction}`).join("\n");
-  const result = await runForkedAgent({
+  // Dynamic per-flush data only (current profile + the new edits); the rubric lives
+  // in the cached DISTILL_INSTRUCTIONS prefix.
+  const input = `CURRENT PROFILE:\n${current || "(none yet)"}\n\nNEW EDITS THE USER JUST APPLIED:\n${recent}`;
+  const { data: parsed, raw } = await runReasoningFork({
     label: "studio-style",
     model: config.extractionModel ?? "claude-haiku-4-5",
-    allowedTools: [],
-    prompt: `${DISTILL_PROMPT}\n\nCURRENT PROFILE:\n${current || "(none yet)"}\n\nNEW EDITS THE USER JUST APPLIED:\n${recent}`,
+    instructions: DISTILL_INSTRUCTIONS,
+    input,
+    schema: DistilledStyleSchema,
   });
-  const parsed = parseStyle(result.text);
+  // On parse/validation failure `parsed` is null → skip the write rather than persist
+  // a synthetic default into the vault + user_model.
   if (!parsed) {
-    log.debug({ chars: result.text.length }, "distill output not parseable; skipping");
+    log.debug({ chars: raw.text.length }, "distill output not parseable; skipping");
     return;
   }
-  // The editable prose profile, in the wiki/vault.
-  await vaultWrite(userId, STYLE_NOTE, parsed.profile, { title: "Photo editing style" });
-  // Structured, confidence-weighted prefs for injection.
+  // Normalize post-parse (was previously in the schema's transforms): trim + cap the
+  // profile; a blank profile means skip the write. Drop blank/non-string prefs and
+  // trim + cap each.
+  const profile = parsed.profile.trim().slice(0, 1200);
+  if (!profile) {
+    log.debug("distilled profile empty; skipping");
+    return;
+  }
+  const prefs: Record<string, string> = {};
   for (const [key, value] of Object.entries(parsed.prefs)) {
+    if (typeof value === "string" && value.trim()) prefs[key] = value.trim().slice(0, 80);
+  }
+  // The editable prose profile, in the wiki/vault.
+  await vaultWrite(userId, STYLE_NOTE, profile, { title: "Photo editing style" });
+  // Structured, confidence-weighted prefs for injection.
+  for (const [key, value] of Object.entries(prefs)) {
     await upsertUserModel({
       userId,
       category: "photo_style",

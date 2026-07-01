@@ -19,6 +19,13 @@ export interface IncomingMessage {
   threadId?: string;
   /** Message text content */
   content: string;
+  /**
+   * Optional stable, per-turn system-prompt append (NOT persisted). Used by
+   * fixed-procedure sources (e.g. proactive watcher crons) to deliver their
+   * byte-identical procedure in the cached system-prompt prefix instead of as a
+   * fresh user message every run, while `content` carries a trivial trigger.
+   */
+  systemPromptAppend?: string;
   /** Timestamp */
   timestamp: Date;
   /** Metadata (platform-specific extras) */
