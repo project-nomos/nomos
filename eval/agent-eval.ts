@@ -1148,7 +1148,6 @@ async function runCommitments(): Promise<void> {
     remind.every((c) => c.description !== "send the quarterly report"),
   );
 
-  // ── Action-item backbone (Bond gap plan, Phases 1-3) ───────────────────────
   // A dedicated owner so ranking/waiting-on assertions are not polluted by the
   // rows above.
   const C = "eval-commit-c";

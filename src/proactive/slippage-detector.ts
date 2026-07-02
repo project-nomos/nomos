@@ -1,8 +1,8 @@
 /**
- * "What's slipping" detector (Bond gap plan, Phase 5).
+ * "What's slipping" detector.
  *
- * Bond's pitch is "tells you your highest leverage move"; the honest, grounded
- * version is a weekly pass that surfaces what is quietly falling through:
+ * Surfaces the user's highest-leverage move: a weekly pass that flags what is
+ * quietly falling through:
  *   - stalled items I owe (past deadline, or old + still unranked/unmoved),
  *   - things others owe me that are overdue and out of polite follow-ups,
  *   - goals with no recent linked activity,

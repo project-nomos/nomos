@@ -260,7 +260,7 @@ export async function expireOverdueCommitments(userId: string): Promise<number> 
   return Number(result.numUpdatedRows ?? 0n);
 }
 
-// ── Action-item backbone (Bond gap plan) ────────────────────────────────────
+// ── Action-item backbone ────────────────────────────────────────────────────
 
 export interface ActionItemQuery {
   /** Filter to one direction; omit for both. */

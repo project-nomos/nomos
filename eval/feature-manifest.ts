@@ -251,7 +251,7 @@ export const FEATURES: FeatureSpec[] = [
   {
     id: "commitment-followups",
     summary:
-      "Polite follow-up engine (Bond's signature behavior, consent-first). Hourly: for items others owe the user (direction 'theirs') whose next_follow_up_at has arrived and that haven't exhausted the backoff (due+1d/+3d/+7d, cap 3), compose a short nudge in the user's voice and STAGE it through DraftManager under the platform's consent mode — never auto-send. recordFollowUp bumps the counter + reschedules (or clears once capped).",
+      "Polite follow-up engine (consent-first). Hourly: for items others owe the user (direction 'theirs') whose next_follow_up_at has arrived and that haven't exhausted the backoff (due+1d/+3d/+7d, cap 3), compose a short nudge in the user's voice and STAGE it through DraftManager under the platform's consent mode — never auto-send. recordFollowUp bumps the counter + reschedules (or clears once capped).",
     trigger: {
       kind: "cron",
       sentinel: "__commitment_followups__",
@@ -282,7 +282,7 @@ export const FEATURES: FeatureSpec[] = [
   {
     id: "slippage-review",
     summary:
-      "Weekly 'what's slipping' review per owner (Bond's 'highest leverage move', grounded). Surfaces stalled items the user owes (past deadline, or old + unranked), overdue items others owe the user, goals with no recent movement (goals/ vault notes untouched >30d), and people the user owes a pile of things. Writes each report to an editable slippage.md vault note (durable, user-readable) and delivers it to the owner's channel. Pure DB + vault reads; no LLM.",
+      "Weekly 'what's slipping' review per owner (surfaces the highest-leverage move, grounded). Surfaces stalled items the user owes (past deadline, or old + unranked), overdue items others owe the user, goals with no recent movement (goals/ vault notes untouched >30d), and people the user owes a pile of things. Writes each report to an editable slippage.md vault note (durable, user-readable) and delivers it to the owner's channel. Pure DB + vault reads; no LLM.",
     trigger: { kind: "cron", sentinel: "__slippage_review__", schedule: "0 8 * * 1", fanOut: true },
     entry: ["runSlippageReview", "detectSlippage", "runSlippageForOwner"],
     effects: [

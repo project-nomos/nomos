@@ -1,5 +1,5 @@
 /**
- * Commitment ranker (Bond gap plan, Phase 2).
+ * Commitment ranker.
  *
  * Turns the flat action list into a RANKED one: a single reasoning fork scores
  * each pending item p0..p3 with a one-line reason, and the scores are written

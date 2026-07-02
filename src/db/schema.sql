@@ -670,7 +670,7 @@ BEGIN
     CREATE INDEX IF NOT EXISTS idx_commitments_user ON commitments(user_id, status);
   END IF;
 
-  -- commitments → action-item backbone (Bond gap plan, Phases 1+3).
+  -- commitments → action-item backbone.
   -- The commitments table becomes the single durable action-item store: every
   -- promise/ask captured from any surface, ranked, with waiting-on + follow-up
   -- state. All column adds are idempotent so re-running migrate is a no-op.
