@@ -53,7 +53,13 @@ export async function detectSlippage(userId: string): Promise<SlippageReport> {
   const stalled = mine
     .filter((c) => {
       const overdue = c.deadline ? c.deadline.getTime() < Date.now() : false;
-      const old = (daysAgo(c.created_at) ?? 0) >= STALE_DAYS && c.priority === null;
+      // "Sitting around": old and never risen above low priority. Gate on created_at
+      // (not updated_at — the daily ranker bumps updated_at) + a low/absent priority.
+      // The ranker assigns a priority to nearly every open item, so `priority === null`
+      // alone would almost never fire; treat p2/p3/unranked as "not important enough
+      // to have gotten done".
+      const lowPriority = c.priority === null || c.priority === "p2" || c.priority === "p3";
+      const old = (daysAgo(c.created_at) ?? 0) >= STALE_DAYS && lowPriority;
       return overdue || old;
     })
     .map((c) => ({

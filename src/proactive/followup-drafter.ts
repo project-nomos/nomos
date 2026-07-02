@@ -24,11 +24,16 @@ import {
 import { getKysely } from "../db/client.ts";
 import { runReasoningFork } from "../sdk/reasoning-fork.ts";
 import { getNotificationDefaultFor } from "../db/notification-defaults.ts";
+import { normalizePlatform } from "../db/consent-config.ts";
 import { createLogger } from "../lib/logger.ts";
 
 const log = createLogger("followup-drafter");
 
-/** Channel platforms we can register a send function for (draft is sendable there). */
+/**
+ * Normalized channel bases we can register a send function for (draft is sendable
+ * there). `source` is compared after normalizePlatform, since an adapter stores a
+ * qualified platform like "slack-user:T074…" that normalizes to "slack".
+ */
 const SENDABLE_CHANNELS = new Set(["slack", "imessage", "telegram", "whatsapp", "discord"]);
 
 /** STABLE rubric — byte-identical every call; only the item detail is dynamic. */
@@ -99,7 +104,10 @@ export async function draftFollowUpsForOwner(
       }
 
       // Prefer the original channel + thread; fall back to the default channel.
-      const onOriginal = SENDABLE_CHANNELS.has(c.source);
+      // Compare the NORMALIZED base ("slack-user:T074…" -> "slack") against the
+      // sendable set, but keep the qualified c.source as the draft platform so the
+      // send fn registered under that exact adapter id is found on approval.
+      const onOriginal = c.source_ref != null && SENDABLE_CHANNELS.has(normalizePlatform(c.source));
       const platform = onOriginal ? c.source : (fallback?.platform ?? null);
       const channelId = onOriginal ? c.source_ref : (fallback?.channelId ?? null);
       if (!platform || !channelId) {

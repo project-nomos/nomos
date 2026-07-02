@@ -11,6 +11,7 @@
 import type { TenantContext } from "../auth/tenant-context.ts";
 import { getConfigValue } from "../db/config.ts";
 import { getActionItems, getWaitingOn } from "../proactive/commitment-tracker.ts";
+import { getKysely } from "../db/client.ts";
 import { CronStore } from "../cron/store.ts";
 import { curateConsumerTasks } from "../cron/task-view.ts";
 import { gapiFetch } from "../sdk/google-rest-mcp.ts";
@@ -64,6 +65,13 @@ export async function getTodayOverview(ctx: TenantContext): Promise<TodayOvervie
     new CronStore().listJobs({ userId }),
   ]);
 
+  // Resolve the other party's name for the waiting-on subtitle ("Waiting on <name>").
+  // Batch-look up the linked contacts once, owner-scoped.
+  const contactNames = await resolveContactNames(
+    userId,
+    [...mineRows, ...theirsRows].map((c) => c.contact_id),
+  );
+
   const toToday = (c: (typeof mineRows)[number]): TodayCommitment => ({
     id: c.id,
     description: c.description,
@@ -71,7 +79,7 @@ export async function getTodayOverview(ctx: TenantContext): Promise<TodayOvervie
     priority: c.priority ?? "",
     rankReason: c.rank_reason ?? "",
     direction: c.direction,
-    contact: "",
+    contact: (c.contact_id && contactNames.get(c.contact_id)) || "",
   });
   const commitments: TodayCommitment[] = mineRows.slice(0, 8).map(toToday);
   const waiting: TodayCommitment[] = theirsRows.slice(0, 8).map(toToday);
@@ -85,6 +93,28 @@ export async function getTodayOverview(ctx: TenantContext): Promise<TodayOvervie
     .map((t) => ({ id: t.id, name: t.name, schedule: t.displaySchedule }));
 
   return { briefingEnabled, events, commitments, tasks, waiting };
+}
+
+/** Batch-resolve contact_id → display_name, owner-scoped. Missing/unnamed → absent. */
+async function resolveContactNames(
+  userId: string,
+  ids: (string | null)[],
+): Promise<Map<string, string>> {
+  const uniq = [...new Set(ids.filter((x): x is string => x != null))];
+  const map = new Map<string, string>();
+  if (uniq.length === 0) return map;
+  try {
+    const rows = await getKysely()
+      .selectFrom("contacts")
+      .select(["id", "display_name"])
+      .where("user_id", "=", userId)
+      .where("id", "in", uniq)
+      .execute();
+    for (const r of rows) if (r.display_name) map.set(r.id, r.display_name);
+  } catch {
+    // Best-effort: a lookup failure just means no subtitle, never a broken brief.
+  }
+  return map;
 }
 
 /** A one-off ("at") reminder is on Today's plate when it's due by the end of today. */

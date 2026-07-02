@@ -69,28 +69,24 @@ describe("commitment-tracker action-item backbone", () => {
     expect(q.parameters).toContain(MAX_FOLLOW_UPS);
   });
 
-  it("recordFollowUp bumps the counter and reschedules per the backoff", async () => {
-    // First query: SELECT follow_up_count → 0. Then the UPDATE.
-    mock.addResult([{ follow_up_count: 0 }]);
+  it("recordFollowUp is a single atomic UPDATE that increments in-DB + rebuilds the schedule", async () => {
+    // No SELECT first: one UPDATE that computes follow_up_count + 1 in the DB and
+    // rebuilds next_follow_up_at from a CASE over the backoff array.
     mock.addResult([]);
     await recordFollowUp("u1", "c1");
-    const update = mock.getQueries().at(-1)!;
-    // nextCount = 1, nextDays = FOLLOW_UP_BACKOFF_DAYS[1]; next_follow_up_at is
-    // rescheduled via `now() + interval '1 day' * <days>`.
-    expect(update.parameters).toContain(1);
-    expect(update.parameters).toContain(FOLLOW_UP_BACKOFF_DAYS[1]);
-    expect(update.sql.toLowerCase()).toContain("interval");
-  });
-
-  it("recordFollowUp clears the schedule once the backoff is exhausted", async () => {
-    // At the last slot, there is no next backoff day → next_follow_up_at = null.
-    mock.addResult([{ follow_up_count: MAX_FOLLOW_UPS - 1 }]);
-    mock.addResult([]);
-    await recordFollowUp("u1", "c1");
-    const update = mock.getQueries().at(-1)!;
-    // Counter reaches the cap; there is no next backoff day so next_follow_up_at
-    // is set to a null literal (no `interval` reschedule in the SQL).
-    expect(update.parameters).toContain(MAX_FOLLOW_UPS);
-    expect(update.sql.toLowerCase()).not.toContain("interval");
+    const queries = mock.getQueries();
+    expect(queries.length).toBe(1); // atomic — no read-then-write
+    const update = queries[0]!;
+    const s = update.sql.toLowerCase();
+    // Increment happens in-SQL, and the reschedule is a CASE that falls through to
+    // NULL once the backoff is exhausted (so exhausted items leave the sweep).
+    expect(s).toContain("follow_up_count + 1");
+    expect(s).toContain("case");
+    expect(s).toContain("interval");
+    expect(s).toContain("else null");
+    // The between-nudge backoff days (indices 1..N-1) are bound as params.
+    for (const days of FOLLOW_UP_BACKOFF_DAYS.slice(1)) {
+      expect(update.parameters).toContain(days);
+    }
   });
 });

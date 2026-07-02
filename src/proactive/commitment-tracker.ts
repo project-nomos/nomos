@@ -203,6 +203,10 @@ export async function completeCommitment(userId: string, id: string): Promise<vo
 
 /**
  * Get commitments due for reminders (deadline within 24h, not yet reminded).
+ * Only 'mine' items (things the user owes) generate "you owe" reminders --
+ * 'theirs' (waiting-on) items are handled by the polite follow-up engine
+ * (getCommitmentsDueForFollowUp), so they must not leak into this digest framed
+ * as the user's own to-dos.
  */
 export async function getCommitmentsForReminder(userId: string): Promise<CommitmentRow[]> {
   const db = getKysely();
@@ -211,6 +215,7 @@ export async function getCommitmentsForReminder(userId: string): Promise<Commitm
     .selectAll()
     .where("user_id", "=", userId)
     .where("status", "=", "pending")
+    .where("direction", "=", "mine")
     .where("reminded", "=", false)
     .where("deadline", "is not", null)
     .where("deadline", "<=", sql<Date>`now() + interval '24 hours'`)
@@ -235,6 +240,11 @@ export async function markReminded(userId: string, ids: string[]): Promise<void>
 
 /**
  * Expire overdue commitments (past deadline by more than 7 days).
+ *
+ * Scoped to 'mine' items: the follow-up engine owns the lifecycle of 'theirs'
+ * (waiting-on) items and chases them on its own backoff schedule (due+1/+3/+7).
+ * Expiring 'theirs' on this 7-day clock would kill the last nudge before it
+ * fires, so waiting-on items stay pending until the user clears them.
  */
 export async function expireOverdueCommitments(userId: string): Promise<number> {
   const db = getKysely();
@@ -243,6 +253,7 @@ export async function expireOverdueCommitments(userId: string): Promise<number> 
     .set({ status: "expired", updated_at: sql`now()` })
     .where("user_id", "=", userId)
     .where("status", "=", "pending")
+    .where("direction", "=", "mine")
     .where("deadline", "is not", null)
     .where("deadline", "<", sql<Date>`now() - interval '7 days'`)
     .executeTakeFirst();
@@ -373,7 +384,13 @@ export async function setPriority(
 
 // ── Follow-up engine (Phase 3) ──────────────────────────────────────────────
 
-/** Backoff schedule for polite nudges on 'theirs' items: due+1d, +3d, +7d. */
+/**
+ * Backoff schedule for polite nudges on 'theirs' items, in days.
+ * Index 0 (1 day) is the SEED interval — the gap from capture to the first nudge,
+ * applied by storeCommitments when a 'theirs' item has no deadline. Indices 1..N-1
+ * (3d, 7d) are the gaps BETWEEN nudges, applied by recordFollowUp after the
+ * respective follow-up. So a deadline-less item nudges at +1d, +1d+3d, +1d+3d+7d.
+ */
 export const FOLLOW_UP_BACKOFF_DAYS = [1, 3, 7] as const;
 export const MAX_FOLLOW_UPS = FOLLOW_UP_BACKOFF_DAYS.length;
 
@@ -400,22 +417,25 @@ export async function getCommitmentsDueForFollowUp(userId: string): Promise<Comm
 /**
  * Record that a follow-up was drafted for an item: bump the counter and schedule
  * the next nudge per the backoff schedule (or clear it once exhausted).
+ *
+ * Atomic single UPDATE: follow_up_count is incremented in-DB and next_follow_up_at
+ * is rebuilt from the new count via a CASE, so two overlapping sweeps (e.g. two
+ * hosted nodes firing the hourly sentinel) can't lose an increment or double-fire.
+ * The CASE is generated from FOLLOW_UP_BACKOFF_DAYS (single source of truth):
+ * after the k-th nudge the next gap is BACKOFF[k]; past the last step it falls
+ * through to NULL, taking the item out of getCommitmentsDueForFollowUp.
  */
 export async function recordFollowUp(userId: string, id: string): Promise<void> {
   const db = getKysely();
-  const row = await db
-    .selectFrom("commitments")
-    .select(["follow_up_count"])
-    .where("user_id", "=", userId)
-    .where("id", "=", id)
-    .executeTakeFirst();
-  const nextCount = Number(row?.follow_up_count ?? 0) + 1;
-  const nextDays = FOLLOW_UP_BACKOFF_DAYS[nextCount];
-  const nextAt = nextDays !== undefined ? sql<Date>`now() + interval '1 day' * ${nextDays}` : null;
+  // whenClauses: after new_count = k, wait BACKOFF[k] days (k = 1..N-1; k=N → null).
+  const whenClauses = FOLLOW_UP_BACKOFF_DAYS.slice(1).map(
+    (days, i) => sql`when follow_up_count + 1 = ${i + 1} then now() + interval '1 day' * ${days}`,
+  );
+  const nextAt = sql<Date | null>`case ${sql.join(whenClauses, sql` `)} else null end`;
   await db
     .updateTable("commitments")
     .set({
-      follow_up_count: nextCount,
+      follow_up_count: sql<number>`follow_up_count + 1`,
       next_follow_up_at: nextAt,
       updated_at: sql`now()`,
     })

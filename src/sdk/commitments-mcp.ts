@@ -45,21 +45,28 @@ function fmt(c: CommitmentRow): string {
 export function buildCommitmentsMcpServer(userId: string): McpSdkServerConfigWithInstance {
   const todoList = tool(
     "todo_list",
-    "List the action items on your plate: things the user owes ('mine') and things others owe the user ('theirs', the waiting-on lane). Returns them ranked (p0..p3 first, then by due date). Use before answering 'what's on my list' or when deciding what to follow up on.",
+    "List the action items on your plate: things the user owes ('mine') and things others owe the user ('theirs', the waiting-on lane). Returns them ranked (p0..p3 first, then by due date). Defaults to open ('pending') items; pass status to see what's already been handled (e.g. status='delegated' for items you handed off, 'completed' for done). Use before answering 'what's on my list' or when deciding what to follow up on.",
     {
       direction: z
         .enum(["mine", "theirs"])
         .optional()
         .describe("Filter: 'mine' = user owes, 'theirs' = someone owes the user. Omit for both."),
+      status: z
+        .enum(["pending", "completed", "delegated", "expired", "cancelled"])
+        .optional()
+        .describe(
+          "Filter by status. Omit for open items (pending). Use 'delegated' for handed-off items.",
+        ),
       limit: z.number().int().min(1).max(50).optional().describe("Max items (default 20)"),
     },
     async (args) => {
       try {
         const items = await getActionItems(userId, {
           direction: args.direction,
+          status: args.status,
           limit: args.limit ?? 20,
         });
-        if (items.length === 0) return ok("No open action items.");
+        if (items.length === 0) return ok("No matching action items.");
         return ok(items.map(fmt).join("\n"));
       } catch (e) {
         return fail(`todo_list failed: ${e instanceof Error ? e.message : e}`);
