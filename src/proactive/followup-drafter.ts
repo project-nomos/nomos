@@ -1,11 +1,11 @@
 /**
- * Polite follow-up drafter (Bond gap plan, Phase 3).
+ * Polite follow-up drafter.
  *
  * For items others owe the user (the "waiting on" lane) that are due for a nudge,
  * compose a short, polite chase message in the user's voice and STAGE it through
  * DraftManager under the platform's consent mode — never auto-send behind the
- * user's back. This is Bond's signature "politely follows up so you don't have
- * to", with Nomos's consent story on top.
+ * user's back. The agent politely follows up so the user doesn't have to, with
+ * Nomos's consent story on top.
  *
  * Routing: a follow-up is drafted on the item's ORIGINAL platform + thread
  * (source_ref) when that platform is a channel we can send on; otherwise it falls

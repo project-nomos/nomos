@@ -1,5 +1,5 @@
 /**
- * Meeting-notes watcher (Bond gap plan, Phase 4).
+ * Meeting-notes watcher.
  *
  * The calendar watcher briefs meetings BEFORE they start; this one runs AFTER a
  * meeting ends and mines its notes/transcript for decisions and commitments —

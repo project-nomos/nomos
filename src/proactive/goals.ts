@@ -1,5 +1,5 @@
 /**
- * Goals (Bond gap plan, Phase 5).
+ * Goals.
  *
  * A goal is a first-class, user-editable vault note under `goals/` — the source
  * of truth the user edits in the vault UI and the agent writes when the user
