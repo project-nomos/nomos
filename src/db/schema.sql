@@ -670,6 +670,85 @@ BEGIN
     CREATE INDEX IF NOT EXISTS idx_commitments_user ON commitments(user_id, status);
   END IF;
 
+  -- commitments → action-item backbone (Bond gap plan, Phases 1+3).
+  -- The commitments table becomes the single durable action-item store: every
+  -- promise/ask captured from any surface, ranked, with waiting-on + follow-up
+  -- state. All column adds are idempotent so re-running migrate is a no-op.
+  --
+  -- direction: 'mine' (I owe someone) | 'theirs' (someone owes me → the
+  --   "waiting on others" lane). The core new axis.
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'commitments' AND column_name = 'direction'
+  ) THEN
+    ALTER TABLE commitments ADD COLUMN direction TEXT NOT NULL DEFAULT 'mine'
+      CHECK (direction IN ('mine', 'theirs'));
+  END IF;
+  -- priority: p0..p3, nullable until the ranking pass scores it.
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'commitments' AND column_name = 'priority'
+  ) THEN
+    ALTER TABLE commitments ADD COLUMN priority TEXT
+      CHECK (priority IN ('p0', 'p1', 'p2', 'p3'));
+  END IF;
+  -- rank_reason: one line explaining the rank (surfaced in Today/brief).
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'commitments' AND column_name = 'rank_reason'
+  ) THEN
+    ALTER TABLE commitments ADD COLUMN rank_reason TEXT;
+  END IF;
+  -- source: which surface captured it (chat | email | imessage | slack |
+  --   whatsapp | telegram | discord | meeting | manual). Default 'chat'.
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'commitments' AND column_name = 'source'
+  ) THEN
+    ALTER TABLE commitments ADD COLUMN source TEXT NOT NULL DEFAULT 'chat';
+  END IF;
+  -- source_ref: a pointer back to the origin (thread id / message id / event id)
+  --   so a follow-up can be drafted onto the original thread.
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'commitments' AND column_name = 'source_ref'
+  ) THEN
+    ALTER TABLE commitments ADD COLUMN source_ref TEXT;
+  END IF;
+  -- delegated_to: who a 'mine' item was handed off to (contact name or 'nomos').
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'commitments' AND column_name = 'delegated_to'
+  ) THEN
+    ALTER TABLE commitments ADD COLUMN delegated_to TEXT;
+  END IF;
+  -- next_follow_up_at / follow_up_count: the polite follow-up engine (Phase 3).
+  --   For 'theirs' items the hourly sentinel drafts a nudge when now >= this,
+  --   backing off (due+1d, +3d, +7d) and capping at follow_up_count.
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'commitments' AND column_name = 'next_follow_up_at'
+  ) THEN
+    ALTER TABLE commitments ADD COLUMN next_follow_up_at TIMESTAMPTZ;
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'commitments' AND column_name = 'follow_up_count'
+  ) THEN
+    ALTER TABLE commitments ADD COLUMN follow_up_count INT NOT NULL DEFAULT 0;
+  END IF;
+  -- Widen the status CHECK to add 'delegated' (a 'mine' item handed off). The
+  -- existing pending/completed/expired/cancelled all stay valid (superset).
+  ALTER TABLE commitments DROP CONSTRAINT IF EXISTS commitments_status_check;
+  ALTER TABLE commitments ADD CONSTRAINT commitments_status_check
+    CHECK (status IN ('pending', 'completed', 'expired', 'cancelled', 'delegated'));
+  -- Indexes for the waiting-on lane + the follow-up sweep.
+  CREATE INDEX IF NOT EXISTS idx_commitments_direction
+    ON commitments(user_id, direction, status);
+  CREATE INDEX IF NOT EXISTS idx_commitments_followup
+    ON commitments(next_follow_up_at)
+    WHERE next_follow_up_at IS NOT NULL;
+
   -- contacts (the user's contact list; subjective per family-plan member)
   IF NOT EXISTS (
     SELECT 1 FROM information_schema.columns

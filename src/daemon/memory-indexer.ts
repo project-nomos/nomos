@@ -200,7 +200,14 @@ async function extractAndStoreCommitmentsFromTurn(
     await import("../proactive/commitment-tracker.ts");
   const commitments = await extractCommitments(incoming.content, outgoing.content);
   if (commitments.length === 0) return;
-  await storeCommitments(userId, commitments, incoming.content.slice(0, 500));
+  // Tag provenance: the surface this turn arrived on (so a follow-up can reply on
+  // the same thread) — the direct agent chat is 'chat', a channel is its platform.
+  const source = incoming.platform && incoming.platform !== "cli" ? incoming.platform : "chat";
+  const sourceRef = incoming.threadId ?? incoming.channelId ?? undefined;
+  await storeCommitments(userId, commitments, incoming.content.slice(0, 500), {
+    source,
+    sourceRef,
+  });
   log.debug(`Stored ${commitments.length} commitment(s) for ${userId}`);
 }
 

@@ -12,6 +12,11 @@ import { getKysely } from "../db/client.ts";
 import { runReasoningFork } from "../sdk/reasoning-fork.ts";
 import { searchContacts } from "../identity/contacts.ts";
 
+/** Commitment direction: I owe someone ('mine') vs someone owes me ('theirs'). */
+export type CommitmentDirection = "mine" | "theirs";
+export type CommitmentPriority = "p0" | "p1" | "p2" | "p3";
+export type CommitmentStatus = "pending" | "completed" | "expired" | "cancelled" | "delegated";
+
 export interface CommitmentRow {
   id: string;
   user_id: string;
@@ -19,16 +24,34 @@ export interface CommitmentRow {
   description: string;
   source_msg: string | null;
   deadline: Date | null;
-  status: "pending" | "completed" | "expired" | "cancelled";
+  status: CommitmentStatus;
   reminded: boolean;
+  direction: CommitmentDirection;
+  priority: CommitmentPriority | null;
+  rank_reason: string | null;
+  source: string;
+  source_ref: string | null;
+  delegated_to: string | null;
+  next_follow_up_at: Date | null;
+  follow_up_count: number;
   created_at: Date;
   updated_at: Date;
 }
 
-interface ExtractedCommitment {
+export interface ExtractedCommitment {
   description: string;
   deadline: string | null;
   contact: string | null;
+  /** 'mine' = the user owes this; 'theirs' = someone owes the user. */
+  direction?: CommitmentDirection;
+}
+
+/** Extra provenance for a stored commitment (which surface, which thread). */
+export interface CommitmentSource {
+  /** chat | email | imessage | slack | whatsapp | telegram | discord | meeting | manual */
+  source?: string;
+  /** Origin thread/message/event id so a follow-up can reply on the same thread. */
+  sourceRef?: string;
 }
 
 const ExtractedCommitmentsSchema = z.object({
@@ -40,20 +63,26 @@ const ExtractedCommitmentsSchema = z.object({
         // (transforms can't be represented as JSON Schema for the SDK outputFormat).
         deadline: z.string().nullable().default(null),
         contact: z.string().nullable().default(null),
+        // `.catch` keeps one off-list value from failing the whole batch.
+        direction: z.enum(["mine", "theirs"]).catch("mine").default("mine"),
       }),
     )
     .default([]),
 });
 
-const COMMITMENT_EXTRACTION_INSTRUCTIONS = `Analyze the conversation and extract any commitments, promises, or follow-up items.
+const COMMITMENT_EXTRACTION_INSTRUCTIONS = `Analyze the conversation and extract any commitments, promises, or follow-up items — in BOTH directions.
 
-A commitment is something the user promised to do, needs to follow up on, or was asked to do.
-Examples: "I'll send that report by Friday", "Let me check and get back to you", "I need to review the PR"
+A commitment is something someone owes:
+- direction "mine": the USER promised to do it, needs to follow up on it, or was asked to do it.
+  Examples: "I'll send that report by Friday", "Let me check and get back to you", "I need to review the PR"
+- direction "theirs": someone else owes the USER something (a reply, a deliverable, an approval).
+  Examples: "Can you get me the numbers by Monday?" (from the user to X), "waiting on Sarah for sign-off", "X said they'd send the contract"
 
 Return a JSON object with a "commitments" array. Each commitment has:
-- "description": what needs to be done
+- "description": what needs to be done (phrase it as the outstanding item)
 - "deadline": ISO date string if mentioned, null otherwise
-- "contact": who it's for, null if unclear
+- "contact": the other party's name, null if unclear
+- "direction": "mine" or "theirs" (default "mine" when genuinely ambiguous)
 
 Return an empty "commitments" array if no commitments found. Return ONLY the JSON object.`;
 
@@ -80,11 +109,17 @@ RESPONSE: ${agentResponse}`;
 
 /**
  * Store extracted commitments in the database.
+ *
+ * `provenance` records which surface captured the item and a pointer back to the
+ * origin thread (so a Phase-3 follow-up can be drafted on the same channel). For
+ * 'theirs' items we seed `next_follow_up_at` to the deadline (or +1 day when no
+ * deadline is given) so the polite follow-up engine has something to act on.
  */
 export async function storeCommitments(
   userId: string,
   commitments: ExtractedCommitment[],
   sourceMsg?: string,
+  provenance?: CommitmentSource,
 ): Promise<CommitmentRow[]> {
   if (commitments.length === 0) return [];
 
@@ -100,6 +135,11 @@ export async function storeCommitments(
       const matches = await searchContacts(userId, c.contact.trim()).catch(() => []);
       contactId = matches[0]?.id ?? null;
     }
+    const direction: CommitmentDirection = c.direction ?? "mine";
+    const deadline = c.deadline ? new Date(c.deadline) : null;
+    // Seed the first follow-up moment for items others owe the user.
+    const nextFollowUp =
+      direction === "theirs" ? (deadline ?? new Date(Date.now() + 24 * 60 * 60 * 1000)) : null;
     const row = await db
       .insertInto("commitments")
       .values({
@@ -107,7 +147,11 @@ export async function storeCommitments(
         contact_id: contactId,
         description: c.description,
         source_msg: sourceMsg ?? null,
-        deadline: c.deadline ? new Date(c.deadline) : null,
+        deadline,
+        direction,
+        source: provenance?.source ?? "chat",
+        source_ref: provenance?.sourceRef ?? null,
+        next_follow_up_at: nextFollowUp,
       })
       .returningAll()
       .executeTakeFirstOrThrow();
@@ -159,6 +203,10 @@ export async function completeCommitment(userId: string, id: string): Promise<vo
 
 /**
  * Get commitments due for reminders (deadline within 24h, not yet reminded).
+ * Only 'mine' items (things the user owes) generate "you owe" reminders --
+ * 'theirs' (waiting-on) items are handled by the polite follow-up engine
+ * (getCommitmentsDueForFollowUp), so they must not leak into this digest framed
+ * as the user's own to-dos.
  */
 export async function getCommitmentsForReminder(userId: string): Promise<CommitmentRow[]> {
   const db = getKysely();
@@ -167,6 +215,7 @@ export async function getCommitmentsForReminder(userId: string): Promise<Commitm
     .selectAll()
     .where("user_id", "=", userId)
     .where("status", "=", "pending")
+    .where("direction", "=", "mine")
     .where("reminded", "=", false)
     .where("deadline", "is not", null)
     .where("deadline", "<=", sql<Date>`now() + interval '24 hours'`)
@@ -191,6 +240,11 @@ export async function markReminded(userId: string, ids: string[]): Promise<void>
 
 /**
  * Expire overdue commitments (past deadline by more than 7 days).
+ *
+ * Scoped to 'mine' items: the follow-up engine owns the lifecycle of 'theirs'
+ * (waiting-on) items and chases them on its own backoff schedule (due+1/+3/+7).
+ * Expiring 'theirs' on this 7-day clock would kill the last nudge before it
+ * fires, so waiting-on items stay pending until the user clears them.
  */
 export async function expireOverdueCommitments(userId: string): Promise<number> {
   const db = getKysely();
@@ -199,8 +253,193 @@ export async function expireOverdueCommitments(userId: string): Promise<number> 
     .set({ status: "expired", updated_at: sql`now()` })
     .where("user_id", "=", userId)
     .where("status", "=", "pending")
+    .where("direction", "=", "mine")
     .where("deadline", "is not", null)
     .where("deadline", "<", sql<Date>`now() - interval '7 days'`)
     .executeTakeFirst();
   return Number(result.numUpdatedRows ?? 0n);
+}
+
+// ── Action-item backbone (Bond gap plan) ────────────────────────────────────
+
+export interface ActionItemQuery {
+  /** Filter to one direction; omit for both. */
+  direction?: CommitmentDirection;
+  /** Status filter; defaults to 'pending'. */
+  status?: CommitmentStatus;
+  limit?: number;
+}
+
+/**
+ * The ranked action list: pending items, priority-first (p0..p3, unranked last),
+ * then by deadline (soonest first, no-deadline last), then newest. This is the
+ * single read the Today brief + morning briefing + the todo_list tool render.
+ */
+export async function getActionItems(
+  userId: string,
+  q: ActionItemQuery = {},
+): Promise<CommitmentRow[]> {
+  const db = getKysely();
+  let query = db
+    .selectFrom("commitments")
+    .selectAll()
+    .where("user_id", "=", userId)
+    .where("status", "=", q.status ?? "pending");
+  if (q.direction) query = query.where("direction", "=", q.direction);
+  query = query
+    // priority p0<p1<p2<p3, NULL (unranked) last
+    .orderBy(sql`priority ASC NULLS LAST`)
+    .orderBy(sql`deadline ASC NULLS LAST`)
+    .orderBy("created_at", "desc");
+  if (q.limit !== undefined) query = query.limit(q.limit);
+  return query.execute() as unknown as Promise<CommitmentRow[]>;
+}
+
+/** The "waiting on others" lane: things someone else owes the user. */
+export async function getWaitingOn(userId: string): Promise<CommitmentRow[]> {
+  return getActionItems(userId, { direction: "theirs" });
+}
+
+/**
+ * Add an action item directly (the manual / tool-driven path, no extraction).
+ * Returns the stored row.
+ */
+export async function addActionItem(
+  userId: string,
+  item: {
+    description: string;
+    deadline?: Date | null;
+    contact?: string | null;
+    direction?: CommitmentDirection;
+    source?: string;
+    sourceRef?: string;
+  },
+): Promise<CommitmentRow> {
+  const [row] = await storeCommitments(
+    userId,
+    [
+      {
+        description: item.description,
+        deadline: item.deadline ? item.deadline.toISOString() : null,
+        contact: item.contact ?? null,
+        direction: item.direction ?? "mine",
+      },
+    ],
+    undefined,
+    { source: item.source ?? "manual", sourceRef: item.sourceRef },
+  );
+  return row!;
+}
+
+/** Snooze an item's deadline (and reset its reminder flag) to a new time. */
+export async function snoozeCommitment(userId: string, id: string, until: Date): Promise<void> {
+  const db = getKysely();
+  await db
+    .updateTable("commitments")
+    .set({ deadline: until, reminded: false, updated_at: sql`now()` })
+    .where("user_id", "=", userId)
+    .where("id", "=", id)
+    .execute();
+}
+
+/** Mark an item delegated (handed off to a person or to the agent itself). */
+export async function delegateCommitment(userId: string, id: string, to: string): Promise<void> {
+  const db = getKysely();
+  await db
+    .updateTable("commitments")
+    .set({ status: "delegated", delegated_to: to, updated_at: sql`now()` })
+    .where("user_id", "=", userId)
+    .where("id", "=", id)
+    .execute();
+}
+
+/** Drop an item the user no longer intends to do (soft-cancel). */
+export async function dropCommitment(userId: string, id: string): Promise<void> {
+  const db = getKysely();
+  await db
+    .updateTable("commitments")
+    .set({ status: "cancelled", updated_at: sql`now()` })
+    .where("user_id", "=", userId)
+    .where("id", "=", id)
+    .execute();
+}
+
+// ── Ranking (Phase 2) ───────────────────────────────────────────────────────
+
+/** Write a computed priority + reason onto an item. */
+export async function setPriority(
+  userId: string,
+  id: string,
+  priority: CommitmentPriority,
+  reason: string,
+): Promise<void> {
+  const db = getKysely();
+  await db
+    .updateTable("commitments")
+    .set({ priority, rank_reason: reason, updated_at: sql`now()` })
+    .where("user_id", "=", userId)
+    .where("id", "=", id)
+    .execute();
+}
+
+// ── Follow-up engine (Phase 3) ──────────────────────────────────────────────
+
+/**
+ * Backoff schedule for polite nudges on 'theirs' items, in days.
+ * Index 0 (1 day) is the SEED interval — the gap from capture to the first nudge,
+ * applied by storeCommitments when a 'theirs' item has no deadline. Indices 1..N-1
+ * (3d, 7d) are the gaps BETWEEN nudges, applied by recordFollowUp after the
+ * respective follow-up. So a deadline-less item nudges at +1d, +1d+3d, +1d+3d+7d.
+ */
+export const FOLLOW_UP_BACKOFF_DAYS = [1, 3, 7] as const;
+export const MAX_FOLLOW_UPS = FOLLOW_UP_BACKOFF_DAYS.length;
+
+/**
+ * Items others owe the user whose next follow-up moment has arrived and that
+ * have not exhausted the backoff schedule. Drives the follow-up drafter.
+ */
+export async function getCommitmentsDueForFollowUp(userId: string): Promise<CommitmentRow[]> {
+  const db = getKysely();
+  const rows = await db
+    .selectFrom("commitments")
+    .selectAll()
+    .where("user_id", "=", userId)
+    .where("direction", "=", "theirs")
+    .where("status", "=", "pending")
+    .where("next_follow_up_at", "is not", null)
+    .where("next_follow_up_at", "<=", sql<Date>`now()`)
+    .where("follow_up_count", "<", MAX_FOLLOW_UPS)
+    .orderBy("next_follow_up_at", "asc")
+    .execute();
+  return rows as unknown as CommitmentRow[];
+}
+
+/**
+ * Record that a follow-up was drafted for an item: bump the counter and schedule
+ * the next nudge per the backoff schedule (or clear it once exhausted).
+ *
+ * Atomic single UPDATE: follow_up_count is incremented in-DB and next_follow_up_at
+ * is rebuilt from the new count via a CASE, so two overlapping sweeps (e.g. two
+ * hosted nodes firing the hourly sentinel) can't lose an increment or double-fire.
+ * The CASE is generated from FOLLOW_UP_BACKOFF_DAYS (single source of truth):
+ * after the k-th nudge the next gap is BACKOFF[k]; past the last step it falls
+ * through to NULL, taking the item out of getCommitmentsDueForFollowUp.
+ */
+export async function recordFollowUp(userId: string, id: string): Promise<void> {
+  const db = getKysely();
+  // whenClauses: after new_count = k, wait BACKOFF[k] days (k = 1..N-1; k=N → null).
+  const whenClauses = FOLLOW_UP_BACKOFF_DAYS.slice(1).map(
+    (days, i) => sql`when follow_up_count + 1 = ${i + 1} then now() + interval '1 day' * ${days}`,
+  );
+  const nextAt = sql<Date | null>`case ${sql.join(whenClauses, sql` `)} else null end`;
+  await db
+    .updateTable("commitments")
+    .set({
+      follow_up_count: sql<number>`follow_up_count + 1`,
+      next_follow_up_at: nextAt,
+      updated_at: sql`now()`,
+    })
+    .where("user_id", "=", userId)
+    .where("id", "=", id)
+    .execute();
 }

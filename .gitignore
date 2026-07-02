@@ -68,3 +68,8 @@ skills/.anthropic-skills-fetched
 # for the assistant, not part of this repo.
 .claude/skills/
 skills-lock.json
+
+# Project-local runtime dir. The daemon mirrors DB-managed files here on boot
+# (e.g. .nomos/WIKI.md, restored from the managed_files table by syncAllFiles),
+# so its contents are generated/local, not source. The DB is the source of truth.
+.nomos/

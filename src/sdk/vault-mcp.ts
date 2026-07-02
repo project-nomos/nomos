@@ -48,7 +48,7 @@ export function buildVaultMcpServer(userId: string): McpSdkServerConfigWithInsta
 
   const memoryWrite = tool(
     "memory_write",
-    "Write or REVISE a note in your long-term memory (upsert by path). Use this to remember durable facts about the user, decisions, and per-topic notes. Revise the existing note rather than piling on duplicates or contradictions. Link related notes with [[wikilinks]].",
+    "Write or REVISE a note in your long-term memory (upsert by path). Use this to remember durable facts about the user, decisions, and per-topic notes. Revise the existing note rather than piling on duplicates or contradictions. Link related notes with [[wikilinks]]. When the user states a GOAL (something they're working toward), record it under a 'goals/<slug>.md' path so it becomes a first-class goal the weekly review can track.",
     {
       path: z.string().describe("The note path, e.g. 'people/dana.md' or 'profile.md'"),
       content: z

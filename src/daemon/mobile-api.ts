@@ -200,6 +200,15 @@ export function buildMobileApiHandlers(deps: MobileApiDeps) {
     DeleteTask: withAuthUnary("/nomos.MobileApi/DeleteTask", (call, ctx) =>
       handleDeleteTask(call, ctx),
     ),
+    CompleteCommitment: withAuthUnary("/nomos.MobileApi/CompleteCommitment", (call, ctx) =>
+      handleCompleteCommitment(call, ctx),
+    ),
+    SnoozeCommitment: withAuthUnary("/nomos.MobileApi/SnoozeCommitment", (call, ctx) =>
+      handleSnoozeCommitment(call, ctx),
+    ),
+    DelegateCommitment: withAuthUnary("/nomos.MobileApi/DelegateCommitment", (call, ctx) =>
+      handleDelegateCommitment(call, ctx),
+    ),
     AnswerQuestion: withAuthUnary("/nomos.MobileApi/AnswerQuestion", (call, ctx) =>
       handleAnswerQuestion(deps, call, ctx),
     ),
@@ -1326,6 +1335,41 @@ async function handleDeleteTask(
   await store.deleteJob(job.id);
   process.emit("cron:refresh" as never);
   return { success: true, message: "deleted" };
+}
+
+async function handleCompleteCommitment(
+  call: grpc.ServerUnaryCall<unknown, unknown>,
+  ctx: TenantContext,
+): Promise<{ success: boolean; message: string }> {
+  const req = call.request as { id?: string };
+  if (!req.id) return { success: false, message: "missing_id" };
+  const { completeCommitment } = await import("../proactive/commitment-tracker.ts");
+  await completeCommitment(resolveMemoryUserId(ctx.userId), req.id);
+  return { success: true, message: "completed" };
+}
+
+async function handleSnoozeCommitment(
+  call: grpc.ServerUnaryCall<unknown, unknown>,
+  ctx: TenantContext,
+): Promise<{ success: boolean; message: string }> {
+  const req = call.request as { id?: string; until?: string };
+  if (!req.id) return { success: false, message: "missing_id" };
+  const until = req.until ? new Date(req.until) : null;
+  if (!until || Number.isNaN(until.getTime())) return { success: false, message: "bad_until" };
+  const { snoozeCommitment } = await import("../proactive/commitment-tracker.ts");
+  await snoozeCommitment(resolveMemoryUserId(ctx.userId), req.id, until);
+  return { success: true, message: "snoozed" };
+}
+
+async function handleDelegateCommitment(
+  call: grpc.ServerUnaryCall<unknown, unknown>,
+  ctx: TenantContext,
+): Promise<{ success: boolean; message: string }> {
+  const req = call.request as { id?: string; to?: string };
+  if (!req.id || !req.to?.trim()) return { success: false, message: "missing_args" };
+  const { delegateCommitment } = await import("../proactive/commitment-tracker.ts");
+  await delegateCommitment(resolveMemoryUserId(ctx.userId), req.id, req.to.trim());
+  return { success: true, message: "delegated" };
 }
 
 async function handleAnswerQuestion(

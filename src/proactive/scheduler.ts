@@ -18,9 +18,11 @@ import {
   markReminded,
   expireOverdueCommitments,
 } from "./commitment-tracker.ts";
+import { rankActionItems } from "./commitment-ranker.ts";
 import { generateTriage, type TriageSummary } from "./priority-triage.ts";
 import { inboxScanJobSpec, type ProactiveJobSpec } from "./inbox-watcher.ts";
 import { calendarScanJobSpec } from "./calendar-watcher.ts";
+import { meetingNotesJobSpec } from "./meeting-notes.ts";
 import { classroomDueDateJobSpec } from "./classroom-watcher.ts";
 import { morningBriefingJobSpec, DEFAULT_BRIEFING_CRON } from "./morning-briefing.ts";
 import { loadEnvConfigAsync } from "../config/env.ts";
@@ -32,8 +34,12 @@ const log = createLogger("proactive-scheduler");
 
 const INBOX_JOB_NAME = "proactive:inbox-watcher";
 const CALENDAR_JOB_NAME = "proactive:calendar-watcher";
+const MEETING_NOTES_JOB_NAME = "proactive:meeting-notes";
 const BRIEFING_JOB_NAME = "proactive:morning-briefing";
 const COMMITMENT_JOB_NAME = "proactive:commitment-reminders";
+const RANK_JOB_NAME = "proactive:commitment-ranking";
+const FOLLOWUP_JOB_NAME = "proactive:commitment-followups";
+const SLIPPAGE_JOB_NAME = "proactive:slippage-review";
 const TRIAGE_JOB_NAME = "proactive:triage-digest";
 const CLASSROOM_JOB_NAME = "proactive:classroom-watcher";
 
@@ -49,6 +55,7 @@ export async function registerProactiveJobs(): Promise<void> {
   const autonomy = config.inboxAutonomy;
   const inboxInterval = config.inboxScanInterval ?? "15m";
   const calendarInterval = config.calendarScanInterval ?? "5m";
+  const meetingNotesInterval = config.meetingNotesScanInterval ?? "30m";
   const briefingCron = config.briefingCron ?? DEFAULT_BRIEFING_CRON;
 
   let changed = false;
@@ -64,6 +71,41 @@ export async function registerProactiveJobs(): Promise<void> {
       prompt: "__commitment_reminders__",
       schedule: "1h",
       scheduleType: "every",
+      enabled: Boolean(config.commitmentTracking && (target || isHosted())),
+    })) || changed;
+
+  // Commitment ranking -- score open action items p0..p3 daily before the morning
+  // brief renders (so the brief + Today show the most important thing on top).
+  // No delivery, so it needs no notification target; gated on commitmentTracking.
+  changed =
+    (await syncSentinelJob(store, {
+      name: RANK_JOB_NAME,
+      prompt: "__rank_commitments__",
+      schedule: "0 7 * * *",
+      scheduleType: "cron",
+      enabled: Boolean(config.commitmentTracking),
+    })) || changed;
+
+  // Polite follow-ups on the waiting-on lane -- hourly, drafts a nudge for items
+  // others owe the user that are due for follow-up (staged via DraftManager under
+  // the platform's consent mode). Needs a delivery target (or hosted per-owner push).
+  changed =
+    (await syncSentinelJob(store, {
+      name: FOLLOWUP_JOB_NAME,
+      prompt: "__commitment_followups__",
+      schedule: "1h",
+      scheduleType: "every",
+      enabled: Boolean(config.commitmentTracking && (target || isHosted())),
+    })) || changed;
+
+  // Weekly "what's slipping" review -- Monday 8am. Surfaces stalled items, overdue
+  // waiting-on items, quiet goals, and heavy debtors; writes slippage.md + delivers.
+  changed =
+    (await syncSentinelJob(store, {
+      name: SLIPPAGE_JOB_NAME,
+      prompt: "__slippage_review__",
+      schedule: "0 8 * * 1",
+      scheduleType: "cron",
       enabled: Boolean(config.commitmentTracking && (target || isHosted())),
     })) || changed;
 
@@ -92,7 +134,13 @@ export async function registerProactiveJobs(): Promise<void> {
   if (autonomy === "off") {
     // Disable the autonomy-gated jobs (don't delete — preserve run history).
     // Commitment reminders are NOT in this list (they follow commitmentTracking).
-    for (const name of [INBOX_JOB_NAME, CALENDAR_JOB_NAME, BRIEFING_JOB_NAME, TRIAGE_JOB_NAME]) {
+    for (const name of [
+      INBOX_JOB_NAME,
+      CALENDAR_JOB_NAME,
+      MEETING_NOTES_JOB_NAME,
+      BRIEFING_JOB_NAME,
+      TRIAGE_JOB_NAME,
+    ]) {
       const existing = await store.getJobByName(name);
       if (existing?.enabled) {
         await store.updateJob(existing.id, { enabled: false });
@@ -117,6 +165,7 @@ export async function registerProactiveJobs(): Promise<void> {
   // the agent's reply to the default channel.
   changed = (await upsertJob(store, inboxScanJobSpec(autonomy, inboxInterval), target)) || changed;
   changed = (await upsertJob(store, calendarScanJobSpec(calendarInterval), target)) || changed;
+  changed = (await upsertJob(store, meetingNotesJobSpec(meetingNotesInterval), target)) || changed;
   changed = (await upsertJob(store, morningBriefingJobSpec(briefingCron), target)) || changed;
 
   // Daily triage digest -- gated on inbox autonomy (reads ingested inbox msgs).
@@ -250,6 +299,52 @@ export async function runCommitmentReminders(): Promise<Array<{ userId: string; 
     await expireOverdueCommitments(userId);
   }
 
+  return out;
+}
+
+/**
+ * Rank every owner's open action items (p0..p3) so the morning brief + Today
+ * render a ranked list. Per-owner; best-effort. Returns the total ranked count.
+ */
+export async function runCommitmentRanking(): Promise<number> {
+  const { listMemoryOwners } = await import("../auth/org-members.ts");
+  let total = 0;
+  for (const userId of await listMemoryOwners()) {
+    total += await rankActionItems(userId).catch(() => 0);
+  }
+  return total;
+}
+
+/**
+ * Draft polite follow-ups for every owner's due waiting-on items, staged through
+ * DraftManager (consent-gated). Per-owner; best-effort. Returns drafts staged.
+ */
+export async function runCommitmentFollowUps(
+  draftManager: import("../daemon/draft-manager.ts").DraftManager,
+): Promise<number> {
+  const { listMemoryOwners } = await import("../auth/org-members.ts");
+  const { draftFollowUpsForOwner } = await import("./followup-drafter.ts");
+  let total = 0;
+  for (const userId of await listMemoryOwners()) {
+    total += await draftFollowUpsForOwner(userId, draftManager).catch(() => 0);
+  }
+  return total;
+}
+
+/**
+ * Weekly "what's slipping" review per owner: surface stalled items, overdue
+ * waiting-on items, quiet goals, and people owed a lot. Writes each report to the
+ * owner's editable slippage.md vault note and returns one deliverable per owner
+ * with anything to report (clean weeks omitted). Called by CronEngine.
+ */
+export async function runSlippageReview(): Promise<Array<{ userId: string; text: string }>> {
+  const { listMemoryOwners } = await import("../auth/org-members.ts");
+  const { runSlippageForOwner } = await import("./slippage-detector.ts");
+  const out: Array<{ userId: string; text: string }> = [];
+  for (const userId of await listMemoryOwners()) {
+    const text = await runSlippageForOwner(userId).catch(() => null);
+    if (text) out.push({ userId, text });
+  }
   return out;
 }
 

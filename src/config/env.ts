@@ -116,6 +116,8 @@ export interface NomosConfig {
   inboxScanInterval?: string;
   /** Interval for calendar scanning (default: "5m"). Used only when inboxAutonomy !== "off". */
   calendarScanInterval?: string;
+  /** Interval for the post-meeting notes scan (default: "30m"). Used only when inboxAutonomy !== "off". */
+  meetingNotesScanInterval?: string;
   /**
    * Enable the Google Classroom student-assistant capability (default: false; opt-in).
    * Mirrors `FEATURES.classroom()`; toggled via the Extensions page. When false, no
@@ -222,6 +224,7 @@ export function loadEnvConfig(): NomosConfig {
     briefingCron: process.env.NOMOS_BRIEFING_CRON,
     inboxScanInterval: process.env.NOMOS_INBOX_SCAN_INTERVAL,
     calendarScanInterval: process.env.NOMOS_CALENDAR_SCAN_INTERVAL,
+    meetingNotesScanInterval: process.env.NOMOS_MEETING_NOTES_SCAN_INTERVAL,
     classroomEnabled: process.env.NOMOS_CLASSROOM === "true",
     classroomWriteEnabled: process.env.NOMOS_CLASSROOM_WRITE === "true",
     classroomScan: process.env.NOMOS_CLASSROOM_SCAN === "true",
