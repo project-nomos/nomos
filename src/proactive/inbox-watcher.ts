@@ -55,6 +55,10 @@ TASK:
 3. Skip junk and FYI silently.
 4. ${autonomyLine}
 5. Before staging a draft, check existing drafts for that thread FIRST (list drafts). NEVER create a second draft for a message you have already drafted — if a draft already exists for the thread, skip it. Do not re-draft the same email on later scans.
+6. CAPTURE COMMITMENTS into my action list with the todo_add tool (call todo_list first to avoid duplicates — match on the same ask/thread):
+   - If the email asks ME to do something or I promise something → todo_add direction "mine".
+   - If the email is ME asking THEM for something, or they said they'd send something → todo_add direction "theirs" (so it lands in my waiting-on lane and gets polite follow-ups).
+   - Always pass source "email" and set sourceRef to the Gmail thread id so a follow-up can reply on that thread. Include the sender's name as contact and any deadline.
 
 REPLY FORMAT:
 - If the Gmail tool is unavailable or errors this run so you cannot ACTUALLY scan, respond with exactly: ${NOACTION_PREFIX} gmail unavailable — and NOTHING else. Do not announce that a tool is disconnected or that you will retry; the next run retries automatically.

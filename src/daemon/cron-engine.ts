@@ -9,6 +9,7 @@ import { randomUUID } from "node:crypto";
 import { createCronSystem, type CronSystem, type CronJob } from "../cron/index.ts";
 import type { MessageQueue } from "./message-queue.ts";
 import type { ChannelManager } from "./channel-manager.ts";
+import type { DraftManager } from "./draft-manager.ts";
 import type { AgentEvent } from "./types.ts";
 import { createLogger } from "../lib/logger.ts";
 import { stripHeartbeatToken } from "../auto-reply/heartbeat.ts";
@@ -29,15 +30,18 @@ export class CronEngine {
   private messageQueue: MessageQueue;
   private channelManager: ChannelManager;
   private broadcast: (event: AgentEvent) => void;
+  private draftManager?: DraftManager;
 
   constructor(
     messageQueue: MessageQueue,
     channelManager: ChannelManager,
     broadcast?: (event: AgentEvent) => void,
+    draftManager?: DraftManager,
   ) {
     this.messageQueue = messageQueue;
     this.channelManager = channelManager;
     this.broadcast = broadcast ?? (() => {});
+    this.draftManager = draftManager;
   }
 
   /** Initialize and start the cron system. */
@@ -253,6 +257,69 @@ export class CronEngine {
         }
       })().catch((err) => {
         log.error({ err: err instanceof Error ? err.message : err }, "Triage digest failed");
+      });
+      return;
+    }
+
+    // Intercept commitment-ranking sentinel -- score each owner's open action
+    // items p0..p3 so the morning brief + Today render a RANKED list (the most
+    // important thing on top). No agent turn, no delivery: it only writes
+    // priority + rank_reason back onto the rows.
+    if (job.prompt === "__rank_commitments__") {
+      log.info("Firing commitment ranking");
+      (async () => {
+        const { runCommitmentRanking } = await import("../proactive/scheduler.ts");
+        await runCommitmentRanking();
+      })().catch((err) => {
+        log.error({ err: err instanceof Error ? err.message : err }, "Commitment ranking failed");
+      });
+      return;
+    }
+
+    // Intercept commitment-followups sentinel -- draft polite nudges for items
+    // others owe the user (the waiting-on lane) that are due for follow-up. Each
+    // nudge is staged through DraftManager under the platform's consent mode.
+    if (job.prompt === "__commitment_followups__") {
+      log.info("Firing commitment follow-ups");
+      const draftManager = this.draftManager;
+      (async () => {
+        if (!draftManager) {
+          log.warn("No DraftManager wired; skipping commitment follow-ups");
+          return;
+        }
+        const { runCommitmentFollowUps } = await import("../proactive/scheduler.ts");
+        await runCommitmentFollowUps(draftManager);
+      })().catch((err) => {
+        log.error(
+          { err: err instanceof Error ? err.message : err },
+          "Commitment follow-ups failed",
+        );
+      });
+      return;
+    }
+
+    // Intercept slippage-review sentinel -- weekly "what's slipping" per owner.
+    // Writes each owner's slippage.md vault note and delivers the report to that
+    // owner's notification channel (suppressed on a clean week; no agent turn).
+    if (job.prompt === "__slippage_review__") {
+      log.info("Firing slippage review");
+      (async () => {
+        const { runSlippageReview } = await import("../proactive/scheduler.ts");
+        const results = await runSlippageReview();
+        if (results.length === 0) return;
+        const { getNotificationDefaultFor } = await import("../db/notification-defaults.ts");
+        for (const r of results) {
+          const nd = await getNotificationDefaultFor(r.userId);
+          if (!nd) continue;
+          await this.channelManager.send({
+            inReplyTo: "slippage-review",
+            platform: nd.platform,
+            channelId: nd.channelId,
+            content: r.text,
+          });
+        }
+      })().catch((err) => {
+        log.error({ err: err instanceof Error ? err.message : err }, "Slippage review failed");
       });
       return;
     }

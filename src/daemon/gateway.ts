@@ -147,10 +147,17 @@ export class Gateway {
     this.grpcServer.setElicitationManager(this.elicitationManager);
 
     // 6. Create cron engine with broadcast to connected clients
-    this.cronEngine = new CronEngine(this.messageQueue, this.channelManager, (event) => {
-      this.wsServer.broadcast(event);
-      this.grpcServer.broadcast(event);
-    });
+    this.cronEngine = new CronEngine(
+      this.messageQueue,
+      this.channelManager,
+      (event) => {
+        this.wsServer.broadcast(event);
+        this.grpcServer.broadcast(event);
+      },
+      // The follow-up sentinel stages polite nudges through DraftManager so they
+      // honor each platform's consent mode (always_ask / auto_approve).
+      this.draftManager,
+    );
 
     // 7. Create ingest scheduler (subprocess spawning wired later in start())
     this.ingestScheduler = new IngestScheduler((subcommand, extraArgs, label) =>

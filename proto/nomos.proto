@@ -31,6 +31,11 @@ service NomosAgent {
   rpc UpdateTask (MTaskUpdateRequest) returns (MAck);
   rpc DeleteTask (MTaskDeleteRequest) returns (MAck);
 
+  // Action items (the ranked commitments list) — check off / snooze / delegate.
+  rpc CompleteCommitment (MCommitmentAction) returns (MAck);
+  rpc SnoozeCommitment (MCommitmentSnooze) returns (MAck);
+  rpc DelegateCommitment (MCommitmentDelegate) returns (MAck);
+
   // Answer a pending ask_user elicitation out-of-band (does not enqueue a turn).
   rpc AnswerQuestion (MAnswerRequest) returns (MAck);
 
@@ -216,6 +221,11 @@ service MobileApi {
   rpc UpdateTask (MTaskUpdateRequest) returns (MAck);
   rpc DeleteTask (MTaskDeleteRequest) returns (MAck);
 
+  // Action items (the ranked commitments list) — check off / snooze / delegate.
+  rpc CompleteCommitment (MCommitmentAction) returns (MAck);
+  rpc SnoozeCommitment (MCommitmentSnooze) returns (MAck);
+  rpc DelegateCommitment (MCommitmentDelegate) returns (MAck);
+
   // Answer a pending ask_user elicitation out-of-band (does not enqueue a turn).
   rpc AnswerQuestion (MAnswerRequest) returns (MAck);
 
@@ -368,6 +378,10 @@ message MTodayCommitment {
   string id = 1;
   string description = 2;
   string due = 3;
+  string priority = 4;    // p0..p3, empty if unranked
+  string rank_reason = 5; // why it's ranked here (one line)
+  string direction = 6;   // mine | theirs
+  string contact = 7;     // the other party, if known
 }
 message MTodayTask {
   string id = 1;
@@ -377,8 +391,22 @@ message MTodayTask {
 message MTodayResponse {
   bool briefing_enabled = 1;
   repeated MTodayEvent events = 2;
-  repeated MTodayCommitment commitments = 3;
+  repeated MTodayCommitment commitments = 3;  // "needs you" — items I owe, ranked
   repeated MTodayTask tasks = 4;
+  repeated MTodayCommitment waiting = 5;       // "waiting on others" — items owed to me
+}
+
+// Action-item mutations (the ranked commitments list).
+message MCommitmentAction {
+  string id = 1;
+}
+message MCommitmentSnooze {
+  string id = 1;
+  string until = 2;  // ISO date/time to push the item's deadline to
+}
+message MCommitmentDelegate {
+  string id = 1;
+  string to = 2;     // who it's delegated to (a name, or 'nomos')
 }
 
 message MAck {

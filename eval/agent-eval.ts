@@ -131,6 +131,15 @@ import {
   storeCommitments,
   getPendingCommitments,
   getCommitmentsForReminder,
+  getActionItems,
+  getWaitingOn,
+  addActionItem,
+  delegateCommitment,
+  snoozeCommitment,
+  setPriority,
+  getCommitmentsDueForFollowUp,
+  recordFollowUp,
+  MAX_FOLLOW_UPS,
 } from "../src/proactive/commitment-tracker.ts";
 import { compileKnowledge } from "../src/memory/knowledge-compiler.ts";
 import { lintWiki } from "../src/memory/wiki-lint.ts";
@@ -1137,6 +1146,174 @@ async function runCommitments(): Promise<void> {
   check(
     "[commitments] no-deadline commitment is not in the reminder set",
     remind.every((c) => c.description !== "send the quarterly report"),
+  );
+
+  // ── Action-item backbone (Bond gap plan, Phases 1-3) ───────────────────────
+  // A dedicated owner so ranking/waiting-on assertions are not polluted by the
+  // rows above.
+  const C = "eval-commit-c";
+
+  // Capture BOTH directions with provenance. 'theirs' seeds next_follow_up_at.
+  await storeCommitments(
+    C,
+    [
+      {
+        description: "reply to the investor email",
+        deadline: soon,
+        contact: null,
+        direction: "mine",
+      },
+    ],
+    "inv-thread",
+    { source: "email", sourceRef: "gmail-thread-1" },
+  );
+  const [waiting] = await storeCommitments(
+    C,
+    [
+      {
+        description: "Gilfoyle owes the compression fix",
+        deadline: null,
+        contact: null,
+        direction: "theirs",
+      },
+    ],
+    undefined,
+    { source: "slack", sourceRef: "slack-thread-9" },
+  );
+  // Meeting-notes capture (Phase 4): the post-meeting scan records commitments
+  // with source 'meeting' via todo_add; drive that path deterministically here.
+  await storeCommitments(
+    C,
+    [
+      {
+        description: "send the recap deck from standup",
+        deadline: null,
+        contact: null,
+        direction: "mine",
+      },
+    ],
+    undefined,
+    { source: "meeting", sourceRef: "gcal-evt-42" },
+  );
+  check(
+    "[action-items] non-chat source is recorded (capture widened beyond chat)",
+    (await getActionItems(C)).some((c) => c.source === "email"),
+  );
+  check(
+    "[action-items] meeting-notes capture records source='meeting'",
+    (await getActionItems(C)).some((c) => c.source === "meeting"),
+  );
+  check(
+    "[action-items] a 'theirs' item lands in the waiting-on lane",
+    (await getWaitingOn(C)).some((c) => c.description.includes("compression")),
+  );
+  check(
+    "[action-items] a 'theirs' item is seeded with next_follow_up_at",
+    waiting?.next_follow_up_at != null,
+  );
+
+  // Tool path: addActionItem (source='manual') + delegate.
+  const manual = await addActionItem(C, {
+    description: "book the board dinner",
+    direction: "mine",
+    source: "manual",
+  });
+  check("[action-items] todo_add stores a manual item", manual.source === "manual");
+  await delegateCommitment(C, manual.id, "Monica");
+  check(
+    "[action-items] delegate sets status + delegated_to",
+    (await getActionItems(C, { status: "delegated" })).some(
+      (c) => c.id === manual.id && c.delegated_to === "Monica",
+    ),
+  );
+
+  // Ranking: p0 sorts ahead of an unranked item regardless of insertion order.
+  const ranked = await addActionItem(C, { description: "sign the contract", direction: "mine" });
+  await setPriority(C, ranked.id, "p0", "hard deadline EOD");
+  const listed = await getActionItems(C, { direction: "mine" });
+  check(
+    "[action-items] p0 ranks ahead of unranked items",
+    listed[0]?.id === ranked.id && listed[0]?.priority === "p0",
+  );
+
+  // Snooze pushes the deadline out.
+  const nextWeek = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+  await snoozeCommitment(C, ranked.id, nextWeek);
+  check(
+    "[action-items] snooze moves the deadline out",
+    (await getActionItems(C, { direction: "mine" })).some(
+      (c) =>
+        c.id === ranked.id &&
+        c.deadline != null &&
+        c.deadline.getTime() > Date.now() + 6 * 86400000,
+    ),
+  );
+
+  // Follow-up engine: a 'theirs' item due for follow-up surfaces, and recording a
+  // follow-up bumps the counter + reschedules per the backoff, capping out.
+  const overdue = await addActionItem(C, {
+    description: "chase the signed NDA",
+    direction: "theirs",
+    deadline: new Date(Date.now() - 2 * 86400000),
+  });
+  check(
+    "[follow-up] an overdue 'theirs' item is due for follow-up",
+    (await getCommitmentsDueForFollowUp(C)).some((c) => c.id === overdue.id),
+  );
+  for (let i = 0; i < MAX_FOLLOW_UPS; i++) await recordFollowUp(C, overdue.id);
+  check(
+    "[follow-up] follow-ups cap out (no infinite nudging)",
+    (await getCommitmentsDueForFollowUp(C)).every((c) => c.id !== overdue.id),
+  );
+  check(
+    "[action-items] owner C is isolated from A/B",
+    (await getActionItems(C)).every((c) => c.user_id === C),
+  );
+
+  // Today read model: the ranked "needs you" list + the "waiting on others" lane
+  // both come back owner-scoped through getTodayOverview (calendar is best-effort
+  // and empty here — no Google in the eval).
+  const { getTodayOverview } = await import("../src/daemon/today.ts");
+  const today = await getTodayOverview({ orgId: "eval", userId: C });
+  check(
+    "[today] ranked 'needs you' items surface (p0 first)",
+    today.commitments.length > 0 && today.commitments[0]?.direction === "mine",
+  );
+  check(
+    "[today] the 'waiting on others' lane surfaces theirs-direction items",
+    today.waiting.every((c) => c.direction === "theirs"),
+  );
+
+  // ── Goals + "what's slipping" (Phase 5) ────────────────────────────────────
+  // A goal is a vault note under goals/ (authored via the vault write path).
+  const { vaultWrite } = await import("../src/memory/vault.ts");
+  await vaultWrite(C, "goals/ship-v2.md", "Ship v2 by end of quarter.", { title: "Ship v2" });
+  const { listGoals } = await import("../src/proactive/goals.ts");
+  check(
+    "[goals] goals are read from the vault under goals/",
+    (await listGoals(C)).some((g) => g.path === "goals/ship-v2.md"),
+  );
+
+  // Slippage: owner C has an overdue 'theirs' item + a past-deadline 'mine' item,
+  // so the review produces a report and persists slippage.md.
+  await addActionItem(C, {
+    description: "file the expense report",
+    direction: "mine",
+    deadline: new Date(Date.now() - 3 * 86400000),
+  });
+  const { detectSlippage, runSlippageForOwner } =
+    await import("../src/proactive/slippage-detector.ts");
+  const slip = await detectSlippage(C);
+  check(
+    "[slippage] a past-deadline 'mine' item is flagged as stalled",
+    slip.stalled.some((s) => s.description.includes("expense report")),
+  );
+  const slipText = await runSlippageForOwner(C);
+  check("[slippage] a non-empty week produces a report", slipText != null);
+  const slipNote = await (await import("../src/memory/vault.ts")).vaultRead(C, "slippage.md");
+  check(
+    "[slippage] the review is persisted to an editable slippage.md vault note",
+    slipNote != null,
   );
 }
 
@@ -2686,7 +2863,7 @@ async function dumpDbForAudit(): Promise<Record<string, unknown[]>> {
     ),
     q(
       "commitments",
-      `SELECT user_id, description, deadline, status, reminded, source_msg FROM commitments ORDER BY user_id LIMIT 30`,
+      `SELECT user_id, description, deadline, status, direction, priority, source, delegated_to, next_follow_up_at, follow_up_count FROM commitments ORDER BY user_id LIMIT 30`,
     ),
     q(
       "sessions",

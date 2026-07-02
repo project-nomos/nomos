@@ -46,6 +46,7 @@ import { buildClassroomMcpServer } from "../sdk/google-classroom-mcp.ts";
 import { hasClassroomWriteScope, listGoogleAccounts } from "../auth/google-integration.ts";
 import { buildStudioMcpServer } from "../sdk/studio-mcp.ts";
 import { buildVaultMcpServer } from "../sdk/vault-mcp.ts";
+import { buildCommitmentsMcpServer } from "../sdk/commitments-mcp.ts";
 import { buildNativeDeviceMcpServer } from "../sdk/native-device-mcp.ts";
 import { getDeviceBridge } from "./device-bridge.ts";
 import { buildThinkMcpServer } from "../sdk/think-mcp.ts";
@@ -1260,6 +1261,9 @@ export class AgentRuntime {
     let mcpServers = {
       ...this.mcpServers,
       "nomos-vault": buildVaultMcpServer(vaultUserId),
+      // The durable action list (commitments): the agent reads/curates it in-loop
+      // (todo_list/add/complete/snooze/delegate), scoped to this owner.
+      "nomos-commitments": buildCommitmentsMcpServer(vaultUserId),
       // Rebuild the memory tools per-turn so memory_search is scoped to this
       // owner (the cached one at init has no user). Overrides the cached entry.
       "nomos-memory": createMemoryMcpServer(vaultUserId, {

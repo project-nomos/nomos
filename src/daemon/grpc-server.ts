@@ -97,6 +97,9 @@ export class GrpcServer {
         ListTasks: this.handleListTasks.bind(this),
         UpdateTask: this.handleUpdateTask.bind(this),
         DeleteTask: this.handleDeleteTask.bind(this),
+        CompleteCommitment: this.handleCompleteCommitment.bind(this),
+        SnoozeCommitment: this.handleSnoozeCommitment.bind(this),
+        DelegateCommitment: this.handleDelegateCommitment.bind(this),
         AnswerQuestion: this.handleAnswerQuestion.bind(this),
         Ping: this.handlePing.bind(this),
       });
@@ -458,6 +461,57 @@ export class GrpcServer {
       await store.deleteJob(job.id);
       process.emit("cron:refresh" as never);
       callback(null, { success: true, message: "deleted" });
+    } catch (err) {
+      callback(err as grpc.ServiceError, null);
+    }
+  }
+
+  /** CompleteCommitment RPC -- check an action item off (local owner). */
+  private async handleCompleteCommitment(
+    call: grpc.ServerUnaryCall<{ id?: string }, unknown>,
+    callback: grpc.sendUnaryData<{ success: boolean; message: string }>,
+  ): Promise<void> {
+    try {
+      const id = call.request?.id;
+      if (!id) return callback(null, { success: false, message: "missing_id" });
+      const { completeCommitment } = await import("../proactive/commitment-tracker.ts");
+      await completeCommitment("local", id);
+      callback(null, { success: true, message: "completed" });
+    } catch (err) {
+      callback(err as grpc.ServiceError, null);
+    }
+  }
+
+  /** SnoozeCommitment RPC -- push an action item's deadline out (local owner). */
+  private async handleSnoozeCommitment(
+    call: grpc.ServerUnaryCall<{ id?: string; until?: string }, unknown>,
+    callback: grpc.sendUnaryData<{ success: boolean; message: string }>,
+  ): Promise<void> {
+    try {
+      const { id, until } = call.request ?? {};
+      if (!id) return callback(null, { success: false, message: "missing_id" });
+      const when = until ? new Date(until) : null;
+      if (!when || Number.isNaN(when.getTime()))
+        return callback(null, { success: false, message: "bad_until" });
+      const { snoozeCommitment } = await import("../proactive/commitment-tracker.ts");
+      await snoozeCommitment("local", id, when);
+      callback(null, { success: true, message: "snoozed" });
+    } catch (err) {
+      callback(err as grpc.ServiceError, null);
+    }
+  }
+
+  /** DelegateCommitment RPC -- hand an action item off (local owner). */
+  private async handleDelegateCommitment(
+    call: grpc.ServerUnaryCall<{ id?: string; to?: string }, unknown>,
+    callback: grpc.sendUnaryData<{ success: boolean; message: string }>,
+  ): Promise<void> {
+    try {
+      const { id, to } = call.request ?? {};
+      if (!id || !to?.trim()) return callback(null, { success: false, message: "missing_args" });
+      const { delegateCommitment } = await import("../proactive/commitment-tracker.ts");
+      await delegateCommitment("local", id, to.trim());
+      callback(null, { success: true, message: "delegated" });
     } catch (err) {
       callback(err as grpc.ServiceError, null);
     }

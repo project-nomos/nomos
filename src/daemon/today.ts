@@ -10,7 +10,7 @@
 
 import type { TenantContext } from "../auth/tenant-context.ts";
 import { getConfigValue } from "../db/config.ts";
-import { getPendingCommitments } from "../proactive/commitment-tracker.ts";
+import { getActionItems, getWaitingOn } from "../proactive/commitment-tracker.ts";
 import { CronStore } from "../cron/store.ts";
 import { curateConsumerTasks } from "../cron/task-view.ts";
 import { gapiFetch } from "../sdk/google-rest-mcp.ts";
@@ -28,6 +28,10 @@ export interface TodayCommitment {
   id: string;
   description: string;
   due: string;
+  priority: string;
+  rankReason: string;
+  direction: string;
+  contact: string;
 }
 export interface TodayTask {
   id: string;
@@ -37,8 +41,11 @@ export interface TodayTask {
 export interface TodayOverview {
   briefingEnabled: boolean;
   events: TodayEvent[];
+  /** "Needs you" — items the user owes, ranked (p0..p3, most important first). */
   commitments: TodayCommitment[];
   tasks: TodayTask[];
+  /** "Waiting on others" — items owed TO the user. */
+  waiting: TodayCommitment[];
 }
 
 export async function getTodayOverview(ctx: TenantContext): Promise<TodayOverview> {
@@ -48,17 +55,26 @@ export async function getTodayOverview(ctx: TenantContext): Promise<TodayOvervie
   const mode = (await getConfigValue<string>("app.inboxAutonomy")) ?? "passive";
   const briefingEnabled = mode !== "off";
 
-  const [events, commitmentRows, jobs] = await Promise.all([
+  const [events, mineRows, theirsRows, jobs] = await Promise.all([
     fetchTodayEvents(userId),
-    getPendingCommitments(userId).catch(() => []),
+    // "Needs you" — items I owe, already ranked (p0..p3 first) by getActionItems.
+    getActionItems(userId, { direction: "mine" }).catch(() => []),
+    // "Waiting on others" — items owed to me.
+    getWaitingOn(userId).catch(() => []),
     new CronStore().listJobs({ userId }),
   ]);
 
-  const commitments: TodayCommitment[] = commitmentRows.slice(0, 8).map((c) => ({
+  const toToday = (c: (typeof mineRows)[number]): TodayCommitment => ({
     id: c.id,
     description: c.description,
     due: c.deadline ? relativeDay(c.deadline) : "",
-  }));
+    priority: c.priority ?? "",
+    rankReason: c.rank_reason ?? "",
+    direction: c.direction,
+    contact: "",
+  });
+  const commitments: TodayCommitment[] = mineRows.slice(0, 8).map(toToday);
+  const waiting: TodayCommitment[] = theirsRows.slice(0, 8).map(toToday);
 
   // Today shows ONLY one-off ("at") reminders that fall due by end of today --
   // recurring tasks ("every"/"cron") live on the Tasks page, so Today never
@@ -68,7 +84,7 @@ export async function getTodayOverview(ctx: TenantContext): Promise<TodayOvervie
     .slice(0, 6)
     .map((t) => ({ id: t.id, name: t.name, schedule: t.displaySchedule }));
 
-  return { briefingEnabled, events, commitments, tasks };
+  return { briefingEnabled, events, commitments, tasks, waiting };
 }
 
 /** A one-off ("at") reminder is on Today's plate when it's due by the end of today. */

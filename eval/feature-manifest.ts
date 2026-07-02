@@ -222,6 +222,105 @@ export const FEATURES: FeatureSpec[] = [
     ],
   },
   {
+    id: "commitment-ranking",
+    summary:
+      "Rank each owner's open action items p0..p3 with a one-line reason (a stable-rubric reasoning fork that folds in deadline proximity, who it's with, and blocking), so the morning brief + Today render the most important thing on top. Writes priority + rank_reason back onto the rows; no delivery. Gated on commitmentTracking; runs before the 8am briefing.",
+    trigger: {
+      kind: "cron",
+      sentinel: "__rank_commitments__",
+      schedule: "0 7 * * *",
+      fanOut: true,
+    },
+    entry: ["runCommitmentRanking", "rankActionItems", "setPriority"],
+    effects: [
+      {
+        claim:
+          "open action items carry a computed priority (p0..p3) + rank_reason so the list is ranked, not flat",
+        sql: {
+          query: "SELECT count(*) FROM commitments WHERE priority IS NOT NULL",
+          expect: "nonzero",
+        },
+      },
+    ],
+    invariants: [
+      "per-owner scoped (user_id)",
+      "rubric is byte-stable (cached prefix); only the item list is dynamic",
+      "a fork failure leaves items unranked (they sort last), never breaks the list",
+    ],
+  },
+  {
+    id: "commitment-followups",
+    summary:
+      "Polite follow-up engine (Bond's signature behavior, consent-first). Hourly: for items others owe the user (direction 'theirs') whose next_follow_up_at has arrived and that haven't exhausted the backoff (due+1d/+3d/+7d, cap 3), compose a short nudge in the user's voice and STAGE it through DraftManager under the platform's consent mode — never auto-send. recordFollowUp bumps the counter + reschedules (or clears once capped).",
+    trigger: {
+      kind: "cron",
+      sentinel: "__commitment_followups__",
+      schedule: "1h",
+      fanOut: true,
+    },
+    entry: ["runCommitmentFollowUps", "draftFollowUpsForOwner", "recordFollowUp"],
+    effects: [
+      {
+        claim:
+          "following up advances the item's follow_up_count (so nudges back off and cap out, no infinite chasing)",
+        sql: {
+          query: "SELECT count(*) FROM commitments WHERE follow_up_count > 0",
+          expect: "nonzero",
+        },
+      },
+      {
+        claim: "each nudge is staged as a consent-gated draft, never auto-sent (behavioral)",
+        notExercised: true,
+      },
+    ],
+    invariants: [
+      "per-owner scoped (user_id)",
+      "only 'theirs' items are followed up; backoff caps at 3 (MAX_FOLLOW_UPS)",
+      "nudges are staged via DraftManager (consent-gated), never sent behind the user's back",
+    ],
+  },
+  {
+    id: "slippage-review",
+    summary:
+      "Weekly 'what's slipping' review per owner (Bond's 'highest leverage move', grounded). Surfaces stalled items the user owes (past deadline, or old + unranked), overdue items others owe the user, goals with no recent movement (goals/ vault notes untouched >30d), and people the user owes a pile of things. Writes each report to an editable slippage.md vault note (durable, user-readable) and delivers it to the owner's channel. Pure DB + vault reads; no LLM.",
+    trigger: { kind: "cron", sentinel: "__slippage_review__", schedule: "0 8 * * 1", fanOut: true },
+    entry: ["runSlippageReview", "detectSlippage", "runSlippageForOwner"],
+    effects: [
+      {
+        claim:
+          "the weekly review persists an editable slippage.md vault note the user can read/clear",
+        sql: {
+          query: "SELECT count(*) FROM vault_notes WHERE path = 'slippage.md'",
+          expect: "nonzero",
+        },
+      },
+    ],
+    invariants: [
+      "per-owner scoped (user_id)",
+      "pure reads (no LLM); a clean week produces no note + no delivery",
+    ],
+  },
+  {
+    id: "goals",
+    summary:
+      "Goals are first-class, user-editable vault notes under goals/ — authored via the normal vault memory_write path when the user states a goal, edited in the vault UI, and (because the vault feeds the graph) surfaced in the Brain. listGoals reads them; the weekly slippage review flags goals with no recent movement.",
+    trigger: { kind: "turn" },
+    entry: ["listGoals"],
+    effects: [
+      {
+        claim: "goals are stored as owner-scoped vault notes under the goals/ prefix",
+        sql: {
+          query: "SELECT count(*) FROM vault_notes WHERE path LIKE 'goals/%'",
+          expect: "nonzero",
+        },
+      },
+    ],
+    invariants: [
+      "per-owner scoped (user_id)",
+      "no parallel store — goals live in the vault (single source of truth), read by the slippage review",
+    ],
+  },
+  {
     id: "style-analyze",
     summary: "Re-derive each owner's writing voice from sent messages (opt-in styleMatching).",
     trigger: { kind: "cron", sentinel: "__style_analyze__", schedule: "24h", fanOut: true },
@@ -584,7 +683,8 @@ export const FEATURES: FeatureSpec[] = [
   },
   {
     id: "commitment-capture",
-    summary: "Extract promises/follow-ups from turns into the commitments table (opt-in).",
+    summary:
+      "Extract promises/follow-ups from turns into the commitments table (opt-in). Captures BOTH directions — 'mine' (the user owes) and 'theirs' (someone owes the user, the waiting-on lane) — and records provenance (source surface + source_ref thread pointer) so a follow-up can reply on the same thread. Capture is widened beyond direct chat: the inbox watcher records email asks/promises via todo_add, and channel turns tag their platform as the source.",
     trigger: { kind: "turn", gate: "commitmentTracking" },
     entry: ["extractCommitments", "storeCommitments"],
     effects: [
@@ -600,8 +700,80 @@ export const FEATURES: FeatureSpec[] = [
           expect: "nonzero",
         },
       },
+      {
+        claim:
+          "the waiting-on lane is populated: some captured commitments are direction='theirs' (someone owes the user), not only 'mine'",
+        sql: {
+          query: "SELECT count(*) FROM commitments WHERE direction = 'theirs'",
+          expect: "nonzero",
+        },
+      },
+      {
+        claim:
+          "capture is widened beyond chat: some commitments record a non-default source surface (email/meeting/…), so capture is not chat-only",
+        sql: {
+          query: "SELECT count(*) FROM commitments WHERE source <> 'chat'",
+          expect: "nonzero",
+        },
+      },
+      {
+        claim:
+          "post-meeting notes capture lands commitments with source='meeting' (decisions + owed items from the standup, not just chat/email)",
+        sql: {
+          query: "SELECT count(*) FROM commitments WHERE source = 'meeting'",
+          expect: "nonzero",
+        },
+      },
+      {
+        claim:
+          "'theirs' items are seeded with a next_follow_up_at so the polite follow-up engine has something to act on",
+        sql: {
+          query:
+            "SELECT count(*) FROM commitments WHERE direction = 'theirs' AND next_follow_up_at IS NOT NULL",
+          expect: "nonzero",
+        },
+      },
     ],
-    invariants: ["per-owner scoped"],
+    invariants: [
+      "per-owner scoped",
+      "direction is inferred (mine vs theirs); ambiguous defaults to mine",
+      "provenance (source + source_ref) is recorded for follow-up drafting",
+    ],
+  },
+  {
+    id: "commitments-tool",
+    summary:
+      "Agent-facing action-list MCP (nomos-commitments): todo_list/todo_add/todo_complete/todo_snooze/todo_delegate. Tools-not-router — the agent reads and curates the durable commitments store in-loop (same pattern as the vault), scoped per owner, injected in both modes. addActionItem/getActionItems back the tools and the Today/brief read models.",
+    trigger: { kind: "mcp-tool", name: "nomos-commitments" },
+    entry: [
+      "buildCommitmentsMcpServer",
+      "addActionItem",
+      "getActionItems",
+      "delegateCommitment",
+      "snoozeCommitment",
+    ],
+    effects: [
+      {
+        claim:
+          "the todo_add path stores tool-authored items (source='manual') distinct from auto-captured ones",
+        sql: {
+          query: "SELECT count(*) FROM commitments WHERE source = 'manual'",
+          expect: "nonzero",
+        },
+      },
+      {
+        claim: "delegated items carry status='delegated' + a delegated_to target (todo_delegate)",
+        sql: {
+          query:
+            "SELECT count(*) FROM commitments WHERE status = 'delegated' AND delegated_to IS NOT NULL",
+          expect: "nonzero",
+        },
+      },
+    ],
+    invariants: [
+      "per-owner scoped (every read/write filters user_id)",
+      "getActionItems ranks p0..p3 first (NULLS last), then by deadline",
+    ],
   },
   {
     id: "knowledge-graph-ingest",
@@ -797,12 +969,13 @@ export const FEATURES: FeatureSpec[] = [
   {
     id: "proactive-jobs",
     summary:
-      "Register the proactive cron jobs (inbox scan, calendar/meeting brief, morning briefing).",
+      "Register the proactive cron jobs (inbox scan, pre-meeting calendar brief, post-meeting notes capture, morning briefing). The post-meeting notes scan mines Google Meet transcripts / Gemini notes for decisions + commitments (both directions) via the agent's todo_add/memory_write tools, so 'you promised X in the standup' lands on the action list.",
     trigger: { kind: "boot" },
     entry: [
       "registerProactiveJobs",
       "inboxScanJobSpec",
       "calendarScanJobSpec",
+      "meetingNotesJobSpec",
       "morningBriefingJobSpec",
       "classroomDueDateJobSpec",
     ],
@@ -1390,18 +1563,19 @@ export const FEATURES: FeatureSpec[] = [
   {
     id: "today-overview",
     summary:
-      "Consumer Today brief (MobileApi.GetToday). Composes today's Google Calendar events (live via gapiFetch, best-effort -- empty when Google isn't connected), pending commitments, and one-off ('at') reminders due by end of today. Recurring tasks ('every'/'cron') are NOT shown here -- they live on the Tasks page, so Today never duplicates them. briefingEnabled=false (proactive autonomy off) tells the client to show the enable-briefing deep link.",
+      "Consumer Today brief (MobileApi/NomosAgent.GetToday). Composes today's Google Calendar events (live via gapiFetch, best-effort -- empty when Google isn't connected); the RANKED 'needs you' list (items the user owes, ordered p0..p3 via getActionItems with priority + rank_reason); the 'waiting on others' lane (items owed TO the user, via getWaitingOn); and one-off ('at') reminders due by end of today. Recurring tasks ('every'/'cron') are NOT shown here. Items are checkable/snoozable/delegable via CompleteCommitment/SnoozeCommitment/DelegateCommitment. briefingEnabled=false (proactive autonomy off) tells the client to show the enable-briefing deep link.",
     trigger: { kind: "turn" },
-    entry: ["getTodayOverview"],
+    entry: ["getTodayOverview", "getActionItems", "getWaitingOn"],
     effects: [
       {
-        claim: "commitments feeding the brief are owner-scoped",
+        claim: "the ranked 'needs you' + 'waiting on' lanes feeding the brief are owner-scoped",
         sql: { query: "SELECT count(*) FROM commitments", expect: "nonzero" },
         notExercised: true,
       },
     ],
     invariants: [
       "owner-scoped",
+      "'needs you' = direction 'mine' ranked p0..p3; 'waiting on others' = direction 'theirs'",
       "calendar is best-effort (empty when Google isn't connected)",
       "gated on app.inboxAutonomy != 'off'",
     ],

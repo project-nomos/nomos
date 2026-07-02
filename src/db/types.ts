@@ -301,8 +301,21 @@ export interface CommitmentsTable {
   description: string;
   source_msg: string | null;
   deadline: ColumnType<Date | null, Date | null, Date | null>;
-  status: Generated<"pending" | "completed" | "expired" | "cancelled">;
+  status: Generated<"pending" | "completed" | "expired" | "cancelled" | "delegated">;
   reminded: Generated<boolean>;
+  /** 'mine' = I owe someone; 'theirs' = someone owes me (the waiting-on lane). */
+  direction: Generated<"mine" | "theirs">;
+  /** p0..p3, null until the ranking pass scores it. */
+  priority: "p0" | "p1" | "p2" | "p3" | null;
+  rank_reason: string | null;
+  /** Which surface captured it: chat | email | imessage | slack | meeting | manual | … */
+  source: Generated<string>;
+  /** Pointer back to the origin thread/message/event for follow-up drafting. */
+  source_ref: string | null;
+  /** Who a 'mine' item was handed off to (contact name or 'nomos'). */
+  delegated_to: string | null;
+  next_follow_up_at: ColumnType<Date | null, Date | null, Date | null>;
+  follow_up_count: Generated<number>;
   created_at: Generated<Date>;
   updated_at: Generated<Date>;
 }
